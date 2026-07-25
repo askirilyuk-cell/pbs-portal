@@ -19,3 +19,4 @@ nc-token*
 *.log
 n8n/.n8n/
 scratchpad/
+*.bak-*

@@ -1,0 +1,42 @@
+# Add-on: портал ИСМ ПБС (BFF + SPA) в существующую сеть pbs-net.
+# Запуск на NAS:  sudo NC_TOKEN=<token> docker compose -f compose.portal.yml up -d
+#
+# Сеть pbs-net создана инфра-проектом (external). Портал в той же сети →
+# ходит к NocoDB (nocodb:8080) и Gotenberg (pbs-gotenberg:3000) по именам.
+# Наружу публикуем 4173 (позже закроем за Caddy + Bitrix SSO).
+
+services:
+  portal:
+    image: node:20-alpine
+    container_name: pbs-portal-app
+    restart: unless-stopped
+    working_dir: /app
+    command: node portal/server.js
+    volumes:
+      - /volume1/docker/pbs-portal:/app
+      - /volume1/06-Записи-ПБС:/records:ro      # папка записей ИСМ (read-only) → просмотрщик файлов продаж/закупок
+      - /volume1/06-Записи-ПБС/6.1-Продажи:/records/6.1-Продажи:rw   # write ТОЛЬКО в продажи → приложение файлов к запросам ЗП (остальные записи остаются ro)
+      # документы ИСМ → просмотрщик + публикация файла при утверждении (DOCS_ROOT=/docs).
+      # rw на 01-04: при переводе документа в «Действует» портал кладёт файл в нужную папку. 07-Архив остаётся ro.
+      - /volume1/01-Руководство-и-политика-ПБС:/docs/01-Руководство-и-политика-ПБС:rw
+      - /volume1/02-Процедуры-ПБС:/docs/02-Процедуры-ПБС:rw
+      - /volume1/03-Формы-и-приложения-ПБС:/docs/03-Формы-и-приложения-ПБС:rw
+      - /volume1/04-Рабочие-инструкции-ПБС:/docs/04-Рабочие-инструкции-ПБС:rw
+      - /volume1/07-Архив-ПБС:/docs/07-Архив-ПБС:ro
+    environment:
+      PORT: "4173"
+      NC_URL: "http://nocodb:8080"
+      NC_TOKEN: "${NC_TOKEN}"
+      GOTENBERG_URL: "http://pbs-gotenberg:3000"
+      RECORDS_ROOT: "/records"
+      DOCS_ROOT: "/docs"
+    ports:
+      - "4173:4173"
+    networks:
+      - pbs-net
+    mem_limit: 256m
+
+networks:
+  pbs-net:
+    external: true
+    name: pbs-net

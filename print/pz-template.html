@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<!--
+  Печатный вид «Производственный заказ» (Ф.1–П.2).
+  Стиль — по фирменным формам ИСМ ПБС (ср. Ф.13/Ф.14): тёмно-синие плашки разделов,
+  шрифт с засечками, шапка в 3 колонки, пояснительные строки под разделами.
+  Заполняется render-pz.mjs: плейсхолдеры {{...}} и строки номенклатуры {{POSITIONS}}.
+  Рендер в PDF — через Gotenberg (/forms/chromium/convert/html).
+-->
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: A4; margin: 14mm 14mm 16mm 14mm; }
+    * { box-sizing: border-box; }
+    :root { --navy: #1F4E79; --navy2: #2E5E8C; --line: #9aa6b2; --muted: #6b7785; }
+    body { font-family: "Liberation Serif", "DejaVu Serif", "Times New Roman", serif;
+           font-size: 11.5px; color: #16181c; }
+
+    /* шапка */
+    .head { display: flex; align-items: flex-start; justify-content: space-between; }
+    .head .org { font-size: 11px; color: var(--navy); padding-top: 4px; white-space: nowrap; }
+    .head .code { font-size: 10.5px; color: var(--navy); font-style: italic; padding-top: 4px; white-space: nowrap; }
+    h1 { flex: 1; text-align: center; font-size: 19px; color: var(--navy);
+         text-transform: uppercase; letter-spacing: 2px; margin: 0 8px; font-weight: bold; }
+    .subtitle { text-align: center; color: var(--muted); font-size: 10px; font-style: italic;
+                margin: 2px 0 12px; }
+
+    /* плашка раздела */
+    .sec { background: var(--navy); color: #fff; font-weight: bold; font-size: 12px;
+           padding: 4px 9px; margin: 13px 0 0; }
+    .hint { color: var(--muted); font-size: 9.5px; font-style: italic; margin: 3px 2px 5px; }
+
+    /* таблицы «ключ-значение» */
+    table { width: 100%; border-collapse: collapse; }
+    .kv td { border: 1px solid var(--line); padding: 4px 7px; vertical-align: top; }
+    .kv td.l { background: #eef2f6; font-weight: bold; width: 20%; white-space: nowrap; }
+    .kv td.v { width: 30%; }
+
+    /* таблица номенклатуры */
+    .nom th, .nom td { border: 1px solid var(--line); padding: 4px 6px; }
+    .nom th { background: var(--navy); color: #fff; font-weight: bold; font-size: 10.5px; text-align: center; }
+    .nom td.num, .nom td.qty { text-align: center; }
+    .muted { color: var(--muted); font-style: italic; }
+
+    /* согласование */
+    .sign th, .sign td { border: 1px solid var(--line); padding: 6px 7px; font-size: 10.5px; }
+    .sign th { background: var(--navy); color: #fff; font-weight: bold; text-align: center; }
+    .sign td.role { font-weight: bold; background: #eef2f6; }
+
+    .foot { margin-top: 12px; font-size: 9px; color: var(--muted); border-top: 1px solid #d4dae0; padding-top: 5px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="org">ООО «Петробалт Сервис»</div>
+    <h1>Производственный заказ</h1>
+    <div class="code">Ф.1–П.2 | Версия 1.0 | № {{NUM_PZ}}</div>
+  </div>
+  <div class="subtitle">Что / сколько / когда изготовить · приложение к ДП–Д.1–1.0</div>
+
+  <div class="sec">1. Общая информация</div>
+  <div class="hint">Кто заказчик, тип и приоритет заказа, плановые сроки.</div>
+  <table class="kv">
+    <tr><td class="l">Номер заказа</td><td class="v"><b>{{NUM_PZ}}</b></td><td class="l">Дата размещения</td><td class="v">{{DATE_PLACED}}</td></tr>
+    <tr><td class="l">Заказчик / инициатор</td><td class="v">{{CUSTOMER}}</td><td class="l">Тип заказа</td><td class="v">{{ORDER_TYPE}}</td></tr>
+    <tr><td class="l">Тип продукции</td><td class="v">{{PRODUCT_TYPE}}</td><td class="l">Приоритет</td><td class="v">{{PRIORITY}}</td></tr>
+    <tr><td class="l">Плановый срок</td><td class="v">{{DATE_PLAN}}</td><td class="l">Статус</td><td class="v">{{STATUS}}</td></tr>
+  </table>
+
+  <div class="sec">2. Основание</div>
+  <div class="hint">Документ-основание и связь с продажами (запрос продаж / коммерческий заказ).</div>
+  <table class="kv">
+    <tr><td class="l">Основание / договор</td><td colspan="3">{{BASIS}}</td></tr>
+    <tr><td class="l">Запрос продаж (Ф.1–З.1)</td><td class="v">{{NUM_ZP}}</td><td class="l">Реестр заказов (Ф.3–З.1)</td><td class="v">{{NUM_ZKZ}}</td></tr>
+  </table>
+
+  <div class="sec">3. Номенклатура к производству</div>
+  <div class="hint">Перечень позиций заказа: что, сколько и к какому сроку изготовить.</div>
+  <table class="nom">
+    <thead>
+      <tr><th>№</th><th>Наименование / обозначение</th><th>Чертёж / ТУ</th><th>Ед.</th><th>Кол-во</th><th>Срок готовн.</th><th>Примечание</th></tr>
+    </thead>
+    <tbody>
+      {{POSITIONS}}
+    </tbody>
+  </table>
+
+  <div class="sec">4. Условия выполнения</div>
+  <div class="hint">Срок изготовления, поставка, упаковка, маркировка, сопроводительные документы, особые требования.</div>
+  <table class="kv">
+    <tr><td class="l">Условия</td><td colspan="3">{{TERMS}}</td></tr>
+  </table>
+
+  <div class="sec">5. Согласование и принятие в работу</div>
+  <div class="hint">Кто выдал, принял в работу и утвердил заказ.</div>
+  <table class="sign">
+    <tr><th>Роль</th><th>ФИО</th><th>Подпись</th><th>Дата</th></tr>
+    <tr><td class="role">Выдал: менеджер по продажам</td><td>{{APPROVE_ISSUED}}</td><td></td><td>{{DATE_ISSUED}}</td></tr>
+    <tr><td class="role">Принял в работу: директор по производству</td><td>{{APPROVE_ACCEPTED}}</td><td></td><td>{{DATE_ACCEPTED}}</td></tr>
+    <tr><td class="role">Утвердил: технолог</td><td>{{APPROVE_APPROVED}}</td><td></td><td>{{DATE_APPROVED}}</td></tr>
+  </table>
+
+  <div class="foot">
+    Связанные: ДП–З.1–1.0, ДП–Д.1–1.0, ДП–Д.1.1–1.0 ·
+    Хранение: /06–Записи по процессам/6.2–Производство/[Год]/{{NUM_PZ}}/ ·
+    Сформировано порталом ИСМ ПБС {{GENERATED_AT}}
+  </div>
+</body>
+</html>

@@ -1,0 +1,34 @@
+{
+  "name": "Задача · заполнение параметров по типу операции",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "task-params-populate",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh",
+      "name": "NocoDB: after insert Задачи",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "task-params-populate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// При создании задачи скопировать набор параметров её Типа операции\n// в дочернюю таблицу «Значения параметров задачи» и привязать к задаче.\nconst NC = $env.NOCODB_INTERNAL_URL;\nconst BASE = $env.NC_BASE_ID;\nconst TOKEN = $env.NC_TOKEN;\nconst H = { 'xc-token': TOKEN };\nconst data = (t) => `${NC}/api/v1/db/data/noco/${BASE}/${encodeURIComponent(t)}`;\n\nasync function list(t) { const r = await this.helpers.httpRequest({ method: 'GET', url: data(t) + '?limit=1000', headers: H, json: true }); return r.list || []; }\nasync function create(t, body) { return this.helpers.httpRequest({ method: 'POST', url: data(t), headers: H, body, json: true }); }\nfunction linkId(v) { if (!v) return null; if (Array.isArray(v)) return v[0]?.Id ?? v[0]?.id ?? null; return v.Id ?? v.id ?? null; }\n\n// найти id link-колонки «Значения параметров» на таблице «Задачи на участки» через meta\nasync function paramLinkColumnId() {\n  const bases = await this.helpers.httpRequest({ method: 'GET', url: `${NC}/api/v1/db/meta/projects/${BASE}/tables`, headers: H, json: true });\n  const tbl = (bases.list || []).find((t) => t.title === 'Задачи на участки');\n  const full = await this.helpers.httpRequest({ method: 'GET', url: `${NC}/api/v1/db/meta/tables/${tbl.id}`, headers: H, json: true });\n  const col = full.columns.find((c) => c.title === 'Значения параметров');\n  return col?.id;\n}\nasync function link(taskId, colId, childId) {\n  return this.helpers.httpRequest({ method: 'POST', url: `${data('Задачи на участки')}/${taskId}/mm/${colId}/${childId}`, headers: H, json: true });\n}\n\nconst body = $input.first().json.body || $input.first().json;\nconst rows = body?.data?.rows || (body?.data ? [body.data] : []);\nconst rec = rows[0] || {};\nconst taskId = rec.Id ?? rec.id;\nconst opTypeId = linkId(rec['Типы операций']);\nif (!taskId || !opTypeId) return [{ json: { skipped: true, reason: 'нет задачи или типа операции' } }];\n\nconst params = await list.call(this, 'Параметры типов');\nconst mine = params.filter((p) => linkId(p['Типы операций']) === opTypeId);\nconst colId = await paramLinkColumnId.call(this);\n\nconst created = [];\nfor (const p of mine) {\n  const row = await create.call(this, 'Значения параметров задачи', {\n    'Параметр': p['Параметр'], 'Единица': p['Единица'], 'Обязательный': p['Обязательный'], 'Значение': ''\n  });\n  const childId = row.Id ?? row.id;\n  if (colId) await link.call(this, taskId, colId, childId);\n  created.push(p['Параметр']);\n}\nreturn [{ json: { taskId, opTypeId, created } }];"
+      },
+      "id": "fill",
+      "name": "Скопировать параметры",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    }
+  ],
+  "connections": {
+    "NocoDB: after insert Задачи": { "main": [[{ "node": "Скопировать параметры", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

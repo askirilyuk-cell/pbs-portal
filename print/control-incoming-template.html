@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<!-- Печатный вид «Акт входного контроля материалов» (Ф.3–Д.1). Заполняется render-control.mjs.
+     Шапка-данные из NocoDB; чек-лист 5 пунктов печатается под ручное заполнение ОТК. -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: A4; margin: 11mm 12mm 13mm 12mm; }
+    * { box-sizing: border-box; }
+    :root { --navy: #1F4E79; --line: #9aa6b2; --muted: #6b7785; }
+    body { font-family: "Liberation Serif", "DejaVu Serif", "Times New Roman", serif; font-size: 10.5px; color: #16181c; }
+    .head { display: flex; align-items: flex-start; justify-content: space-between; }
+    .head .org { font-size: 10.5px; color: var(--navy); padding-top: 3px; white-space: nowrap; }
+    .head .code { font-size: 10px; color: var(--navy); font-style: italic; padding-top: 3px; white-space: nowrap; }
+    h1 { flex: 1; text-align: center; font-size: 17px; color: var(--navy); text-transform: uppercase; letter-spacing: 1.5px; margin: 0 8px; font-weight: bold; }
+    .docno { text-align: center; font-size: 12px; margin: 4px 0 8px; }
+    .sec { background: var(--navy); color: #fff; font-weight: bold; font-size: 11px; padding: 3px 8px; margin: 9px 0 0; }
+    .box { font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    .kv td { border: 1px solid var(--line); padding: 3px 6px; vertical-align: top; }
+    .kv td.l { background: #eef2f6; font-weight: bold; white-space: nowrap; width: 22%; }
+    .kv td.v { width: 28%; }
+    .line { border: 1px solid var(--line); border-top: none; padding: 4px 6px; }
+    .grid th, .grid td { border: 1px solid var(--line); padding: 3px 5px; vertical-align: top; }
+    .grid th { background: var(--navy); color: #fff; font-weight: bold; font-size: 9.5px; text-align: center; }
+    .grid td.c { text-align: center; }
+    .verdict { border: 1px solid var(--line); padding: 5px 7px; font-size: 12px; font-weight: bold; }
+    .sign th, .sign td { border: 1px solid var(--line); padding: 5px 7px; font-size: 10px; }
+    .sign th { background: var(--navy); color: #fff; text-align: center; }
+    .sign td.role { background: #eef2f6; font-weight: bold; }
+    .foot { margin-top: 8px; font-size: 8.5px; color: var(--muted); border-top: 1px solid #d4dae0; padding-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="org">ООО «Петробалт Сервис»</div>
+    <h1>Акт входного контроля материалов</h1>
+    <div class="code">Ф.3–Д.1 | Версия 1.0 | № {{NUM}}</div>
+  </div>
+  <div class="docno">Акт № <b>{{NUM}}</b> от {{DATE}}</div>
+
+  <div class="sec">1. Реквизиты поставки</div>
+  <table class="kv">
+    <tr><td class="l">Поставщик</td><td colspan="3">{{SUPPLIER}}</td></tr>
+    <tr><td class="l">Накладная №</td><td class="v">{{WAYBILL_NO}}</td><td class="l">от</td><td class="v">{{WAYBILL_DATE}}</td></tr>
+    <tr><td class="l">Договор / Заказ №</td><td colspan="3">{{CONTRACT}}</td></tr>
+    <tr><td class="l">Наименование материала</td><td colspan="3">{{MAT_NAME}}</td></tr>
+    <tr><td class="l">Марка / Сортамент</td><td class="v">{{GRADE}}</td><td class="l">Кол-во / Ед.</td><td class="v">{{QTY}} {{UNIT}}</td></tr>
+    <tr><td class="l">Дата изготовления</td><td class="v">{{MFG_DATE}}</td><td class="l">Срок годности до</td><td class="v">{{EXPIRY}}</td></tr>
+  </table>
+  <div class="line">Наличие документов: {{DOCS}}</div>
+
+  <div class="sec">2. Результаты проверки</div>
+  <table class="grid">
+    <thead><tr><th style="width:4%">№</th><th style="width:24%">Параметр проверки</th><th style="width:24%">Требование</th><th>Факт</th><th style="width:11%">Результат (✓/✗)</th><th style="width:12%">СИ</th><th style="width:14%">Примечание</th></tr></thead>
+    <tbody>
+      {{CHECK_ROWS}}
+    </tbody>
+  </table>
+
+  <div class="sec">Заключение</div>
+  <div class="verdict">{{VERDICT}}</div>
+  <div style="font-size:9px;color:var(--muted);font-style:italic;margin:3px 2px;">При несоответствии — оформляется Акт о несоответствии (Ф.5–Д.1).</div>
+
+  <div class="sec">Подписи</div>
+  <table class="sign">
+    <tr><th>Роль</th><th>ФИО</th><th>Подпись</th><th>Дата</th></tr>
+    <tr><td class="role">Контролёр ОТК</td><td>{{OTK}}</td><td></td><td></td></tr>
+    <tr><td class="role">Представитель склада</td><td>{{WAREHOUSE}}</td><td></td><td></td></tr>
+    <tr><td class="role">Получатель (ответственный)</td><td>{{RECEIVER}}</td><td></td><td></td></tr>
+  </table>
+
+  <div class="foot">Связанные: ДП–Д.1–1.1 (§ входной контроль), Ф.5–Д.1 (несоответствие) · Сформировано порталом ИСМ ПБС {{GENERATED_AT}}</div>
+</body>
+</html>

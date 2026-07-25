@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!-- Печатный вид «Акт о несоответствии» (Ф.5–Д.1), увязан с ДП–У.2. Заполняется render-control.mjs. -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: A4; margin: 11mm 12mm 13mm 12mm; }
+    * { box-sizing: border-box; }
+    :root { --navy: #1F4E79; --line: #9aa6b2; --muted: #6b7785; }
+    body { font-family: "Liberation Serif", "DejaVu Serif", "Times New Roman", serif; font-size: 10.5px; color: #16181c; }
+    .head { display: flex; align-items: flex-start; justify-content: space-between; }
+    .head .org { font-size: 10.5px; color: var(--navy); padding-top: 3px; white-space: nowrap; }
+    .head .code { font-size: 10px; color: var(--navy); font-style: italic; padding-top: 3px; white-space: nowrap; }
+    h1 { flex: 1; text-align: center; font-size: 17px; color: var(--navy); text-transform: uppercase; letter-spacing: 1.5px; margin: 0 8px; font-weight: bold; }
+    .docno { text-align: center; font-size: 12px; margin: 4px 0 8px; }
+    .sec { background: var(--navy); color: #fff; font-weight: bold; font-size: 11px; padding: 3px 8px; margin: 9px 0 0; }
+    table { width: 100%; border-collapse: collapse; }
+    .kv td { border: 1px solid var(--line); padding: 3px 6px; vertical-align: top; }
+    .kv td.l { background: #eef2f6; font-weight: bold; white-space: nowrap; width: 22%; }
+    .kv td.v { width: 28%; }
+    .line { border: 1px solid var(--line); border-top: none; padding: 4px 6px; font-size: 11px; }
+    .text { border: 1px solid var(--line); padding: 5px 7px; min-height: 38px; white-space: pre-wrap; }
+    .verdict { border: 1px solid var(--line); padding: 5px 7px; font-size: 11.5px; }
+    .sign th, .sign td { border: 1px solid var(--line); padding: 5px 7px; font-size: 10px; }
+    .sign th { background: var(--navy); color: #fff; text-align: center; }
+    .sign td.role { background: #eef2f6; font-weight: bold; }
+    .foot { margin-top: 8px; font-size: 8.5px; color: var(--muted); border-top: 1px solid #d4dae0; padding-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="org">ООО «Петробалт Сервис»</div>
+    <h1>Акт о несоответствии</h1>
+    <div class="code">Ф.5–Д.1 | Версия 1.0 | № {{NUM}}</div>
+  </div>
+  <div class="docno">Акт НП № <b>{{NUM}}</b> от {{DATE}}</div>
+
+  <div class="sec">1. Идентификация</div>
+  <div class="line">Этап обнаружения: {{STAGE}}</div>
+  <table class="kv" style="border-top:none;">
+    <tr><td class="l">Заказ № / МК №</td><td colspan="3">{{ORDER_MK}}</td></tr>
+    <tr><td class="l">Наименование изделия / материала</td><td colspan="3">{{PRODUCT}}</td></tr>
+    <tr><td class="l">Кол-во НП</td><td class="v">{{QTY_NC}}</td><td class="l">Участок / Обнаружил</td><td class="v">{{FOUND_BY}}</td></tr>
+  </table>
+
+  <div class="sec">2. Описание несоответствия</div>
+  <div class="text">{{DESCRIPTION}}</div>
+  <div class="line" style="border-top:none;"><b>Причина (предварительная):</b> {{CAUSE}}</div>
+
+  <div class="sec">3. Решение</div>
+  <div class="verdict">{{DECISION}}</div>
+  <div class="line"><b>Согласование заказчика:</b> {{CUSTOMER_APPROVAL}} &nbsp;&nbsp; <b>Решение принял:</b> {{DECISION_BY}} &nbsp;&nbsp; <b>Дата:</b> {{DECISION_DATE}}</div>
+
+  <div class="sec">4. Корректирующее действие (по ДП–У.2)</div>
+  <div class="text">{{CORRECTIVE}}</div>
+  <div class="line" style="border-top:none;"><b>Срок:</b> {{DEADLINE}} &nbsp;&nbsp; <b>Ответственный:</b> {{RESPONSIBLE}}</div>
+
+  <div class="sec">5. Проверка результативности</div>
+  <div class="line"><b>Дата проверки:</b> {{CHECK_DATE}} &nbsp;&nbsp; <b>Результат:</b> {{CHECK_RESULT}}</div>
+  <div class="line" style="border-top:none;">{{EFFECTIVENESS}}</div>
+
+  <div class="sec">Подписи</div>
+  <table class="sign">
+    <tr><th>Роль</th><th>ФИО</th><th>Подпись</th><th>Дата</th></tr>
+    <tr><td class="role">Составил</td><td>{{COMPILER}}</td><td></td><td></td></tr>
+    <tr><td class="role">Согласовал (Директор по производству)</td><td>{{DPP}}</td><td></td><td></td></tr>
+  </table>
+
+  <div class="foot">Связанные: ДП–У.2 (несоответствия и корректирующие действия), ДП–Д.1–1.1, Ф.3/Ф.4 (контроль) · Сформировано порталом ИСМ ПБС {{GENERATED_AT}}</div>
+</body>
+</html>

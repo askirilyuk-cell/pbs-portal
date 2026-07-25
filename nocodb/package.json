@@ -1,0 +1,23 @@
+{
+  "name": "pbs-nocodb-schema",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Схема, сидинг и представления производственного модуля портала ИСМ ПБС (NocoDB Meta API).",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "schema": "node schema/build-schema.mjs",
+    "seed": "node seed/seed.mjs",
+    "views": "node views/build-views.mjs",
+    "all": "npm run schema && npm run seed && npm run views",
+    "migrate": "node schema/migrate-001-procedure-align.mjs",
+    "migrate-002": "node schema/migrate-002-journal.mjs",
+    "migrate-003": "node schema/migrate-003-param-norms.mjs",
+    "migrate-005": "node schema/migrate-005-design.mjs",
+    "seed-demo-route": "node seed/seed-demo-route.mjs",
+    "assign-mk": "node scripts/assign-mk-number.mjs",
+    "assign-control": "node scripts/assign-control-number.mjs",
+    "cleanup-orphan-tasks": "node scripts/cleanup-orphan-tasks.mjs",
+    "seed-demo-control": "node seed/seed-demo-control.mjs"
+  }
+}

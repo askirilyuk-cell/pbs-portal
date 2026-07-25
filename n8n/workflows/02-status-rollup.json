@@ -1,0 +1,34 @@
+{
+  "name": "Статусы · агрегация Задачи→Позиция→Заказ",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "status-rollup",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh",
+      "name": "NocoDB: after insert/update Задачи",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "status-rollup"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Агрегация статусов: задача → её позиция → её заказ.\n// Все обращения к NocoDB — через this.helpers.httpRequest (доступно в Code-ноде).\nconst NC = $env.NOCODB_INTERNAL_URL;\nconst BASE = $env.NC_BASE_ID;\nconst TOKEN = $env.NC_TOKEN;\nconst H = { 'xc-token': TOKEN };\nconst api = (t) => `${NC}/api/v1/db/data/noco/${BASE}/${encodeURIComponent(t)}`;\n\nasync function list(t) {\n  const r = await this.helpers.httpRequest({ method: 'GET', url: api(t) + '?limit=1000', headers: H, json: true });\n  return r.list || [];\n}\nasync function patch(t, id, body) {\n  return this.helpers.httpRequest({ method: 'PATCH', url: api(t) + '/' + id, headers: H, body, json: true });\n}\n// id связанной BT-записи в строке (NocoDB вкладывает belongsTo как объект)\nfunction linkId(v) { if (!v) return null; if (Array.isArray(v)) return v[0]?.Id ?? v[0]?.id ?? null; return v.Id ?? v.id ?? null; }\n\n// статус позиции из статусов её задач\nfunction posStatus(states) {\n  if (states.length && states.every((s) => s === 'Выполнено')) return 'Выполнено';\n  if (states.includes('В работе')) return 'В работе';\n  if (states.includes('Приостановлено')) return 'Приостановлено';\n  return 'В очереди';\n}\n// статус заказа из статусов его позиций\nfunction ordStatus(states) {\n  if (states.length && states.every((s) => s === 'Выполнено')) return 'Выполнен';\n  if (states.includes('В работе')) return 'В работе';\n  if (states.includes('Приостановлено')) return 'Приостановлен';\n  return 'Размещён';\n}\n\nconst body = $input.first().json.body || $input.first().json;\nconst rows = body?.data?.rows || (body?.data ? [body.data] : []);\nconst rec = rows[0] || {};\nconst posId = linkId(rec['Позиции']);\nconst ordId = linkId(rec['Заказы']);\n\nconst allTasks = await list.call(this, 'Задачи на участки');\nconst allPos = await list.call(this, 'Позиции');\n\nconst out = {};\n\n// 1) позиция\nif (posId) {\n  const states = allTasks.filter((t) => linkId(t['Позиции']) === posId).map((t) => t['Статус']).filter(Boolean);\n  const st = posStatus(states);\n  await patch.call(this, 'Позиции', posId, { 'Статус': st });\n  out.position = { id: posId, status: st };\n}\n\n// 2) заказ — собрать его позиции (со свежим статусом позиции)\nlet orderId = ordId;\nif (!orderId && posId) { const p = allPos.find((x) => (x.Id ?? x.id) === posId); orderId = linkId(p?.['Заказы']); }\nif (orderId) {\n  const states = allPos.filter((p) => linkId(p['Заказы']) === orderId)\n    .map((p) => ((p.Id ?? p.id) === posId && out.position) ? out.position.status : p['Статус']).filter(Boolean);\n  // ручные статусы заказа не перетираем\n  const ord = (await list.call(this, 'Заказы')).find((o) => (o.Id ?? o.id) === orderId);\n  const manual = ['Отгружен', 'Закрыт', 'Отменён'];\n  if (!manual.includes(ord?.['Статус'])) {\n    const st = ordStatus(states);\n    await patch.call(this, 'Заказы', orderId, { 'Статус': st });\n    out.order = { id: orderId, status: st };\n  }\n}\n\nreturn [{ json: out }];"
+      },
+      "id": "rollup",
+      "name": "Пересчитать статусы",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    }
+  ],
+  "connections": {
+    "NocoDB: after insert/update Задачи": { "main": [[{ "node": "Пересчитать статусы", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

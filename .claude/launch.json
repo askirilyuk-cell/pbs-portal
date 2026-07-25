@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nocodb",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "nocodb"],
+      "port": 8080
+    },
+    {
+      "name": "n8n",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "n8n"],
+      "port": 5678
+    },
+    {
+      "name": "metabase",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "metabase"],
+      "port": 3000
+    },
+    {
+      "name": "gotenberg",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "gotenberg"],
+      "port": 3001
+    }
+  ]
+}

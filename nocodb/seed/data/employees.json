@@ -1,0 +1,10 @@
+[
+  { "full_name": "Герасимов А.В.", "role": "Технолог", "section_code": "" },
+  { "full_name": "Директор по производству", "role": "ДпП", "section_code": "" },
+  { "full_name": "Менеджер по продажам", "role": "Менеджер", "section_code": "" },
+  { "full_name": "Мастер УЧ-03", "role": "Мастер участка", "section_code": "УЧ-03" },
+  { "full_name": "Мастер УЧ-10", "role": "Мастер участка", "section_code": "УЧ-10" },
+  { "full_name": "Рабочий УЧ-03", "role": "Рабочий", "section_code": "УЧ-03" },
+  { "full_name": "Рабочий УЧ-10", "role": "Рабочий", "section_code": "УЧ-10" },
+  { "full_name": "Контролёр ОТК", "role": "ОТК", "section_code": "" }
+]

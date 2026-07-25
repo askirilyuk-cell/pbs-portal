@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<!--
+  Печатный вид «Карта задачи на участок» (Ф.14–Д.1).
+  Верстка по утверждённой форме (C:\…\Сервер ПБС\03-Формы…\Ф.14–Д.1): тёмно-синие
+  плашки разделов, шрифт с засечками, 7 секций (основание / изделие / операция /
+  материалы / точки контроля / параметры / журнал исполнения).
+  Заполняется render-task.mjs: плейсхолдеры {{...}} и строки таблиц.
+  §7 печатается пустыми строками под ручное заполнение в цеху.
+  Рендер в PDF — через Gotenberg (/forms/chromium/convert/html).
+-->
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: A4; margin: 10mm 11mm 12mm 11mm; }
+    * { box-sizing: border-box; }
+    :root { --navy: #1F4E79; --line: #9aa6b2; --muted: #6b7785; }
+    body { font-family: "Liberation Serif", "DejaVu Serif", "Times New Roman", serif;
+           font-size: 10px; color: #16181c; }
+
+    .head { display: flex; align-items: flex-start; justify-content: space-between; }
+    .head .org { font-size: 10.5px; color: var(--navy); padding-top: 3px; white-space: nowrap; }
+    .head .code { font-size: 10px; color: var(--navy); font-style: italic; padding-top: 3px; white-space: nowrap; }
+    h1 { flex: 1; text-align: center; font-size: 17px; color: var(--navy);
+         text-transform: uppercase; letter-spacing: 2px; margin: 0 8px; font-weight: bold; }
+    .subtitle { text-align: center; color: var(--muted); font-size: 9.5px; font-style: italic; margin: 1px 0 7px; }
+
+    .sec { background: var(--navy); color: #fff; font-weight: bold; font-size: 11px; padding: 3px 8px; margin: 7px 0 0; }
+    .hint { color: var(--muted); font-size: 9px; font-style: italic; margin: 2px 2px 3px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    .kv td { border: 1px solid var(--line); padding: 3px 6px; vertical-align: top; }
+    .kv td.l { background: #eef2f6; font-weight: bold; white-space: nowrap; width: 22%; }
+    .kv td.v { width: 28%; }
+
+    .grid th, .grid td { border: 1px solid var(--line); padding: 3px 5px; vertical-align: top; }
+    .grid th { background: var(--navy); color: #fff; font-weight: bold; font-size: 9.5px; text-align: center; }
+    .grid td.c { text-align: center; }
+    .grid .blank td { height: 16px; }
+    .muted { color: var(--muted); font-style: italic; }
+    .foot { margin-top: 8px; font-size: 8.5px; color: var(--muted); border-top: 1px solid #d4dae0; padding-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="org">ООО «Петробалт Сервис»</div>
+    <h1>Карта задачи на участок</h1>
+    <div class="code">Ф.14–Д.1 | Версия 1.0 | № {{NUM_TASK}}</div>
+  </div>
+  <div class="subtitle">Задание на операцию + запись о выполнении и контроле качества · приложение к ДП–Д.1–1.0</div>
+
+  <div class="sec">1. Основание</div>
+  <div class="hint">Откуда задача и в какой срок: номер ПЗ/заказа, приоритет, сколько изготовить.</div>
+  <table class="kv">
+    <tr><td class="l">№ карты задачи</td><td class="v"><b>{{NUM_TASK}}</b></td><td class="l">№ ПЗ / заказа</td><td class="v">{{NUM_PZ}}</td></tr>
+    <tr><td class="l">Дата выдачи / срок</td><td class="v">{{DATE_DUE}}</td><td class="l">Кол-во по заданию, шт.</td><td class="v">{{QTY}}</td></tr>
+  </table>
+
+  <div class="sec">2. Изделие / деталь</div>
+  <div class="hint">Что изготавливается. К карте прикладывается чертёж с отмеченными точками контроля. Применимость — для каких изделий используется деталь.</div>
+  <table class="kv">
+    <tr><td class="l">Наименование</td><td class="v">{{PART_NAME}}</td><td class="l">Обозначение</td><td class="v">{{DESIGNATION}}</td></tr>
+    <tr><td class="l">Чертёж № (с точками контроля)</td><td class="v">{{DRAWING}}</td><td class="l">Применимость</td><td class="v">{{APPLICABILITY}}</td></tr>
+  </table>
+
+  <div class="sec">3. Операция</div>
+  <div class="hint">№ МК — ссылка на маршрут; тип операции задаёт участок, РИ и параметры.</div>
+  <table class="kv">
+    <tr><td class="l">№ МК (маршрута)</td><td class="v">{{NUM_MK}}</td><td class="l">№ операции в маршруте</td><td class="v">{{OP_NUM}}</td></tr>
+    <tr><td class="l">Тип операции</td><td class="v">{{OP_TYPE}}</td><td class="l">Участок (Ф.1–П)</td><td class="v">{{SECTION}}</td></tr>
+    <tr><td class="l">Оборудование (Ф.1–О.3.2)</td><td class="v">{{EQUIPMENT}}</td><td class="l">РИ / ИОТ</td><td class="v">{{RI}}</td></tr>
+  </table>
+
+  <div class="sec">4. Материалы и компоненты (из чего сделано — прослеживаемость)</div>
+  <div class="hint">Что взято со склада и № приёмки/сертификата (Ф.3 Акт входного контроля) или № МК-источника — чтобы знать, из какого материала и компонентов изготовлено.</div>
+  <table class="grid">
+    <thead><tr><th>Наименование</th><th style="width:12%">Кол-во</th><th style="width:26%">№ приёмки / сертификата (Ф.3)</th><th style="width:20%">№ МК-источника</th></tr></thead>
+    <tbody>
+      {{MATERIALS}}
+    </tbody>
+  </table>
+
+  <div class="sec">5. Точки контроля (что проверять)</div>
+  <div class="hint">Контролируемые параметры этой операции; номера точек — по чертежу-приложению. Тип: С — самоконтроль рабочего, ОТК — контролёр.</div>
+  <table class="grid">
+    <thead><tr><th style="width:8%">№ точки</th><th>Что контролировать (параметр)</th><th style="width:20%">Номинал / допуск</th><th style="width:16%">СИ</th><th style="width:10%">С / ОТК</th></tr></thead>
+    <tbody>
+      {{CONTROL_POINTS}}
+    </tbody>
+  </table>
+
+  <div class="sec">6. Параметры операции (режимы по типу)</div>
+  <div class="hint">Наплавка — материал/ток/слои/HV; токарная/фрезерная — режимы/инструмент/программа; вулканизация — T/P/время/форма и т. д.</div>
+  <table class="grid">
+    <thead><tr><th>Параметр</th><th style="width:16%">Единица</th><th style="width:34%">Значение / режим</th></tr></thead>
+    <tbody>
+      {{PARAMS}}
+    </tbody>
+  </table>
+
+  <div class="sec">7. Журнал исполнения и контроля (по единицам)</div>
+  <div class="hint">На каждую изготовленную единицу: кто сделал, № заготовки/приёмки материала, результат самоконтроля и контроля ОТК (годен/брак), дата. Это и есть запись прослеживаемости и качества.</div>
+  <table class="grid">
+    <thead><tr><th style="width:6%">№ ед.</th><th>Исполнитель (ФИО)</th><th style="width:20%">№ заготовки / приёмки</th><th style="width:13%">Самоконтроль (С)</th><th style="width:13%">Контроль ОТК</th><th style="width:13%">Дата</th></tr></thead>
+    <tbody>
+      {{JOURNAL}}
+    </tbody>
+  </table>
+
+  <div class="foot">
+    Связанные: ДП–Д.1–1.0 (§6), Ф.13–Д.1 (маршрутная карта), Ф.1–П.2 (производственный заказ), Ф.3 (акт входного контроля) ·
+    Хранение: /06–Записи по процессам/6.2–Производство/Карты задач/{{NUM_TASK}}/ ·
+    Сформировано порталом ИСМ ПБС {{GENERATED_AT}}
+  </div>
+</body>
+</html>

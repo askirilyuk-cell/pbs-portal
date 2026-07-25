@@ -1,0 +1,416 @@
+[
+  {
+    "op_type_code": "ОП-ЗАГ",
+    "param": "Размер реза",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ЗАГ",
+    "param": "Количество",
+    "unit": "шт",
+    "value_type": "Number",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ЗАГ",
+    "param": "Припуск",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ТОК",
+    "param": "Частота вращения n",
+    "unit": "об/мин",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ТОК",
+    "param": "Подача S",
+    "unit": "мм/об",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ТОК",
+    "param": "Глубина t",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ТОК",
+    "param": "Инструмент",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ТОК",
+    "param": "Программа ЧПУ",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ФРЧ",
+    "param": "Программа ЧПУ",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ФРЧ",
+    "param": "Инструмент",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ФРЧ",
+    "param": "Режим",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ФРУ",
+    "param": "Режим",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ФРУ",
+    "param": "Инструмент",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ЭЭО",
+    "param": "Программа",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ЭЭО",
+    "param": "Проволока",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ЭЭО",
+    "param": "Режим",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ШЛ",
+    "param": "Припуск",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ШЛ",
+    "param": "Шероховатость Ra",
+    "unit": "мкм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ШЛ",
+    "param": "Диск",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-СЛ",
+    "param": "Ø отверстия",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-СЛ",
+    "param": "Глубина",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-СЛ",
+    "param": "Резьба",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-СЛ",
+    "param": "Момент затяжки",
+    "unit": "Н·м",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-НАП",
+    "param": "Материал наплавки",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-НАП",
+    "param": "Ток",
+    "unit": "А",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-НАП",
+    "param": "Напряжение",
+    "unit": "В",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-НАП",
+    "param": "Число слоёв",
+    "unit": "шт",
+    "value_type": "Number",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-НАП",
+    "param": "Толщина слоя",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-НАП",
+    "param": "Твёрдость HV",
+    "unit": "HV",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ПЛ",
+    "param": "Толщина",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ПЛ",
+    "param": "Программа раскроя",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ПЛ",
+    "param": "Скорость",
+    "unit": "мм/мин",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ВАЛ",
+    "param": "Ø обечайки",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ВАЛ",
+    "param": "Толщина листа",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ВАЛ",
+    "param": "Число проходов",
+    "unit": "шт",
+    "value_type": "Number",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-СВ",
+    "param": "Тип сварки",
+    "unit": "MIG/MAG, TIG, РДС",
+    "value_type": "SingleSelect",
+    "options": [
+      "MIG/MAG",
+      "TIG",
+      "РДС"
+    ],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-СВ",
+    "param": "Материал",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-СВ",
+    "param": "Режим",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ДРО",
+    "param": "Время",
+    "unit": "мин",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ДРО",
+    "param": "Степень очистки",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ОКР",
+    "param": "Покрытие",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ОКР",
+    "param": "Толщина",
+    "unit": "мкм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ОКР",
+    "param": "Число слоёв",
+    "unit": "шт",
+    "value_type": "Number",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ПРС",
+    "param": "Способ",
+    "unit": "прямое / инъекционное",
+    "value_type": "SingleSelect",
+    "options": [
+      "прямое / инъекционное"
+    ],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ПРС",
+    "param": "Температура T",
+    "unit": "°C",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ПРС",
+    "param": "Давление P",
+    "unit": "т",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ПРС",
+    "param": "Время вулканизации",
+    "unit": "мин",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ПРС",
+    "param": "Пресс-форма",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ВРС",
+    "param": "Рецепт смеси",
+    "unit": "",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ВРС",
+    "param": "Зазор",
+    "unit": "мм",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ВРС",
+    "param": "Число пропусков",
+    "unit": "шт",
+    "value_type": "Number",
+    "options": [],
+    "required": false
+  }
+]

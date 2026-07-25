@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<!--
+  Печатный вид «Маршрутная карта» (Ф.13–Д.1).
+  Верстка по утверждённой форме (C:\…\Сервер ПБС\03-Формы…\Ф.13–Д.1): тёмно-синие
+  плашки разделов, шрифт с засечками, шапка-«ключ-значение», две таблицы
+  (входящие компоненты для СБР + маршрут операций).
+  Заполняется render-route.mjs: плейсхолдеры {{...}}, строки {{COMPONENTS}}/{{OPERATIONS}}.
+  Рендер в PDF — через Gotenberg (/forms/chromium/convert/html).
+-->
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: A4 landscape; margin: 12mm 12mm 14mm 12mm; }
+    * { box-sizing: border-box; }
+    :root { --navy: #1F4E79; --line: #9aa6b2; --muted: #6b7785; }
+    body { font-family: "Liberation Serif", "DejaVu Serif", "Times New Roman", serif;
+           font-size: 11px; color: #16181c; }
+
+    /* шапка */
+    .head { display: flex; align-items: flex-start; justify-content: space-between; }
+    .head .org { font-size: 11px; color: var(--navy); padding-top: 4px; white-space: nowrap; }
+    .head .code { font-size: 10.5px; color: var(--navy); font-style: italic; padding-top: 4px; white-space: nowrap; }
+    h1 { flex: 1; text-align: center; font-size: 19px; color: var(--navy);
+         text-transform: uppercase; letter-spacing: 2px; margin: 0 8px; font-weight: bold; }
+    .subtitle { text-align: center; color: var(--muted); font-size: 10px; font-style: italic; margin: 2px 0 10px; }
+
+    .sec { background: var(--navy); color: #fff; font-weight: bold; font-size: 12px; padding: 4px 9px; margin: 12px 0 0; }
+    .hint { color: var(--muted); font-size: 9.5px; font-style: italic; margin: 3px 2px 5px; }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    /* шапка-карточка «ключ-значение» */
+    .kv td { border: 1px solid var(--line); padding: 4px 7px; vertical-align: top; }
+    .kv td.l { background: #eef2f6; font-weight: bold; white-space: nowrap; width: 13%; }
+    .kv td.v { width: 20%; }
+    .box { font-size: 12px; }
+
+    /* таблицы данных */
+    .grid th, .grid td { border: 1px solid var(--line); padding: 4px 6px; vertical-align: top; }
+    .grid th { background: var(--navy); color: #fff; font-weight: bold; font-size: 10px; text-align: center; }
+    .grid td.c { text-align: center; }
+    .grid .small { font-size: 9px; color: var(--muted); }
+    .muted { color: var(--muted); font-style: italic; }
+
+    .foot { margin-top: 12px; font-size: 9px; color: var(--muted); border-top: 1px solid #d4dae0; padding-top: 5px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="org">ООО «Петробалт Сервис»</div>
+    <h1>Маршрутная карта</h1>
+    <div class="code">Ф.13–Д.1 | Версия 1.0 | № {{NUM_MK}}</div>
+  </div>
+  <div class="subtitle">Полный маршрут изготовления изделия / компонента (сквозной по участкам) · приложение к ДП–Д.1–1.0</div>
+  <div class="hint">Тип: <b>КОМ</b> — маршрут изготовления компонента/детали (один выход). <b>СБР</b> — маршрут сборки изделия из компонентов. Применимость — для каких изделий используется данный компонент.</div>
+
+  <table class="kv">
+    <tr>
+      <td class="l">№ МК</td><td class="v"><b>{{NUM_MK}}</b></td>
+      <td class="l">Тип</td><td class="v"><span class="box">{{KOM_BOX}} КОМ&nbsp;&nbsp;{{SBR_BOX}} СБР</span></td>
+      <td class="l">Тип продукции</td><td class="v">{{PRODUCT_TYPE}}</td>
+    </tr>
+    <tr>
+      <td class="l">Изделие / компонент</td><td class="v">{{PRODUCT_NAME}}</td>
+      <td class="l">Обозначение</td><td class="v">{{DESIGNATION}}</td>
+      <td class="l">Ревизия</td><td class="v">{{REVISION}} ({{STATUS}})</td>
+    </tr>
+  </table>
+
+  <div class="sec">Входящие компоненты (заполняется для сборки — МК-СБР)</div>
+  <div class="hint">Из каких компонентов собирается изделие и по каким маршрутам они изготовлены (№ МК-КОМ / ПЗ источника) — для прослеживаемости.</div>
+  <table class="grid">
+    <thead>
+      <tr><th style="width:5%">№</th><th>Наименование компонента</th><th style="width:30%">№ МК-КОМ / ПЗ источника</th><th style="width:12%">Кол-во</th></tr>
+    </thead>
+    <tbody>
+      {{COMPONENTS}}
+    </tbody>
+  </table>
+
+  <div class="sec">Маршрут операций</div>
+  <div class="hint">Последовательность операций по порядку. Тип операции задаёт участок, РИ и параметры. Контроль: «С» — самоконтроль, «ОТК» — контролёр. В колонке «№ карты задачи» проставляется номер карты Ф.14 — по нему «отматывается» вся история изготовления.</div>
+  <table class="grid">
+    <thead>
+      <tr>
+        <th style="width:3%">№</th>
+        <th style="width:16%">Наименование операции</th>
+        <th style="width:8%">Тип операции</th>
+        <th style="width:11%">Участок</th>
+        <th style="width:11%">Оборудование</th>
+        <th style="width:15%">Параметры / режимы</th>
+        <th style="width:9%">Контроль</th>
+        <th style="width:8%">РИ / ИОТ</th>
+        <th style="width:6%">Норма t</th>
+        <th style="width:13%">№ карты задачи (Ф.14)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{OPERATIONS}}
+    </tbody>
+  </table>
+
+  <div class="foot">
+    Связанные: ДП–Д.1–1.0 (§6), Ф.14–Д.1 (карта задачи), Ф.1–П.2 (производственный заказ) ·
+    Хранение: /06–Записи по процессам/6.2–Производство/Маршруты/{{NUM_MK}}/ ·
+    Сформировано порталом ИСМ ПБС {{GENERATED_AT}}
+  </div>
+</body>
+</html>

@@ -1,0 +1,313 @@
+{
+  "base": "Производство ПБС",
+  "_comment": "Декларативная схема производственного модуля (MVP-1, раздел 9 ТЗ). Применяется build-schema.mjs идемпотентно. uidt — типы колонок NocoDB. options — варианты SingleSelect. display — колонка-первичное значение (pv). Связи — внизу (hasMany со стороны 'один').",
+
+  "tables": [
+    {
+      "key": "sections",
+      "title": "Участки",
+      "table_name": "sections",
+      "display": "Код",
+      "columns": [
+        { "title": "Код", "uidt": "SingleLineText" },
+        { "title": "Участок", "uidt": "SingleLineText" },
+        { "title": "Описание", "uidt": "LongText" },
+        { "title": "Основное оборудование", "uidt": "LongText" },
+        { "title": "Тип", "uidt": "SingleSelect", "options": ["Основной", "Вспомогательный"] },
+        { "title": "Должность ответственного", "uidt": "SingleLineText" }
+      ]
+    },
+
+    {
+      "key": "op_types",
+      "title": "Типы операций",
+      "table_name": "op_types",
+      "display": "Код типа",
+      "columns": [
+        { "title": "Код типа", "uidt": "SingleLineText" },
+        { "title": "Наименование", "uidt": "SingleLineText" },
+        { "title": "РИ", "uidt": "SingleLineText" }
+      ]
+    },
+
+    {
+      "key": "op_params",
+      "title": "Параметры типов",
+      "table_name": "op_params",
+      "display": "Параметр",
+      "columns": [
+        { "title": "Параметр", "uidt": "SingleLineText" },
+        { "title": "Единица", "uidt": "SingleLineText" },
+        { "title": "Тип значения", "uidt": "SingleSelect", "options": ["Decimal", "Number", "SingleLineText", "SingleSelect"] },
+        { "title": "Варианты", "uidt": "SingleLineText" },
+        { "title": "Норматив", "uidt": "SingleLineText", "_note": "дефолтное целевое значение (migrate-003)" },
+        { "title": "Допуск", "uidt": "SingleLineText", "_note": "напр. ±0,1 (migrate-003)" },
+        { "title": "Обязательный", "uidt": "Checkbox" }
+      ]
+    },
+
+    {
+      "key": "employees",
+      "title": "Сотрудники",
+      "table_name": "employees",
+      "display": "ФИО",
+      "columns": [
+        { "title": "ФИО", "uidt": "SingleLineText" },
+        { "title": "Роль", "uidt": "SingleSelect", "options": ["Технолог", "ДпП", "Менеджер", "Мастер участка", "Рабочий", "ОТК", "Начальник ДЛЗ", "ПРК"] }
+      ]
+    },
+
+    {
+      "key": "orders",
+      "title": "Заказы",
+      "table_name": "orders",
+      "display": "№ ПЗ",
+      "columns": [
+        { "title": "№ ПЗ", "uidt": "SingleLineText" },
+        { "title": "№ ЗП", "uidt": "SingleLineText" },
+        { "title": "№ ЗКЗ", "uidt": "SingleLineText" },
+        { "title": "Тип заказа", "uidt": "SingleSelect", "options": ["Клиентский", "Внутренний (склад)", "ОПИ", "Сервис-ремонт"] },
+        { "title": "Тип задачи", "uidt": "SingleSelect", "options": ["Производство", "Обслуживание", "Ремонт", "Подготовка оснастки", "Прочее"] },
+        { "title": "Заказчик / Инициатор", "uidt": "SingleLineText" },
+        { "title": "Тип продукции", "uidt": "SingleSelect", "options": ["РТИ", "Биметалл", "Оснастка ОК", "ЗИП ПВО", "Механообработка", "Металлоконструкции"] },
+        { "title": "Договор / основание", "uidt": "LongText" },
+        { "title": "Дата размещения", "uidt": "Date" },
+        { "title": "Плановый срок", "uidt": "Date" },
+        { "title": "Дата завершения", "uidt": "Date" },
+        { "title": "Статус", "uidt": "SingleSelect", "options": ["Размещён", "В работе", "Приостановлен", "Выполнен", "Отгружен", "Закрыт", "Отменён"] },
+        { "title": "Приоритет", "uidt": "SingleSelect", "options": ["Высокий", "Нормальный", "Низкий"] },
+        { "title": "Условия", "uidt": "LongText" },
+        { "title": "Выдал (менеджер)", "uidt": "SingleLineText" },
+        { "title": "Дата выдачи", "uidt": "Date" },
+        { "title": "Принял (ДпП)", "uidt": "SingleLineText" },
+        { "title": "Дата принятия", "uidt": "Date" },
+        { "title": "Утвердил (технолог)", "uidt": "SingleLineText" },
+        { "title": "Дата утверждения", "uidt": "Date" },
+        { "title": "Папка досье", "uidt": "URL" }
+      ]
+    },
+
+    {
+      "key": "positions",
+      "title": "Позиции",
+      "table_name": "positions",
+      "display": "Позиция",
+      "columns": [
+        { "title": "Позиция", "uidt": "SingleLineText", "_note": "№ ПЗ + № позиции, формируется при сидинге" },
+        { "title": "№ позиции", "uidt": "SingleLineText" },
+        { "title": "Наименование / обозначение", "uidt": "SingleLineText" },
+        { "title": "Чертёж / ТУ", "uidt": "SingleLineText" },
+        { "title": "Ед.", "uidt": "SingleLineText" },
+        { "title": "Кол-во", "uidt": "Number" },
+        { "title": "Срок готовности", "uidt": "Date" },
+        { "title": "Статус", "uidt": "SingleSelect", "options": ["В очереди", "В работе", "Выполнено", "Приостановлено"] },
+        { "title": "Примечание", "uidt": "LongText" }
+      ]
+    },
+
+    {
+      "key": "tasks",
+      "title": "Задачи на участки",
+      "table_name": "tasks",
+      "display": "№ задачи",
+      "columns": [
+        { "title": "№ задачи", "uidt": "SingleLineText" },
+        { "title": "Операция (№ МК / № оп.)", "uidt": "SingleLineText", "_note": "задел под 2-ю итерацию (связь с Операциями)" },
+        { "title": "Оборудование", "uidt": "SingleLineText" },
+        { "title": "Приоритет", "uidt": "SingleSelect", "options": ["Высокий", "Нормальный", "Низкий"] },
+        { "title": "Дата плановая", "uidt": "Date" },
+        { "title": "Дата факт.", "uidt": "Date" },
+        { "title": "Статус", "uidt": "SingleSelect", "options": ["В очереди", "В работе", "Выполнено", "Приостановлено"] },
+        { "title": "Входящие материалы", "uidt": "LongText", "_note": "что взять, кол-во, № партии/сертификата/МК-источника — прослеживаемость" },
+        { "title": "Кол-во факт.", "uidt": "Number" },
+        { "title": "Время факт. (ч)", "uidt": "Decimal" },
+        { "title": "Самоконтроль (С)", "uidt": "Checkbox" },
+        { "title": "Контроль ОТК", "uidt": "Checkbox" },
+        { "title": "Примечание", "uidt": "LongText" }
+      ]
+    },
+
+    {
+      "key": "task_param_values",
+      "title": "Значения параметров задачи",
+      "table_name": "task_param_values",
+      "display": "Параметр",
+      "columns": [
+        { "title": "Параметр", "uidt": "SingleLineText" },
+        { "title": "Единица", "uidt": "SingleLineText" },
+        { "title": "Норматив", "uidt": "SingleLineText", "_note": "план/референс — задаётся при заведении МК (migrate-003)" },
+        { "title": "Допуск", "uidt": "SingleLineText", "_note": "напр. ±0,1 (migrate-003)" },
+        { "title": "Факт", "uidt": "SingleLineText", "_note": "что получилось — забивает рабочий (migrate-003)" },
+        { "title": "Вердикт", "uidt": "SingleSelect", "options": ["в допуске", "вне допуска"], "_note": "migrate-003" },
+        { "title": "Значение", "uidt": "SingleLineText", "_note": "DEPRECATED: перенесено в «Факт» миграцией 003" },
+        { "title": "Обязательный", "uidt": "Checkbox" }
+      ]
+    },
+
+    {
+      "key": "routes",
+      "title": "Маршруты",
+      "table_name": "routes",
+      "display": "№ МК",
+      "_note": "Маршрутная карта (Ф.13) — на изделие/компонент (ДП–Д.1 §6.1)",
+      "columns": [
+        { "title": "№ МК", "uidt": "SingleLineText" },
+        { "title": "Тип МК", "uidt": "SingleSelect", "options": ["КОМ", "СБР"] },
+        { "title": "Наименование", "uidt": "SingleLineText" },
+        { "title": "Изделие / обозначение", "uidt": "SingleLineText" },
+        { "title": "Тип продукции", "uidt": "SingleSelect", "options": ["РТИ", "Биметалл", "Оснастка ОК", "ЗИП ПВО", "Механообработка", "Металлоконструкции"] },
+        { "title": "Ревизия", "uidt": "SingleLineText" },
+        { "title": "Статус", "uidt": "SingleSelect", "options": ["Действует", "Архив"] }
+      ]
+    },
+
+    {
+      "key": "operations",
+      "title": "Операции маршрута",
+      "table_name": "operations",
+      "display": "Операция",
+      "_note": "Операция маршрута (ДП–Д.1 §6.2). Тип операции задаёт участок/РИ/параметры.",
+      "columns": [
+        { "title": "Операция", "uidt": "SingleLineText", "_note": "№ МК + № оп., формируется при создании" },
+        { "title": "№ операции", "uidt": "Number" },
+        { "title": "Оборудование", "uidt": "SingleLineText" },
+        { "title": "Входящие материалы", "uidt": "LongText" },
+        { "title": "Точка контроля", "uidt": "SingleSelect", "options": ["нет", "С", "ОТК"] },
+        { "title": "Что контролировать", "uidt": "SingleLineText" },
+        { "title": "СИ", "uidt": "SingleLineText" },
+        { "title": "Допуски", "uidt": "SingleLineText" },
+        { "title": "Норма времени (ч)", "uidt": "Decimal" }
+      ]
+    },
+
+    {
+      "key": "components_in",
+      "title": "Входящие компоненты",
+      "table_name": "components_in",
+      "display": "Компонент",
+      "_note": "Прослеживаемость КОМ→СБР (ДП–Д.1 §6.8): из каких компонентов собрано.",
+      "columns": [
+        { "title": "Компонент", "uidt": "SingleLineText" },
+        { "title": "Кол-во", "uidt": "Number" },
+        { "title": "№ ПЗ-источника", "uidt": "SingleLineText", "_note": "если компонент сделан по ПЗ (лёгкий путь), а не по стоячей МК" }
+      ]
+    },
+
+    {
+      "key": "incoming_control",
+      "title": "Входной контроль",
+      "table_name": "incoming_control",
+      "display": "№ акта",
+      "_note": "Акт входного контроля материалов (Ф.3–Д.1). Шапка-запись; чек-лист 5 пунктов печатается бланком под ручное заполнение ОТК.",
+      "columns": [
+        { "title": "№ акта", "uidt": "SingleLineText", "_note": "ВК-ГГГГ-NNN, автонумерация" },
+        { "title": "Дата", "uidt": "Date" },
+        { "title": "Поставщик", "uidt": "SingleLineText" },
+        { "title": "Накладная №", "uidt": "SingleLineText" },
+        { "title": "Накладная от", "uidt": "Date" },
+        { "title": "Договор / Заказ №", "uidt": "SingleLineText" },
+        { "title": "Наименование материала", "uidt": "SingleLineText" },
+        { "title": "Марка / Сортамент", "uidt": "SingleLineText" },
+        { "title": "Кол-во", "uidt": "Number" },
+        { "title": "Ед. изм.", "uidt": "SingleLineText" },
+        { "title": "Дата изготовления", "uidt": "Date" },
+        { "title": "Срок годности до", "uidt": "Date" },
+        { "title": "Документы", "uidt": "MultiSelect", "options": ["Сертификат качества", "Паспорт", "Накладная", "Иное"] },
+        { "title": "Заключение", "uidt": "SingleSelect", "options": ["ГОДЕН", "ГОДЕН С ЗАМЕЧАНИЯМИ", "НЕ ГОДЕН"] },
+        { "title": "Контролёр ОТК", "uidt": "SingleLineText" },
+        { "title": "Представитель склада", "uidt": "SingleLineText" },
+        { "title": "Получатель", "uidt": "SingleLineText" },
+        { "title": "Примечание", "uidt": "LongText" }
+      ]
+    },
+
+    {
+      "key": "acceptance_control",
+      "title": "Приёмочный контроль",
+      "table_name": "acceptance_control",
+      "display": "№ протокола",
+      "_note": "Протокол приёмочного контроля изделия (Ф.4–Д.1). Шапка-запись; таблица измерений печатается бланком.",
+      "columns": [
+        { "title": "№ протокола", "uidt": "SingleLineText", "_note": "ПК-ГГГГ-NNN, автонумерация" },
+        { "title": "Дата", "uidt": "Date" },
+        { "title": "Заказ №", "uidt": "SingleLineText" },
+        { "title": "МК №", "uidt": "SingleLineText" },
+        { "title": "Наименование изделия", "uidt": "SingleLineText" },
+        { "title": "Чертёж №", "uidt": "SingleLineText" },
+        { "title": "Кол-во, шт.", "uidt": "Number" },
+        { "title": "Партия / серия", "uidt": "SingleLineText" },
+        { "title": "Внешний вид", "uidt": "SingleSelect", "options": ["Соответствует", "Не соответствует"] },
+        { "title": "Маркировка", "uidt": "SingleSelect", "options": ["Нанесена", "Не нанесена"] },
+        { "title": "Комплектность", "uidt": "SingleSelect", "options": ["Полная", "Неполная"] },
+        { "title": "МК подписана", "uidt": "SingleSelect", "options": ["Все операции", "Не все"] },
+        { "title": "Заключение", "uidt": "SingleSelect", "options": ["ГОДЕН", "ГОДЕН С ОТКЛОНЕНИЕМ", "НЕ ГОДЕН"] },
+        { "title": "Контролёр ОТК", "uidt": "SingleLineText" },
+        { "title": "Директор по производству", "uidt": "SingleLineText" },
+        { "title": "Примечание", "uidt": "LongText" }
+      ]
+    },
+
+    {
+      "key": "nonconformity",
+      "title": "Несоответствия",
+      "table_name": "nonconformity",
+      "display": "№ акта НП",
+      "_note": "Акт о несоответствии (Ф.5–Д.1), увязан с ДП–У.2. Создаётся при заключении «НЕ ГОДЕН» во входном/приёмочном контроле или браке на операции.",
+      "columns": [
+        { "title": "№ акта НП", "uidt": "SingleLineText", "_note": "НП-ГГГГ-NNN, автонумерация" },
+        { "title": "Дата", "uidt": "Date" },
+        { "title": "Этап обнаружения", "uidt": "SingleSelect", "options": ["Входной контроль", "Операционный", "Приёмочный"] },
+        { "title": "Заказ № / МК №", "uidt": "SingleLineText" },
+        { "title": "Наименование изделия / материала", "uidt": "SingleLineText" },
+        { "title": "Кол-во НП", "uidt": "Number" },
+        { "title": "Участок / Обнаружил", "uidt": "SingleLineText" },
+        { "title": "Описание несоответствия", "uidt": "LongText" },
+        { "title": "Причина (предварительная)", "uidt": "LongText" },
+        { "title": "Решение", "uidt": "SingleSelect", "options": ["Исправить (доработка)", "Принять с отклонением", "Утилизировать", "Вернуть поставщику"] },
+        { "title": "Согласование заказчика", "uidt": "SingleSelect", "options": ["Да", "Нет", "Не требуется"] },
+        { "title": "Решение принял", "uidt": "SingleLineText" },
+        { "title": "Дата решения", "uidt": "Date" },
+        { "title": "Корректирующее действие (ДП–У.2)", "uidt": "LongText" },
+        { "title": "Срок", "uidt": "Date" },
+        { "title": "Ответственный", "uidt": "SingleLineText" },
+        { "title": "Дата проверки", "uidt": "Date" },
+        { "title": "Результат проверки", "uidt": "LongText" },
+        { "title": "Результативность", "uidt": "SingleSelect", "options": ["Эффективно", "Требуется доп. действие"] },
+        { "title": "Составил", "uidt": "SingleLineText" },
+        { "title": "Согласовал (ДпП)", "uidt": "SingleLineText" }
+      ]
+    }
+  ],
+
+  "links": [
+    { "title": "Типы операций", "parent": "sections", "child": "op_types", "type": "hm" },
+    { "title": "Задачи на участки", "parent": "sections", "child": "tasks", "type": "hm" },
+    { "title": "Сотрудники участка", "parent": "sections", "child": "employees", "type": "hm" },
+
+    { "title": "Параметры", "parent": "op_types", "child": "op_params", "type": "hm" },
+    { "title": "Задачи (по типу)", "parent": "op_types", "child": "tasks", "type": "hm" },
+
+    { "title": "Ответственный за заказы", "parent": "employees", "child": "orders", "type": "hm" },
+    { "title": "Задачи (исполнитель)", "parent": "employees", "child": "tasks", "type": "hm" },
+
+    { "title": "Позиции", "parent": "orders", "child": "positions", "type": "hm" },
+    { "title": "Задачи", "parent": "orders", "child": "tasks", "type": "hm" },
+
+    { "title": "Задачи", "parent": "positions", "child": "tasks", "type": "hm" },
+
+    { "title": "Значения параметров", "parent": "tasks", "child": "task_param_values", "type": "hm" },
+
+    { "title": "Операции маршрута", "parent": "routes", "child": "operations", "type": "hm" },
+    { "title": "Используется как компонент", "parent": "routes", "child": "components_in", "type": "hm" },
+    { "title": "Позиции (по маршруту)", "parent": "routes", "child": "positions", "type": "hm" },
+
+    { "title": "Операции (по типу)", "parent": "op_types", "child": "operations", "type": "hm" },
+    { "title": "Входящие компоненты", "parent": "operations", "child": "components_in", "type": "hm" },
+    { "title": "Задачи (по операции)", "parent": "operations", "child": "tasks", "type": "hm" },
+
+    { "title": "Входной контроль", "parent": "orders", "child": "incoming_control", "type": "hm" },
+    { "title": "Приёмочный контроль", "parent": "positions", "child": "acceptance_control", "type": "hm" },
+    { "title": "Несоответствия", "parent": "orders", "child": "nonconformity", "type": "hm" },
+    { "title": "Несоответствия (по задаче)", "parent": "tasks", "child": "nonconformity", "type": "hm" }
+  ]
+}

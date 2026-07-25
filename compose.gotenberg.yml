@@ -1,0 +1,25 @@
+# Add-on: Gotenberg (HTML→PDF) в уже существующую сеть pbs-net.
+# Запуск на NAS:  sudo docker compose -f compose.gotenberg.yml up -d
+#
+# Сеть pbs-net создана инфра-проектом pbs-portal-ism (external), не пересоздаём.
+# Порт наружу не публикуем — печать гоняется во временном node-контейнере в той же сети.
+
+services:
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: pbs-gotenberg
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=false
+      - --api-timeout=120s                 # office→PDF (LibreOffice) бывает дольше HTML-печати
+      - --libreoffice-restart-after=10      # перезапуск LO после N конвертаций (стабильность памяти)
+    networks:
+      - pbs-net
+    mem_limit: 1g
+    mem_reservation: 256m
+
+networks:
+  pbs-net:
+    external: true
+    name: pbs-net

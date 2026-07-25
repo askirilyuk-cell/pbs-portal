@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Портал ИСМ ПБС — варианты дизайна</title>
+  <style>
+    /* Палитра по ДП–Л.1.2 (§2.2, §10.8). Системный шрифт-стек (§10.2.2). */
+    :root{
+      --navy:#1F4E79; --navy-d:#1a3a5c; --blue:#2E75B6; --blue50:#eff6ff; --blue100:#dbeafe;
+      --green:#15803d; --amber:#b45309; --red:#b91c1c; --purple:#7c3aed;
+      --gray:#888888; --gray4:#9ca3af; --ink:#333333; --tbl:#F2F2F2;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:'Segoe UI',-apple-system,'Helvetica Neue',Arial,sans-serif;color:var(--ink);}
+
+    /* --- значения по умолчанию (классическая) --- */
+    body{ --page-bg:#eef2f6; --side-bg:#ffffff; --side-fg:#1f3a52; --side-muted:#6b7785;
+          --side-active-bg:var(--blue50); --side-active-fg:var(--navy); --side-border:#e2e8f0;
+          --card-bg:#fff; --card-border:#e2e8f0; --radius:6px; --gap:14px; --shadow:0 1px 2px rgba(15,40,70,.06);
+          --topbar:linear-gradient(90deg,var(--navy),var(--navy-d)); --topbar-fg:#fff; }
+    /* V2 — светлая карточная */
+    body[data-theme="soft"]{ --page-bg:#f0f4f8; --side-bg:#ffffff; --radius:14px; --gap:18px;
+          --shadow:0 4px 16px rgba(31,78,121,.08); --card-border:#eef2f6; }
+    /* V3 — тёмная боковая панель */
+    body[data-theme="dark"]{ --side-bg:linear-gradient(180deg,var(--navy),var(--navy-d)); --side-fg:#e8eef5;
+          --side-muted:#a9bdd2; --side-active-bg:rgba(255,255,255,.14); --side-active-fg:#fff; --side-border:rgba(255,255,255,.12);
+          --page-bg:#eef2f6; --radius:10px; --gap:16px; }
+
+    .app{display:grid;grid-template-columns:236px 1fr;min-height:100vh;background:var(--page-bg);}
+
+    /* боковая панель / управление слева */
+    .side{background:var(--side-bg);border-right:1px solid var(--side-border);display:flex;flex-direction:column;}
+    .brand{display:flex;align-items:center;gap:10px;padding:16px 16px 12px;}
+    .brand img{height:40px;width:auto;}
+    .brand .t{font-weight:700;color:var(--side-fg);font-size:14px;line-height:1.1;}
+    .brand .t small{display:block;font-weight:400;color:var(--side-muted);font-size:11px;}
+    nav{padding:8px;display:flex;flex-direction:column;gap:2px;}
+    nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:var(--side-fg);
+          text-decoration:none;font-size:14px;}
+    nav a .i{width:18px;text-align:center;opacity:.8;}
+    nav a:hover{background:var(--side-active-bg);}
+    nav a.active{background:var(--side-active-bg);color:var(--side-active-fg);font-weight:600;}
+    .side .foot{margin-top:auto;padding:12px 16px;border-top:1px solid var(--side-border);font-size:12px;color:var(--side-muted);}
+    .side .foot b{color:var(--side-fg);}
+
+    /* верхняя полоса */
+    .top{background:var(--topbar);color:var(--topbar-fg);padding:12px 20px;display:flex;align-items:center;gap:14px;}
+    .top h1{font-size:16px;margin:0;font-weight:600;}
+    .top .sub{color:rgba(255,255,255,.7);font-size:13px;}
+    .top .right{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px;}
+    .top select{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;padding:4px 8px;}
+    .content{padding:18px 20px;display:flex;flex-direction:column;gap:var(--gap);}
+
+    .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);box-shadow:var(--shadow);}
+    .pad{padding:14px 16px;}
+    .h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray);margin:0 0 8px;}
+
+    /* заказы — ряд карточек */
+    .orders{display:flex;gap:var(--gap);flex-wrap:wrap;}
+    .ord{flex:1;min-width:230px;cursor:pointer;}
+    .ord .pad{padding:12px 14px;}
+    .ord.sel{outline:2px solid var(--blue);outline-offset:-2px;}
+    .ord .num{font-weight:700;color:var(--navy);}
+    .ord .cust{font-size:13px;color:#52606d;margin-top:2px;}
+    .ord .meta{font-size:12px;color:var(--gray);margin-top:4px;}
+
+    .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    .title{font-size:18px;font-weight:700;color:var(--navy);}
+    .spacer{margin-left:auto;}
+
+    .badge{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid transparent;white-space:nowrap;}
+    .s-done{background:#ecfdf5;color:var(--green);border-color:#a7f3d0;}
+    .s-work{background:var(--blue50);color:var(--blue);border-color:#bfdbfe;}
+    .s-queue{background:#f3f4f6;color:#4b5563;border-color:#e5e7eb;}
+    .s-hold{background:#fffbeb;color:var(--amber);border-color:#fde68a;}
+    .s-plan{background:#eef6ff;color:var(--navy);border-color:#cfe0f5;}
+
+    .pbtn{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 10px;border-radius:8px;
+          border:1px solid var(--navy);color:var(--navy);background:#fff;text-decoration:none;cursor:pointer;}
+    .pbtn:hover{background:var(--navy);color:#fff;}
+
+    table{width:100%;border-collapse:collapse;font-size:13px;}
+    th{ text-align:left;color:var(--gray);font-size:11px;font-weight:600;padding:0 10px 6px 0;}
+    td{padding:7px 10px 7px 0;border-top:1px solid #eef2f6;}
+
+    /* канбан */
+    .kb{display:flex;gap:var(--gap);overflow-x:auto;}
+    .col{flex:1;min-width:210px;}
+    .col .ch{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--gray);margin-bottom:8px;display:flex;gap:6px;}
+    .tk{background:var(--card-bg);border:1px solid var(--card-border);border-left:3px solid var(--blue);border-radius:10px;padding:10px;margin-bottom:8px;box-shadow:var(--shadow);}
+    .tk.done{border-left-color:var(--green);}
+    .tk.queue{border-left-color:var(--gray4);}
+    .tk.hold{border-left-color:var(--amber);}
+    .tk .sct{font-size:12px;font-weight:700;color:var(--navy);}
+    .tk .tt{font-size:13px;margin-top:2px;}
+    .tk .op{font-size:11px;color:var(--gray);}
+    .tk .b{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}
+    .ctrl{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gap);}
+    .ci{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #eef2f6;font-size:13px;}
+    .ci .n{font-weight:600;color:var(--navy);}
+
+    /* переключатель вариантов */
+    .switch{position:fixed;top:10px;right:14px;z-index:50;display:flex;gap:6px;background:#fff;border:1px solid #d1d5db;border-radius:10px;padding:5px;box-shadow:0 4px 16px rgba(0,0,0,.12);}
+    .switch button{font-size:12px;padding:6px 10px;border-radius:7px;border:1px solid transparent;background:#fff;color:#374151;cursor:pointer;}
+    .switch button.on{background:var(--blue);color:#fff;}
+  </style>
+</head>
+<body data-theme="classic">
+  <div class="switch" id="switch">
+    <button data-t="classic" class="on">V1 · Классическая</button>
+    <button data-t="soft">V2 · Светлая</button>
+    <button data-t="dark">V3 · Тёмная</button>
+  </div>
+
+  <div class="app">
+    <aside class="side">
+      <div class="brand">
+        <img src="/assets/PBS_LOGO_2026.png" alt="ПБС" />
+        <div class="t">ИСМ ПБС<small>Производство</small></div>
+      </div>
+      <nav>
+        <a class="active"><span class="i">▦</span> Производственная доска</a>
+        <a><span class="i">▤</span> Заказы (ПЗ)</a>
+        <a><span class="i">⛏</span> Маршруты (Ф.13)</a>
+        <a><span class="i">✓</span> Контроль качества</a>
+        <a><span class="i">⚙</span> Справочники</a>
+      </nav>
+      <div class="foot">Роль: <b>ДпП</b><br/>ООО «Петробалт Сервис»</div>
+    </aside>
+
+    <main>
+      <div class="top">
+        <h1>Производственная доска</h1>
+        <span class="sub" id="today"></span>
+        <div class="right"><span>Роль:</span>
+          <select><option>ДпП</option><option>Мастер участка</option><option>ОТК</option><option>Технолог</option></select>
+        </div>
+      </div>
+      <div class="content">
+        <div>
+          <div class="h">Производственные заказы</div>
+          <div class="orders" id="orders"></div>
+        </div>
+        <div id="detail" class="content" style="padding:0;gap:var(--gap);"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const DATA = {
+      orders:[
+        {numPz:"ПЗ-2026-001",customer:"АО «Энергомаш-Турбо»",orderType:"Клиентский",status:"В работе",priority:"Высокий",plan:"2026-05-20",
+         positions:[{numPos:"1.0",name:"Втулка биметаллическая",drawing:"23.12.08.021",qty:4,unit:"шт",status:"В работе"}],
+         routes:[{mk:"МК-КОМ-2026-001"}],
+         tasks:[
+           {sct:"УЧ-16",tt:"Заготовка / раскрой",op:"МК-КОМ-2026-001 оп.1",status:"Выполнено",plan:"2026-04-20"},
+           {sct:"УЧ-10",tt:"Токарная обработка",op:"МК-КОМ-2026-001 оп.2",status:"В работе",plan:"2026-04-20"},
+           {sct:"УЧ-03",tt:"Наплавка",op:"МК-КОМ-2026-001 оп.3",status:"В очереди",plan:"2026-04-20"}
+         ]},
+        {numPz:"ПЗ-2026-002",customer:"ООО «Балтнефтесервис»",orderType:"Клиентский",status:"Размещён",priority:"Нормальный",plan:"2026-06-10",
+         positions:[{numPos:"1.0",name:"Кольцо уплотнительное РТИ",drawing:"РТ-114-07",qty:50,unit:"шт",status:"В очереди"}],routes:[],tasks:[]},
+        {numPz:"ПЗ-2026-003",customer:"Внутренний (склад ЗИП)",orderType:"Внутренний",status:"В работе",priority:"Низкий",plan:"2026-07-01",
+         positions:[{numPos:"1.0",name:"Седло клапана ПВО",drawing:"ПВО-220-15",qty:8,unit:"шт",status:"В работе"}],
+         routes:[{mk:"МК-КОМ-2026-002"}],
+         tasks:[
+           {sct:"УЧ-04",tt:"Плазменная резка",op:"МК-КОМ-2026-002 оп.1",status:"Выполнено",plan:"2026-06-15"},
+           {sct:"УЧ-09",tt:"Фрезерная обработка (ЧПУ)",op:"МК-КОМ-2026-002 оп.2",status:"В работе",plan:"2026-06-18"}
+         ]}
+      ],
+      controls:{
+        incoming:[{num:"ВК-2026-001",t:"Труба бронзовая БрАЖ9-4",v:"ГОДЕН"}],
+        acceptance:[{num:"ПК-2026-001",t:"Втулка биметаллическая",v:"ГОДЕН"}],
+        nonconformity:[{num:"НП-2026-001",t:"Втулка биметаллическая",v:"Исправить"}]
+      }
+    };
+    const STATUSES=["В очереди","В работе","Выполнено","Приостановлено"];
+    const SCLASS={"Выполнено":"s-done","В работе":"s-work","В очереди":"s-queue","Приостановлено":"s-hold","Размещён":"s-plan"};
+    const TKCLASS={"Выполнено":"done","В очереди":"queue","Приостановлено":"hold","В работе":""};
+    const PRIO={"Высокий":"🔴","Нормальный":"🟡","Низкий":"⚪"};
+    const fmt=(d)=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||""));return m?`${m[3]}.${m[2]}.${m[1]}`:(d||"—");};
+    const badge=(s)=>`<span class="badge ${SCLASS[s]||'s-queue'}">${s||'—'}</span>`;
+    const pbtn=(l)=>`<a class="pbtn">🖨 ${l}</a>`;
+    let sel="ПЗ-2026-001";
+
+    document.getElementById('today').textContent="на "+fmt(new Date().toISOString().slice(0,10));
+
+    function renderOrders(){
+      document.getElementById('orders').innerHTML=DATA.orders.map(o=>`
+        <div class="card ord ${o.numPz===sel?'sel':''}" data-pz="${o.numPz}">
+          <div class="pad">
+            <div class="row"><span class="num">${o.numPz}</span><span class="spacer"></span>${badge(o.status)}</div>
+            <div class="cust">${o.customer}</div>
+            <div class="meta">${PRIO[o.priority]||''} ${o.priority} · срок ${fmt(o.plan)}</div>
+          </div>
+        </div>`).join('');
+      document.querySelectorAll('.ord').forEach(e=>e.onclick=()=>{sel=e.dataset.pz;renderOrders();renderDetail();});
+    }
+    function renderDetail(){
+      const o=DATA.orders.find(x=>x.numPz===sel);
+      const cols=STATUSES.map(st=>{
+        const cs=o.tasks.filter(t=>t.status===st);
+        return `<div class="col"><div class="ch">${st} <span style="color:var(--gray4)">${cs.length}</span></div>
+          ${cs.map(t=>`<div class="tk ${TKCLASS[t.status]||''}"><div class="sct">${t.sct}</div>
+            <div class="tt">${t.tt}</div><div class="op">${t.op}</div>
+            <div class="b"><span class="op">срок ${fmt(t.plan)}</span>${pbtn('Ф.14')}</div></div>`).join('')||'<div class="op" style="opacity:.5">—</div>'}
+        </div>`;}).join('');
+      const pos=o.positions.map(p=>`<tr><td><b>${p.numPos}</b></td><td>${p.name}</td><td style="color:#64748b">${p.drawing}</td><td>${p.qty} ${p.unit}</td><td>${badge(p.status)}</td></tr>`).join('');
+      const ci=(arr)=>arr.map(x=>`<div class="ci"><span><span class="n">${x.num}</span> ${x.t} ${badge(x.v==='ГОДЕН'?'Выполнено':x.v)}</span>${pbtn('Печать')}</div>`).join('')||'<div class="op" style="opacity:.5">нет</div>';
+      document.getElementById('detail').innerHTML=`
+        <div class="card pad"><div class="row"><span class="title">${o.numPz}</span>${badge(o.status)}
+          <span style="color:#64748b;font-size:13px">${o.customer} · ${o.orderType}</span>
+          <span class="spacer"></span>${pbtn('ПЗ (Ф.1–П.2)')}${o.routes.map(r=>pbtn('Ф.13 '+r.mk.replace('МК-',''))).join('')}</div></div>
+        <div class="card pad"><div class="h">Номенклатура</div>
+          <table><thead><tr><th>№</th><th>Наименование</th><th>Чертёж</th><th>Кол-во</th><th>Статус</th></tr></thead>
+          <tbody>${pos||'<tr><td colspan=5 style="opacity:.5">—</td></tr>'}</tbody></table></div>
+        <div class="card pad"><div class="h">Задачи по участкам</div><div class="kb">${cols}</div></div>
+        <div class="card pad"><div class="h">Контроль качества</div><div class="ctrl">
+          <div><div style="font-size:12px;font-weight:600;margin-bottom:4px">Ф.3 Входной</div>${ci(DATA.controls.incoming)}</div>
+          <div><div style="font-size:12px;font-weight:600;margin-bottom:4px">Ф.4 Приёмочный</div>${ci(DATA.controls.acceptance)}</div>
+          <div><div style="font-size:12px;font-weight:600;margin-bottom:4px">Ф.5 Несоответствия</div>${ci(DATA.controls.nonconformity)}</div>
+        </div></div>`;
+    }
+    // переключатель тем + ?t=
+    const sw=document.getElementById('switch');
+    function setTheme(t){document.body.dataset.theme=t;[...sw.children].forEach(b=>b.classList.toggle('on',b.dataset.t===t));}
+    sw.onclick=(e)=>{if(e.target.dataset.t)setTheme(e.target.dataset.t);};
+    const t=new URLSearchParams(location.search).get('t'); if(t)setTheme(t);
+    renderOrders();renderDetail();
+  </script>
+</body>
+</html>

@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>K-05 · Редизайн «Продажи» (ДП–З.1) — макет для DEV</title>
+<style>
+  :root{
+    --navy:#1F4E79; --navy-d:#16314c; --blue:#2E75B6; --green:#15803d; --amber:#b45309; --red:#b91c1c;
+    --ink:#1f3a52; --sub:#5b6b7a; --line:#e2e8f0; --line2:#eef2f6; --head:#f1f4f8; --bg:#dde3e9;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Segoe UI",-apple-system,"Helvetica Neue",Arial,sans-serif;color:#333;background:var(--bg);}
+  .doc{max-width:1360px;margin:0 auto;padding:32px 24px 90px;}
+  .doc-kicker{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--blue);}
+  .doc-title{font-size:26px;font-weight:800;color:var(--navy);margin:6px 0 6px;}
+  .doc-lead{font-size:14px;line-height:1.6;color:var(--sub);max-width:940px;margin:0;}
+  .doc-lead b{color:var(--ink);}
+  .doc-toc{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0;}
+  .doc-toc a{font-size:12.5px;font-weight:600;color:var(--navy);text-decoration:none;background:#fff;border:1px solid var(--line);border-radius:2px;padding:6px 13px;}
+  h2.screen-title{font-size:13px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--navy);background:#cfe0f5;border-radius:2px;padding:9px 14px;margin:34px 0 12px;}
+  .screen-note{font-size:12.5px;color:#64748b;margin:9px 2px 0;line-height:1.55;}
+  .screen-note code,.brief code{font-family:monospace;font-size:12px;background:#f3f6fa;padding:1px 6px;border-radius:3px;}
+  .gate-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--amber);background:#fffbeb;border:1px solid #fde68a;border-radius:2px;padding:2px 7px;}
+
+  .frame{border:1px solid #c4ccd6;border-radius:3px;overflow:hidden;box-shadow:0 6px 20px rgba(20,40,70,.10);}
+  .app{display:grid;grid-template-columns:212px 1fr;min-height:600px;background:#fff;}
+  .side{background:var(--navy-d);display:flex;flex-direction:column;}
+  .brand{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.1);}
+  .brand .logo{background:#fff;border-radius:4px;padding:3px;display:inline-flex;font-size:10px;font-weight:800;color:var(--navy);width:30px;height:30px;align-items:center;justify-content:center;}
+  .brand b{color:#fff;font-size:13px;line-height:1.1;}
+  .brand small{display:block;font-weight:400;color:#9db8d4;font-size:10.5px;}
+  nav{padding:6px 0;display:flex;flex-direction:column;}
+  .nav-h{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#5d7fa3;padding:11px 14px 5px;}
+  nav a{display:flex;align-items:center;gap:10px;padding:8px 14px;color:#c8d8e8;text-decoration:none;font-size:13px;border-left:3px solid transparent;}
+  nav a .ic{width:17px;height:17px;color:#7d9bbb;display:inline-flex;}
+  nav a.active{color:#fff;background:#1d3e5e;border-left-color:var(--blue);font-weight:600;}
+  nav a.active .ic{color:#7fb0e4;}
+  .side-foot{margin-top:auto;padding:10px 14px;border-top:1px solid rgba(255,255,255,.1);font-size:11px;color:#9db8d4;}
+  main{display:flex;flex-direction:column;min-width:0;}
+  .topbar{height:46px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 16px;background:#fff;}
+  .topbar h1{font-size:15px;font-weight:700;color:var(--ink);margin:0;}
+  .topbar .sub{font-size:12px;color:#94a3b4;}
+  .topbar .av{margin-left:auto;width:28px;height:28px;border-radius:50%;background:var(--navy);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;}
+  .toolbar{min-height:42px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:6px 12px;background:#fff;flex-wrap:wrap;}
+  .tbtn{font:inherit;font-size:12.5px;color:#334155;background:#fff;border:1px solid #cfd8e3;border-radius:2px;padding:6px 11px;cursor:pointer;}
+  .tbtn.primary{font-weight:600;color:#fff;background:var(--navy);border-color:var(--navy);}
+  .tbtn.green{font-weight:600;color:#fff;background:var(--green);border-color:var(--green);}
+  .tbtn.ghost{color:#94a3b4;background:#f8fafc;}
+  .tbtn:disabled{color:#b6c0cc;background:#f4f6f9;border-color:#e2e8f0;cursor:not-allowed;}
+  .seg{display:flex;border:1px solid #cfd8e3;border-radius:2px;overflow:hidden;}
+  .seg span{font-size:12px;font-weight:600;color:var(--sub);padding:6px 11px;border-left:1px solid #cfd8e3;cursor:pointer;}
+  .seg span:first-child{border-left:0;}
+  .seg span.on{color:#fff;background:var(--navy);}
+  .statusbar{height:34px;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 14px;background:#f8fafc;font-size:12px;color:#64748b;}
+
+  table.dt{width:100%;border-collapse:collapse;font-size:13px;}
+  table.dt thead tr{background:var(--head);}
+  table.dt th{position:relative;text-align:left;padding:8px 10px;border-bottom:1px solid #d8e0ea;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--sub);white-space:nowrap;}
+  table.dt td{padding:9px 10px;border-bottom:1px solid var(--line2);color:#334155;}
+  table.dt tr.sel td{background:#eaf2fb;}
+  table.dt tr.alt td{background:#fafcfe;}
+  .code{font-family:monospace;font-weight:700;color:var(--navy);white-space:nowrap;}
+  .ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;}
+  .nw{white-space:nowrap;} .rt{text-align:right;}
+  .st{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+  .st i{width:7px;height:7px;border-radius:50%;display:inline-block;}
+  .c-blue{color:var(--blue);} .c-amber{color:var(--amber);} .c-red{color:var(--red);} .c-green{color:var(--green);} .c-gray{color:#64748b;} .c-navy{color:var(--navy);}
+  .i-blue{background:var(--blue);} .i-amber{background:var(--amber);} .i-red{background:var(--red);} .i-green{background:var(--green);} .i-gray{background:#9ca3af;} .i-navy{background:var(--navy);}
+  .chip{font-size:11px;font-weight:600;border-radius:2px;padding:2px 8px;}
+  .chip.prod{color:var(--navy);background:#eff6ff;border:1px solid #cfe0f5;}
+  .chip.buy{color:var(--amber);background:#fffbeb;border:1px solid #fde68a;}
+  .chip.svc{color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;}
+
+  .card{background:#fff;border:1px solid var(--line);border-radius:3px;padding:14px 16px;}
+  .card-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:10px;}
+  .lbl-sm{font-size:11px;color:#94a3b4;}
+
+  /* дашборд KPI */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:14px 16px;background:#f8fafc;border-bottom:1px solid var(--line);}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:3px;padding:11px 13px;}
+  .kpi .lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);}
+  .kpi .num{font-size:22px;font-weight:800;line-height:1.15;margin-top:3px;color:var(--navy);}
+  .kpi .foot{font-size:10.5px;margin-top:2px;}
+  /* воронка K-06 */
+  .funnel{display:flex;gap:6px;padding:12px 16px;background:#fff;border-bottom:1px solid var(--line);overflow:auto;}
+  .fseg{flex:1;min-width:120px;border:1px solid var(--line);border-radius:2px;padding:8px 11px;cursor:pointer;background:#fff;}
+  .fseg:hover{background:#f7faff;}
+  .fseg.on{border-color:var(--navy);box-shadow:inset 0 -2px 0 var(--navy);}
+  .fseg .fn{font-size:20px;font-weight:800;line-height:1;color:var(--navy);}
+  .fseg .fl{font-size:11px;font-weight:600;color:var(--sub);margin-top:4px;display:flex;align-items:center;gap:5px;}
+  .fseg .fl i{width:7px;height:7px;border-radius:50%;}
+  .term{display:flex;gap:14px;padding:8px 16px;background:#f8fafc;border-bottom:1px solid var(--line);font-size:12px;color:#64748b;}
+  .term b{color:var(--ink);}
+
+  /* master-detail */
+  .md{display:grid;grid-template-columns:328px 1fr;min-height:440px;}
+  .md-list{border-right:1px solid var(--line);overflow:auto;background:#fbfcfe;}
+  .lrow{padding:10px 13px;border-bottom:1px solid var(--line2);cursor:pointer;}
+  .lrow:hover{background:#f2f7fd;}
+  .lrow.sel{background:#eaf2fb;border-left:3px solid var(--navy);padding-left:10px;}
+  .lrow .r1{display:flex;align-items:center;gap:8px;}
+  .lrow .r1 .code{font-size:12.5px;}
+  .lrow .r1 .sum{margin-left:auto;font-size:12.5px;font-weight:700;color:var(--ink);}
+  .lrow .r2{font-size:12.5px;color:var(--ink);margin-top:3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lrow .r3{display:flex;align-items:center;gap:8px;font-size:11px;color:#94a3b4;margin-top:3px;}
+  .md-detail{overflow:auto;background:#eef2f6;}
+
+  /* степпер / гейты */
+  .pipe{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;overflow:auto;}
+  .pstep{display:flex;align-items:center;gap:7px;white-space:nowrap;}
+  .pdot{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;}
+  .pdot.done{background:var(--green);color:#fff;} .pdot.cur{background:var(--blue);color:#fff;} .pdot.todo{background:#eef2f6;color:#94a3b4;border:1px solid #cfd8e3;} .pdot.lock{background:#f1f4f8;color:#b6c0cc;border:1px solid #dbe2ea;}
+  .pline{flex:0 0 30px;height:2px;margin:0 6px;}
+  /* вкладки карточки */
+  .tabs{display:flex;gap:0;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;overflow:auto;}
+  .tab{font-size:12.5px;font-weight:600;color:var(--sub);padding:10px 14px;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px;}
+  .tab.on{color:var(--navy);border-bottom-color:var(--navy);}
+  .tab.lock{color:#b6c0cc;cursor:not-allowed;}
+  .tab .lk{width:12px;height:12px;}
+
+  .brief{background:#fff;border:1px solid var(--line);border-radius:3px;box-shadow:0 1px 3px rgba(15,40,70,.06);padding:22px 26px;margin-top:14px;}
+  .brief .r{display:flex;gap:11px;padding:11px 0;border-top:1px solid var(--line2);font-size:13.5px;line-height:1.6;color:#334155;}
+  .brief .r:first-of-type{border-top:0;}
+  .brief .n{flex:0 0 22px;font-weight:800;color:var(--blue);}
+  .brief b{color:var(--ink);}
+
+  /* конструктор КП */
+  .kp{display:grid;grid-template-columns:1fr 468px;min-height:560px;}
+  .kp-build{border-right:1px solid var(--line);overflow:auto;background:#f8fafc;padding:14px;display:flex;flex-direction:column;gap:12px;}
+  .kp-prev{overflow:auto;background:#5b6b7a;padding:20px;}
+  .postab{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:2px;}
+  .pos{font-size:12px;font-weight:600;color:var(--sub);background:#fff;border:1px solid #cfd8e3;border-radius:2px;padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:7px;}
+  .pos.on{color:#fff;background:var(--navy);border-color:var(--navy);}
+  .pos .pl{font-size:10px;opacity:.85;}
+  .pos.add{color:var(--blue);border-style:dashed;}
+  .fld{display:flex;flex-direction:column;gap:3px;}
+  .fld label{font-size:11px;font-weight:600;color:var(--sub);}
+  .inp{font:inherit;font-size:13px;color:var(--ink);border:1px solid #cfd8e3;border-radius:2px;padding:6px 8px;background:#fff;}
+  .inp.rt{text-align:right;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .costrow{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;padding:5px 0;border-top:1px dashed var(--line);}
+  .costrow.tot{border-top:1px solid var(--navy);font-weight:800;color:var(--navy);font-size:13.5px;padding-top:7px;}
+  .costrow .v{font-variant-numeric:tabular-nums;}
+  .hint{font-size:11px;color:#94a3b4;line-height:1.5;}
+
+  /* превью бланка Ф.6–Л.1 */
+  .blank{background:#fff;max-width:428px;margin:0 auto;box-shadow:0 8px 30px rgba(0,0,0,.35);padding:30px 32px;font-size:11.5px;color:#222;line-height:1.5;}
+  .blank .bh{display:flex;align-items:flex-start;gap:12px;border-bottom:2px solid var(--navy);padding-bottom:10px;}
+  .blank .bh .lg{width:44px;height:44px;background:var(--navy);color:#fff;border-radius:3px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;}
+  .blank .bh .co{font-size:13px;font-weight:800;color:var(--navy);}
+  .blank .bh .cd{font-size:10px;color:#666;line-height:1.4;margin-top:2px;}
+  .blank h3{font-size:14px;text-align:center;color:var(--navy);margin:14px 0 4px;letter-spacing:.02em;}
+  .blank .sub{text-align:center;font-size:10.5px;color:#666;margin-bottom:12px;}
+  .blank table{width:100%;border-collapse:collapse;font-size:10.5px;margin:8px 0;}
+  .blank table th{background:#eef3f9;border:1px solid #cbd6e2;padding:4px 5px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--navy);}
+  .blank table td{border:1px solid #dbe2ea;padding:4px 5px;}
+  .blank .tot{text-align:right;font-size:12px;font-weight:800;color:var(--navy);margin-top:6px;}
+  .blank .terms{font-size:10px;color:#444;margin-top:10px;}
+  .blank .terms b{color:#222;}
+  .blank .sign{margin-top:16px;display:flex;justify-content:space-between;align-items:flex-end;font-size:10px;}
+  .wm{position:relative;}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="doc-kicker">Модуль · Продажи · ДП–З.1 · Карточка K-05</div>
+  <h1 class="doc-title">Редизайн раздела «Продажи» — макет для реализации</h1>
+  <p class="doc-lead">Целевой раздел взамен модалки: <b>дашборд + воронка → реестр master-detail → карточка ЗП с вкладками и гейтами → конструктор КП</b>. Решения Александра зашиты: охват КП — <b>ГИБРИД</b> (данные = позиции по линейкам, вывод = один документ Ф.6–Л.1); переход на <b>master-detail</b>; порог подписи §5.3.5 — <b>параметр в Настройках</b> (заглушка 1&nbsp;млн ₽ без НДС); себестоимость — <b>ручной ввод по линейкам</b> (§5.3.3), заказчику не печатается. Стиль ДП–Л.1.2, компоненты переиспользованы из <code>redesign-sales.html</code>/<code>#design</code>. Макет статический — открой в браузере, читай разметку.</p>
+  <div class="doc-toc">
+    <a href="#s1">1 · Дашборд + воронка + реестр (master-detail)</a>
+    <a href="#s2">2 · Карточка ЗП — вкладки + гейты</a>
+    <a href="#s3">3 · Конструктор КП (гибрид §5.3)</a>
+    <a href="#s4">4 · Настройки — порог §5.3.5</a>
+    <a href="#brief">→ Бриф для DEV</a>
+  </div>
+
+  <!-- ================= S1 ================= -->
+  <h2 class="screen-title" id="s1">ЭКРАН 1: Дашборд + воронка (K-06) + реестр master-detail — уходим от модалки</h2>
+  <div class="frame"><div class="app">
+    <aside class="side">
+      <div class="brand"><span class="logo">ПБС</span><b>ИСМ ПБС<small>Продажи · ДП–З.1</small></b></div>
+      <nav>
+        <div class="nav-h">Продажи</div>
+        <a class="active"><span class="ic"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h9l3 3v9H4z"/><path d="M7 9h6M7 12h4"/></svg></span>Запросы (ЗП)</a>
+        <a><span class="ic"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h10M5 8h10M5 12h7"/></svg></span>Заказы (ЗКЗ)</a>
+        <a><span class="ic"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><path d="M3 16c0-2.5 2-4 4-4s4 1.5 4 4"/><path d="M13 6h4M13 9h4"/></svg></span>Контрагенты</a>
+        <a><span class="ic"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16V8M9 16V4M14 16v-6"/></svg></span>Аналитика</a>
+        <div class="nav-h">Настройки</div>
+        <a><span class="ic"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="3"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></span>Параметры продаж</a>
+      </nav>
+      <div class="side-foot">ОП · Петробалт Сервис</div>
+    </aside>
+    <main>
+      <div class="topbar"><h1>Продажи</h1><span class="sub">Реестр Ф.1–З.1 · 2026</span><span class="av">ОП</span></div>
+
+      <!-- KPI -->
+      <div class="kpis">
+        <div class="kpi"><div class="lbl">Сумма КП в работе</div><div class="num">4,64 млн ₽</div><div class="foot c-gray">7 активных предложений</div></div>
+        <div class="kpi"><div class="lbl">Конверсия ЗП→ЗКЗ</div><div class="num" style="color:var(--green);">22%</div><div class="foot c-gray">2 из 9 закрыты в заказ</div></div>
+        <div class="kpi"><div class="lbl">КП без ответа &gt;10 раб.дн</div><div class="num" style="color:var(--red);">1</div><div class="foot c-red">SLA §5.3.8 — повторное обращение</div></div>
+        <div class="kpi"><div class="lbl">ЛОВ с просрочкой SLA</div><div class="num" style="color:var(--amber);">2</div><div class="foot c-amber">оценка &gt;5 раб.дн (§5.2)</div></div>
+      </div>
+
+      <!-- Воронка по состояниям K-06 -->
+      <div class="funnel">
+        <div class="fseg"><div class="fn">3</div><div class="fl"><i class="i-gray"></i>Новый</div></div>
+        <div class="fseg"><div class="fn" style="color:var(--navy);">2</div><div class="fl"><i class="i-navy"></i>На оценке (ЛОВ)</div></div>
+        <div class="fseg on"><div class="fn" style="color:var(--blue);">2</div><div class="fl"><i class="i-blue"></i>КП готовится</div></div>
+        <div class="fseg"><div class="fn" style="color:var(--amber);">3</div><div class="fl"><i class="i-amber"></i>КП отправлено</div></div>
+        <div class="fseg"><div class="fn" style="color:var(--green);">2</div><div class="fl"><i class="i-green"></i>Согласовано / Выиграли</div></div>
+      </div>
+      <div class="term">Терминалы (вне активной воронки): <b class="c-red">Отклонён по ЛОВ · 1</b> · <b class="c-gray">Закрыт без сделки · 2</b> <span style="margin-left:auto;">клик по сегменту воронки → фильтр реестра</span></div>
+
+      <!-- master-detail -->
+      <div class="toolbar">
+        <button class="tbtn primary">+ Новый запрос</button>
+        <button class="tbtn">Фильтр</button>
+        <button class="tbtn">Колонки ▾</button>
+        <div class="seg" style="margin-left:2px;"><span class="on">Все</span><span>Активные</span><span>Производство</span><span>ВЭД</span></div>
+        <span style="margin-left:auto;font-size:12px;color:#64748b;">Реестр слева · карточка справа (без модалки)</span>
+      </div>
+      <div class="md">
+        <div class="md-list">
+          <div class="lrow"><div class="r1"><span class="code">ЗП-2026-001</span><span class="sum">585 600 ₽</span></div><div class="r2">ООО «Юграпромбезопасность»</div><div class="r3"><span class="st c-green"><i class="i-green"></i>Согласовано</span>· Уплотнения ПВО — 120 шт</div></div>
+          <div class="lrow sel"><div class="r1"><span class="code">ЗП-2026-007</span><span class="sum">3 050 000 ₽</span></div><div class="r2">АО «АГД ДАЙМОНДС»</div><div class="r3"><span class="st c-blue"><i class="i-blue"></i>КП готовится</span>· Пластины — 25 шт</div></div>
+          <div class="lrow"><div class="r1"><span class="code">ЗП-2026-012</span><span class="sum">91 993 ₽</span></div><div class="r2">ООО «НЧТЗ»</div><div class="r3"><span class="st c-blue"><i class="i-blue"></i>КП готовится</span>· Муфты — 3 поз.</div></div>
+          <div class="lrow"><div class="r1"><span class="code">ЗП-2026-005</span><span class="sum" style="color:#94a3b4;">—</span></div><div class="r2">АО «Мордовцемент» (ЦЕМРОС)</div><div class="r3"><span class="st c-navy"><i class="i-navy"></i>На оценке</span>· Плита — 7,1 т</div></div>
+          <div class="lrow"><div class="r1"><span class="code">ЗП-2026-008</span><span class="sum" style="color:#94a3b4;">—</span></div><div class="r2">Пикалёвский глинозёмный завод</div><div class="r3"><span class="st c-gray"><i class="i-gray"></i>Новый</span>· Плиты ЗТС-Б — 8 шт</div></div>
+          <div class="lrow"><div class="r1"><span class="code">ЗП-2026-002</span><span class="sum" style="color:#94a3b4;">— CNY</span></div><div class="r2">ООО «Юграпромбезопасность»</div><div class="r3"><span class="st c-amber"><i class="i-amber"></i>КП отправлено</span>· Станок Z5180 · ВЭД</div></div>
+        </div>
+        <div class="md-detail">
+          <div class="pipe">
+            <div class="pstep"><span class="pdot done">✓</span><span style="font-size:12px;font-weight:600;color:var(--green);">Регистрация<br><span style="font-weight:400;color:#94a3b4;font-size:10.5px;">5.1 · 14.04</span></span></div>
+            <span class="pline" style="background:var(--green);"></span>
+            <div class="pstep"><span class="pdot done">✓</span><span style="font-size:12px;font-weight:600;color:var(--green);">Оценка (ЛОВ)<br><span style="font-weight:400;color:#94a3b4;font-size:10.5px;">5.2 · 15.04</span></span></div>
+            <span class="pline" style="background:var(--blue);"></span>
+            <div class="pstep"><span class="pdot cur">3</span><span style="font-size:12px;font-weight:600;color:var(--navy);">КП<br><span style="font-weight:400;color:#94a3b4;font-size:10.5px;">5.3 · текущий</span></span></div>
+            <span class="pline" style="background:#dde6ef;"></span>
+            <div class="pstep"><span class="pdot lock">🔒</span><span style="font-size:12px;font-weight:600;color:#b6c0cc;">Заказ (ЗКЗ)<br><span style="font-weight:400;font-size:10.5px;">5.4 · гейт</span></span></div>
+          </div>
+          <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span class="code" style="font-size:16px;">ЗП-2026-007</span>
+              <span class="st" style="font-size:11.5px;color:var(--blue);background:#eff6ff;border:1px solid #cfe0f5;border-radius:2px;padding:3px 9px;"><i class="i-blue"></i>КП готовится</span>
+              <span style="font-size:12.5px;color:#64748b;">АО «АГД ДАЙМОНДС» · Л2 · Биметалл</span>
+              <button class="tbtn green" style="margin-left:auto;">Открыть конструктор КП →</button>
+            </div>
+            <div class="card">
+              <div class="card-h">Запрос (Ф.1–З.1)</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px 22px;font-size:13px;">
+                <div><div class="lbl-sm">Контакт</div><div>Ширяевский Ю.А. · вед. инженер УМТС</div></div>
+                <div><div class="lbl-sm">Источник</div><div>Email</div></div>
+                <div><div class="lbl-sm">Тип запроса</div><div>Производство · в области ИСМ</div></div>
+                <div><div class="lbl-sm">Продуктовая линейка</div><div>Л2 — Биметалл / Наплавка</div></div>
+                <div style="grid-column:1 / -1;"><div class="lbl-sm">Наименование</div><div style="color:var(--ink);font-weight:600;">Износостойкие пластины 1300×2800 мм (6+5 мм) — 25 шт</div></div>
+              </div>
+            </div>
+            <div style="font-size:12px;color:#94a3b4;">Ниже — вкладки карточки (Экран 2). Панель детали заменяет прежнюю модалку: список ЗП остаётся слева, ничего не перекрывается.</div>
+          </div>
+        </div>
+      </div>
+      <div class="statusbar"><span>Показаны активные · 9 из 25</span><span style="margin-left:auto;">deep-link <code style="background:#eef2f6;padding:1px 5px;border-radius:2px;">#sales/ЗП-2026-007</code> сохранён</span></div>
+    </main>
+  </div></div>
+  <p class="screen-note"><b>Изменения против текущего портала:</b> (1) добавлен дашборд KPI + воронка по <b>состояниям процесса K-06</b> (не по разнородному тексту), сегменты кликабельны → фильтр; терминалы вынесены отдельно. (2) Карточка ЗП переехала из <b>модалки</b> в <b>detail-панель</b> справа от списка — deep-link <code>#sales/&lt;№&gt;</code> сохранён. (3) На степпере появился <b>замок-гейт</b> на «Заказ (ЗКЗ)». Метрики SLA §5.2/§5.3.8 выведены на дашборд.</p>
+
+  <!-- ================= S2 ================= -->
+  <h2 class="screen-title" id="s2">ЭКРАН 2: Карточка ЗП — вкладки жизненного цикла + гейты (K-06)</h2>
+  <div class="frame" style="background:#eef2f6;">
+    <div class="topbar" style="border-bottom:1px solid #c4ccd6;">
+      <span class="c-blue" style="font-size:12.5px;cursor:pointer;">← Реестр</span>
+      <span class="code" style="font-size:16px;">ЗП-2026-007</span>
+      <span class="st" style="font-size:11.5px;color:var(--blue);background:#eff6ff;border:1px solid #cfe0f5;border-radius:2px;padding:3px 9px;"><i class="i-blue"></i>КП готовится</span>
+      <div style="margin-left:auto;display:flex;gap:8px;"><button class="tbtn">Печать карточки</button></div>
+    </div>
+    <div class="tabs">
+      <div class="tab">Запрос</div>
+      <div class="tab">Оценка (ЛОВ)</div>
+      <div class="tab on">КП</div>
+      <div class="tab lock"><svg class="lk" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="9" width="12" height="8" rx="1"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/></svg>Заказ (ЗКЗ)</div>
+      <div class="tab">Файлы</div>
+      <div class="tab">История</div>
+    </div>
+    <div style="padding:14px 16px;display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:start;">
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card" style="border-left:3px solid var(--blue);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div class="card-h" style="margin:0;">Вкладка «КП» · §5.3</div><span class="gate-tag">ГЕЙТ 1 пройден · ЛОВ «Принято с условиями»</span></div>
+          <p style="font-size:13px;color:var(--sub);margin:0 0 12px;line-height:1.55;">Конструктор КП доступен: ДпП по ЛОВ вынес «Принято…». Отправка КП заказчику откроет <b>ГЕЙТ 2</b> — подпись по порогу суммы (§5.3.5). Вкладка «Заказ (ЗКЗ)» — <b>ГЕЙТ 3</b> — активируется только при «Результат КП» ∈ {Согласовано, Выиграли}.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="tbtn green">Открыть конструктор КП →</button>
+            <button class="tbtn" disabled>Отправить КП (после подписи)</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h">Гейты жизненного цикла (K-06)</div>
+          <div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px;">
+            <div style="display:flex;align-items:center;gap:9px;"><span class="pdot done" style="width:20px;height:20px;">✓</span><div><b style="color:var(--ink);">ГЕЙТ 1 · КП после ЛОВ.</b> <span class="c-gray">Конструктор КП закрыт, пока ДпП не решил «Принято…» по Ф.2–З.1.</span></div></div>
+            <div style="display:flex;align-items:center;gap:9px;"><span class="pdot cur" style="width:20px;height:20px;">2</span><div><b style="color:var(--ink);">ГЕЙТ 2 · Отправка КП.</b> <span class="c-gray">«КП отправлено» — только после подписи по порогу (ДпП≤порог&lt;ГД, §5.3.5).</span></div></div>
+            <div style="display:flex;align-items:center;gap:9px;"><span class="pdot lock" style="width:20px;height:20px;">🔒</span><div><b style="color:#b6c0cc;">ГЕЙТ 3 · Создание ЗКЗ.</b> <span class="c-gray">Вкладка «Заказ» активна при «Результат КП» ∈ {Согласовано, Выиграли}.</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card">
+          <div class="card-h">Прослеживаемость (ИСО 9001 п.8.2)</div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;">
+            <div style="display:flex;align-items:center;gap:8px;"><span class="code">ЗП-2026-007</span><span style="font-size:11px;color:#64748b;">запрос</span></div>
+            <div style="padding-left:10px;border-left:2px solid #dde6ef;display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;gap:8px;"><span class="code c-blue">ЛОВ-2026-007</span><span style="font-size:11px;color:#64748b;">оценка</span></div>
+              <div style="display:flex;align-items:center;gap:8px;"><span class="code" style="color:#94a3b4;">КП — черновик</span></div>
+              <div style="display:flex;align-items:center;gap:8px;"><span class="code" style="color:#94a3b4;">ЗКЗ — гейт</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h">История</div>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;">
+            <div style="display:flex;gap:8px;"><span style="color:#94a3b4;white-space:nowrap;">15.04</span><span>ЛОВ закрыт: «Принято с условиями» → гейт КП открыт</span></div>
+            <div style="display:flex;gap:8px;"><span style="color:#94a3b4;white-space:nowrap;">14.04</span><span>Запрос зарегистрирован (email)</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="screen-note">Карточка вместо одноколоночной модалки — <b>вкладки жизненного цикла</b> ДП–З.1 со степпером и <b>гейтами K-06</b>. Заблокированная вкладка «Заказ (ЗКЗ)» показана с замком (не кликается). Каждый гейт — явное условие перехода, а не свободная кнопка (закрывает риск дублей/прыжков по этапам).</p>
+
+  <!-- ================= S3 ================= -->
+  <h2 class="screen-title" id="s3">ЭКРАН 3: Конструктор КП — ГИБРИД (данные = позиции по линейкам · вывод = один Ф.6–Л.1)</h2>
+  <div class="frame" style="background:#fff;">
+    <div class="topbar" style="border-bottom:1px solid #c4ccd6;">
+      <span class="c-blue" style="font-size:12.5px;cursor:pointer;">← Карточка ЗП-2026-007</span>
+      <span style="font-size:15px;font-weight:700;color:var(--ink);">Конструктор КП</span>
+      <span class="st" style="font-size:11.5px;color:var(--blue);background:#eff6ff;border:1px solid #cfe0f5;border-radius:2px;padding:3px 9px;"><i class="i-blue"></i>черновик · §5.3</span>
+      <div style="margin-left:auto;display:flex;gap:8px;">
+        <button class="tbtn">Рассчитать</button>
+        <button class="tbtn primary">Сформировать PDF (Ф.6–Л.1)</button>
+      </div>
+    </div>
+    <div class="kp">
+      <!-- левая: сборка -->
+      <div class="kp-build">
+        <div>
+          <div class="hint" style="margin-bottom:6px;">Позиции тянутся из ЛОВ/классификации (§5.3, «не дублировать ввод»). У каждой — своя модель себестоимости по продуктовой линейке. Смешанный ЗП корректен: разные линейки в одном КП.</div>
+          <div class="postab">
+            <span class="pos on">Поз. 1 · Пластина 6+5<span class="pl">Л2 · Биметалл</span></span>
+            <span class="pos">Поз. 2 · Метизы к-т<span class="pl">Поставка</span></span>
+            <span class="pos add">+ позиция</span>
+          </div>
+        </div>
+
+        <div class="card" style="background:#fff;">
+          <div class="card-h">Позиция 1 — реквизиты (из ЛОВ)</div>
+          <div class="grid2">
+            <div class="fld"><label>Наименование</label><input class="inp" value="Пластина износостойкая 1300×2800 (6+5 мм)"></div>
+            <div class="fld"><label>Обозначение / чертёж</label><input class="inp" value="по эскизу заказчика"></div>
+            <div class="fld"><label>Кол-во</label><input class="inp rt" value="25"></div>
+            <div class="fld"><label>Ед. изм.</label><input class="inp" value="шт"></div>
+          </div>
+        </div>
+
+        <div class="card" style="background:#fff;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <div class="card-h" style="margin:0;">Себестоимость — модель линейки «Биметалл» (§5.3.2)</div>
+            <span style="margin-left:auto;font-size:10.5px;color:#94a3b4;">ручной ввод · заказчику НЕ печатается</span>
+          </div>
+          <div class="grid3">
+            <div class="fld"><label>Площадь наплавки, м²</label><input class="inp rt" value="3,64"></div>
+            <div class="fld"><label>Толщина слоя, мм</label><input class="inp rt" value="5"></div>
+            <div class="fld"><label>Материал наплавки</label><input class="inp" value="ПП-АН180"></div>
+          </div>
+          <div style="margin-top:10px;">
+            <div class="costrow"><span>Материалы / комплектующие (цены ДЛЗ)</span><span class="v">1 420 000 ₽</span></div>
+            <div class="costrow"><span>Трудозатраты (нормативы КО/ПД)</span><span class="v">610 000 ₽</span></div>
+            <div class="costrow"><span>Энергия / расходники / инструмент</span><span class="v">185 000 ₽</span></div>
+            <div class="costrow"><span>Накладные</span><span class="v">240 000 ₽</span></div>
+            <div class="costrow tot"><span>Себестоимость позиции</span><span class="v">2 455 000 ₽</span></div>
+            <div class="costrow"><span>Плановая прибыль (§5.3.3)</span><span class="v" style="color:var(--green);">+ 24% · 595 000 ₽</span></div>
+            <div class="costrow tot"><span>Цена позиции (в КП)</span><span class="v">3 050 000 ₽</span></div>
+          </div>
+          <div class="hint" style="margin-top:8px;">Формулы/коэффициенты линеек (нормативы трудоёмкости, ставки, % накладных, плановая прибыль) — <b>от ДпП, §5.3.4</b>. Пока их нет — поля заполняются вручную. ВЭД (Ф.2–ТП) — отдельная ветка ДП–ТП.</div>
+        </div>
+
+        <div class="card" style="background:#fff;">
+          <div class="card-h">Условия КП (§5.3.1) — на уровне документа</div>
+          <div class="grid2">
+            <div class="fld"><label>Срок изготовления</label><input class="inp" value="45 к.дн. от подтверждения"></div>
+            <div class="fld"><label>Условия оплаты</label><input class="inp" value="аванс 50% / 50% по готовности"></div>
+            <div class="fld"><label>Условия поставки</label><input class="inp" value="самовывоз, СПб"></div>
+            <div class="fld"><label>Срок действия КП</label><input class="inp" value="30 к.дн."></div>
+            <div class="fld" style="grid-column:1/-1;"><label>Особые условия</label><input class="inp" value="срок +1 нед. от поставки листа 09Г2С"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- правая: превью бланка -->
+      <div class="kp-prev">
+        <div class="blank">
+          <div class="bh">
+            <div class="lg">ПБС</div>
+            <div><div class="co">ООО «Петробалт Сервис»</div><div class="cd">198152, Санкт-Петербург, ул. …, д. … · ИНН 7805… · тел. +7 (812) …<br>бланк <b>Ф.6–Л.1</b> · фирменный (ДП–Л.1.2)</div></div>
+          </div>
+          <h3>КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ</h3>
+          <div class="sub">№ КП-2026-007 от 02.07.2026 · к запросу ЗП-2026-007</div>
+          <div style="font-size:10.5px;margin-bottom:6px;"><b>Заказчик:</b> АО «АГД ДАЙМОНДС» · вниманию: Ширяевский Ю.А.</div>
+          <table>
+            <thead><tr><th style="width:16px;">№</th><th>Наименование</th><th style="width:34px;">Кол-во</th><th style="width:64px;">Цена, ₽</th><th style="width:70px;">Сумма, ₽</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>Пластина износостойкая 1300×2800 (6+5 мм)</td><td>25 шт</td><td>122 000</td><td>3 050 000</td></tr>
+              <tr><td>2</td><td>Метизы и крепёж (комплект)</td><td>25 к-т</td><td>3 400</td><td>85 000</td></tr>
+            </tbody>
+          </table>
+          <div class="tot">Итого без НДС: 3 135 000 ₽<br><span style="font-weight:400;font-size:10px;color:#555;">НДС 20%: 627 000 ₽ · </span>Всего с НДС: 3 762 000 ₽</div>
+          <div class="terms">
+            <div><b>Срок изготовления:</b> 45 к.дн. от подтверждения</div>
+            <div><b>Оплата:</b> аванс 50% / 50% по готовности &nbsp; <b>Поставка:</b> самовывоз, СПб</div>
+            <div><b>Срок действия КП:</b> 30 к.дн. &nbsp; <b>Особые условия:</b> срок +1 нед. от поставки листа 09Г2С</div>
+          </div>
+          <div class="sign">
+            <div>Директор по продажам<br><span style="color:#888;">(подпись по порогу §5.3.5: сумма &lt; 1 000 000 ₽ → ДпП;<br>≥ порога → ГД)</span></div>
+            <div style="text-align:right;">_______________<br>М.П.</div>
+          </div>
+        </div>
+        <div style="text-align:center;color:#cdd6df;font-size:11px;margin-top:12px;line-height:1.5;">Превью бланка Ф.6–Л.1 · PDF через Gotenberg → <code style="background:rgba(255,255,255,.12);color:#eaf2fb;padding:1px 5px;border-radius:2px;">6.1-Продажи/2026/ЗП-007/03-КП/</code><br>Себестоимость в печать не выводится — только цена/итоги.</div>
+      </div>
+    </div>
+  </div>
+  <p class="screen-note"><b>Ядро K-05 — конструктор КП, гибрид (решение Александра).</b> Слева — <b>позиции</b> (вкладки), у каждой своя модель себестоимости по линейке (§5.3.2/§5.3.3: ручной ввод материалов/труда/энергии/накладных → себестоимость → +прибыль → цена). Справа — <b>единый документ Ф.6–Л.1</b>: одна таблица позиций, один блок условий/НДС/подписи. Для ЗП из одной позиции вкладки схлопываются в одну. Подпись — по порогу из Настроек (Экран 4). Себестоимость заказчику не печатается (§5.3.3). ВЭД/Ф.2–ТП — отдельная ветка.</p>
+
+  <!-- ================= S4 ================= -->
+  <h2 class="screen-title" id="s4">ЭКРАН 4: Настройки продаж — порог подписи §5.3.5 (параметр, не хардкод)</h2>
+  <div class="frame" style="background:#fff;">
+    <div class="toolbar" style="height:44px;"><div style="font-size:15px;font-weight:700;color:var(--ink);">Параметры продаж</div><div style="font-size:12px;color:#94a3b4;">Настройки · доступ: ДпП / ГД</div></div>
+    <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:900px;">
+      <div class="card">
+        <div class="card-h">Порог подписи КП (§5.3.5)</div>
+        <div class="fld" style="max-width:260px;"><label>Сумма-порог ДпП ↔ ГД, ₽ без НДС</label><input class="inp rt" value="1 000 000"></div>
+        <div class="hint" style="margin-top:8px;">КП с суммой <b>&lt; порога</b> подписывает ДпП; <b>≥ порога</b> — ГД. Точное число — из приказа (пока заглушка <b>1 000 000 ₽</b>). Меняется без правки кода.</div>
+      </div>
+      <div class="card">
+        <div class="card-h">SLA и напоминания</div>
+        <div class="grid2">
+          <div class="fld"><label>Срок КП после ЛОВ, раб.дн (§5.3.6)</label><input class="inp rt" value="5"></div>
+          <div class="fld"><label>КП без ответа → повтор, раб.дн (§5.3.8)</label><input class="inp rt" value="10"></div>
+        </div>
+        <div class="hint" style="margin-top:8px;">Управляет метриками дашборда и авто-напоминаниями (n8n, позже).</div>
+      </div>
+      <div class="card" style="grid-column:1/-1;">
+        <div class="card-h">База НДС · валюта</div>
+        <div class="grid3">
+          <div class="fld"><label>Ставка НДС по умолчанию, %</label><input class="inp rt" value="20"></div>
+          <div class="fld"><label>Валюта КП по умолчанию</label><input class="inp" value="RUB"></div>
+          <div class="fld"><label>Плановая прибыль по умолч., %</label><input class="inp rt" value="24"></div>
+        </div>
+        <div class="hint" style="margin-top:8px;">Число порога, база НДС и ставки/% себестоимости §5.3.4 — <b>решение Александра/ДпП</b>; идём с заглушками, реализация от них не зависит.</div>
+      </div>
+    </div>
+  </div>
+  <p class="screen-note">Все «магические числа» из §5.3 вынесены в <b>Настройки</b> (порог подписи, SLA, НДС, прибыль). Это снимает блокеры реализации: DEV строит конструктор и гейты сейчас, а точные значения Александр/ДпП проставляют в UI позже — без деплоя кода.</p>
+
+  <!-- ================= БРИФ ================= -->
+  <h2 class="screen-title" id="brief">Бриф для DEV (что реализовать поверх текущего портала)</h2>
+  <div class="brief">
+    <div class="r"><span class="n">0</span><div><b>Стиль/компоненты — не изобретать.</b> Переиспользовать токены и классы из <code>redesign-sales.html</code> и паттерн master-detail из <code>#design</code>: <code>erpGrid</code>, статусы «точка+текст», радиус 2–3px, тёмный сайдбар, палитра #1F4E79. Нового CSS — минимум. Дата ДД.ММ.ГГГГ, логотип на белой плашке.</div></div>
+    <div class="r"><span class="n">1</span><div><b>Дашборд + воронка (K-06).</b> KPI: сумма КП в работе, конверсия ЗП→ЗКЗ, «КП без ответа &gt;10 раб.дн» (§5.3.8), «ЛОВ с просрочкой SLA» (§5.2). Воронка — по <b>состояниям процесса</b> (Новый · На оценке · КП готовится · КП отправлено · Согласовано/Выиграли), терминалы (Отклонён по ЛОВ / Закрыт без сделки) — отдельно. Клик по сегменту → фильтр реестра.</div></div>
+    <div class="r"><span class="n">2</span><div><b>Master-detail вместо модалки.</b> Список ЗП слева (№ · заказчик · статус-точка · сумма), карточка справа. Deep-link <code>#sales/&lt;№ЗП&gt;</code> сохранить. Реестровые фичи (сортировка/поиск/печать Ф.1–З.1/удаление) — на списке.</div></div>
+    <div class="r"><span class="n">3</span><div><b>Карточка ЗП — вкладки + степпер + ГЕЙТЫ.</b> Вкладки: Запрос · Оценка(ЛОВ) · КП · Заказ(ЗКЗ) · Файлы · История. <b>ГЕЙТ 1</b>: конструктор КП закрыт до решения ЛОВ «Принято…». <b>ГЕЙТ 2</b>: «КП отправлено» только после подписи по порогу (§5.3.5). <b>ГЕЙТ 3</b>: вкладка «Заказ» активна при «Результат КП» ∈ {Согласовано, Выиграли}. Заблокированные вкладки/шаги — с замком, не кликаются.</div></div>
+    <div class="r"><span class="n">4</span><div><b>Конструктор КП — ГИБРИД (ядро).</b> Модель данных = <b>всегда позиции</b> (позиция → линейка → калькулятор себестоимости §5.3.2/§5.3.3: материалы/труд/энергия/накладные → себестоимость → +прибыль → цена). Вывод = <b>всегда единый документ Ф.6–Л.1</b> (одна таблица позиций, один блок НДС/условий/подписи). Позиции тянутся из ЛОВ — не дублировать ввод. Себестоимость <b>не печатается</b>. PDF через Gotenberg → <code>6.1-Продажи/&lt;год&gt;/ЗП-NNN/03-КП/</code>. Статусы: КП готовится → КП отправлено (дата+сумма в Ф.1–З.1, §5.3.7).</div></div>
+    <div class="r"><span class="n">5</span><div><b>Настройки продаж.</b> Порог подписи §5.3.5 (заглушка 1 000 000 ₽ без НДС), SLA §5.3.6/§5.3.8, ставка НДС, плановая прибыль — параметрами, без хардкода. Доступ ДпП/ГД.</div></div>
+    <div class="r"><span class="n">6</span><div><b>Миграция «Запросы продаж».</b> Добавить поля: <code>№ КП</code>, <code>сумма КП</code>, <code>срок действия КП</code>, <code>дата отправки КП</code>. Позиции КП — отдельной таблицей (позиция → ЗП, поля: наименование/кол-во/ед.изм/цена + блок себестоимости). Сцепить с восстановленными link-полями (K-11).</div></div>
+    <div class="r"><span class="n">7</span><div><b>Открыто на Александра/ДпП (не блокирует макет/каркас):</b> точное число порога §5.3.5; ставки/коэффициенты моделей себестоимости по линейкам §5.3.4; реальный шаблон бланка Ф.6–Л.1 из ИСМ; НДС/валюта для ВЭД-КП (Ф.2–ТП, ветка ДП–ТП). Пока — заглушки в Настройках.</div></div>
+    <div class="r"><span class="n">8</span><div><b>В пакет UI-фиксов попутно (K-10):</b> #1/#2 адаптив таблиц (min-width+overflow-x), #4 чекбоксы по требованию, #5 ресайз колонок, F-1 — убрать лишнее окно-подтверждение при регистрации КП; <code>saveLov</code> error alert()→toast.</div></div>
+  </div>
+
+  <p class="screen-note" style="margin-top:16px;"><b>Статус карточки K-05.</b> Макет собран по одобренной спеке ИСМ (гибрид · master-detail · порог в Настройках · ручная себестоимость · Ф.6–Л.1). Готов на QA-осмотр и APPROVE Александра. Реализацию (сервер: createКП/расчёт/PDF/статусы/гейты + миграция) ведёт DEV после аппрува. UI не деплоит.</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,98 @@
+{
+  "name": "ПЗ · автонумерация",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pz-autonumber",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh",
+      "name": "NocoDB: after insert Заказы",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "pz-autonumber"
+    },
+    {
+      "parameters": {
+        "jsValue": "={{ JSON.stringify($json) }}",
+        "jsCode": "// Разбор payload вебхука NocoDB и решение о нумерации\nconst body = $input.first().json.body || $input.first().json;\nconst rows = body?.data?.rows || (body?.data ? [body.data] : []);\nconst rec = rows[0] || {};\nconst id = rec.Id ?? rec.id;\nconst current = rec['№ ПЗ'];\nconst orderType = rec['Тип заказа'] || '';\nconst placed = rec['Дата размещения'] || new Date().toISOString();\nconst year = String(new Date(placed).getFullYear());\nconst internal = /внутрен/i.test(orderType);\nreturn [{ json: { id, current, year, internal, needs: !current || String(current).trim() === '' } }];"
+      },
+      "id": "parse",
+      "name": "Разобрать запись",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            { "leftValue": "={{ $json.needs }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if",
+      "name": "Нужен номер?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.NOCODB_INTERNAL_URL }}/api/v1/db/data/noco/{{ $env.NC_BASE_ID }}/Заказы",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "limit", "value": "1000" }, { "name": "fields", "value": "№ ПЗ" } ] },
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "xc-token", "value": "={{ $env.NC_TOKEN }}" } ] },
+        "options": {}
+      },
+      "id": "list",
+      "name": "Список ПЗ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Вычислить следующий сквозной номер по году и серии\nconst meta = $('Разобрать запись').first().json;\nconst list = $input.first().json.list || [];\nconst year = meta.year;\nconst prefix = meta.internal ? `ПЗ-${year}-С` : `ПЗ-${year}-`;\nconst re = meta.internal ? new RegExp(`^ПЗ-${year}-С(\\\\d+)$`) : new RegExp(`^ПЗ-${year}-(\\\\d+)$`);\nlet max = 0;\nfor (const r of list) {\n  const m = re.exec(String(r['№ ПЗ'] || ''));\n  if (m) max = Math.max(max, parseInt(m[1], 10));\n}\nconst next = String(max + 1).padStart(3, '0');\nreturn [{ json: { id: meta.id, num: `${prefix}${next}` } }];"
+      },
+      "id": "calc",
+      "name": "Следующий номер",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 240]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.NOCODB_INTERNAL_URL }}/api/v1/db/data/noco/{{ $env.NC_BASE_ID }}/Заказы/{{ $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "xc-token", "value": "={{ $env.NC_TOKEN }}" } ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ '№ ПЗ': $json.num }) }}",
+        "options": {}
+      },
+      "id": "patch",
+      "name": "Записать № ПЗ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 240]
+    }
+  ],
+  "connections": {
+    "NocoDB: after insert Заказы": { "main": [[{ "node": "Разобрать запись", "type": "main", "index": 0 }]] },
+    "Разобрать запись": { "main": [[{ "node": "Нужен номер?", "type": "main", "index": 0 }]] },
+    "Нужен номер?": { "main": [[{ "node": "Список ПЗ", "type": "main", "index": 0 }], []] },
+    "Список ПЗ": { "main": [[{ "node": "Следующий номер", "type": "main", "index": 0 }]] },
+    "Следующий номер": { "main": [[{ "node": "Записать № ПЗ", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

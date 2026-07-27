@@ -11253,8 +11253,12 @@
         return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;padding:2px 0"><span style="color:#5b6b7a;min-width:210px">${esc(x.doc||'')}</span><span class="code" style="font-family:monospace;color:var(--blue)">№ ${esc(x.number||'—')}</span><span class="c-gray">от ${esc(x.dateHuman||fmt(String(x.date||'').slice(0,10))||'—')}</span>${badge}</div>`; };
       const onecBlockHtml=(o)=>{
         const n=o.onec||null, has=!!(n&&(n.production||n.transfer));
+        // идентификатор связки (uuid) — то, по чему портал узнаёт СВОИ документы в 1С.
+        // № операции меняется при пересохранении МК, идентификатор — никогда; показываем его,
+        // чтобы связку можно было сверить с «Комментарием» документа в 1С глазами.
+        const uidLine=(n&&n.uid)?`<div style="font-size:11px;color:#8a97a6;margin-top:3px">Идентификатор связки: <span class="code" style="font-family:monospace">${esc(n.uid)}</span> — он же в «Комментарии» документов 1С</div>`:'';
         const body=has
-          ?`${onecDocLine(n.production)}${onecDocLine(n.transfer)}${n.nomenclature&&n.nomenclature.name?`<div style="font-size:11.5px;color:#5b6b7a;margin-top:3px">Номенклатура: ${esc(n.nomenclature.name)}${n.qty?` · ${esc(String(n.qty))} шт`:''}</div>`:''}`
+          ?`${onecDocLine(n.production)}${onecDocLine(n.transfer)}${n.nomenclature&&n.nomenclature.name?`<div style="font-size:11.5px;color:#5b6b7a;margin-top:3px">Номенклатура: ${esc(n.nomenclature.name)}${n.qty?` · ${esc(String(n.qty))} шт`:''}</div>`:''}${uidLine}`
           :'<div class="c-gray" style="font-size:12px">Черновики в 1С ещё не создавались.</div>';
         return `<div data-onec="${esc(String(o.n))}" style="margin-top:9px;padding:9px 11px;border:1px solid #dbe4f0;border-radius:8px;background:#fff">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
@@ -11519,6 +11523,22 @@
       if(c.onec&&typeof c.onec==='object')out.onec=c.onec;      // связка с черновиками 1С — то же самое: без этой строки пересохранение МК стирает номера документов
       return JSON.stringify(out);
     }
+    // (и) Ключ связки с 1С — клиентское зеркало серверного onecLinkKey(): идентичность даёт uuid
+    // связки, а не № операции (он меняется при пересохранении МК). Фолбэк на Ref_Key документов —
+    // для связок, созданных до появления uuid.
+    const rtGuidRe=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    function rtOnecLinkKey(n){
+      if(!n||typeof n!=='object')return '';
+      if(rtGuidRe.test(String(n.uid||'')))return 'uid:'+String(n.uid).toLowerCase();
+      const p=n.production&&n.production.ref, t=n.transfer&&n.transfer.ref;
+      if(rtGuidRe.test(String(p||'')))return 'ref:'+String(p).toLowerCase();
+      if(rtGuidRe.test(String(t||'')))return 'ref:'+String(t).toLowerCase();
+      return '';
+    }
+    function rtOnecLinkText(n,opNo){
+      const nums=[n&&n.production&&n.production.number,n&&n.transfer&&n.transfer.number].filter(Boolean).join(' и ');
+      return 'оп.'+(opNo!=null?opNo:'?')+(nums?' · документы 1С № '+nums:(n&&n.uid?' · ид '+n.uid:''));
+    }
     // сводка отправлено/закрыто/просрочка — клиентское зеркало server-side mkCoopStatus()
     function rtCoopStatus(c){
       const norm=(s)=>String(s||'').trim().toLowerCase();
@@ -11558,7 +11578,10 @@
         reg:{projects:(reg&&reg.projects)||[],docs:(reg&&reg.kd)||[]}, eqReg, tools, setup,
         route:{type:r0.type||'КОМ',name:r0.name||'',designation:r0.designation||'',productType:r0.productType||'',revision:r0.revision||'',material:r0.material||'',statusMk:r0.statusMk||'Черновик',projectDecNo:r0.projectDecNo||'',mk:r0.mk||''},
         kdSel:((r0.kdDrawings)||[]).slice(),
-        ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',control:o.control||'нет',norm:o.norm!=null?o.norm:'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,components:o.components||[],_open:i===0})) };
+        ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',control:o.control||'нет',norm:o.norm!=null?o.norm:'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,coopOrphan:null,components:o.components||[],_open:i===0})) };
+      // (и) снимок связок с 1С НА МОМЕНТ ЗАГРУЗКИ — с ним сверяем то, что уходит на сохранение,
+      // чтобы не потерять связку молча (зеркало серверной проверки в saveRoute).
+      rtWiz.onecAtLoad=(init.operations||[]).map((o,i)=>{ const n=o.coop&&o.coop.onec; const k=rtOnecLinkKey(n); return k?{key:k,text:rtOnecLinkText(n,o.n!=null?o.n:(i+1))}:null; }).filter(Boolean);
       rtWizRender();
     }
     function rtWizRender(){
@@ -11727,6 +11750,24 @@
         <div style="display:flex;gap:6px"><input class="rt-inp" type="number" min="0" step="any" data-partf="qty" data-parti="${idx}" value="${rtEscA(p.qty)}" placeholder="кол-во" style="flex:1"><button type="button" class="tbtn" data-partrem="${idx}" style="color:var(--red)" title="Удалить деталь">✕</button></div>
       </div>`;
     }
+    // (и) Операция стала в карте ПЕРВОЙ — блок кооперации на ней невозможен (первая операция
+    // занята заготовкой: и то, и другое хранится в одном поле «Входящие материалы»). Данные не
+    // выбрасываем молча: держим их в op.coopOrphan и показываем красным, что именно пропадёт
+    // при сохранении. Сервер это же сохранение отклонит, пока отвязку не подтвердят (dropOnecLinks).
+    function rtCoopOrphanHtml(op){
+      const c=op&&op.coopOrphan; if(!c)return '';
+      const nums=(c.onec&&(c.onec.production||c.onec.transfer))
+        ?[c.onec.production&&c.onec.production.number,c.onec.transfer&&c.onec.transfer.number].filter(Boolean).join(' и '):'';
+      return `<div class="rt-fld" style="margin-top:12px;padding:12px 14px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2">
+        <div style="font-weight:700;color:#b91c1c;font-size:12.5px">⚠ Эта операция стала первой — кооперация с неё будет снята</div>
+        <div style="margin-top:5px;font-size:12px;color:#7f1d1d;line-height:1.5">
+          На первой операции маршрута хранится заготовка, блока «Внешняя кооперация» здесь быть не может.
+          При сохранении МК с этой операции пропадёт кооперация${c.contractor?` (исполнитель ${esc(c.contractor)})`:''}${nums?` и связка с черновиками 1С (${esc(nums)})`:''}.
+          ${nums?'Документы в 1С останутся, но портал перестанет показывать их номера, а следующий клик «Создать черновики» задвоит выпуск. ':''}
+          Верните перед ней операцию (например, заготовительную) — данные вернутся на место. Иначе сохранение придётся подтвердить отдельно.
+        </div>
+      </div>`;
+    }
     function rtCoopBlockHtml(op,i){
       const c=op.coop=op.coop||rtCoopDefault();
       const contractors=rtWiz.contractors||[];
@@ -11788,7 +11829,7 @@
         <div class="rt-obody">
           <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование)</label><input class="rt-inp" data-of="name" value="${rtEscA(op.name)}" placeholder="по умолч. = тип"></div></div>
           ${auto}
-          ${i===0?rtBlankBlockHtml(op):rtCoopBlockHtml(op,i)}
+          ${i===0?(rtCoopOrphanHtml(op)+rtBlankBlockHtml(op)):rtCoopBlockHtml(op,i)}
           <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment)}</select></div><div class="rt-fld"><label>Норма, ч</label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="0"></div></div>
           ${rtToolChecklist(op,i)}
           ${setupRow}
@@ -11812,8 +11853,19 @@
     function rtStep2Html(){
       // заготовка живёт на операции №1 (см. rtBlankDefault) — если первая операция сменилась (удаление), донормализуем
       if(rtWiz.ops.length&&!rtWiz.ops[0].blank)rtWiz.ops[0].blank=rtBlankDefault();
-      // кооперация НЕ живёт на операции №1 (там заготовка) — если удаление сдвинуло операции, донормализуем симметрично
-      if(rtWiz.ops.length&&rtWiz.ops[0].coop)rtWiz.ops[0].coop=null;
+      // кооперация НЕ живёт на операции №1 (там заготовка) — если удаление сдвинуло операции, донормализуем симметрично.
+      // (и) НО МОЛЧА НЕ ТЕРЯЕМ: если у операции, ставшей первой, была кооперация или связка с 1С —
+      // откладываем её в coopOrphan и рисуем предупреждение на карточке (см. rtCoopOrphanHtml).
+      // Раньше здесь стояло простое coop=null: технолог удалял операцию выше, сохранял МК — и номера
+      // черновиков 1С исчезали без единого слова, после чего повторный клик задваивал выпуск.
+      if(rtWiz.ops.length&&rtWiz.ops[0].coop){
+        const c0=rtWiz.ops[0].coop;
+        const lost=!!(c0.enabled||(c0.onec&&(c0.onec.production||c0.onec.transfer||c0.onec.uid)));
+        if(lost&&!rtWiz.ops[0].coopOrphan)rtWiz.ops[0].coopOrphan=c0;
+        rtWiz.ops[0].coop=null;
+      }
+      // операция уехала с первой позиции обратно вниз — возвращаем ей отложенную кооперацию
+      rtWiz.ops.forEach((op,i)=>{ if(i>0&&op.coopOrphan){ op.coop=op.coopOrphan; op.coopOrphan=null; } });
       rtWiz.ops.forEach((op,i)=>{ if(i>0&&!op.coop)op.coop=rtCoopDefault(); });
       const cards=rtWiz.ops.map((op,i)=>rtOpCardHtml(op,i)).join('')||'<div class="rt-hint" style="padding:10px 0">Операций пока нет — добавьте первую (обычно «Заготовительная»), чтобы указать заготовку.</div>';
       const pal=((rtWiz.cat.opTypes)||[]).map(t=>`<button type="button" class="rt-ptype" data-add="${rtEscA(t.id)}"><div style="min-width:0"><div class="pn">${esc(t.name)}</div><div class="pm">${esc([t.section,t.ri].filter(Boolean).join(' · '))}</div></div><span class="pp">+</span></button>`).join('')||'<div class="rt-hint">Справочник типов операций пуст.</div>';
@@ -11961,11 +12013,26 @@
       // приёмок возврата) уже сохранён внутри op.coop с загрузки формы — просто едет обратно, чтобы пересохранение МК его не стёрло.
       const ops=rtWiz.ops.map((op,i)=>({opTypeId:op.opTypeId||'',name:(op.name||'').trim(),equipment:(op.equipment||'').trim(),tooling:(op.tooling||'').trim(),setupCardNo:(op.setupCardNo||'').trim(),control:op.control||'нет',norm:op.norm,whatControl:(op.whatControl||'').trim(),si:(op.si||'').trim(),tolerance:(op.tolerance||'').trim(),materials:i===0?rtBlankSerialize(op.blank):(op.coop&&op.coop.enabled?rtCoopSerialize(op.coop):(op.materials||'').trim()),components:op.components||[]})).filter(o=>o.name||o.opTypeId);
       const body={id:rtWiz.routeId,type:rtWiz.route.type,name:(rtWiz.route.name||'').trim(),designation:(rtWiz.route.designation||'').trim(),productType:rtWiz.route.productType||'',revision:(rtWiz.route.revision||'').trim(),material:(rtWiz.route.material||'').trim(),statusMk:release?'Утверждена':(rtWiz.route.statusMk||'Черновик'),projectDecNo:rtWiz.route.projectDecNo||'',kdDrawings:rtWiz.kdSel,operations:ops};
+      // (и) НЕ ТЕРЯТЬ СВЯЗКУ С 1С МОЛЧА. Сверяем связки на момент загрузки МК с тем, что реально
+      // уходит на сервер: пропала — спрашиваем прямо. Причины: операция стала первой (там заготовка),
+      // снята галка «Внешняя кооперация», операция удалена. Сервер откажет в сохранении без этого
+      // подтверждения (saveRoute → dropOnecLinks) — здесь мы лишь объясняем человеку, что происходит.
+      const sentKeys=new Set(ops.map(o=>{ try{ const j=JSON.parse(String(o.materials||'')); return (j&&j.coop===true)?rtOnecLinkKey(j.onec):''; }catch(e){ return ''; } }).filter(Boolean));
+      const lost=(rtWiz.onecAtLoad||[]).filter(l=>!sentKeys.has(l.key));
+      if(lost.length){
+        if(!confirm('При сохранении МК пропадёт связка с черновиками 1С:\n\n'+lost.map(l=>'• '+l.text).join('\n')
+          +'\n\nСами документы в 1С останутся, но портал перестанет показывать их номера, а следующий клик «Создать черновики в 1С» ЗАДВОИТ выпуск.'
+          +'\n\nЧастая причина — операция стала в маршруте первой (на первой операции живёт заготовка, блока кооперации там нет) или снята галка «Внешняя кооперация».'
+          +'\n\nСохранить и отвязать?')){ toast('Сохранение отменено — связка с 1С сохранена.','err'); return; }
+        body.dropOnecLinks=true;
+      }
       const host=rtWiz.host; const btns=host.querySelectorAll('#rt-draft,#rt-release'); btns.forEach(b=>{b.disabled=true;});
       try{ const r=await fetch('/api/routes/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         RT=null; toast(`МК ${j.mk||''} ${release?'выпущена':'сохранена'} · операций: ${j.operations}${j.components?', компонентов: '+j.components:''}`,'ok');
         // МК-резерв металла (этап 1): при переходе в «В производстве» — покажем, что произошло с резервом
         const br=j.blankReserve; if(br&&(br.reserved||br.note)){ setTimeout(()=>toast(br.reserved?`Резерв металла: ${br.reserved.code} · ${br.reserved.qty} кг`:br.note, br.reserved?'ok':'err'),300); }
+        // (и) отвязка от 1С прошла по подтверждению — говорим об этом ещё раз, уже по факту
+        if(Array.isArray(j.droppedOnecLinks)&&j.droppedOnecLinks.length)setTimeout(()=>toast('Связка с 1С снята: '+j.droppedOnecLinks.join('; ')+'. Документы в 1С остались.','err'),600);
         const id=j.id; rtWiz=null; openRouteCard(host,id);
       }catch(e){ toast('Не удалось сохранить: '+(e.message||e),'err'); btns.forEach(b=>{b.disabled=false;}); }
     }

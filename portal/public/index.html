@@ -832,7 +832,9 @@
       folder:'<path d="M3 6.3A1.5 1.5 0 0 1 4.5 4.8H8l1.6 1.7h6A1.5 1.5 0 0 1 17 8v6a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14z"/>',
       doc:'<rect x="4" y="3" width="12" height="14" rx="1"/><path d="M7 8h6M7 11h4"/>',
       search:'<circle cx="9" cy="9" r="6"/><line x1="13.5" y1="13.5" x2="17" y2="17"/>',
-      trash:'<path d="M5 6h10M8 6V4.5h4V6M6.5 6l.7 9.5h5.6L13.5 6"/>'
+      trash:'<path d="M5 6h10M8 6V4.5h4V6M6.5 6l.7 9.5h5.6L13.5 6"/>',
+      // единая иконка пустого состояния реестров (пустой лоток)
+      empty:'<path d="M3 11.5h4l1.2 2h3.6l1.2-2h4"/><path d="M3 11.5L5.4 4.8A1.4 1.4 0 0 1 6.7 4h6.6a1.4 1.4 0 0 1 1.3.8L17 11.5V15a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15z"/>'
     };
     const aico=(n,s=15)=>`<svg viewBox="0 0 20 20" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;vertical-align:-2px">${AICONS[n]||''}</svg>`;
 
@@ -937,7 +939,15 @@
         if(opts.groupBy){const g=new Map();rs.forEach(r=>{const k=opts.groupBy(r)||'—';if(!g.has(k))g.set(k,[]);g.get(k).push(r);});
           body=[...g.entries()].map(([k,gr])=>`<tr class="grp"><td colspan="${cols.length}">${opts.groupLabel?opts.groupLabel(k,gr):esc(k)} <span style="color:var(--gray4)">${gr.length}</span></td></tr>`+gr.map(rowHtml).join('')).join('');
         } else body=rs.map(rowHtml).join('');
-        tbody.innerHTML=body||`<tr><td colspan="${cols.length}" style="opacity:.5;padding:14px">Ничего не найдено</td></tr>`;
+        if(!body){ // п.2 аудита: то же единое пустое состояние, что и в erpGrid
+          const e=opts.empty||{};
+          const eh=rows.length
+            ? emptyState('Ничего не найдено по текущему поиску',{sub:'Уточните запрос или очистите строку поиска.',action:{label:'Очистить поиск',onClick:()=>{st.q='';if(inp)inp.value='';draw();}}})
+            : emptyState(e.text||'Записей пока нет',e);
+          body=`<tr class="empty-row"><td colspan="${cols.length}" style="padding:0">${eh}</td></tr>`;
+        }
+        tbody.innerHTML=body;
+        tblTitles(tbody.parentNode); // п.3 аудита: title на обрезанных ячейках
         ths.forEach((th,i)=>th.setAttribute('data-dir', st.sort===i?(st.dir>0?'▲':'▼'):''));
         if(cnt)cnt.textContent=`${rs.length}${rs.length!==rows.length?' / '+rows.length:''}`;
       }
@@ -966,6 +976,67 @@
     const prioCell=(p)=>p?`<span class="st"><i class="i-${PRIO_ERP[p]||'gray'}"></i>${esc(p)}</span>`:'<span class="c-gray">—</span>';
     // закрытие меню «Колонки» по клику вне (одна глобальная подписка)
     document.addEventListener('click',(e)=>{ if(!e.target.closest('.colmenu')&&!e.target.closest('[data-colbtn]')) document.querySelectorAll('.colmenu:not([hidden])').forEach(m=>m.hidden=true); });
+
+    // ══ Единый язык реестров (сквозной UI-аудит, п.2) ═══════════════════════════
+    //  Было: 8 разных формулировок подсказки «клик по строке — …» и 11 разных пустых
+    //  состояний. Стало: ОДНА подсказка (её дорисовывает сам erpGrid, если строка
+    //  кликабельна) и ОДИН компонент пустого состояния (иконка + фраза + кнопка).
+    //  Точечные формулировки по разделам не заводить — иначе снова расползётся.
+    const REG_HINT='<span class="c-gray">клик по строке — карточка</span>';
+    // Пустое состояние: emptyState(text,{icon?,sub?,action:{label,href|onClick}}).
+    //  action.href — ссылка (в т.ч. #раздел); action.onClick — колбэк, вешается в emptyWire().
+    let EMPTY_ACTS=Object.create(null), emptyActSeq=0;
+    function emptyState(text,opts){
+      const o=opts||{};
+      let act='';
+      if(o.action&&o.action.label){
+        if(o.action.href) act=`<a class="tbtn" href="${esc(o.action.href)}" style="margin-top:12px;text-decoration:none">${esc(o.action.label)}</a>`;
+        else { const k='ea'+(++emptyActSeq); EMPTY_ACTS[k]=o.action.onClick; act=`<button type="button" class="tbtn" data-empty-act="${k}" style="margin-top:12px">${esc(o.action.label)}</button>`; }
+      }
+      return `<div class="empty-st" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px 18px;color:var(--sub);line-height:1.5">
+        <span aria-hidden="true" style="opacity:.4;margin-bottom:9px">${aico(o.icon||'empty',30)}</span>
+        <span style="font-size:13px">${esc(text)}</span>
+        ${o.sub?`<span style="font-size:11.5px;opacity:.85;margin-top:2px">${esc(o.sub)}</span>`:''}
+        ${act}</div>`;
+    }
+    // то же в карточке — для мест, где пустое состояние стоит вместо блока/таблицы раздела
+    const emptyCard=(text,opts)=>`<div class="card">${emptyState(text,opts)}</div>`;
+    // навешивание onClick-кнопок пустого состояния (делегирование, одна глобальная подписка)
+    document.addEventListener('click',(e)=>{ const b=e.target.closest('[data-empty-act]'); if(!b)return;
+      const fn=EMPTY_ACTS[b.dataset.emptyAct]; if(typeof fn==='function'){ e.preventDefault(); e.stopPropagation(); fn(); } });
+
+    // ── Подсказки на обрезанных ячейках (сквозной UI-аудит, п.3) ───────────────
+    //  Длинные значения режутся многоточием (td.ell / td.name / вложенные спаны с
+    //  text-overflow). Системно: общие компоненты таблиц после каждой отрисовки
+    //  проставляют title с полным текстом ровно там, где текст НЕ поместился.
+    //  Свои title (их ставят отдельные ячейки) не перетираем.
+    function tblTitles(scope){
+      if(!scope||!scope.querySelectorAll)return;
+      let tries=0;
+      const run=()=>{ try{
+        // раскладка бывает ещё не посчитана (ширины 0) — ждём, иначе «обрезано» не определить
+        if(!scope.isConnected||!scope.clientWidth){ if(tries++<10)setTimeout(run,40); return; }
+        // свои подсказки помечаем data-ttl — при смене ширины колонок пересчитываем их заново
+        scope.querySelectorAll('[data-ttl]').forEach(el=>{el.removeAttribute('title');el.removeAttribute('data-ttl');});
+        // У ячеек таблицы (td) scrollWidth не отражает вылезающий инлайн-контент — для них
+        // ширину содержимого меряем Range'ом. Для вложенных спанов со своим ellipsis хватает
+        // обычного scrollWidth. Все td в .dt имеют overflow:hidden, поэтому «шире ячейки» = «обрезано».
+        const put=(el)=>{ const t=String(el.textContent||'').replace(/\s+/g,' ').trim();
+          if(!t||t==='—')return false; el.setAttribute('title',t); el.setAttribute('data-ttl','1'); return true; };
+        const contentW=(el)=>{ try{ const r=document.createRange(); r.selectNodeContents(el);
+          let w=0; for(const q of r.getClientRects())w=Math.max(w,q.width); return w; }catch{ return 0; } };
+        scope.querySelectorAll('tbody td').forEach(td=>{
+          if(td.hasAttribute('title'))return;
+          if(td.clientWidth&&(td.scrollWidth-td.clientWidth>=2||contentW(td)-td.clientWidth>1)){ if(put(td))return; }
+          for(const el of td.querySelectorAll('*')){
+            if(!el.getAttribute||el.hasAttribute('title'))continue;
+            if(el.scrollWidth-el.clientWidth<2)continue;             // помещается — подсказка не нужна
+            put(el);
+          }
+        });
+      }catch{} };
+      setTimeout(run,0);
+    }
 
     // ── ERP-таблица: поиск + сортировка + ресайз столбцов (.rz→localStorage) + скрытие столбцов («Колонки ▾»→localStorage) ──
     // cols: [{key,label,cell:(r)=>html,w?:px,align?,cls?,fixed?,sortVal?:(r)=>v}]
@@ -996,7 +1067,9 @@
       const search=opts.search!==false?`<input class="erp-search" type="search" aria-label="Поиск по таблице" placeholder="Поиск…" value="${esc(st.q)}">`:'';
       const selbtn=DEL?`<button class="tbtn" data-selbtn style="display:inline-flex;align-items:center;gap:5px">☑ Выбрать</button>`:'';
       const delbtn=DEL?`<button class="tbtn" data-delbtn disabled style="color:var(--red);border-color:#fca5a5;display:none;align-items:center;gap:5px">${aico('trash',13)} Удалить (0)</button>`:'';
-      host.innerHTML=`<div class="erp-toolbar">${tbar}${selbtn}${delbtn}${colmenu}${search}<span style="margin-left:auto;display:flex;gap:14px">${opts.info||''}</span></div>
+      // п.2 аудита: подсказку «клик по строке — карточка» рисует сам компонент (одна формулировка на портал)
+      const hint=(opts.onRow&&opts.hint!==false)?REG_HINT:'';
+      host.innerHTML=`<div class="erp-toolbar">${tbar}${selbtn}${delbtn}${colmenu}${search}<span style="margin-left:auto;display:flex;gap:14px">${opts.info||''}${hint}</span></div>
         <div class="erp-scroll"></div>
         <div class="statusbar"><span data-cnt></span><span style="margin-left:auto">строк на странице: 50</span></div>`;
       (opts.toolbar||[]).forEach((b,i)=>{const el=host.querySelector(`[data-tb="${i}"]`);if(el&&b.onClick&&!b.disabled)el.onclick=b.onClick;});
@@ -1028,8 +1101,17 @@
         const colg=`<colgroup>${selCol}${vc.map(c=>`<col${cw(c)?` style="width:${cw(c)}px"`:''}>`).join('')}</colgroup>`;
         const thead=`<thead><tr>${selTh}${vc.map(c=>{const ind=st.sk===c.key?(st.dir>0?' ▲':' ▼'):'';return `<th${c.align?` style="text-align:${c.align}"`:''}><span class="th-l" data-sk="${esc(c.key)}">${esc(c.label)}<span class="c-blue">${ind}</span></span><span class="rz" data-rz="${esc(c.key)}"></span></th>`;}).join('')}</tr></thead>`;
         const rs=pipeline(); lastVisible=rs;
-        const body=rs.map(r=>{const cls=[(opts.rowClass?opts.rowClass(r):'')||'',(rowKey&&selKey!=null&&rowKey(r)===selKey)?'row-sel':''].filter(Boolean).join(' ');return `<tr data-ri="${r.__i}"${cls?` class="${cls}"`:''}>${selTd(r)}${vc.map(c=>`<td${c.align?` style="text-align:${c.align}"`:''}${c.cls?` class="${c.cls}"`:''}>${c.cell(r)}</td>`).join('')}</tr>`;}).join('')||`<tr><td colspan="${vc.length+(hasSel?1:0)}" style="padding:14px;color:#5b6b7a">Ничего не найдено</td></tr>`;
+        let body=rs.map(r=>{const cls=[(opts.rowClass?opts.rowClass(r):'')||'',(rowKey&&selKey!=null&&rowKey(r)===selKey)?'row-sel':''].filter(Boolean).join(' ');return `<tr data-ri="${r.__i}"${cls?` class="${cls}"`:''}>${selTd(r)}${vc.map(c=>`<td${c.align?` style="text-align:${c.align}"`:''}${c.cls?` class="${c.cls}"`:''}>${c.cell(r)}</td>`).join('')}</tr>`;}).join('');
+        if(!body){
+          // п.2 аудита: одно пустое состояние на все реестры. Отличаем «данных нет» от «поиск ничего не дал».
+          const e=opts.empty||{};
+          const eh=rows.length
+            ? emptyState('Ничего не найдено по текущему поиску',{sub:'Уточните запрос или очистите строку поиска.',action:{label:'Очистить поиск',onClick:()=>{st.q='';const si2=host.querySelector('.erp-search');if(si2)si2.value='';draw();}}})
+            : emptyState(e.text||'Записей пока нет',e);
+          body=`<tr class="empty-row"><td colspan="${vc.length+(hasSel?1:0)}" style="padding:0">${eh}</td></tr>`;
+        }
         scroll.innerHTML=`<table class="dt erp">${colg}${thead}<tbody>${body}</tbody></table>`;
+        tblTitles(scroll); // п.3 аудита: title на ячейках, где текст обрезан многоточием
         const cnt=host.querySelector('[data-cnt]'); if(cnt)cnt.textContent=`${rs.length}${rs.length!==rows.length?' из '+rows.length:''} зап.`;
         const tbl=scroll.querySelector('table'), colEls=tbl.querySelector('colgroup').children;
         // K-10 #2: min-width таблицы = сумма ширин колонок (гибкие — по 140px) → на узком экране .erp-scroll даёт горизонтальный скролл вместо схлопывания
@@ -1040,7 +1122,7 @@
         tbl.querySelectorAll('.rz[data-rz]').forEach(h=>{const k=h.dataset.rz, idx=vc.findIndex(c=>c.key===k), col=colEls[idx+colOff];
           h.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();h.setPointerCapture(e.pointerId);const sx=e.clientX,sw=col.getBoundingClientRect().width;
             const mv=ev=>{const w=Math.max(40,Math.round(sw+ev.clientX-sx));col.style.width=w+'px';W[k]=w;};
-            const up=()=>{saveW();h.removeEventListener('pointermove',mv);h.removeEventListener('pointerup',up);};
+            const up=()=>{saveW();tblTitles(scroll);h.removeEventListener('pointermove',mv);h.removeEventListener('pointerup',up);};
             h.addEventListener('pointermove',mv);h.addEventListener('pointerup',up);});
           h.ondblclick=()=>{delete W[k];saveW();draw();};});
         if(opts.onRow)tbl.querySelector('tbody').onclick=(e)=>{if(e.target.closest('a')||e.target.closest('input'))return;const tr=e.target.closest('tr[data-ri]');if(!tr)return;const row=rows[+tr.dataset.ri];if(rowKey){selKey=rowKey(row);markSel();try{scroll.focus({preventScroll:true});}catch{}}opts.onRow(row);};
@@ -1336,6 +1418,7 @@
       {code:'Ф.5–Д.1', name:'Акт о несоответствии', type:'Форма', ver:'1.0', status:'Действует', approvedDate:'2026-06-16', approvedBy:'ДпП А.С. Кирилюк'},
       {code:'Ф.1–З.1', name:'Реестр запросов и КП', type:'Форма', ver:'1.0', status:'Проект', approvedDate:'', approvedBy:''},
     ];
+    let routePrevView=null; // последний отрисованный раздел — для сброса прокрутки при СМЕНЕ раздела
     function route(){
       const raw=(location.hash||'#board').slice(1);
       const slash=raw.indexOf('/'); let v=slash<0?raw:raw.slice(0,slash); const arg=slash<0?'':decodeURIComponent(raw.slice(slash+1));
@@ -1374,6 +1457,10 @@
       else renderBoard(host);
       if(RBAC_ON)applyReadonlyBanner(); // K-49 Шаг3: баннер read-only после отрисовки раздела
       toggle(false); // закрыть мобильное меню при переходе
+      // п.4 аудита: при СМЕНЕ раздела прокрутка уходит наверх — иначе человек попадает на пустой
+      // экран и думает, что раздел не работает. Внутри раздела (deep-link по #view/arg, выбор
+      // строки, вкладки) позиция сохраняется — там она осмысленна.
+      if(v!==routePrevView){ routePrevView=v; try{window.scrollTo(0,0);}catch{} try{document.documentElement.scrollTop=0;document.body.scrollTop=0;}catch{} }
     }
     window.addEventListener('hashchange',route);
 
@@ -1432,7 +1519,7 @@
       let rows=(LOGI.shipments||[]).slice();
       if(logiFilterType!=='all')rows=rows.filter(s=>s.type===logiFilterType);
       rows.sort((a,b)=>String(b.num||'').localeCompare(String(a.num||'')));
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">Заявок нет. Создайте первую кнопкой «+ Заявка на перевозку».</div>'; logiShowDetail(null); return; }
+      if(!rows.length){ gh.innerHTML=emptyCard('Заявок на перевозку пока нет',{sub:'Первая заявка создаётся кнопкой «+ Заявка на перевозку» выше.'}); logiShowDetail(null); return; }
       if(logiSelId==null||!rows.some(r=>String(r.id)===String(logiSelId)))logiSelId=rows[0].id;
       const cols=[
         {key:'num',label:'№ ЗПер',w:118,cls:'nw',cell:s=>`<b style="color:var(--ink)">${esc(s.num||'—')}</b>`,sortVal:s=>s.num},
@@ -1445,7 +1532,7 @@
       erpGrid(gh,{key:'logi-list',cols,rows,rowKey:s=>String(s.id),selKey:String(logiSelId),
         onRow:s=>{ logiSelId=s.id; try{history.replaceState(null,'','#logistics/'+encodeURIComponent(s.id));}catch{} logiShowDetail(s.id); },
         onEnter:s=>{ logiSelId=s.id; logiShowDetail(s.id); },
-        info:`<span>Заявок: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик / ↑↓ — карточка</span>`});
+        info:`<span>Заявок: <b style="color:var(--ink)">${rows.length}</b></span>`});
       logiShowDetail(logiSelId);
     }
     function logiShipmentById(id){ return (LOGI.shipments||[]).find(x=>String(x.id)===String(id)); }
@@ -4144,7 +4231,7 @@
       let rows=all.slice();
       if(salesFilter) rows=rows.filter(r=>zpBucket(r.status)===salesFilter);
       rows.sort((a,b)=>String(b.numZp).localeCompare(String(a.numZp),'ru'));   // по умолчанию № ЗП ↓
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">Нет запросов по фильтру.</div>'; return; }
+      if(!rows.length){ gh.innerHTML=emptyCard('Запросов по текущему фильтру нет',{sub:'Снимите фильтр или создайте новый запрос.'}); return; }
       if(!salesSelZp||!rows.some(r=>r.numZp===salesSelZp)) salesSelZp=rows[0].numZp;
       const live=SALES&&SALES.mode==='live';
       const cols=[
@@ -4159,7 +4246,7 @@
       erpGrid(gh,{key:'sales-req',cols,rows,
         onRow:r=>{ salesSelZp=r.numZp; salesOpenZp=r.numZp; try{history.replaceState(null,'','#sales/'+encodeURIComponent(r.numZp));}catch{} renderSales(document.getElementById('view')); },
         del:live?{key:'sales_requests',idOf:r=>r.id,reload:()=>{salesSelZp=null;SALES=null;renderSales(document.getElementById('view'));}}:undefined,
-        info:`${srcChip(live)}<span>Запросов: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик по строке — открыть запрос</span>`,
+        info:`${srcChip(live)}<span>Запросов: <b style="color:var(--ink)">${rows.length}</b></span>`,
         toolbar:[{label:'+ Новый запрос',cls:'primary',onClick:()=>openCreateRequest()},{label:'Реестр (PDF)',onClick:()=>window.open('/api/sales/registry.pdf','_blank','noopener')}]});
     }
     // «Работа по запросу» — полноэкранная страница ЗП (эталон redesign-sales.html · ЭКРАН 2):
@@ -4573,7 +4660,8 @@
       ];
       erpGrid(document.getElementById('cpgrid'),{key:'cps2',cols,rows,onRow:c=>openCounterpartyCard(host,c.id),
         del:CPS.mode==='live'?{key:'sales_counterparties',idOf:c=>c.id,reload:()=>{CPS=null;renderCounterparties(host);}}:undefined,
-        info:`${srcChip(CPS.mode==='live')}<span>Контрагентов: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик по строке — карточка</span>${CPS.warning?'<span class="c-red">'+esc(CPS.warning)+'</span>':''}`,
+        info:`${srcChip(CPS.mode==='live')}<span>Контрагентов: <b style="color:var(--ink)">${rows.length}</b></span>${CPS.warning?'<span class="c-red">'+esc(CPS.warning)+'</span>':''}`,
+        empty:{text:'Контрагентов пока нет',sub:CPS.mode==='live'?'Реестр заполнится по мере заведения заказчиков и поставщиков.':'Реестр контрагентов появится в LIVE-режиме.'},
         toolbar:[{label:'+ Контрагент',cls:'primary',onClick:()=>alert('Создание контрагента — дедуп по ИНН, запись в NocoDB (T2).')}]});
     }
 
@@ -5804,7 +5892,7 @@
       ];
       erpGrid(body,{key:'proc-req',cols,rows:all,onRow:openZnzCard,
         del:PROC.mode==='live'?{key:'procurement_requests',idOf:r=>r.id,reload:()=>{PROC=null;renderProcurement(document.getElementById('view'));}}:undefined,
-        info:`${srcChip(PROC.mode==='live')}<span>Заявок: <b style="color:var(--ink)">${all.length}</b></span><span class="c-gray">клик по строке — карточка</span>`});
+        info:`${srcChip(PROC.mode==='live')}<span>Заявок: <b style="color:var(--ink)">${all.length}</b></span>`});
     }
 
     // ── Реестр поставщиков РОП (#s4, Ф.5–К) ──
@@ -7230,7 +7318,7 @@
       else if(whFilter==='dav')rows=rows.filter(i=>i.customerOwned);
       else if(whFilter==='def')rows=rows.filter(i=>i.belowMin);
       rows.sort((a,b)=>whDefRatio(a)-whDefRatio(b));   // дефицит наверху (по отношению остаток/мин)
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+((WH&&WH.mode==='live')?'Нет позиций по фильтру.':'Раздел «Склад» ещё не наполнен (таблицы появятся после APPLY).')+'</div>'; whShowDetail(null); return; }
+      if(!rows.length){ gh.innerHTML=(WH&&WH.mode==='live')?emptyCard('Позиций по текущему фильтру нет',{sub:'Снимите фильтр, чтобы увидеть весь склад.'}):emptyCard('Раздел «Склад» ещё не наполнен',{sub:'Таблицы склада появятся после APPLY миграции.'}); whShowDetail(null); return; }
       if(!whSelCode||!rows.some(r=>r.code===whSelCode)) whSelCode=rows[0].code;
       const live=WH&&WH.mode==='live';
       const cols=[
@@ -7247,7 +7335,7 @@
       erpGrid(gh,{key:'wh-items',cols,rows,rowKey:i=>i.code,selKey:whSelCode,rowClass:i=>(i.belowMin&&!i.customerOwned)?'row-def':'',
         onRow:i=>{ whSelCode=i.code; try{history.replaceState(null,'','#warehouse/'+encodeURIComponent(i.code));}catch{} whShowDetail(i.code); },
         onEnter:i=>{ whSelCode=i.code; whShowDetail(i.code); },
-        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик / ↑↓ — карточка</span>`});
+        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
       whShowDetail(whSelCode);
     }
     async function whShowDetail(code){
@@ -7571,7 +7659,7 @@
       let rows=items.slice();
       if(catFilter==='noalias')rows=rows.filter(i=>!i.aliasCount);
       else if(catFilter==='noprice')rows=rows.filter(i=>!i.priceCount);
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+(live?'Нет позиций по фильтру. Добавьте канон-позицию кнопкой «+ Канон-позиция».':'Раздел «Каталог» ещё не наполнен (таблицы появятся после APPLY migrate-032).')+'</div>'; catShowDetail(null); return; }
+      if(!rows.length){ gh.innerHTML=live?emptyCard('Позиций по текущему фильтру нет',{sub:'Снимите фильтр или добавьте канон-позицию кнопкой «+ Канон-позиция».'}):emptyCard('Раздел «Каталог» ещё не наполнен',{sub:'Таблицы каталога появятся после APPLY migrate-032.'}); catShowDetail(null); return; }
       if(catSelId==null||!rows.some(r=>String(r.id)===String(catSelId))) catSelId=rows[0].id;
       const cols=[
         {key:'name',label:'Каноническое наименование',cls:'ell',cell:i=>`<span title="${esc(i.name||'')}" style="font-weight:600;color:var(--ink)">${esc(i.name||'—')}</span>`,sortVal:i=>i.name},
@@ -7586,7 +7674,7 @@
         onRow:i=>{ catSelId=i.id; try{history.replaceState(null,'','#catalog/'+encodeURIComponent(i.id));}catch{} catShowDetail(i.id); },
         onEnter:i=>{ catSelId=i.id; catShowDetail(i.id); },
         del:live?{key:'catalog_canon',idOf:(r)=>r.id,reload:()=>{catCardCache={};CAT=null;renderCatalog(document.getElementById('view'));}}:undefined,
-        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик / ↑↓ — карточка</span>`});
+        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
       catShowDetail(catSelId);
     }
     async function catShowDetail(id){
@@ -7888,11 +7976,16 @@
       const to1SoonN=items.filter(i=>{const n=eqDaysLeft(i.to1Next);return n!=null&&n>=0&&n<=14;}).length;
       const tag=srcChip(live, live?(items.length+' ед. · '+(k.sections||0)+' участков'):'реестр «Оборудование» ещё не наполнен');
       const m=(lbl,num,col,sub)=>`<div class="m"><div class="lbl">${lbl}</div><div class="num"${col?` style="color:${col}"`:''}>${num}</div>${sub?`<div style="font-size:10.5px;color:var(--sub);margin-top:1px">${sub}</div>`:''}</div>`;
+      // п.5 аудита «честные нули»: показатель без данных — прочерк с пояснением, а не 0.
+      //  «ТО-1 просрочено: 0» при пустом графике ТО читалось как «всё в порядке» — это ложь.
+      const noEq=!items.length;                                     // реестра оборудования нет вообще
+      const noTo1=!items.some(i=>i.to1Next);                        // ни у одной единицы не задано ТО-1
+      const dash='<span style="color:var(--gray4,#94a3b4)">—</span>';
       host.innerHTML=`<div class="mstrip">
-          ${m('Единиц оборудования',k.total??items.length,'var(--navy)','реестр Ф.3–О.3')}
-          ${m('В работе',k.inWork??0,'var(--green)', (k.repair?k.repair+' в ремонте':''))}
-          ${m('С ЧПУ',k.cnc??0,'var(--ink)','числовое ПУ')}
-          ${m('ТО-1 просрочено',to1OverdueN,(to1OverdueN?'var(--red)':'var(--ink)'),(to1SoonN?to1SoonN+' в ближайшие 14 дн':'по графику'))}
+          ${m('Единиц оборудования',noEq?dash:(k.total??items.length),noEq?'':'var(--navy)',noEq?'реестр Ф.3–О.3 не наполнен':'реестр Ф.3–О.3')}
+          ${m('В работе',noEq?dash:(k.inWork??0),noEq?'':'var(--green)',noEq?'данных нет':(k.repair?k.repair+' в ремонте':''))}
+          ${m('С ЧПУ',noEq?dash:(k.cnc??0),noEq?'':'var(--ink)',noEq?'данных нет':'числовое ПУ')}
+          ${m('ТО-1 просрочено',noTo1?dash:to1OverdueN,(noTo1?'':(to1OverdueN?'var(--red)':'var(--ink)')),(noTo1?(noEq?'данных нет':'график ТО не заведён'):(to1SoonN?to1SoonN+' в ближайшие 14 дн':'по графику')))}
         </div>
         <div class="filters card" style="margin-top:var(--gap);padding:8px 10px">
           <div class="seg" id="eqseg">
@@ -7959,7 +8052,7 @@
       // сортировка по умолчанию ↑ по ТО-1 след. (просрочка/ближайшие наверху)
       rows.sort((a,b)=>{const x=a.to1Next?(Date.parse(a.to1Next)||8e15):8e15,y=b.to1Next?(Date.parse(b.to1Next)||8e15):8e15;return x-y;});
       const live=EQ&&EQ.mode==='live';
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+((EQ&&EQ.mode==='live')?'Оборудование не найдено по фильтру.':'Реестр «Оборудование» ещё не наполнен (появится в LIVE-режиме).')+'</div>'; eqRegGridApi=null; return; }
+      if(!rows.length){ gh.innerHTML=(EQ&&EQ.mode==='live')?emptyCard('Оборудования по текущему фильтру нет',{sub:'Снимите фильтр или заведите новую единицу.',action:{label:'+ Оборудование',onClick:()=>openEquipForm(null)}}):emptyCard('Реестр «Оборудование» ещё не наполнен',{sub:'Записи появятся в LIVE-режиме.'}); eqRegGridApi=null; return; }
       const cncChip='<span class="src-chip" style="font-size:9.5px;padding:1px 5px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">ЧПУ</span>';
       const cols=[
         {key:'code',label:'Инв. №',w:112,cls:'code',cell:i=>esc(i.invNo||'—'),sortVal:i=>i.invNo},
@@ -7975,7 +8068,7 @@
         rowClass:i=>eqOverdue(i.to1Next)?'row-def':'',
         onRow:i=>{ eqSelId=i.id; eqTab='tree'; try{history.replaceState(null,'','#equipment/'+encodeURIComponent(i.id));}catch{}
           const sg=document.getElementById('eqseg'); if(sg)sg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t==='tree')); eqBody(); },
-        info:`${srcChip(live)}<span>Единиц: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик по строке — паспорт единицы</span>`});
+        info:`${srcChip(live)}<span>Единиц: <b style="color:var(--ink)">${rows.length}</b></span>`});
     }
 
     // ── Вкладка 1c: Обслуживание — план/внеплан ТО ──
@@ -7993,6 +8086,9 @@
       const overdue=all.filter(r=>r.kind==='planned'&&eqOverdue(r.due));
       const soon=all.filter(r=>r.kind==='planned'&&(()=>{const n=eqDaysLeft(r.due);return n!=null&&n>=0&&n<=14;})());
       const unpl=all.filter(r=>r.kind==='unplanned');
+      // п.5 аудита «честные нули»: пустой план-график ТО — это «—», а не «просрочено 0»
+      const noEqMnt=!((EQ&&EQ.items)||[]).length;                  // реестра оборудования нет
+      const noPlan=!all.some(r=>r.kind==='planned');               // плановых ТО не заведено
       const tile=(num,lbl,col,sub)=>`<div class="card" style="flex:1;padding:11px 13px;border-left:3px solid ${col}"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:22px;font-weight:800;color:${col};line-height:1">${num}</span><span style="font-size:12px;color:var(--sub)">${lbl}</span></div><div style="font-size:11.5px;color:#64748b;margin-top:5px">${sub||'&nbsp;'}</div></div>`;
       const segT=(v,l)=>`<button data-s="${v}" class="${eqMntSeg===v?'on':''}">${l}</button>`;
       const segY=(v,l,col)=>`<button data-y="${v}" class="${eqMntType===v?'on':''}"${col?` style="color:${col}"`:''}>${l}</button>`;
@@ -8001,10 +8097,13 @@
           <button class="tbtn primary" id="eqmnt-plan" style="margin-left:auto">+ Запланировать ТО</button>
         </div>
         <div style="display:flex;gap:8px;margin-top:var(--gap);flex-wrap:wrap">
-          ${tile(overdue.length,'ТО-1 просрочено','var(--red)',overdue.map(r=>r.eq.invNo).slice(0,3).join(', ')||'нет')}
-          ${tile(soon.length,'в 14 дней','var(--amber)','плановые по графику')}
-          ${tile(unpl.length,'внеплановое сейчас','#7c3aed',unpl.map(r=>r.eq.invNo).slice(0,3).join(', ')||'нет')}
-          ${tile(0,'выполнено за месяц','var(--green)','план/внеплан — в LIVE')}
+          ${noPlan?tile('—','ТО-1 просрочено','var(--gray4,#94a3b4)','график ТО не заведён')
+                  :tile(overdue.length,'ТО-1 просрочено','var(--red)',overdue.map(r=>r.eq.invNo).slice(0,3).join(', ')||'нет')}
+          ${noPlan?tile('—','в 14 дней','var(--gray4,#94a3b4)','график ТО не заведён')
+                  :tile(soon.length,'в 14 дней','var(--amber)','плановые по графику')}
+          ${noEqMnt?tile('—','внеплановое сейчас','var(--gray4,#94a3b4)','реестр оборудования пуст')
+                   :tile(unpl.length,'внеплановое сейчас','#7c3aed',unpl.map(r=>r.eq.invNo).slice(0,3).join(', ')||'нет')}
+          ${tile('—','выполнено за месяц','var(--gray4,#94a3b4)','журнал фактов ТО ведётся в LIVE')}
         </div>
         <div class="filters card" style="padding:8px 10px;margin-top:var(--gap)">
           <div class="seg" id="eqmnt-seg">${segT('todo','К выполнению')}${segT('all','Все')}${segT('done','Выполненные')}</div>
@@ -8026,7 +8125,7 @@
       else if(eqMntSeg==='done')rows=[]; // факты ТО ведутся в LIVE
       rows.sort((a,b)=>{const x=Date.parse(a.due)||8e15,y=Date.parse(b.due)||8e15;return x-y;});
       const live=EQ&&EQ.mode==='live';
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+((EQ&&EQ.mode==='live')?(eqMntSeg==='done'?'Журнал выполненных ТО ведётся в LIVE-режиме.':'Нет ТО по фильтру.'):'План-график появится после наполнения реестра (LIVE).')+'</div>'; eqMntGridApi=null; return; }
+      if(!rows.length){ gh.innerHTML=(EQ&&EQ.mode==='live')?(eqMntSeg==='done'?emptyCard('Журнал выполненных ТО пуст',{sub:'Факты ТО фиксируются кнопкой «Отметить ✓» в плане-графике.'}):emptyCard('ТО по текущему фильтру нет',{sub:'Снимите фильтр или запланируйте ТО.',action:{label:'+ Запланировать ТО',onClick:()=>eqMntForm(null)}})):emptyCard('План-график ТО пока пуст',{sub:'Появится после наполнения реестра оборудования (LIVE).'}); eqMntGridApi=null; return; }
       const dueCell=(r)=>{ const n=eqDaysLeft(r.due); if(n!=null&&n<0)return `<b class="c-red" style="font-weight:700">${fmt(r.due)} · ${-n>0?'−'+(-n)+' дн':'сегодня'}</b>`; if(n===0)return `<b class="c-red" style="font-weight:700">${fmt(r.due)} · сегодня</b>`; if(n!=null&&n<=14)return `<span class="c-amber">${fmt(r.due)} · через ${n} дн</span>`; return `<span style="color:#64748b">${fmt(r.due)}${n!=null?' · через '+n+' дн':''}</span>`; };
       const cols=[
         {key:'code',label:'Инв. №',w:112,cls:'code',cell:r=>esc(r.eq.invNo||'—'),sortVal:r=>r.eq.invNo},
@@ -8499,7 +8598,7 @@
       if(tlSub==='osn') rows.sort((a,b)=>String(a.invNo||a.code).localeCompare(String(b.invNo||b.code),'ru'));
       else rows.sort((a,b)=>tlDefRatio(a)-tlDefRatio(b));   // дефицит/пусто наверху
       tlSummary(rows.length,subAll.length);
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+((TL&&TL.mode==='live')?'Нет позиций по фильтру.':'Модуль ещё не наполнен (таблицы появятся после миграции).')+'</div>'; tlGridApi=null; tlSel=null; tlShowDetail(null); tlSyncDrawer(); return; }
+      if(!rows.length){ gh.innerHTML=(TL&&TL.mode==='live')?emptyCard('Позиций по текущему фильтру нет',{sub:'Снимите фильтр, чтобы увидеть весь инструмент.'}):emptyCard('Модуль «Инструмент и оснастка» ещё не наполнен',{sub:'Таблицы появятся после миграции.'}); tlGridApi=null; tlSel=null; tlShowDetail(null); tlSyncDrawer(); return; }
       // K-39: drawer НЕ открывается автоматически — только по клику/deep-link. Сбрасываем «протухший» выбор.
       if(tlSel&&!rows.some(r=>r.code===tlSel)) tlSel=null;
       const live=TL&&TL.mode==='live';
@@ -8529,7 +8628,7 @@
       tlGridApi=erpGrid(gh,{key:'tl-'+tlSub,cols,rows,rowKey:i=>i.code,selKey:tlSel,rowClass:i=>((tlSub!=='osn'&&(i.belowMin||Number(i.balance)<=0))||i.calOverdue)?'row-def':'',
         onRow:i=>{ tlSel=i.code; try{history.replaceState(null,'','#tools/'+encodeURIComponent(i.code));}catch{} tlBody(); },
         onEnter:i=>{ tlSel=i.code; try{history.replaceState(null,'','#tools/'+encodeURIComponent(i.code));}catch{} tlBody(); },
-        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик / ↑↓ — карточка</span>`});
+        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
     }
     async function tlShowDetail(code){
       const host=document.getElementById('tldetail'); if(!host)return;
@@ -9082,7 +9181,7 @@
         <div id="tcgrid" style="margin-top:var(--gap)"></div>`;
       host.querySelector('#tc-new').onclick=()=>tcForm(kind,null);
       const gh=host.querySelector('#tcgrid');
-      if(!items.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+(live?('Каталог пуст — нажмите «+ Добавить '+newLbl+'».'):'Таблицы каталога появятся после миграции (LIVE-режим требует токен NocoDB).')+(D.warning?'<div style="margin-top:6px;color:#b45309">'+esc(D.warning)+'</div>':'')+'</div>'; return; }
+      if(!items.length){ gh.innerHTML=(live?emptyCard('Каталог пуст',{sub:'Первая запись добавляется кнопкой «+ Добавить '+newLbl+'».'}):emptyCard('Таблицы каталога ещё не заведены',{sub:'Появятся после миграции (LIVE-режим требует токен NocoDB).'}))+(D.warning?'<div class="card pad" style="margin-top:8px;color:#b45309;font-size:12.5px">'+esc(D.warning)+'</div>':''); return; }
       let cols;
       if(kind==='holders'){
         cols=[
@@ -9105,7 +9204,7 @@
       }
       erpGrid(gh,{key:'tc-'+kind,cols,rows:items,rowKey:i=>String(i.id),
         onRow:i=>tcForm(kind,i),onEnter:i=>tcForm(kind,i),
-        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${items.length}</b></span><span class="c-gray">клик — карточка / правка</span>`});
+        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${items.length}</b></span>`});
     }
     // K-82: полноэкранная страница-форма внутри раздела «Инструмент» (вместо модалки).
     // Открывается в контейнере #tlbody, прячет верхний seg-таб; «← Назад» восстанавливает вкладку через tlBody().
@@ -9234,7 +9333,7 @@
         <div id="cjgrid" style="margin-top:var(--gap)"></div>`;
       host.querySelector('#cj-new').onclick=()=>cjForm(null);
       const gh=host.querySelector('#cjgrid');
-      if(!items.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+(live?'Библиотека пуста — нажмите «+ Добавить комплект».':'Таблица кулачков появится после миграции (LIVE-режим требует токен NocoDB).')+(D.warning?'<div style="margin-top:6px;color:#b45309">'+esc(D.warning)+'</div>':'')+'</div>'; return; }
+      if(!items.length){ gh.innerHTML=(live?emptyCard('Библиотека кулачков пуста',{sub:'Первый комплект добавляется кнопкой «+ Добавить комплект».'}):emptyCard('Таблица кулачков ещё не заведена',{sub:'Появится после миграции (LIVE-режим требует токен NocoDB).'}))+(D.warning?'<div class="card pad" style="margin-top:8px;color:#b45309;font-size:12.5px">'+esc(D.warning)+'</div>':''); return; }
       const cols=[
         {key:'setNo',label:'№ комплекта',w:130,cls:'code',cell:i=>`<b style="color:var(--navy)">${esc(i.setNo||'—')}</b>`,sortVal:i=>i.setNo},
         {key:'type',label:'Тип',w:130,cls:'nw',cell:i=>esc(i.jawType||'—'),sortVal:i=>i.jawType},
@@ -9248,7 +9347,7 @@
       erpGrid(gh,{key:'cj',cols,rows:items,rowKey:i=>String(i.id),
         onRow:i=>cjForm(i),onEnter:i=>cjForm(i),
         del:live?{key:'chuck_jaws',idOf:i=>i.id,reload:()=>{cjCache=null;cjBody(host);}}:undefined,
-        info:`${srcChip(live)}<span>Комплектов: <b style="color:var(--ink)">${items.length}</b></span><span class="c-gray">клик — карточка / правка</span>`});
+        info:`${srcChip(live)}<span>Комплектов: <b style="color:var(--ink)">${items.length}</b></span>`});
     }
     function cjForm(item){
       const edit=!!item; const D=cjCache||{}; const stations=D.stations||[];
@@ -9411,7 +9510,7 @@
       const holders=(H.items||[]);
       const info='<div class="tl-infoline"><span>ⓘ</span><span>Связка «державка ↔ совместимые пластины» показана единой парой — сразу видно, что и с чем работает, каким сплавом и есть ли остаток на складе. Раньше эта связь была спрятана внутри формы правки державки.</span></div>';
       let cards;
-      if(!holders.length){ cards='<div class="card pad" style="color:var(--sub);font-size:13px">'+(live?'Державки ещё не заведены — вкладка «Державки (ISO 5608)» → «+ Добавить державку».':'Каталог появится после миграции (LIVE-режим требует токен NocoDB).')+'</div>'; }
+      if(!holders.length){ cards=live?emptyCard('Державки ещё не заведены',{sub:'Вкладка «Державки (ISO 5608)» → «+ Добавить державку».'}):emptyCard('Каталог появится после миграции',{sub:'LIVE-режим требует токен NocoDB.'}); }
       else cards=holders.map((h,ix)=>{
         const ins=(h.compat||[]);
         const insHtml=ins.length?ins.map(c=>`<div class="tl-insrow"><div class="tl-itop"><span class="tl-icode">${esc(c.iso)}</span><span style="margin-left:auto">${tlStockChip(tlInsertStock(c.iso),true)}</span></div><div class="tl-imeta">${c.grade?tlChip('сплав '+c.grade,'exp'):''}</div></div>`).join(''):'<div class="tl-hint">Нет связанных пластин. Откройте «Державки (ISO 5608)» и выберите совместимые.</div>';
@@ -9857,7 +9956,9 @@
     const toneColor={red:'var(--red)',amber:'var(--amber)',green:'var(--green)',blue:'var(--navy)',navy:'var(--navy)'};
     function renderBoard(host){
       const m=boardKpis();
-      host.innerHTML=`<div class="mstrip">${m.map(k=>`<div class="m"><div class="lbl">${esc(k.label)}</div><div class="num" style="color:${toneColor[k.tone]||'var(--navy)'}">${k.n}</div></div>`).join('')}</div>
+      // п.5 аудита «честные нули»: k.n===null → прочерк и поясняющая подпись (данных нет),
+      // иначе число и обычная подпись. Подпись показываем всегда — раньше её на доске не было.
+      host.innerHTML=`<div class="mstrip">${m.map(k=>`<div class="m"><div class="lbl">${esc(k.label)}</div><div class="num" style="color:${k.n==null?'var(--gray4,#94a3b4)':(toneColor[k.tone]||'var(--navy)')}">${k.n==null?'—':k.n}</div>${k.sub?`<div style="font-size:10.5px;color:var(--sub);margin-top:1px">${esc(k.sub)}</div>`:''}</div>`).join('')}</div>
         <div class="erp-toolbar" style="margin-top:10px"><div class="seg" id="board-seg">
           <button data-m="status" class="${boardMode==='status'?'on':''}">По статусу</button>
           <button data-m="section" class="${boardMode==='section'?'on':''}">По участку</button>
@@ -9954,6 +10055,34 @@
       return `<div class="prog"><div class="bar"><i style="width:${pct}%;background:${pct===100?'var(--green)':'var(--blue)'}"></i></div><span class="n">${d}/${total}</span></div>`;
     }
     function doneCount(o){return (o.tasks||[]).filter(t=>t.status==='Выполнено').length;}
+    // ── Контроль (Ф.3/Ф.4/Ф.5) по конкретному ПЗ ──────────────────────────────
+    //  Связь акта с заказом в данных ЕСТЬ: /api/board отдаёт по каждому акту поле pz
+    //  («Договор / Заказ №» Ф.3, «Заказ №» Ф.4, «Заказ № / МК №» Ф.5 в NocoDB).
+    //  Поле текстовое и может нести № договора/МК рядом с № ПЗ, поэтому сверяем
+    //  вхождением номера ПЗ — тот же приём, что в блоке «Риск срока».
+    //  ВАЖНО (СМК): без такой фильтрации карточка показывала чужие акты. Пусто —
+    //  показываем пустое состояние, а НЕ первый попавшийся акт раздела.
+    const ctlPzRef=(r)=>String((r&&(r.pz??r.numPz??r.order??r.object??r.pzNo))||'').trim();
+    const ctlOfPz=(arr,numPz)=>{ const pz=String(numPz||'').trim(); if(!pz)return [];
+      return (arr||[]).filter(r=>{ const ref=ctlPzRef(r); return !!ref&&ref.includes(pz); }); };
+    // Единый блок «Контроль качества» карточки ПЗ: и модалка (orderDetailHtml), и вкладка «Контроль».
+    function orderCtlBlockHtml(o){
+      const c=DATA.controls||{};
+      const inc=ctlOfPz(c.incoming,o.numPz), acc=ctlOfPz(c.acceptance,o.numPz), nco=ctlOfPz(c.nonconformity,o.numPz);
+      if(!inc.length&&!acc.length&&!nco.length)
+        return emptyState('По этому заказу актов контроля нет',{
+          sub:'Ни входного (Ф.3), ни приёмочного (Ф.4), ни акта о несоответствии (Ф.5) со ссылкой на '+o.numPz+'.',
+          action:{label:'Открыть «Контроль качества»',href:'#control'}});
+      const vbadge=(v)=>badge(v==='ГОДЕН'?'Выполнено':v);
+      const qrow=(inner)=>`<div style="display:flex;align-items:center;gap:7px">${inner}</div>`;
+      const qcell=(hd,arr,render,none)=>`<div class="qcell"><div class="qh">${hd}</div><div class="qv" style="flex-direction:column;align-items:stretch;gap:5px">${
+        arr.length?arr.map(x=>qrow(render(x))).join(''):`<span style="color:var(--sub)">${esc(none)}</span>`}</div></div>`;
+      return `<div class="qc">
+        ${qcell('Ф.3 Входной',inc,x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`,'актов по заказу нет')}
+        ${qcell('Ф.4 Приёмочный',acc,x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`,'протоколов по заказу нет')}
+        ${qcell('Ф.5 Несоответствия',nco,x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto;color:#334155">${esc(x.decision||'открыто')}</span>`,'несоответствий по заказу нет')}
+      </div>`;
+    }
     const isDone=(s)=>s==='Выполнено'||s==='Отгружен'||s==='Закрыт';
     const orderDone=(o)=>{const t=(o.tasks||[]).length;return t>0&&doneCount(o)===t;};
     // «следующая операция»: первая в работе, иначе первая в очереди
@@ -9966,19 +10095,24 @@
       const overdue=O.filter(o=>o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status));
       const working=O.filter(o=>o.status==='В работе');
       const waitOtk=O.flatMap(o=>o.tasks||[]).filter(t=>t.otk&&t.status==='Выполнено');
-      const nc=(DATA.controls&&DATA.controls.nonconformity)||[];
+      const ncRaw=(DATA.controls||{}).nonconformity;                 // undefined = данных о Ф.5 нет вообще
+      const nc=ncRaw||[];
       const ship=O.filter(o=>orderDone(o)&&o.status!=='Отгружен'&&o.status!=='Закрыт');
+      // п.5 аудита «честные нули»: n===null → раздел рисует прочерк с поясняющей подписью.
+      //  Нет заказов — «Просрочено/В работе/К отгрузке» не 0, а «—»: 0 читается как «всё чисто».
+      //  Нет ни одной задачи — «Ждут ОТК» тоже «—» (маршруты не заведены, а не «ОТК пуст»).
+      const noOrders=!O.length, noTasks=!O.some(o=>(o.tasks||[]).length);
       return [
-        {label:'Просрочено',tone:'red',n:overdue.length,sub:overdue[0]?`${overdue[0].numPz} · ${overdue[0].customer||''}`:'нет'},
-        {label:'В работе',tone:'blue',n:working.length,sub:'заказов сейчас'},
-        {label:'Ждут ОТК',tone:'amber',n:waitOtk.length,sub:waitOtk.length?'операций на контроль':'нет'},
-        {label:'Несоответствия',tone:'red',n:nc.length,sub:nc[0]?`${nc[0].num} · ${nc[0].decision||'открыто'}`:'нет'},
-        {label:'К отгрузке',tone:'green',n:ship.length,sub:ship.length?'готовы к отгрузке':'нет'},
+        {label:'Просрочено',tone:'red',n:noOrders?null:overdue.length,sub:noOrders?'заказов нет':(overdue[0]?`${overdue[0].numPz} · ${overdue[0].customer||''}`:'нет')},
+        {label:'В работе',tone:'blue',n:noOrders?null:working.length,sub:noOrders?'заказов нет':'заказов сейчас'},
+        {label:'Ждут ОТК',tone:'amber',n:noTasks?null:waitOtk.length,sub:noTasks?'задач по заказам нет':(waitOtk.length?'операций на контроль':'нет')},
+        {label:'Несоответствия',tone:'red',n:ncRaw?nc.length:null,sub:ncRaw?(nc[0]?`${nc[0].num} · ${nc[0].decision||'открыто'}`:'нет'):'данных Ф.5 нет'},
+        {label:'К отгрузке',tone:'green',n:noOrders?null:ship.length,sub:noOrders?'заказов нет':(ship.length?'готовы к отгрузке':'нет')},
       ];
     }
     function renderKpis(){const host=document.getElementById('kpis');if(!host)return;
       host.innerHTML=boardKpis().map(k=>`<div class="kpi kpi-${k.tone}">
-        <div class="kl">${esc(k.label)}</div><div class="kn">${k.n}</div><div class="ks">${esc(k.sub)}</div></div>`).join('');}
+        <div class="kl">${esc(k.label)}</div><div class="kn"${k.n==null?' style="color:var(--gray4,#94a3b4)"':''}>${k.n==null?'—':k.n}</div><div class="ks">${esc(k.sub)}</div></div>`).join('');}
 
     // Раздел «Заказы (ПЗ)» — реестр производственных заданий
     // Заказы (ПЗ) — master-detail (эталон #s3)
@@ -10021,10 +10155,6 @@
       const tk=(o.tasks||[]).slice().sort((a,b)=>(Number(a.opNum)||0)-(Number(b.opNum)||0));
       const tasks=tk.map(t=>{const cls=t.status==='Выполнено'?'done':(t.status==='В работе'?'work':'');
         return `<div class="tcard ${cls}"><div class="st">${esc(t.sectionCode||t.section||'')}${(t.opNum!==''&&t.opNum!=null)?' · оп.'+esc(t.opNum):''}</div><div class="nm">${esc(t.title||t.op||'')}</div>${badge(t.status)}</div>`;}).join('')||'<div style="color:var(--sub)">Задач нет</div>';
-      const c=DATA.controls||{};
-      const vbadge=(v)=>badge(v==='ГОДЕН'?'Выполнено':v);
-      const qcell=(h,arr,fld)=>{const x=(arr||[])[0];
-        return `<div class="qcell"><div class="qh">${h}</div><div class="qv">${x?`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x[fld])}</span>`:'<span style="color:var(--sub)">нет</span>'}</div></div>`;};
       const routes=(o.routes||[]).map(r=>pbtn('route',r.mk,'Ф.13 '+String(r.mk).replace('МК-',''))).join('');
       return `<div class="card pad"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:20px;font-weight:700;color:var(--navy)">${esc(o.numPz)}</span>${badge(o.status)}
@@ -10033,9 +10163,7 @@
         <div class="card pad nomen"><div class="sec-h" style="margin-bottom:8px">Номенклатура</div>${nomen}${genBtn}</div>
         <div class="card pad"><div class="sec-h" style="margin-bottom:10px">Задачи по участкам</div><div class="tasks">${tasks}</div></div>
         <div class="card pad"><div class="sec-h" style="margin-bottom:10px">Контроль качества</div>
-          <div class="qc">${qcell('Ф.3 Входной',c.incoming,'verdict')}${qcell('Ф.4 Приёмочный',c.acceptance,'verdict')}
-            <div class="qcell"><div class="qh">Ф.5 Несоответствия</div><div class="qv" style="color:var(--sub)">${(c.nonconformity&&c.nonconformity[0])?esc(c.nonconformity[0].num)+' · '+esc(c.nonconformity[0].decision||'открыто'):'нет открытых'}</div></div>
-          </div></div>`;
+          ${orderCtlBlockHtml(o)}</div>`;
     }
     // ══ Раздел «Учёт остатков металла» — реестр остатка (кг) + журнал + деловые остатки (migrate-035) ══
     //  Образец парадигмы — модуль «Инструмент» (renderTools): реестр + running-баланс «Остаток после»,
@@ -10167,7 +10295,7 @@
       if(mtFilter==='def')rows=rows.filter(i=>i.belowMin||i.available<=0);
       rows.sort((a,b)=>mtDefRatio(a)-mtDefRatio(b));
       mtSummary(rows.length,items.length);
-      if(!rows.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+((MT&&MT.mode==='live')?'Нет позиций по фильтру.':'Раздел ещё не наполнен (таблицы появятся после миграции).')+'</div>'; mtGridApi=null; mtSel=null; mtShowDetail(null); mtSyncDrawer(); return; }
+      if(!rows.length){ gh.innerHTML=(MT&&MT.mode==='live')?emptyCard('Позиций по текущему фильтру нет',{sub:'Снимите фильтр, чтобы увидеть весь остаток металла.'}):emptyCard('Учёт остатков металла ещё не наполнен',{sub:'Таблицы появятся после миграции.'}); mtGridApi=null; mtSel=null; mtShowDetail(null); mtSyncDrawer(); return; }
       if(mtSel&&!rows.some(r=>r.code===mtSel)) mtSel=null;
       const live=MT&&MT.mode==='live';
       const cols=[
@@ -10187,7 +10315,7 @@
       mtGridApi=erpGrid(gh,{key:'mt',cols,rows,rowKey:i=>i.code,selKey:mtSel,rowClass:i=>(i.belowMin||i.available<=0)?'row-def':'',
         onRow:i=>{ mtSel=i.code; try{history.replaceState(null,'','#metal/'+encodeURIComponent(i.code));}catch{} mtShowDetail(i.code); mtSyncDrawer(); },
         onEnter:i=>{ mtSel=i.code; mtShowDetail(i.code); mtSyncDrawer(); },
-        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик / ↑↓ — карточка</span>`});
+        info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
       mtShowDetail(mtSel); mtSyncDrawer();
     }
     async function mtShowDetail(code){
@@ -10527,7 +10655,7 @@
         <div id="mtremgrid" style="margin-top:var(--gap)"></div>`;
       const nb=host.querySelector('#mt-newrem'); if(nb)nb.onclick=()=>openMetalRemnant();
       const gh=host.querySelector('#mtremgrid');
-      if(!rem.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">'+(live?'Деловых остатков нет.':'Раздел ещё не наполнен.')+'</div>'; return; }
+      if(!rem.length){ gh.innerHTML=live?emptyCard('Деловых остатков нет',{sub:'Появятся после списания заготовок с возвратом остатка.'}):emptyCard('Раздел ещё не наполнен',{sub:'Данные появятся в LIVE-режиме.'}); return; }
       erpGrid(gh,{key:'mt-rem',rows:rem,cols:[
         {key:'code',label:'Код',w:104,cls:'code',cell:r=>esc(r.code),sortVal:r=>r.code},
         {key:'grade',label:'Марка',w:120,cls:'nw',cell:r=>esc(r.grade||'—'),sortVal:r=>r.grade},
@@ -10774,7 +10902,7 @@
       host.innerHTML=`<div class="filters"><span style="font-size:12.5px;color:var(--sub)">Принятые ЗнЗ на металл — подтвердите факт. вес, сертификат и ячейку → приходная проводка</span><span style="margin-left:auto"></span>${srcChip(live)}</div>
         <div id="mtintgrid" style="margin-top:var(--gap)"></div>`;
       const gh=host.querySelector('#mtintgrid');
-      if(!items.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">Нет принятых ЗнЗ на металл в очереди.</div>'; return; }
+      if(!items.length){ gh.innerHTML=emptyCard('Очередь приёмки металла пуста',{sub:'Сюда попадают принятые ЗнЗ на металл.'}); return; }
       erpGrid(gh,{key:'mt-int',rows:items,cols:[
         {key:'num',label:'№ ЗнЗ',w:130,cls:'code',cell:r=>esc(r.num||'—'),sortVal:r=>r.num},
         {key:'mat',label:'Материал',cls:'ell',cell:r=>esc(r.material||'—'),sortVal:r=>r.material},
@@ -10797,7 +10925,7 @@
       host.innerHTML=`<div class="filters"><span style="font-size:12.5px;color:var(--sub)">Позиции ≤ минимального запаса (по доступному) — сигнал на закупку</span><span style="margin-left:auto"></span>${srcChip(live)}</div>
         <div id="mtdefgrid" style="margin-top:var(--gap)"></div>`;
       const gh=host.querySelector('#mtdefgrid');
-      if(!sig.length){ gh.innerHTML='<div class="card pad" style="color:var(--sub);font-size:13px">Дефицита нет — все позиции выше минимального запаса.</div>'; return; }
+      if(!sig.length){ gh.innerHTML=emptyCard('Дефицита нет',{sub:'Все позиции выше минимального запаса.'}); return; }
       erpGrid(gh,{key:'mt-def',rows:sig,rowClass:()=>'row-def',cols:[
         {key:'code',label:'Код',w:104,cls:'code',cell:r=>esc(r.code),sortVal:r=>r.code},
         {key:'grade',label:'Марка',w:130,cls:'nw',cell:r=>`<b>${esc(r.grade||'—')}</b>`,sortVal:r=>r.grade},
@@ -10840,7 +10968,8 @@
         onEnter:r=>openOrderModal(r.o),                       // Enter — карточка целиком (модалка; полноэкранный роут — TODO)
         onEsc:()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);},
         del:DATA.mode==='live'?{key:'orders',idOf:r=>r.o.id,reload:()=>load()}:undefined,
-        info:`${srcChip(DATA.mode==='live')}<span>Всего: <b style="color:var(--ink)">${rows.length}</b></span>${lateN?`<span class="c-red">Просрочено: <b>${lateN}</b></span>`:''}${otkN?`<span class="c-amber">Ждут ОТК: <b>${otkN}</b></span>`:''}<span class="c-gray">клик/↑↓ — деталь · Esc — закрыть</span>`,
+        info:`${srcChip(DATA.mode==='live')}<span>Всего: <b style="color:var(--ink)">${rows.length}</b></span>${lateN?`<span class="c-red">Просрочено: <b>${lateN}</b></span>`:''}${otkN?`<span class="c-amber">Ждут ОТК: <b>${otkN}</b></span>`:''}`,
+        empty:{text:'Производственных заданий пока нет',sub:'Первое ПЗ создаётся кнопкой «+ Создать ПЗ» или размещением заказа из продаж.'},
         toolbar:[{label:'+ Создать ПЗ',cls:'primary',onClick:()=>openCreateOrder()}],
       });
       odShowDetail(ordSel);
@@ -10853,7 +10982,7 @@
       const today=new Date().toISOString().slice(0,10);
       const late=o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status);
       // Риск срока: открытые НП, связанные с ПЗ (best-effort по ссылке на № ПЗ) + просрочка плана
-      const nc=((DATA.controls&&DATA.controls.nonconformity)||[]).filter(n=>{const ref=String(n.pz||n.numPz||n.order||n.object||n.pzNo||'');return ref&&ref.includes(o.numPz)&&!/закры|устран|отклон/i.test(String(n.decision||n.status||''));});
+      const nc=ctlOfPz((DATA.controls||{}).nonconformity,o.numPz).filter(n=>!/закры|устран|отклон/i.test(String(n.decision||n.status||'')));
       const riskBlock=(late||nc.length)?`<div class="card pad" style="border-left:3px solid var(--red);background:#fef2f2"><b class="c-red">Риск срока</b> <span style="color:#334155">${[late?'план '+esc(fmt(o.plan))+' просрочен':'',nc.length?('открытые НП: '+nc.map(n=>esc(n.num||n.numNp||'НП')).join(', ')):''].filter(Boolean).join(' · ')}</span></div>`:'';
       const routeBtns=(o.routes||[]).map(r=>`<button class="tbtn" data-mk="${esc(r.mk)}">${aico('route',14)} Маршрут ${esc(String(r.mk).replace('МК-',''))}</button>`).join('');
       const tabs=[['pos','Позиции'],['tasks','Задачи'],['ctl','Контроль'],['hist','История']];
@@ -10893,10 +11022,11 @@
         const tasks=tk.map(t=>{const cls=t.status==='Выполнено'?'done':(t.status==='В работе'?'work':'');return `<div class="tcard ${cls}"><div class="st">${esc(t.sectionCode||t.section||'')}${(t.opNum!==''&&t.opNum!=null)?' · оп.'+esc(t.opNum):''}</div><div class="nm">${esc(t.title||t.op||'')}</div>${badge(t.status)}</div>`;}).join('')||'<div style="color:var(--sub)">Задач нет</div>';
         h.innerHTML=`<div class="card pad"><div class="tasks">${tasks}</div></div>`;
       } else if(ordTab==='ctl'){
-        const c=DATA.controls||{};
-        const vbadge=(v)=>badge(v==='ГОДЕН'?'Выполнено':v);
-        const qcell=(hd,arr,fld)=>{const x=(arr||[])[0];return `<div class="qcell"><div class="qh">${hd}</div><div class="qv">${x?`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x[fld])}</span>`:'<span style="color:var(--sub)">нет</span>'}</div></div>`;};
-        h.innerHTML=`<div class="card pad"><div class="qc">${qcell('Ф.3 Входной',c.incoming,'verdict')}${qcell('Ф.4 Приёмочный',c.acceptance,'verdict')}<div class="qcell"><div class="qh">Ф.5 Несоответствия</div><div class="qv" style="color:var(--sub)">${(c.nonconformity&&c.nonconformity[0])?esc(c.nonconformity[0].num)+' · '+esc(c.nonconformity[0].decision||'открыто'):'нет открытых'}</div></div></div><div style="font-size:11px;color:#5b6b7a;margin-top:8px">Контроль показан по разделу (Ф.3/Ф.4/Ф.5); привязка к конкретному ПЗ — TODO бэкенда.</div></div>`;
+        // СМК: только акты, привязанные к этому ПЗ (см. ctlOfPz). Раньше сюда падал первый акт раздела.
+        const ctlBlock=orderCtlBlockHtml(o);
+        const note=/empty-st/.test(ctlBlock)?''
+          :`<div style="font-size:11px;color:#5b6b7a;margin-top:8px">Показаны акты Ф.3/Ф.4/Ф.5 со ссылкой на ${esc(o.numPz)} (поле «Заказ №» в акте). Полный журнал — раздел <a href="#control" style="color:var(--blue)">Контроль качества</a>.</div>`;
+        h.innerHTML=`<div class="card pad">${ctlBlock}${note}</div>`;
       } else {
         const hist=(o.history||[]);
         h.innerHTML=`<div class="card pad"><div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px">${hist.length?hist.map(x=>`<div style="display:flex;gap:8px"><span style="color:#5b6b7a;white-space:nowrap">${esc(x.date||'')}</span><span>${esc(x.text||'')}</span></div>`).join(''):'<span class="c-gray">Журнал по ПЗ в реестре не ведётся (движение задач — на производственной доске).</span>'}</div></div>`;
@@ -11209,7 +11339,8 @@
       ];
       erpGrid(document.getElementById('rtgrid'),{key:'routes',cols,rows,onRow:r=>openRouteCard(host,r.id),
         del:RT.mode==='live'?{key:'routes',idOf:r=>r.id,reload:()=>{RT=null;renderRoutesView(host);}}:undefined,
-        info:`${srcChip(RT.mode==='live')}<span>Маршрутов: <b style="color:var(--ink)">${rows.length}</b></span><span class="c-gray">клик по строке — карта МК</span>${RT.warning?'<span class="c-red">'+esc(RT.warning)+'</span>':''}`,
+        info:`${srcChip(RT.mode==='live')}<span>Маршрутов: <b style="color:var(--ink)">${rows.length}</b></span>${RT.warning?'<span class="c-red">'+esc(RT.warning)+'</span>':''}`,
+        empty:{text:'Маршрутных карт пока нет',sub:'МК создаются из карточки заказа («Сформировать МК») или конструктором МК.'},
         toolbar:[{label:'+ Новая МК',cls:'primary',onClick:()=>openRouteBuilder(host,null)}]});
     }
     async function openRouteCard(host,id){
@@ -11949,7 +12080,8 @@
       ];
       erpGrid(document.getElementById('stgrid'),{key:'setup_cards',cols,rows:items,onRow:r=>openSetupCard(host,r.id),
         del:live?{key:'setup_cards',idOf:r=>r.id,reload:()=>{SETUP=null;renderSetupView(host);}}:undefined,
-        info:`${srcChip(live)}<span>Карт наладки: <b style="color:var(--ink)">${items.length}</b></span>${live?`<span class="c-gray">черновиков: ${k.draft||0} · утв.: ${k.approved||0}</span>`:''}<span class="c-gray">клик по строке — карта</span>${SETUP.warning?'<span class="c-red">'+esc(SETUP.warning)+'</span>':''}`,
+        info:`${srcChip(live)}<span>Карт наладки: <b style="color:var(--ink)">${items.length}</b></span>${live?`<span class="c-gray">черновиков: ${k.draft||0} · утв.: ${k.approved||0}</span>`:''}${SETUP.warning?'<span class="c-red">'+esc(SETUP.warning)+'</span>':''}`,
+        empty:{text:'Карт наладки пока нет',sub:live?'Карта наладки заводится на операцию маршрутной карты.':'Раздел заполнится в LIVE-режиме.'},
         toolbar:[{label:'+ Новая карта наладки',cls:'primary',onClick:()=>openSetupBuilder(host,null)}]});
     }
     // ── SVG-схема головки (Этап 2b+): круглый револьверный диск ИЛИ плоская гребёнка.

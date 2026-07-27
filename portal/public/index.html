@@ -361,6 +361,43 @@
     .st-save .btn{font-size:17px;padding:14px 26px;}
     @media (max-width:560px){ .st-statusrow{grid-template-columns:1fr 1fr;} .st-fields{grid-template-columns:1fr;} }
 
+    /* ── ЦЕХ, ШАГ 1: табы «Мои задачи» / «Очередь участка», светофор, панель времени ── */
+    .st-tabs{display:flex;gap:8px;margin:2px 0 12px;flex-wrap:wrap;}
+    .st-tab{font:inherit;font-size:16px;font-weight:600;padding:12px 20px;border-radius:10px;border:1px solid var(--bd);background:#fff;color:#475569;cursor:pointer;min-height:48px;}
+    .st-tab.on{background:var(--navy);border-color:var(--navy);color:#fff;}
+    .st-tab .n{opacity:.75;font-weight:600;margin-left:6px;}
+    /* светофор срока — единственный автоматический сигнал шага 1 */
+    .st-lite{display:inline-block;width:12px;height:12px;border-radius:50%;flex:none;}
+    .st-lite.red{background:#dc2626;} .st-lite.amber{background:#f59e0b;}
+    .st-lite.green{background:#16a34a;} .st-lite.gray{background:#94a3b8;}
+    .st-card .top{display:flex;align-items:center;gap:8px;}
+    .st-card.mine{border-left-color:var(--navy);box-shadow:0 0 0 2px rgba(15,37,64,.06),var(--shadow);}
+    .st-flag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap;}
+    .st-flag.nomk{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;}
+    .st-flag.review{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;}
+    .st-flag.run{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;}
+    /* панель времени — крупные элементы «под палец» (планшет/телефон в цеху) */
+    .st-time{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .st-tbtn{font:inherit;font-size:19px;font-weight:700;padding:22px 16px;border:0;border-radius:12px;color:#fff;cursor:pointer;min-height:74px;}
+    .st-tbtn.go{background:var(--green);} .st-tbtn.stop{background:#dc2626;}
+    .st-tbtn:disabled{background:#cbd5e1;color:#64748b;cursor:not-allowed;}
+    .st-tbtn:active:not(:disabled){transform:scale(.985);}
+    .st-tinfo{margin-top:12px;font-size:15px;color:#334155;display:flex;flex-wrap:wrap;gap:6px 18px;}
+    .st-tinfo b{color:var(--navy);}
+    .st-warn{margin-top:12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px 14px;font-size:14.5px;line-height:1.5;}
+    .st-note{margin-top:10px;background:#f8fafc;border:1px solid var(--bd);border-radius:10px;padding:11px 13px;font-size:13.5px;color:#475569;}
+    /* очередь участка: строки с ручным порядком ▲▼ */
+    .qrow{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--bd);border-radius:10px;padding:11px 12px;margin-bottom:8px;}
+    .qrow .qn{font-size:13px;color:var(--gray);width:26px;text-align:center;font-weight:700;flex:none;}
+    .qrow .qmain{flex:1;min-width:0;}
+    .qrow .qt{font-size:15.5px;font-weight:700;color:var(--navy);}
+    .qrow .qs{font-size:12.5px;color:#5b6b7a;margin-top:2px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+    .qrow select{font:inherit;font-size:13.5px;padding:8px 9px;border:1px solid var(--bd);border-radius:8px;max-width:190px;}
+    .qmv{display:flex;flex-direction:column;gap:3px;flex:none;}
+    .qmv button{font:inherit;font-size:13px;line-height:1;width:36px;height:26px;border:1px solid var(--bd);background:#fff;border-radius:6px;cursor:pointer;color:#475569;}
+    .qmv button:disabled{opacity:.35;cursor:not-allowed;}
+    @media (max-width:560px){ .st-time{grid-template-columns:1fr;} .qrow{flex-wrap:wrap;} .qrow select{max-width:100%;} }
+
     /* модалка рабочего места (запись задачи) */
     .mscrim{display:none;position:fixed;inset:0;background:rgba(15,30,50,.45);z-index:80;}
     .mscrim.open{display:block;}
@@ -1130,7 +1167,8 @@
     let ME=null, RBAC_ON=false;
     const RBAC_ROLE_LABEL={ 'Администратор':'Администратор','Руководство':'Руководство','Продажи':'Продажи','Конструктор':'Конструктор','Технолог':'Технолог','Цех':'Цех','Снабжение':'Снабжение','Кладовщик':'Кладовщик','ОТК':'ОТК','Наблюдатель':'Наблюдатель','Сотрудник':'Сотрудник' };
     // Клиентская копия маппинга эндпоинтов → разделы (зеркало RBAC_API_PREFIX на сервере).
-    const RBAC_API_PREFIX=[['/api/board','board'],['/api/station','station'],['/api/orders','orders'],['/api/control','control'],['/api/routes','routes'],['/api/route','routes'],['/api/task','board'],['/api/equipment','equipment'],['/api/tools','tools'],['/api/metal','metal'],['/api/warehouse','warehouse'],['/api/sales','sales'],['/api/lov','lov'],['/api/counterpart','counterparties'],['/api/procurement','purchase'],['/api/catalog','catalog'],['/api/design','design'],['/api/docs','docs'],['/api/logistics','logistics'],['/api/drawing-mass','logistics'],['/api/settings','settings']];
+    // ТЗ «Цех, шаг 1»: /api/task переведён с секции board на station (зеркало сервера).
+    const RBAC_API_PREFIX=[['/api/board','board'],['/api/station','station'],['/api/orders','orders'],['/api/control','control'],['/api/routes','routes'],['/api/route','routes'],['/api/task','station'],['/api/norms','station'],['/api/equipment','equipment'],['/api/tools','tools'],['/api/metal','metal'],['/api/warehouse','warehouse'],['/api/sales','sales'],['/api/lov','lov'],['/api/counterpart','counterparties'],['/api/procurement','purchase'],['/api/catalog','catalog'],['/api/design','design'],['/api/docs','docs'],['/api/logistics','logistics'],['/api/drawing-mass','logistics'],['/api/settings','settings']];
     function rbacApiSection(u){ try{ const p=new URL(u,location.origin).pathname; for(const[pre,sec]of RBAC_API_PREFIX)if(p===pre||p.startsWith(pre+'/')||p.startsWith(pre+'.'))return sec; }catch{} return null; }
     const rbacRole=()=>ME?(ME.effectiveRole||ME.role||'guest'):'guest';
     const rbacAccess=(sec)=>(ME&&ME.access)?ME.access[sec]:undefined;
@@ -1293,6 +1331,7 @@
         catch(e){ DATA=emptyBoard(String((e&&e.message)||e)); }
       }
       if(!DATA||!Array.isArray(DATA.orders)) DATA=emptyBoard(DATA&&DATA.warning); // защита от любого не-board ответа
+      ST=null;                                        // рабочее место перечитает свой лёгкий срез (/api/station)
       STATUSES=DATA.statuses||STATUSES_FALLBACK;
       updateDbBadge(); // бейдж по факту подключения (ME.live), а не по доступности «Доски» для роли
       document.getElementById('warn').innerHTML=DATA.warning?`<div class="warn">${esc(DATA.warning)}</div>`:'';
@@ -9603,26 +9642,169 @@
     function stationTasks(){
       return DATA.orders.flatMap(o=>o.tasks.map(t=>({...t,pz:o.numPz}))).filter(t=>t.sectionCode===stationSel);
     }
+    // ══ ЦЕХ, ШАГ 1 — рабочее место: «Мои задачи» + «Очередь участка» ══════════
+    //  Данные — лёгкий GET /api/station (риск Р8: раньше экран тянул всю доску).
+    //  Отметки времени ставит СЕРВЕР (/api/task/start|finish), клиент шлёт только
+    //  факт нажатия — иначе кривые часы планшета отравят будущие нормы.
+    let ST=null;                                        // payload /api/station
+    let stTab=(()=>{try{return localStorage.getItem('pbs-st-tab')||'mine';}catch{return 'mine';}})();
+    let stBusy=false;
+    const ST_LIGHT_TITLE={red:'Срок сегодня или просрочен',amber:'Срок близко',green:'Срок не горит',gray:'Срок не задан'};
+    function stLite(t){ return `<span class="st-lite ${esc(t.light||'gray')}" title="${esc(ST_LIGHT_TITLE[t.light]||'')}"></span>`; }
+    function stFlags(t){
+      let h='';
+      if(t.noRoute)h+=`<span class="st-flag nomk" title="Задача выдана в цех без маршрутной карты — техпроцесс на неё не написан">без МК</span>`;
+      if(t.needsTimeReview)h+=`<span class="st-flag review" title="Интервал больше лимита смены — время не записано автоматически, часы вносит мастер">⚠ время требует уточнения</span>`;
+      if(t.startedAt&&!t.finishedAt)h+=`<span class="st-flag run" title="Задача в работе">▶ идёт${t.elapsedHours!=null?' '+stHrs(t.elapsedHours):''}</span>`;
+      return h;
+    }
+    const stHrs=(h)=>h==null?'—':(Math.round(h*100)/100).toString().replace('.',',')+' ч';
+    // время храним в UTC, показываем в MSK (грабля Р5: NocoDB DateTime + UTC-контейнер)
+    function stTime(iso){
+      if(!iso)return '';
+      const d=new Date(iso); if(!isFinite(d.getTime()))return String(iso);
+      try{ return d.toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+      catch{ return d.toISOString().slice(0,16).replace('T',' '); }
+    }
+    async function stationLoad(force){
+      if(ST&&!force)return ST;
+      try{ const r=await fetch('/api/station'); ST = r.ok ? await r.json() : null; }catch{ ST=null; }
+      if(!ST)ST={mode:'mock',tasks:[],sections:[],employees:[],me:{},settings:{queueWarnDays:3,shiftMaxHours:12},warning:'Рабочее место недоступно'};
+      return ST;
+    }
+    const stTaskById=(id)=>((ST&&ST.tasks)||[]).find(t=>String(t.id)===String(id));
     function renderStation(host){
-      const secs=sectionsList();
-      if((!stationSel||!secs.some(s=>s.code===stationSel)) && secs.length) stationSel=secs[0].code;
-      const opts=secs.map(s=>`<option value="${esc(s.code)}" ${s.code===stationSel?'selected':''}>${esc(s.code)}${s.name?' · '+esc(s.name):''}</option>`).join('')||'<option>нет участков</option>';
-      const ord={'В работе':0,'В очереди':1,'Приостановлено':2,'Выполнено':3};
-      const tasks=stationTasks().sort((a,b)=>(ord[a.status]??9)-(ord[b.status]??9));
-      const cards=tasks.map(t=>`<div class="st-card ${TKCLASS[t.status]||'work'}" data-tid="${esc(t.id??t.num)}">
-        <div class="op">${esc(t.op)} · ${esc(t.pz)}</div>
-        <div class="nm">${esc(t.title||'Операция')}</div>
-        <div class="meta">${badge(t.status)}<span>срок ${fmt(t.plan)}</span></div></div>`).join('')||'<div class="st-empty">На участке нет задач</div>';
-      host.innerHTML=`<div class="st-top"><span class="title">Рабочее место</span>
-        <select id="st-sec" aria-label="Участок">${opts}</select>
-        <span class="spacer"></span><span style="color:#64748b;font-size:14px">активных задач: ${tasks.filter(t=>t.status!=='Выполнено').length} / ${tasks.length}</span></div>
-        <div class="st-grid" style="margin-top:8px">${cards}</div>`;
+      if(!ST){ host.innerHTML='<div class="st-empty">Загрузка рабочего места…</div>'; stationLoad().then(()=>renderStation(host)); return; }
+      const tasks=ST.tasks||[];
+      const secs=(ST.sections&&ST.sections.length)?ST.sections
+        :[...new Map(tasks.filter(t=>t.sectionCode).map(t=>[t.sectionCode,{id:null,code:t.sectionCode,name:t.sectionName||''}])).values()];
+      if((!stationSel||!secs.some(s=>s.code===stationSel))&&secs.length)stationSel=secs[0].code;
+      const mine=tasks.filter(t=>t.mine);
+      const queue=tasks.filter(t=>t.sectionCode===stationSel);
+      const openN=(a)=>a.filter(t=>t.status!=='Выполнено').length;
+      const tabs=`<div class="st-tabs">
+        <button class="st-tab ${stTab==='mine'?'on':''}" data-tab="mine">Мои задачи<span class="n">${openN(mine)}</span></button>
+        <button class="st-tab ${stTab==='queue'?'on':''}" data-tab="queue">Очередь участка<span class="n">${openN(queue)}</span></button></div>`;
+      const head=`<div class="st-top"><span class="title">Рабочее место</span>
+        ${stTab==='queue'?`<select id="st-sec" aria-label="Участок">${secs.map(s=>`<option value="${esc(s.code)}" ${s.code===stationSel?'selected':''}>${esc(s.code)}${s.name?' · '+esc(s.name):''}</option>`).join('')||'<option>нет участков</option>'}</select>`:''}
+        <span class="spacer"></span>
+        ${ST.mode!=='live'?'<span class="badge b-amber">демо-режим</span>':''}</div>`;
+      host.innerHTML=head+tabs+(stTab==='mine'?stRenderMine(mine):stRenderQueue(queue));
+      host.querySelectorAll('.st-tab').forEach(b=>b.onclick=()=>{stTab=b.dataset.tab;try{localStorage.setItem('pbs-st-tab',stTab);}catch{} renderStation(host);});
       const sec=document.getElementById('st-sec');
       if(sec)sec.onchange=(e)=>{stationSel=e.target.value;try{localStorage.setItem('pbs-station',stationSel);}catch{} renderStation(host);};
-      host.querySelectorAll('.st-card').forEach(c=>c.onclick=()=>renderStationTask(host,c.dataset.tid));
+      host.querySelectorAll('.st-card,.qrow[data-tid]').forEach(c=>c.addEventListener('click',(ev)=>{
+        if(ev.target.closest('button,select,a'))return;                 // ▲▼/исполнитель — не открывают карточку
+        renderStationTask(host,c.dataset.tid);
+      }));
+      if(stTab==='queue')stBindQueue(host,queue);
+    }
+    // ── таб «Мои задачи» (дефолт рабочего) ──────────────────────────────────────
+    function stRenderMine(list){
+      const me=(ST&&ST.me)||{};
+      // Р6: справочник «Сотрудники» частично пуст — честно объясняем, а не показываем пустоту
+      const nomatch=!me.employeeId?`<div class="st-note">Ваш аккаунт Битрикса пока не сопоставлен с сотрудником в справочнике — «Мои задачи» будут пустыми. Попросите мастера проставить «ID Bitrix» в карточке сотрудника. Задачи участка при этом видны на соседнем табе.</div>`:'';
+      const byFio=me.matchedBy==='fio'?`<div class="st-note">Вы опознаны по ФИО, а не по «ID Bitrix» — это временный фолбэк. Надёжнее проставить «ID Bitrix» в справочнике «Сотрудники».</div>`:'';
+      const cards=list.map(stCardHtml).join('')||'<div class="st-empty">На вас сейчас нет задач. Возьмите задачу из очереди участка — она закрепится за вами по кнопке «Начал».</div>';
+      return nomatch+byFio+`<div class="st-grid" style="margin-top:8px">${cards}</div>`;
+    }
+    function stCardHtml(t){
+      return `<div class="st-card ${TKCLASS[t.status]||'work'}${t.mine?' mine':''}" data-tid="${esc(t.id)}">
+        <div class="top">${stLite(t)}<div class="op">${esc(t.op||'')} · ${esc(t.pz||'')}</div></div>
+        <div class="nm">${esc(t.title||'Операция')}</div>
+        ${t.partName?`<div class="op">${esc(t.partName)}${t.drawing?' · '+esc(t.drawing):''}</div>`:''}
+        <div class="meta">${badge(t.status)}<span>срок ${fmt(t.plan)}</span></div>
+        <div class="meta" style="margin-top:6px;gap:6px;justify-content:flex-start">${stFlags(t)}</div></div>`;
+    }
+    // ── таб «Очередь участка» (мастер правит порядок и исполнителей) ────────────
+    function stRenderQueue(list){
+      const ro=!stCanWrite();
+      const emps=((ST&&ST.employees)||[]).filter(e=>e.active!==false);
+      const open=list.filter(t=>t.status!=='Выполнено');
+      const done=list.filter(t=>t.status==='Выполнено');
+      const empSel=(t)=>{
+        if(ro)return `<span>${t.assignee?esc(t.assignee):'в общей очереди'}</span>`;
+        const opts=['<option value="">— в общую очередь —</option>']
+          .concat(emps.map(e=>`<option value="${esc(e.id)}" ${String(e.id)===String(t.assigneeId)?'selected':''}>${esc(e.fio)}</option>`));
+        if(t.assigneeId&&!emps.some(e=>String(e.id)===String(t.assigneeId)))opts.push(`<option value="${esc(t.assigneeId)}" selected>${esc(t.assignee)}</option>`);
+        return `<select class="q-emp" data-tid="${esc(t.id)}" title="Исполнитель задачи">${opts.join('')}</select>`;
+      };
+      const row=(t,i,n)=>`<div class="qrow" data-tid="${esc(t.id)}">
+        ${ro?'':`<div class="qmv"><button class="q-up" data-tid="${esc(t.id)}" ${i===0?'disabled':''} title="Выше в очереди">▲</button><button class="q-dn" data-tid="${esc(t.id)}" ${i===n-1?'disabled':''} title="Ниже в очереди">▼</button></div>`}
+        <div class="qn">${i+1}</div>
+        <div class="qmain"><div class="qt">${esc(t.title||'Операция')} <span style="font-weight:500;color:#5b6b7a;font-size:13px">${esc(t.num||'')}</span></div>
+          <div class="qs">${stLite(t)}<span>срок ${fmt(t.plan)}</span>${badge(t.status)}${t.qtyPlan!==''&&t.qtyPlan!=null?`<span>${esc(t.qtyPlan)} шт</span>`:''}${stFlags(t)}</div></div>
+        <div>${empSel(t)}</div></div>`;
+      const openHtml=open.length?open.map((t,i)=>row(t,i,open.length)).join(''):'<div class="st-empty">На участке нет открытых задач</div>';
+      const doneHtml=done.length?`<div class="st-sec" style="margin-top:12px"><div class="lab">Закрытые (${done.length})</div>${done.map((t,i)=>row(t,i,done.length)).join('')}</div>`:'';
+      const bar=ro?'':`<div class="st-save" style="margin-bottom:10px">
+        <button class="btn btn-g" id="q-resort" title="Разовое действие: расставить очередь по сроку. Это не автоматика — дальше порядок держит мастер.">Пересортировать по сроку</button>
+        <span class="msg" id="q-msg"></span></div>`;
+      return bar+openHtml+doneHtml;
+    }
+    function stCanWrite(){ return !(RBAC_ON&&ME&&ME.authenticated&&rbacAccess('station')!=='write'); }
+    function stBindQueue(host,queue){
+      const msg=document.getElementById('q-msg');
+      const say=(txt,color)=>{ if(msg){msg.style.color=color||'#64748b';msg.textContent=txt;} };
+      const open=queue.filter(t=>t.status!=='Выполнено');
+      const saveOrder=async(ids)=>{
+        const items=ids.map((id,i)=>({id,order:(i+1)*10}));
+        say('Сохранение порядка…');
+        const r=await fetch('/api/task/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+        const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+        // локально применяем порядок, чтобы список не «прыгал» до перезагрузки
+        for(const it of items){ const t=stTaskById(it.id); if(t)t.queueOrder=it.order; }
+        say('Порядок сохранён ✓','var(--green)');
+        renderStation(host);
+      };
+      const move=async(id,delta)=>{
+        const ids=open.map(t=>t.id); const i=ids.findIndex(x=>String(x)===String(id));
+        const j=i+delta; if(i<0||j<0||j>=ids.length)return;
+        [ids[i],ids[j]]=[ids[j],ids[i]];
+        try{ await saveOrder(ids); }catch(e){ say('Ошибка: '+e.message,'var(--red)'); }
+      };
+      host.querySelectorAll('.q-up').forEach(b=>b.onclick=()=>move(b.dataset.tid,-1));
+      host.querySelectorAll('.q-dn').forEach(b=>b.onclick=()=>move(b.dataset.tid,1));
+      host.querySelectorAll('.q-emp').forEach(s=>s.onchange=async()=>{
+        const t=stTaskById(s.dataset.tid);
+        try{
+          say('Назначение…');
+          const r=await fetch('/api/task/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({id:Number(s.dataset.tid),employeeId:s.value===''?null:Number(s.value),assignee:s.options[s.selectedIndex].textContent})});
+          const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+          if(t){ t.assigneeId=s.value===''?null:Number(s.value); t.assignee=s.value===''?'':s.options[s.selectedIndex].textContent; t.mine=!!(ST.me&&ST.me.employeeId&&String(ST.me.employeeId)===String(t.assigneeId)); }
+          say('Исполнитель назначен ✓','var(--green)');
+        }catch(e){ say('Ошибка: '+e.message,'var(--red)'); }
+      });
+      const rs=document.getElementById('q-resort');
+      if(rs)rs.onclick=async()=>{
+        const sec=((ST.sections||[]).find(s=>s.code===stationSel)||{});
+        try{
+          rs.disabled=true; say('Пересортировка по сроку…');
+          if(sec.id!=null){
+            const r=await fetch('/api/task/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'resort',sectionId:sec.id})});
+            const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+          } else {
+            // демо-режим (у участка нет id) — тот же порядок, но через явный список
+            const ids=[...open].sort((a,b)=>String(a.plan||'9999-12-31').localeCompare(String(b.plan||'9999-12-31'))).map(t=>t.id);
+            await saveOrder(ids); rs.disabled=false; return;
+          }
+          ST=null; await stationLoad(true); renderStation(host);
+        }catch(e){ rs.disabled=false; say('Ошибка: '+e.message,'var(--red)'); }
+      };
     }
     function renderStationTask(host,key){
-      const t=stationTasks().find(x=>String(x.id??x.num)===String(key)); if(!t)return;
+      // Карточка склеивается из двух источников: лёгкий /api/station (шаг 1: время,
+      // светофор, «без МК», исполнитель) + богатая модель /api/board (параметры,
+      // журнал §7, контроль). Если доска роли недоступна — работает и без неё.
+      const st=stTaskById(key)||{};
+      const rich=(DATA&&Array.isArray(DATA.orders))
+        ?DATA.orders.flatMap(o=>o.tasks.map(x=>({...x,pz:o.numPz}))).find(x=>String(x.id??x.num)===String(key))
+        :null;
+      if(!rich&&st.id==null)return;
+      const t={...st,...(rich||{})};
+      for(const k of ['startedAt','finishedAt','needsTimeReview','noRoute','light','elapsedHours','hasDrawing','assignee','assigneeId','queueOrder','issuedBy','issuedAt','mine'])
+        if(k in st)t[k]=st[k];
       const ro=DATA.mode!=='live';
       const C=t.control||{};
       const ctl=(C.point&&C.point!=='нет')?([C.what,C.tol,C.si].filter(Boolean).join(' · ')+(C.point?` (${esc(C.point)})`:'')):'';
@@ -9662,8 +9844,9 @@
         <div class="st-hd">
           <div><div class="ht">${esc(t.title||'Операция')}</div>
             <div class="hs">${esc(t.section||'')} · ${esc(t.op)} · ${esc(t.num)}</div></div>
-          <button class="hbtn" id="st-draw" title="Просмотр чертежа — после ввода базы КД" style="display:inline-flex;align-items:center;gap:5px">${aico('doc',14)} Чертёж${t.drawing?' '+esc(t.drawing):''}</button>
+          <button class="hbtn" id="st-draw" data-has="${t.hasDrawing?'1':''}" title="${t.hasDrawing?'Открыть выпущенный PDF чертежа этой позиции':'Выпущенный PDF по этому обозначению не найден в записях 03-КД'}" style="display:inline-flex;align-items:center;gap:5px${t.hasDrawing?'':';opacity:.75'}">${aico('doc',14)} Чертёж${t.drawing?' '+esc(t.drawing):''}</button>
         </div>
+        ${stTimeBlockHtml(t)}
         <div class="st-do"><div class="lab">Что делать (из маршрутной карты)</div>
           ${t.materials?`<div class="big"><b>Взять:</b> ${esc(t.materials)}</div>`:''}
           ${t.equip?`<div class="big"><b>Оборудование:</b> ${esc(t.equip)}</div>`:''}
@@ -9705,8 +9888,17 @@
       let chosen=t.status;
       document.getElementById('st-back').onclick=()=>renderStation(host);
       document.getElementById('st-cancel').onclick=()=>renderStation(host);
+      // «Чертёж» — живая кнопка (была заглушка). Отдаём через /api/station/drawing:
+      // это секция station, поэтому рабочему НЕ нужен доступ к разделу «Проектирование»,
+      // и он видит только PDF своей позиции, а не весь реестр КД.
       const drawBtn=document.getElementById('st-draw');
-      if(drawBtn)drawBtn.onclick=()=>{const m=document.getElementById('st-msg');if(m){m.style.color='#64748b';m.textContent='Просмотр чертежа появится после ввода базы КД (процедура в утверждении).';}};
+      if(drawBtn)drawBtn.onclick=()=>{
+        const m=document.getElementById('st-msg');
+        if(!t.hasDrawing){ if(m){m.style.color='#64748b';m.textContent=t.drawing?`Выпущенный PDF «${t.drawing}» не найден в записях 03-КД — обратитесь к конструктору.`:'У позиции не указан чертёж (поле «Чертёж / ТУ»).';} return; }
+        window.open('/api/station/drawing?taskId='+encodeURIComponent(t.id),'_blank','noopener');
+      };
+      stBindTime(host,t);
+      stNormHint(t);
       if(!ro){
         stBlankLoad(t);
         host.querySelectorAll('#st-status .st-sbtn').forEach(b=>b.onclick=()=>{chosen=b.dataset.st;
@@ -9765,6 +9957,147 @@
           try{await doSave();}catch(e){reopenBtn.disabled=false;const m=document.getElementById('st-msg');m.style.color='var(--red)';m.textContent='Ошибка: '+e.message;}};
       }
     }
+    // ── панель времени «Начал / Закончил» (крупные элементы «под палец») ────────
+    //  Время ставит СЕРВЕР. Клиент лишь сообщает «нажали» и показывает результат.
+    function stTimeBlockHtml(t){
+      const ro=!stCanWrite();
+      const started=!!t.startedAt, finished=!!t.finishedAt, done=t.status==='Выполнено';
+      const startLbl=started?`▶ Начал · ${stTime(t.startedAt)}`:'▶ Начал';
+      const finLbl=finished?`⏹ Закончил · ${stTime(t.finishedAt)}`:'⏹ Закончил';
+      const info=[];
+      if(started)info.push(`<span>начало: <b>${esc(stTime(t.startedAt))}</b></span>`);
+      if(finished)info.push(`<span>конец: <b>${esc(stTime(t.finishedAt))}</b></span>`);
+      if(t.elapsedHours!=null)info.push(`<span>${finished?'вышло':'идёт'}: <b>${esc(stHrs(t.elapsedHours))}</b></span>`);
+      if(t.factTime!==''&&t.factTime!=null)info.push(`<span>записано: <b>${esc(stHrs(Number(t.factTime)))}</b></span>`);
+      if(t.assignee)info.push(`<span>исполнитель: <b>${esc(t.assignee)}</b></span>`);
+      const warn=t.needsTimeReview
+        ?`<div class="st-warn">⚠ Время требует уточнения: интервал больше лимита смены (${esc(((ST&&ST.settings)||{}).shiftMaxHours??12)} ч), поэтому «Время факт. (ч)» автоматически НЕ записано. Часы вносит мастер в поле «Время факт. (ч)» ниже.</div>`:'';
+      const nomk=t.noRoute
+        ?`<div class="st-note">Задача выдана в цех <b>без маршрутной карты</b>${t.issuedBy?` (выдал: ${esc(t.issuedBy)}${t.issuedAt?', '+fmt(t.issuedAt):''})`:''}. Техпроцесс на неё не написан — работайте по чертежу и указаниям мастера.</div>`:'';
+      return `<div class="st-sec" id="st-timebox">
+        <div class="lab">Время работы ${stLite(t)}<span style="font-weight:500;text-transform:none;letter-spacing:0;color:#5b6b7a;margin-left:6px">срок ${esc(fmt(t.plan))}</span></div>
+        <div class="st-time">
+          <button class="st-tbtn go" id="st-start" ${ro||done||started?'disabled':''}>${esc(startLbl)}</button>
+          <button class="st-tbtn stop" id="st-finish" ${ro||!started||finished?'disabled':''}>${esc(finLbl)}</button>
+        </div>
+        ${info.length?`<div class="st-tinfo">${info.join('')}</div>`:''}
+        <div class="st-tinfo" id="st-tmsg" style="display:none"></div>
+        <div class="st-note" id="st-normhint" style="display:none"></div>
+        ${warn}${nomk}
+        ${ro?'<div class="st-note">Отметки времени доступны только роли с правом записи в «Рабочее место».</div>':''}</div>`;
+    }
+    function stBindTime(host,t){
+      const msg=document.getElementById('st-tmsg');
+      const say=(txt,color)=>{ if(!msg)return; msg.style.display=''; msg.style.color=color||'#334155'; msg.textContent=txt; };
+      const hit=async(what)=>{
+        const url=what==='start'?'/api/task/start':'/api/task/finish';
+        const body={id:t.id};
+        if(what==='finish'){ const q=document.getElementById('st-qty'); if(q&&q.value!=='')body.factQty=q.value; }
+        const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+        return j;
+      };
+      const after=async(j)=>{
+        if(j.warn)say(j.warn,'var(--red)'); else if(j.message)say(j.message,j.needsTimeReview?'var(--red)':'var(--green)');
+        await stationLoad(true);
+        if(DATA&&DATA.mode==='live'){ try{ const r=await fetch('/api/board'); if(r.ok)DATA=await r.json(); }catch{} }
+        renderStationTask(host,t.id);
+      };
+      const b1=document.getElementById('st-start');
+      if(b1)b1.onclick=async()=>{ if(stBusy)return; stBusy=true; b1.disabled=true; say('Отмечаю начало…');
+        try{ await after(await hit('start')); }catch(e){ b1.disabled=false; say('Ошибка: '+e.message,'var(--red)'); } finally{ stBusy=false; } };
+      const b2=document.getElementById('st-finish');
+      if(b2)b2.onclick=async()=>{ if(stBusy)return; stBusy=true; b2.disabled=true; say('Отмечаю окончание…');
+        try{ await after(await hit('finish')); }catch(e){ b2.disabled=false; say('Ошибка: '+e.message,'var(--red)'); } finally{ stBusy=false; } };
+    }
+    // подсказка по накопленным нормам: «в прошлые разы ~2,5 ч/шт (3 замера)» — справочно
+    async function stNormHint(t){
+      const box=document.getElementById('st-normhint'); if(!box)return;
+      if(!t.opTypeCode||(ST&&ST.mode!=='live'))return;
+      try{
+        const q=new URLSearchParams({opType:t.opTypeCode,decNo:t.drawing||'',section:t.sectionCode||''});
+        const r=await fetch('/api/norms?'+q.toString()); if(!r.ok)return;
+        const j=await r.json(); const h=j&&j.hint; if(!h||!h.n)return;
+        const per=String(Math.round(h.median*100)/100).replace('.',',');
+        box.style.display='';
+        box.innerHTML=`В прошлые разы ~<b>${esc(per)} ч/шт</b> (${h.n} ${h.n===1?'замер':(h.n<5?'замера':'замеров')}, ${h.kind==='part'?'по этому чертежу':'по операции на участке'}). Это справка по накопленному факту, а не норматив.`;
+      }catch{}
+    }
+    // ══ «Выдать в цех» — ЛЁГКИЙ ПУТЬ из позиции ПЗ ═════════════════════════════
+    //  Живут ОБА пути (указание Александра 27.07):
+    //   • основной — типовая повторяемая деталь: МК → «⚙ Сгенерировать задачи Ф.14»;
+    //   • лёгкий — разовая оснастка/доработка/ремонт, где писать МК дороже, чем
+    //     сделать деталь. Задача лёгкого пути ПОМЕЧАЕТСЯ «без МК» — и в базе
+    //     (колонка «Без МК», migrate-047), и в интерфейсе, чтобы упрощённая выдача
+    //     не стала лазейкой в обход технологии.
+    function posIssueBtn(p){
+      if(!p||DATA.mode!=='live'||p.id==null)return '';
+      return `<button class="tbtn pos-issue" data-pid="${p.id}" title="Выдать позицию в цех без маршрутной карты (разовая оснастка, доработка, ремонт). Задача будет помечена «без МК».">⚡ В цех</button>`;
+    }
+    function wirePosIssue(scope,o){
+      scope.querySelectorAll('button.pos-issue').forEach(b=>b.onclick=(ev)=>{
+        ev.stopPropagation();
+        const p=((o&&o.positions)||[]).find(x=>String(x.id)===String(b.dataset.pid));
+        if(p)stIssueOpen(p,o);
+      });
+    }
+    function stIssueClose(){ const el=document.getElementById('st-issue-scrim'); if(el)el.remove(); }
+    async function stIssueOpen(p,o){
+      await stationLoad();
+      const secs=(ST.sections||[]), emps=(ST.employees||[]).filter(e=>e.active!==false), ots=(ST.opTypes||[]);
+      if(!ots.length){ toast('Справочник «Типы операций» пуст — выдать в цех без типа операции нельзя.','err'); return; }
+      const S='font:inherit;font-size:13.5px;padding:9px 10px;border:1px solid var(--bd);border-radius:8px;width:100%;background:#fff';
+      const L=(t)=>`<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--gray);margin-bottom:4px">${esc(t)}</div>`;
+      const wrap=document.createElement('div');
+      wrap.id='st-issue-scrim';
+      wrap.style.cssText='position:fixed;inset:0;background:rgba(15,30,50,.45);z-index:120;display:flex;align-items:center;justify-content:center;padding:16px';
+      wrap.innerHTML=`<div style="background:#fff;border-radius:12px;width:min(520px,96vw);max-height:92vh;overflow:auto;box-shadow:0 14px 44px rgba(10,30,60,.32)">
+        <div style="background:var(--navy);color:#fff;padding:13px 16px;font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px">
+          ⚡ Выдать в цех без маршрутной карты<span style="margin-left:auto;cursor:pointer;font-weight:400" id="si-x">✕</span></div>
+        <div style="padding:16px;display:grid;gap:12px">
+          <div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.5">
+            Это <b>лёгкий путь</b> для разовой оснастки, доработки и ремонта. Задача будет помечена <b>«без МК»</b> — видно, что сделано без техпроцесса.
+            Для типовой повторяемой детали пользуйтесь маршрутной картой и кнопкой «⚙ Сгенерировать задачи Ф.14».</div>
+          <div style="font-size:13.5px;color:#334155">Позиция <b>${esc(p.numPos||'')}</b> · ${esc(p.name||'')}${p.drawing?` · чертёж <span style="font-family:monospace">${esc(p.drawing)}</span>`:''} · ${esc(p.qty??'')} ${esc(p.unit||'шт')}</div>
+          <div>${L('Тип операции *')}<select id="si-ot" style="${S}">${ots.map(t=>`<option value="${esc(t.id)}">${esc(t.code?t.code+' · ':'')}${esc(t.name)}</option>`).join('')}</select></div>
+          <div>${L('Участок')}<select id="si-sec" style="${S}"><option value="">— по типу операции —</option>${secs.map(s=>`<option value="${esc(s.id)}">${esc(s.code)}${s.name?' · '+esc(s.name):''}</option>`).join('')}</select></div>
+          <div>${L('Исполнитель')}<select id="si-emp" style="${S}"><option value="">— в общую очередь участка —</option>${emps.map(e=>`<option value="${esc(e.id)}">${esc(e.fio)}</option>`).join('')}</select></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>${L('Срок')}<input id="si-plan" type="date" value="${esc(String(p.due||o&&o.plan||'').slice(0,10))}" style="${S}"></div>
+            <div>${L('Оборудование')}<input id="si-eq" placeholder="необязательно" style="${S}"></div></div>
+          <div>${L('Что сделать / примечание')}<textarea id="si-note" rows="3" style="${S}" placeholder="Например: доработать паз по эскизу, ремонт корпуса"></textarea></div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-p" id="si-go">Выдать в цех</button>
+            <button class="btn btn-g" id="si-cancel">Отмена</button>
+            <span class="msg" id="si-msg" style="font-size:12.5px"></span></div>
+        </div></div>`;
+      document.body.appendChild(wrap);
+      wrap.addEventListener('click',(ev)=>{ if(ev.target===wrap)stIssueClose(); });
+      wrap.querySelector('#si-x').onclick=stIssueClose;
+      wrap.querySelector('#si-cancel').onclick=stIssueClose;
+      const msg=wrap.querySelector('#si-msg');
+      wrap.querySelector('#si-go').onclick=async(ev)=>{
+        const b=ev.currentTarget; b.disabled=true; msg.style.color='#64748b'; msg.textContent='Создание задачи…';
+        try{
+          const body={
+            positionId:p.id,
+            opTypeId:Number(wrap.querySelector('#si-ot').value)||null,
+            sectionId:wrap.querySelector('#si-sec').value?Number(wrap.querySelector('#si-sec').value):null,
+            employeeId:wrap.querySelector('#si-emp').value?Number(wrap.querySelector('#si-emp').value):null,
+            plan:wrap.querySelector('#si-plan').value||null,
+            equip:wrap.querySelector('#si-eq').value||'',
+            note:wrap.querySelector('#si-note').value||'',
+          };
+          const r=await fetch('/api/task/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+          stIssueClose();
+          toast(`Задача ${j.num} выдана в цех${j.assignee?' · '+j.assignee:' · в общую очередь'} (без МК)`, 'ok');
+          if(j.warn)toast(j.warn,'err');
+          await load();
+        }catch(e){ b.disabled=false; msg.style.color='var(--red)'; msg.textContent='Ошибка: '+e.message; }
+      };
+    }
+
     // МК-резерв металла, этап 2 (утв. владельцем 21.07): панель «Заготовка → факт» у задачи первой
     // операции МК — оператор видит рекомендацию технолога (этап 1) и списывает со склад факт по
     // каждой отрезанной детали. Кандидаты карточек — сервер (/api/metal/blank-candidates), см.
@@ -10016,7 +10349,7 @@
 
     function orderDetailHtml(o){
       if(!o)return '<div class="card pad" style="color:var(--sub)">Выберите заказ слева</div>';
-      const nomen=(o.positions||[]).map(p=>`<div class="nrow"><b>${esc(p.numPos)}</b><span class="sp">${esc(p.name||'')}</span>${p.drawing?`<span style="color:var(--sub)">чертёж ${esc(p.drawing)}</span>`:''}<span style="color:var(--sub)">${esc(p.qty??'')} ${esc(p.unit||'')}</span>${badge(p.status)}${DATA.mode==='live'?`<span style="margin-left:auto">${posRouteSelect(p)}</span>`:''}</div>`).join('')||'<div class="nrow" style="color:var(--sub)">Позиции не заведены</div>';
+      const nomen=(o.positions||[]).map(p=>`<div class="nrow"><b>${esc(p.numPos)}</b><span class="sp">${esc(p.name||'')}</span>${p.drawing?`<span style="color:var(--sub)">чертёж ${esc(p.drawing)}</span>`:''}<span style="color:var(--sub)">${esc(p.qty??'')} ${esc(p.unit||'')}</span>${badge(p.status)}${DATA.mode==='live'?`<span style="margin-left:auto;display:flex;gap:6px;align-items:center">${posRouteSelect(p)}${posIssueBtn(p)}</span>`:''}</div>`).join('')||'<div class="nrow" style="color:var(--sub)">Позиции не заведены</div>';
       const genBtn=DATA.mode==='live'?`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;justify-content:flex-end"><span style="font-size:11.5px;color:var(--sub)">Привяжите МК к позициям, затем</span><button class="tbtn primary" id="pos-gen">⚙ Сгенерировать задачи Ф.14</button></div>`:'';
       const tk=(o.tasks||[]).slice().sort((a,b)=>(Number(a.opNum)||0)-(Number(b.opNum)||0));
       const tasks=tk.map(t=>{const cls=t.status==='Выполнено'?'done':(t.status==='В работе'?'work':'');
@@ -10880,12 +11213,13 @@
       if(ordTab==='pos'){
         // K-72 / Узел 8: подгружаем список МК (если ещё нет) и перерисовываем вкладку
         if(DATA.mode==='live'&&BOARD_RT===null&&!BOARD_RT_LOADING){ BOARD_RT_LOADING=true; ensureRoutesList().then(()=>{BOARD_RT_LOADING=false; if(ordTab==='pos')odTabBody(o);}); }
-        const nomen=(o.positions||[]).map(p=>`<div class="nrow"><b>${esc(p.numPos)}</b><span class="sp">${esc(p.name||'')}</span>${p.drawing?`<span style="color:var(--sub)">чертёж ${esc(p.drawing)}</span>`:''}<span style="color:var(--sub)">${esc(p.qty??'')} ${esc(p.unit||'')}</span>${badge(p.status)}${DATA.mode==='live'?`<span style="margin-left:auto">${posRouteSelect(p)}</span>`:''}</div>`).join('')||'<div class="nrow" style="color:var(--sub)">Позиции не заведены</div>';
+        const nomen=(o.positions||[]).map(p=>`<div class="nrow"><b>${esc(p.numPos)}</b><span class="sp">${esc(p.name||'')}</span>${p.drawing?`<span style="color:var(--sub)">чертёж ${esc(p.drawing)}</span>`:''}<span style="color:var(--sub)">${esc(p.qty??'')} ${esc(p.unit||'')}</span>${badge(p.status)}${DATA.mode==='live'?`<span style="margin-left:auto;display:flex;gap:6px;align-items:center">${posRouteSelect(p)}${posIssueBtn(p)}</span>`:''}</div>`).join('')||'<div class="nrow" style="color:var(--sub)">Позиции не заведены</div>';
         const genBtn=DATA.mode==='live'?`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;justify-content:flex-end"><span style="font-size:11.5px;color:var(--sub)">Привяжите МК к позициям, затем</span><button class="tbtn primary" id="pos-gen">⚙ Сгенерировать задачи Ф.14</button></div>`:'';
         // МК-мост п.1: кнопка «Сформировать МК» — инлайн-мастер раскладки позиций по МК (см. openMkWizard)
         const mkRow=DATA.mode==='live'?`<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="tbtn primary" id="mk-wiz-btn">⚙ Сформировать МК</button></div>`:'';
         h.innerHTML=`<div id="mkwiz-panel"></div><div class="card pad nomen">${nomen}</div>${mkRow}${genBtn}`;
         wirePosRoutes(h); // после load() вся вкладка перерисуется через route()
+        wirePosIssue(h,o); // лёгкий путь «⚡ В цех» (без МК) — рядом с основным путём через МК
         const gb=h.querySelector('#pos-gen'); if(gb)gb.onclick=()=>genOrderTasks(o.numPz);
         const mb=h.querySelector('#mk-wiz-btn'); if(mb)mb.onclick=()=>{ mkWizNumPz=o.numPz; openMkWizard(); };
       } else if(ordTab==='tasks'){
@@ -11014,6 +11348,7 @@
       // K-72 / Узел 8: привязка позиций к МК + генерация задач Ф.14 из карточки ПЗ
       const numPz=o.numPz;
       wirePosRoutes(modal,()=>{ const fresh=(DATA.orders||[]).find(x=>x.numPz===numPz); fresh?openOrderModal(fresh):closeModal(); });
+      wirePosIssue(modal,o); // лёгкий путь «⚡ В цех» (без МК)
       const gb=modal.querySelector('#pos-gen'); if(gb)gb.onclick=async()=>{ await genOrderTasks(numPz); const fresh=(DATA.orders||[]).find(x=>x.numPz===numPz); if(fresh)openOrderModal(fresh); };
     }
 
@@ -12351,10 +12686,16 @@
           ${num('s_kpPrep','SLA подготовки КП (§5.3.6)','Норматив дней на выпуск КП после положительной оценки.',STG.kpSlaPrepDays,'раб. дн.')}
           ${num('s_kpFollow','SLA follow-up (§5.3.8)','Дней без ответа заказчика, после которых КП попадает в «без ответа».',STG.kpSlaFollowupDays,'раб. дн.')}
         </div>
+        <span style="font-size:16px;font-weight:700;color:var(--ink);display:block;margin-top:22px">Цех · рабочее место (шаг 1)</span>
+        <p style="font-size:13px;color:var(--sub);margin:6px 0 0;line-height:1.5">Пороги очереди и учёта времени. Меняются без перевыпуска кода.</p>
+        <div class="stg-card">
+          ${num('s_queueWarn','Жёлтый светофор срока','За сколько рабочих дней до срока задача желтеет. 🔴 срок сегодня/просрочен · 🟡 ≤ порога · 🟢 больше · ⚫ срок не задан.',STG.queueWarnDays,'раб. дн.')}
+          ${num('s_shiftMax','Лимит незакрытой смены','Если между «Начал» и «Закончил» прошло больше — время НЕ записывается автоматически, задача помечается «⚠ время требует уточнения», часы вносит мастер.',STG.shiftMaxHours,'ч')}
+        </div>
         <div style="margin-top:14px"><button class="stg-btn primary" id="s_saveSales">Сохранить</button></div>
         <div class="stg-msg" id="s_salesMsg"></div>
         <div class="stg-note">Себестоимость позиций (материалы/труд/энергия/накладные) заказчику не печатается (§5.3.2). Точные ставки моделей себестоимости по линейкам §5.3.4 и реальный бланк Ф.6–Л.1 — заглушки до утверждения ИСМ.</div>`;
-      $s('s_saveSales').onclick=()=>stgSave({kpSignThreshold:$s('s_kpThr').value,kpVatRate:$s('s_kpVat').value,kpProfitPct:$s('s_kpProfit').value,kpSlaPrepDays:$s('s_kpPrep').value,kpSlaFollowupDays:$s('s_kpFollow').value},'s_salesMsg');
+      $s('s_saveSales').onclick=()=>stgSave({kpSignThreshold:$s('s_kpThr').value,kpVatRate:$s('s_kpVat').value,kpProfitPct:$s('s_kpProfit').value,kpSlaPrepDays:$s('s_kpPrep').value,kpSlaFollowupDays:$s('s_kpFollow').value,queueWarnDays:$s('s_queueWarn').value,shiftMaxHours:$s('s_shiftMax').value},'s_salesMsg');
     }
     async function stgDict(){
       $s('stgPane').innerHTML=`<div style="display:flex;align-items:center;gap:10px"><span style="font-size:16px;font-weight:700;color:var(--ink)">Справочники</span><span class="stg-pill info">запись в NocoDB</span></div>

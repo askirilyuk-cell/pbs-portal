@@ -82,6 +82,9 @@ function cfg() {
     KP_PROFIT_PCT: numOr(runtime.KP_PROFIT_PCT ?? process.env.KP_PROFIT_PCT, 15),                  // §5.3.4 плановая прибыль по умолчанию, % (утверждает ДпП)
     KP_SLA_PREP_DAYS: numOr(runtime.KP_SLA_PREP_DAYS ?? process.env.KP_SLA_PREP_DAYS, 5),          // §5.3.6 срок подготовки КП, раб.дн
     KP_SLA_FOLLOWUP_DAYS: numOr(runtime.KP_SLA_FOLLOWUP_DAYS ?? process.env.KP_SLA_FOLLOWUP_DAYS, 10), // §5.3.8 повтор при отсутствии ответа, раб.дн
+    // --- параметры цеха (ТЗ «Цех, шаг 1», решения Александра 27.07: п.7 = 3 дня, п.10 = 12 ч) ---
+    QUEUE_WARN_DAYS: numOr(runtime.QUEUE_WARN_DAYS ?? process.env.QUEUE_WARN_DAYS, 3),   // жёлтый светофор: до срока ≤ N раб.дн
+    SHIFT_MAX_HOURS: numOr(runtime.SHIFT_MAX_HOURS ?? process.env.SHIFT_MAX_HOURS, 12),  // лимит незакрытой смены, ч (больше → время не считаем)
   };
 }
 // парсер числа из runtime/env с фолбэком (пустое/NaN → дефолт)
@@ -5028,6 +5031,530 @@ function boardMock() {
 }
 
 // ============================================================================
+//  ЦЕХ, ШАГ 1 — «чертёж → задание → личный кабинет рабочего»
+//  ТЗ: docs/ТЗ-цех-шаг1-чертёж-задание-рабочее-место.md (утв. 27.07.2026).
+//  Схема: migrate-047-shopfloor (НЕ применена до APPROVE — весь код FORWARD-TOLERANT:
+//  новых колонок может не быть, тогда поля читаются как пустые, а запись их
+//  отбрасывает ncPickExisting; портал при этом работает как раньше).
+//
+//  Ключевые решения (утв. Александром 27.07):
+//   • п.1  роль «Цех» получает ЗАПИСЬ в секцию station (см. RBAC_MATRIX);
+//   • п.2  мост «аккаунт ↔ сотрудник» — «ID Bitrix» в справочнике «Сотрудники»;
+//   • п.3  PIN-входа НЕТ — только вход по Битриксу;
+//   • п.4  «Закончил» = «Выполнено», контур ОТК не трогаем;
+//   • п.5  очередь по умолчанию по сроку, мастер правит вручную;
+//   • п.6  одна задача на партию;
+//   • п.7  жёлтый светофор = QUEUE_WARN_DAYS (3, настраивается);
+//   • п.9  нормы считаем по ОБЕИМ парам (чертёж+операция и операция+участок);
+//   • п.10 лимит незакрытой смены = SHIFT_MAX_HOURS (12 ч, настраивается).
+//
+//  ВРЕМЯ СТАВИТ СЕРВЕР, НЕ ПЛАНШЕТ. Клиент присылает только «я нажал», отметку
+//  времени формирует stationNowIso() — иначе неверные часы на планшете отравят
+//  будущие нормы, и это нечем будет поймать. Храним UTC, показываем MSK.
+// ============================================================================
+const STATION_PRIORITY_RANK = { 'Срочный': 0, 'Высокий': 1, 'Нормальный': 2, 'Низкий': 3 };
+// Кто вправе выдать в цех (п.8: технолог, ДпП и мастер участка). ДпП = «Руководство»,
+// мастер участка = «Цех». Проверка ДОПОЛНЯЕТ RBAC (station:'write'), а не заменяет его.
+const STATION_ISSUE_ROLES = ['Администратор', 'Технолог', 'Руководство', 'Цех'];
+
+const stationNowIso = () => new Date().toISOString();          // отметка времени — только отсюда
+const stationToday = () => new Date().toISOString().slice(0, 10);
+// часы между двумя отметками (null, если хоть одна не читается)
+function stationHours(fromIso, toIso) {
+  const a = fromIso ? new Date(fromIso).getTime() : NaN;
+  const b = toIso ? new Date(toIso).getTime() : NaN;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
+  return Math.round(((b - a) / 3600000) * 100) / 100;
+}
+// Светофор срока — ЕДИНСТВЕННЫЙ автоматический сигнал шага 1 (норм времени ещё нет).
+//  red: срок сегодня или просрочен · amber: до срока ≤ QUEUE_WARN_DAYS · green: больше
+//  порога · gray: срок не задан. Порог считаем в РАБОЧИХ днях (сб/вс не в счёт).
+function stationWorkdaysUntil(planDate) {
+  if (!planDate) return null;
+  const d = new Date(String(planDate).slice(0, 10) + 'T00:00:00Z');
+  if (!Number.isFinite(d.getTime())) return null;
+  const today = new Date(stationToday() + 'T00:00:00Z');
+  const calDays = Math.round((d.getTime() - today.getTime()) / 86400000);
+  if (calDays <= 0) return calDays;                    // просрочено/сегодня — рабочие дни не считаем
+  let n = 0;
+  for (let i = 1; i <= calDays; i++) {
+    const c = new Date(today.getTime() + i * 86400000);
+    const wd = c.getUTCDay();
+    if (wd !== 0 && wd !== 6) n++;
+  }
+  return n;
+}
+function stationLight(planDate, warnDays) {
+  const left = stationWorkdaysUntil(planDate);
+  if (left == null) return 'gray';
+  if (left <= 0) return 'red';
+  return left <= (Number(warnDays) || 0) ? 'amber' : 'green';
+}
+// «⚠ время требует уточнения» — ПРОИЗВОДНЫЙ признак (колонки под него нет намеренно,
+// см. шапку migrate-047): интервал больше лимита смены, а часы мастером не введены.
+function stationNeedsTimeReview(startedAt, finishedAt, factTime, maxHours) {
+  if (!startedAt || !finishedAt) return false;
+  if (factTime !== '' && factTime != null && Number.isFinite(Number(factTime))) return false;
+  const h = stationHours(startedAt, finishedAt);
+  return h != null && h > (Number(maxHours) || 0);
+}
+// нормализация ФИО для фолбэк-сопоставления «сессия ↔ сотрудник» (риск Р6: «ID Bitrix»
+// у части сотрудников будет пустым ещё какое-то время после APPLY)
+const stationFio = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+// сотрудник текущего пользователя: сперва по «ID Bitrix» (авторитетно), затем по ФИО
+function stationResolveEmployee(employees, session) {
+  if (!session) return null;
+  const uid = String(session.userId || '');
+  if (uid) {
+    const byId = employees.find((e) => String(e['ID Bitrix'] ?? '') === uid);
+    if (byId) return byId;
+  }
+  const fio = stationFio(session.fio);
+  if (!fio) return null;
+  return employees.find((e) => stationFio(e['ФИО']) === fio) || null;
+}
+// «первый оп.» из «Операция (№ МК / № оп.)» — № МК для отображения
+const stationMkOf = (t) => String(t['Операция (№ МК / № оп.)'] || '').split(' оп.')[0] || '';
+
+// ── Лёгкая выборка рабочего места (риск Р8: #station тянул весь /api/board) ──
+//  Читаем 8 таблиц вместо 13 и не собираем параметры/журнал/акты ОТК — их грузит
+//  карточка задачи отдельным запросом (старый /api/board остаётся как fallback).
+async function buildStationLive(session) {
+  const c = cfg();
+  const [orders, positions, tasks, operations, opTypes, sections, employees] = await Promise.all([
+    ncList('orders'), ncList('positions'), ncList('tasks'),
+    ncListSoft('operations'), ncListSoft('op_types'), ncListSoft('sections'), ncListSoft('employees'),
+  ]);
+  const orderByNum = new Map(orders.map((o) => [String(o['№ ПЗ'] || ''), o]));
+  const posById = indexById(positions), otById = indexById(opTypes), secById = indexById(sections);
+  const opById = indexById(operations), empById = indexById(employees);
+  const me = stationResolveEmployee(employees, session);
+  const meId = me ? idOf(me) : null;
+
+  const out = tasks.map((t) => {
+    const numPz = String(t['№ задачи'] || '').split('/')[0];
+    const order = orderByNum.get(numPz) || {};
+    const position = posById.get(t.positions_id) || {};
+    const opType = otById.get(t.op_types_id) || {};
+    const section = secById.get(t.sections_id) || {};
+    const operation = opById.get(t.operations_id) || {};
+    const emp = empById.get(t.employees_id) || null;
+    const drawing = position['Чертёж / ТУ'] || '';
+    const startedAt = t['Начато (факт)'] || '';
+    const finishedAt = t['Завершено (факт)'] || '';
+    const factTime = t['Время факт. (ч)'] ?? '';
+    // «Без МК»: авторитетна колонка (migrate-047). До APPLY — консервативный фолбэк:
+    // считаем «без МК» только если задача при этом ЯВНО выдана лёгким путём («Выдал в цех»),
+    // чтобы удалённая операция маршрута не переклеймила задачу, рождённую по техпроцессу.
+    const noRoute = t['Без МК'] != null
+      ? !!t['Без МК']
+      : (!t.operations_id && !!String(t['Выдал в цех'] || '').trim());
+    return {
+      id: idOf(t), num: t['№ задачи'] || '', pz: numPz,
+      op: t['Операция (№ МК / № оп.)'] || '', mk: stationMkOf(t),
+      title: opType['Наименование'] || '', opTypeId: t.op_types_id ?? null, opTypeCode: opType['Код типа'] || '',
+      opNum: operation['№ операции'] ?? '',
+      sectionId: t.sections_id ?? null, sectionCode: section['Код'] || '', sectionName: section['Участок'] || '',
+      status: t['Статус'] || 'В очереди', priority: t['Приоритет'] || '', plan: t['Дата плановая'] || '',
+      qtyPlan: position['Кол-во'] ?? '', partName: position['Наименование / обозначение'] || '',
+      drawing, hasDrawing: !!kdHrefForDecNo(drawing),
+      equip: t['Оборудование'] || operation['Оборудование'] || '',
+      normTime: operation['Норма времени (ч)'] ?? '',
+      materials: t['Входящие материалы'] || '',
+      assigneeId: emp ? idOf(emp) : null, assignee: emp ? (emp['ФИО'] || '') : '',
+      mine: !!(meId && emp && idOf(emp) === meId),
+      queueOrder: (t['Порядок в очереди'] === '' || t['Порядок в очереди'] == null) ? null : Number(t['Порядок в очереди']),
+      startedAt, finishedAt, factTime, factQty: t['Кол-во факт.'] ?? '',
+      factDate: t['Дата факт.'] || '', note: t['Примечание'] || '',
+      selfControl: !!t['Самоконтроль (С)'], otk: !!t['Контроль ОТК'],
+      noRoute, issuedBy: t['Выдал в цех'] || '', issuedAt: t['Дата выдачи'] || '',
+      elapsedHours: startedAt && !finishedAt ? stationHours(startedAt, stationNowIso()) : stationHours(startedAt, finishedAt),
+      needsTimeReview: stationNeedsTimeReview(startedAt, finishedAt, factTime, c.SHIFT_MAX_HOURS),
+      light: stationLight(t['Дата плановая'], c.QUEUE_WARN_DAYS),
+      orderPriority: order['Приоритет'] || '',
+    };
+  }).sort(stationQueueCmp);
+
+  return {
+    mode: 'live', statuses: STATUSES,
+    me: {
+      employeeId: meId, fio: (me && me['ФИО']) || (session && session.fio) || '',
+      matchedBy: me ? (String(me['ID Bitrix'] ?? '') === String(session && session.userId) ? 'bitrix' : 'fio') : null,
+      sectionId: me ? (me.sections_id ?? null) : null,
+    },
+    sections: sections.map((s) => ({ id: idOf(s), code: s['Код'] || '', name: s['Участок'] || '' }))
+      .sort((a, b) => String(a.code).localeCompare(String(b.code), 'ru')),
+    employees: employees.map((e) => ({
+      id: idOf(e), fio: e['ФИО'] || '', role: e['Роль'] || '', sectionId: e.sections_id ?? null,
+      bitrixId: e['ID Bitrix'] ?? null, active: e['Активен'] == null ? true : !!e['Активен'],
+    })).filter((e) => e.fio).sort((a, b) => String(a.fio).localeCompare(String(b.fio), 'ru')),
+    opTypes: opTypes.map((o) => ({ id: idOf(o), code: o['Код типа'] || '', name: o['Наименование'] || '', sectionId: o.sections_id ?? null })),
+    settings: { queueWarnDays: c.QUEUE_WARN_DAYS, shiftMaxHours: c.SHIFT_MAX_HOURS },
+    tasks: out,
+  };
+}
+// Порядок очереди (ТЗ): «В работе» наверх → ручной «Порядок в очереди» → срок →
+// приоритет ПЗ → № задачи. «Выполнено» уезжает вниз. Пустой ручной порядок — в конец
+// незакрытых (мастер расставляет то, что важно, остальное едет по сроку).
+function stationQueueCmp(a, b) {
+  const bucket = (t) => (t.status === 'В работе' ? 0 : t.status === 'Выполнено' ? 2 : 1);
+  const db = bucket(a) - bucket(b); if (db) return db;
+  const qa = a.queueOrder == null ? Infinity : a.queueOrder;
+  const qb = b.queueOrder == null ? Infinity : b.queueOrder;
+  if (qa !== qb) return qa - qb;
+  const pa = a.plan || '9999-12-31', pb = b.plan || '9999-12-31';
+  if (pa !== pb) return String(pa).localeCompare(String(pb));
+  const ra = STATION_PRIORITY_RANK[a.orderPriority || a.priority] ?? 9;
+  const rb = STATION_PRIORITY_RANK[b.orderPriority || b.priority] ?? 9;
+  if (ra !== rb) return ra - rb;
+  return String(a.num).localeCompare(String(b.num), 'ru');
+}
+// ── мок-режим стенда ─────────────────────────────────────────────────────────
+//  Писать в NocoDB нечего, но экран рабочего места должен проверяться ЦЕЛИКОМ:
+//  кнопки времени, очередь, назначение. Держим перекрытие в памяти процесса —
+//  к LIVE оно отношения не имеет и умирает вместе с процессом (в прод-режиме
+//  isLive() истинно, и эта ветка вообще не исполняется).
+const STATION_MOCK_OVERLAY = new Map();
+function stationMockWrite(kind, body, ctx) {
+  const c = cfg();
+  const key = String(body && body.id != null ? body.id : '');
+  const cur = STATION_MOCK_OVERLAY.get(key) || {};
+  if (kind === 'start') {
+    if (cur.finishedAt) throw Object.assign(new Error('Задача уже закрыта.'), { status: 409 });
+    const startedAt = cur.startedAt || stationNowIso();
+    STATION_MOCK_OVERLAY.set(key, { ...cur, startedAt, status: 'В работе', assignee: cur.assignee || (ctx && ctx.actor) || '' });
+    return { ok: true, mode: 'mock', id: key, startedAt, resumed: !!cur.startedAt };
+  }
+  if (kind === 'finish') {
+    if (!cur.startedAt) throw Object.assign(new Error('Сначала нажмите «Начал» — без отметки начала время посчитать не из чего.'), { status: 409 });
+    const finishedAt = stationNowIso();
+    const hours = stationHours(cur.startedAt, finishedAt);
+    const overLimit = hours == null || hours > c.SHIFT_MAX_HOURS;
+    STATION_MOCK_OVERLAY.set(key, {
+      ...cur, finishedAt, status: 'Выполнено', factDate: stationToday(),
+      ...(overLimit ? {} : { factTime: hours }),
+    });
+    return {
+      ok: true, mode: 'mock', id: key, startedAt: cur.startedAt, finishedAt, hours,
+      needsTimeReview: overLimit, limitHours: c.SHIFT_MAX_HOURS,
+      message: overLimit
+        ? `Интервал ${hours == null ? '?' : hours} ч больше лимита смены (${c.SHIFT_MAX_HOURS} ч) — время не записано автоматически, задача помечена «требует уточнения». Часы вносит мастер.`
+        : `Записано ${hours} ч.`,
+    };
+  }
+  if (kind === 'assign') {
+    STATION_MOCK_OVERLAY.set(key, { ...cur, assignee: String(body.assignee || ''), assigneeId: body.employeeId ?? null });
+    return { ok: true, mode: 'mock', id: key };
+  }
+  if (kind === 'queue') {
+    const items = Array.isArray(body.items) ? body.items : [];
+    for (const it of items) {
+      const k = String(it.id);
+      STATION_MOCK_OVERLAY.set(k, { ...(STATION_MOCK_OVERLAY.get(k) || {}), queueOrder: Number(it.order) });
+    }
+    return { ok: true, mode: 'mock', updated: items.length };
+  }
+  throw Object.assign(new Error('Демо-режим: операция не поддерживается.'), { status: 501 });
+}
+// ТОЛЬКО для стенда: сдвинуть отметку начала назад на N часов, чтобы проверить
+// защиту от забытой кнопки «Закончил» (интервал > SHIFT_MAX_HOURS) без ожидания 12 часов.
+function stationMockBackdate(id, hoursAgo) {
+  const key = String(id);
+  const cur = STATION_MOCK_OVERLAY.get(key) || {};
+  if (!cur.startedAt) throw Object.assign(new Error('Задача ещё не начата.'), { status: 409 });
+  const startedAt = new Date(Date.now() - Number(hoursAgo) * 3600000).toISOString();
+  STATION_MOCK_OVERLAY.set(key, { ...cur, startedAt });
+  return { ok: true, mode: 'mock', id: key, startedAt };
+}
+
+// мок рабочего места: тот же контракт, что LIVE, но из fixtures «Доски» —
+// стенд без токена NocoDB должен показывать живой экран, а не пустоту.
+function stationMock() {
+  const fx = boardMock();
+  const c = cfg();
+  const tasks = (fx.orders || []).flatMap((o) => (o.tasks || []).map((t, i) => {
+    // в fixtures участок лежит одной строкой «УЧ-16» либо «УЧ-16 · Заготовительный»
+    const secParts = String(t.section || '').split('·').map((s) => s.trim());
+    const pos0 = (o.positions || [])[0] || {};
+    return {
+    id: t.id ?? `${o.numPz}-${i}`, num: t.num || '', pz: o.numPz, op: t.op || '', mk: String(t.op || '').split(' оп.')[0],
+    title: t.title || '', opTypeId: null, opTypeCode: t.opTypeCode || '', opNum: t.opNum ?? '',
+    sectionId: null, sectionCode: t.sectionCode || secParts[0] || '', sectionName: t.sectionName || secParts[1] || '',
+    status: t.status || 'В очереди', priority: t.priority || '', plan: t.plan || '',
+    qtyPlan: t.qtyPlan ?? pos0.qty ?? '', partName: t.partName || pos0.name || '', drawing: t.drawing || pos0.drawing || '', hasDrawing: false,
+    equip: t.equip || '', normTime: t.normTime ?? '', materials: t.materials || '',
+    assigneeId: null, assignee: '', mine: false, queueOrder: null,
+    startedAt: '', finishedAt: '', factTime: t.factTime ?? '', factQty: t.factQty ?? '', factDate: t.factDate || '',
+    note: t.note || '', selfControl: !!t.selfControl, otk: !!t.otk,
+    noRoute: false, issuedBy: '', issuedAt: '', elapsedHours: null, needsTimeReview: false,
+    light: stationLight(t.plan, c.QUEUE_WARN_DAYS), orderPriority: o.priority || '',
+  };
+  })).map((t) => {
+    const ov = STATION_MOCK_OVERLAY.get(String(t.id));
+    if (!ov) return t;
+    const m = { ...t, ...ov, mine: !!ov.assignee };
+    m.elapsedHours = m.startedAt && !m.finishedAt ? stationHours(m.startedAt, stationNowIso()) : stationHours(m.startedAt, m.finishedAt);
+    m.needsTimeReview = stationNeedsTimeReview(m.startedAt, m.finishedAt, m.factTime, c.SHIFT_MAX_HOURS);
+    return m;
+  }).sort(stationQueueCmp);
+  const secs = new Map();
+  for (const t of tasks) if (t.sectionCode && !secs.has(t.sectionCode)) secs.set(t.sectionCode, t.sectionName || '');
+  return {
+    mode: 'mock', statuses: STATUSES,
+    me: { employeeId: null, fio: '', matchedBy: null, sectionId: null },
+    sections: [...secs.entries()].map(([code, name]) => ({ id: null, code, name })),
+    employees: [], opTypes: [],
+    settings: { queueWarnDays: c.QUEUE_WARN_DAYS, shiftMaxHours: c.SHIFT_MAX_HOURS },
+    tasks,
+  };
+}
+
+// ── общее: найти задачу по id + собрать контекст (позиция/заказ) ──────────────
+async function stationLoadTask(taskId) {
+  const id = Number(taskId);
+  if (!Number.isFinite(id)) { const e = new Error('Не указан id задачи.'); e.status = 400; throw e; }
+  const tasks = await ncList('tasks');
+  const t = tasks.find((x) => Number(idOf(x)) === id);
+  if (!t) { const e = new Error('Задача не найдена.'); e.status = 404; throw e; }
+  return { task: t, tasks };
+}
+
+// ── «Выдать в цех» — ЛЁГКИЙ ПУТЬ (разовая оснастка, доработка, ремонт) ────────
+//  Основной путь остаётся прежним: МК → «Сгенерировать задачи Ф.14»
+//  (generateTasksFromRoute), он НЕ ТРОГАЕТСЯ. Лёгкий путь нужен там, где написать
+//  маршрутную карту дороже, чем сделать деталь. Чтобы он не стал лазейкой в обход
+//  технологии, задача ПОМЕЧАЕТСЯ «Без МК» — навсегда, при рождении (см. миграцию 047).
+//  № задачи тоже говорящий: «ПЗ/поз-Ц1» (Ц = выдано в цех), а не «-опN» как из МК.
+async function stationIssueTask(body, ctx) {
+  const positionId = Number(body.positionId);
+  if (!Number.isFinite(positionId)) throw Object.assign(new Error('Не указана позиция ПЗ.'), { status: 400 });
+  const opTypeId = (body.opTypeId != null && body.opTypeId !== '') ? Number(body.opTypeId) : null;
+  if (!opTypeId) throw Object.assign(new Error('Не указан тип операции — без него задача не попадёт на участок.'), { status: 400 });
+  const employeeId = (body.employeeId != null && body.employeeId !== '') ? Number(body.employeeId) : null;
+
+  const [positions, orders, opTypes, sections, tasks, employees] = await Promise.all([
+    ncList('positions'), ncList('orders'), ncList('op_types'), ncList('sections'), ncList('tasks'), ncListSoft('employees'),
+  ]);
+  const pos = positions.find((p) => Number(idOf(p)) === positionId);
+  if (!pos) throw Object.assign(new Error('Позиция ПЗ не найдена.'), { status: 404 });
+  const order = orders.find((o) => Number(idOf(o)) === Number(pos.orders_id)) || {};
+  const ot = opTypes.find((o) => Number(idOf(o)) === opTypeId);
+  if (!ot) throw Object.assign(new Error('Тип операции не найден.'), { status: 404 });
+  // участок: явный из формы, иначе — участок типа операции (как в генерации из МК)
+  let sectionId = (body.sectionId != null && body.sectionId !== '') ? Number(body.sectionId) : null;
+  if (!sectionId) sectionId = (_linkIds(ot['Участки'])[0]) ?? ot.sections_id ?? null;
+  if (!sectionId) throw Object.assign(new Error('Не удалось определить участок: укажите его явно или задайте участок у типа операции.'), { status: 400 });
+  const section = sections.find((s) => Number(idOf(s)) === Number(sectionId)) || {};
+
+  const numPz = order['№ ПЗ'] || 'ПЗ';
+  const posNum = pos['№ позиции'] || String(positionId);
+  const prefix = `${numPz}/${posNum}-Ц`;
+  const used = tasks.map((t) => String(t['№ задачи'] || '')).filter((n) => n.startsWith(prefix));
+  const seq = used.reduce((m, n) => Math.max(m, Number(n.slice(prefix.length)) || 0), 0) + 1;
+  const taskNum = prefix + seq;
+
+  // новая задача встаёт В КОНЕЦ очереди участка (ТЗ): порядок = max по участку + 10
+  const maxOrder = tasks.filter((t) => Number(t.sections_id) === Number(sectionId))
+    .reduce((m, t) => Math.max(m, Number(t['Порядок в очереди']) || 0), 0);
+
+  const row = await ncPickExisting('tasks', {
+    '№ задачи': taskNum,
+    'Операция (№ МК / № оп.)': `без МК · ${ot['Наименование'] || ot['Код типа'] || 'операция'}`,
+    'Статус': 'В очереди',
+    'Приоритет': order['Приоритет'] || 'Нормальный',
+    'Дата плановая': body.plan ? String(body.plan).slice(0, 10) : (pos['Срок готовности'] || order['Плановый срок'] || null),
+    'Оборудование': String(body.equip || ''),
+    'Входящие материалы': String(body.materials || ''),
+    'Примечание': String(body.note || ''),
+    'Самоконтроль (С)': !!body.selfControl,
+    'Контроль ОТК': !!body.otk,
+    'Порядок в очереди': maxOrder + 10,
+    'Выдал в цех': String((ctx && ctx.actor) || ''),
+    'Дата выдачи': stationToday(),
+    'Без МК': true,                                  // ← пометка «сделано без техпроцесса»
+  });
+  const created = await ncCreateMany('tasks', [row]);
+  const rec = Array.isArray(created) ? created[0] : created;
+  const taskId = idOf(rec);
+
+  // связи (заполняют FK на задаче) — best-effort, как в generateTasksFromRoute
+  await ncLinkRecords('orders', 'Задачи', idOf(order), [taskId]).catch(() => {});
+  await ncLinkRecords('positions', 'Задачи', positionId, [taskId]).catch(() => {});
+  await ncLinkRecords('op_types', 'Задачи (по типу)', opTypeId, [taskId]).catch(() => {});
+  await ncLinkRecords('sections', 'Задачи на участки', sectionId, [taskId]).catch(() => {});
+  if (employeeId) await ncLinkRecords('employees', 'Задачи (исполнитель)', employeeId, [taskId]).catch(() => {});
+  // ОПЕРАЦИЮ МАРШРУТА НЕ ПРИВЯЗЫВАЕМ — её нет, в этом и суть лёгкого пути.
+
+  const emp = employees.find((e) => Number(idOf(e)) === employeeId);
+  return {
+    ok: true, id: taskId, num: taskNum, noRoute: true,
+    section: section['Код'] || '', opType: ot['Наименование'] || '',
+    assignee: emp ? (emp['ФИО'] || '') : '', queued: !employeeId,
+    warn: row['Без МК'] === undefined ? 'Пометка «Без МК» не сохранена: миграция 047 ещё не применена.' : null,
+  };
+}
+
+// ── назначение исполнителя (мастер) ──────────────────────────────────────────
+async function stationAssign(body) {
+  const { task } = await stationLoadTask(body.id);
+  const taskId = Number(idOf(task));
+  const employeeId = (body.employeeId != null && body.employeeId !== '') ? Number(body.employeeId) : null;
+  const prev = task.employees_id != null ? Number(task.employees_id) : null;
+  if (prev === employeeId) return { ok: true, unchanged: true };
+  if (prev) await ncUnlinkRecords('employees', 'Задачи (исполнитель)', prev, [taskId]).catch(() => {});
+  if (employeeId) await ncLinkRecords('employees', 'Задачи (исполнитель)', employeeId, [taskId]);
+  return { ok: true, id: taskId, employeeId };
+}
+
+// ── ручной порядок очереди (мастер) ──────────────────────────────────────────
+//  items: [{id, order}] — прямая запись; либо action:'resort' + sectionId —
+//  РАЗОВАЯ пересортировка по сроку (не автоматика, по кнопке мастера).
+async function stationQueue(body) {
+  if (String(body.action || '') === 'resort') {
+    const sectionId = Number(body.sectionId);
+    if (!Number.isFinite(sectionId)) throw Object.assign(new Error('Не указан участок.'), { status: 400 });
+    const tasks = await ncList('tasks');
+    const list = tasks.filter((t) => Number(t.sections_id) === sectionId && t['Статус'] !== 'Выполнено')
+      .sort((a, b) => String(a['Дата плановая'] || '9999-12-31').localeCompare(String(b['Дата плановая'] || '9999-12-31'))
+        || String(a['№ задачи'] || '').localeCompare(String(b['№ задачи'] || ''), 'ru'));
+    const rows = list.map((t, i) => ({ Id: idOf(t), 'Порядок в очереди': (i + 1) * 10 }));
+    if (rows.length) await ncUpdateMany('tasks', rows);
+    return { ok: true, resorted: rows.length };
+  }
+  const items = Array.isArray(body.items) ? body.items : [];
+  const rows = items
+    .map((it) => ({ Id: Number(it.id), 'Порядок в очереди': Number(it.order) }))
+    .filter((r) => Number.isFinite(r.Id) && Number.isFinite(r['Порядок в очереди']));
+  if (!rows.length) throw Object.assign(new Error('Нечего сохранять: пустой список порядка.'), { status: 400 });
+  await ncUpdateMany('tasks', rows);
+  return { ok: true, updated: rows.length };
+}
+
+// ── «▶ Начал» ────────────────────────────────────────────────────────────────
+//  Время ставит сервер. Идемпотентно: повторное нажатие не сдвигает начало.
+//  Задача из общей очереди при этом закрепляется за нажавшим (если исполнителя нет).
+async function stationStart(body, ctx) {
+  const { task } = await stationLoadTask(body.id);
+  const taskId = Number(idOf(task));
+  if (task['Статус'] === 'Выполнено') throw Object.assign(new Error('Задача уже закрыта. Чтобы продолжить работу — верните её в работу.'), { status: 409 });
+  const already = task['Начато (факт)'] || '';
+  const startedAt = already || stationNowIso();
+  const patch = await ncPickExisting('tasks', { 'Начато (факт)': startedAt, 'Статус': 'В работе' });
+  await ncUpdate('tasks', taskId, patch);
+  let assigned = null;
+  if (task.employees_id == null && ctx && ctx.employeeId) {
+    await ncLinkRecords('employees', 'Задачи (исполнитель)', ctx.employeeId, [taskId]).catch(() => {});
+    assigned = ctx.employeeId;
+  }
+  try { await syncPzStatusForTask(taskId); } catch (e) { console.warn('Цех: пересчёт статуса ПЗ не удался:', e.message); }
+  return {
+    ok: true, id: taskId, startedAt, resumed: !!already, assigned,
+    warn: patch['Начато (факт)'] === undefined ? 'Отметка времени не сохранена: миграция 047 ещё не применена.' : null,
+  };
+}
+
+// ── «⏹ Закончил» ─────────────────────────────────────────────────────────────
+//  «Закончил» = «Выполнено» (п.4; контур ОТК шаг 1 не трогает).
+//  Часы считает сервер. ЗАЩИТА ОТ ЗАБЫТОЙ КНОПКИ (Р3): если интервал больше
+//  SHIFT_MAX_HOURS — «Время факт. (ч)» НЕ ПИШЕТСЯ, задача уходит с признаком
+//  «⚠ время требует уточнения», часы вводит мастер руками.
+async function stationFinish(body, ctx) {
+  const c = cfg();
+  const { task } = await stationLoadTask(body.id);
+  const taskId = Number(idOf(task));
+  const startedAt = task['Начато (факт)'] || '';
+  if (!startedAt) throw Object.assign(new Error('Сначала нажмите «Начал» — без отметки начала время посчитать не из чего.'), { status: 409 });
+  const finishedAt = stationNowIso();
+  const hours = stationHours(startedAt, finishedAt);
+  const overLimit = hours == null || hours > c.SHIFT_MAX_HOURS;
+  const row = {
+    'Завершено (факт)': finishedAt,
+    'Дата факт.': stationToday(),
+    'Статус': 'Выполнено',
+  };
+  if (!overLimit) row['Время факт. (ч)'] = hours;
+  const qty = (body.factQty === '' || body.factQty == null) ? null : Number(body.factQty);
+  if (qty != null && Number.isFinite(qty)) row['Кол-во факт.'] = qty;
+  const patch = await ncPickExisting('tasks', row);
+  await ncUpdate('tasks', taskId, patch);
+  try { await syncPzStatusForTask(taskId); } catch (e) { console.warn('Цех: пересчёт статуса ПЗ не удался:', e.message); }
+  return {
+    ok: true, id: taskId, startedAt, finishedAt, hours,
+    needsTimeReview: overLimit,
+    limitHours: c.SHIFT_MAX_HOURS,
+    message: overLimit
+      ? `Интервал ${hours == null ? '?' : hours} ч больше лимита смены (${c.SHIFT_MAX_HOURS} ч) — время не записано автоматически, задача помечена «требует уточнения». Часы вносит мастер.`
+      : `Записано ${hours} ч.`,
+    warn: patch['Завершено (факт)'] === undefined ? 'Отметка времени не сохранена: миграция 047 ещё не применена.' : null,
+    actor: (ctx && ctx.actor) || '',
+  };
+}
+
+// ── НОРМЫ НА ЛЕТУ (шаг 1 не материализует таблицу норм) ──────────────────────
+//  Каждое закрытие задачи даёт факт: часы / кол-во = ч/шт. Считаем сразу по ОБЕИМ
+//  парам (п.9): «тип операции + децим.№» (точная норма на деталь) и «тип операции +
+//  участок» (грубая, когда деталь делается впервые). МЕДИАНА, а не среднее — один
+//  «забытый Закончил» не должен отравить норму (Р3).
+function stationMedian(list) {
+  if (!list.length) return null;
+  const a = [...list].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return Math.round((a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2) * 1000) / 1000;
+}
+async function buildStationNorms() {
+  const c = cfg();
+  const [tasks, positions, opTypes, sections] = await Promise.all([
+    ncList('tasks'), ncList('positions'), ncListSoft('op_types'), ncListSoft('sections'),
+  ]);
+  const posById = indexById(positions), otById = indexById(opTypes), secById = indexById(sections);
+  const byPart = new Map(), bySection = new Map();
+  let used = 0, skipped = 0;
+  for (const t of tasks) {
+    if (String(t['Статус'] || '') !== 'Выполнено') continue;
+    const hours = Number(t['Время факт. (ч)']);
+    const qty = Number(t['Кол-во факт.'] ?? posById.get(t.positions_id)?.['Кол-во']);
+    if (!Number.isFinite(hours) || hours <= 0 || !Number.isFinite(qty) || qty <= 0) { skipped++; continue; }
+    if (hours > c.SHIFT_MAX_HOURS) { skipped++; continue; }   // подозрительный замер в норму не берём
+    const ot = otById.get(t.op_types_id) || {};
+    const otCode = ot['Код типа'] || ot['Наименование'] || '';
+    if (!otCode) { skipped++; continue; }
+    const perPiece = hours / qty;
+    const decNo = String(posById.get(t.positions_id)?.['Чертёж / ТУ'] || '').trim();
+    const secCode = (secById.get(t.sections_id) || {})['Код'] || '';
+    used++;
+    if (decNo) {
+      const k = otCode + ' | ' + decNo;
+      if (!byPart.has(k)) byPart.set(k, { opType: otCode, decNo, samples: [] });
+      byPart.get(k).samples.push(perPiece);
+    }
+    if (secCode) {
+      const k = otCode + ' | @' + secCode;
+      if (!bySection.has(k)) bySection.set(k, { opType: otCode, section: secCode, samples: [] });
+      bySection.get(k).samples.push(perPiece);
+    }
+  }
+  const pack = (m) => [...m.entries()].map(([key, v]) => ({
+    key, opType: v.opType, decNo: v.decNo || '', section: v.section || '',
+    n: v.samples.length, median: stationMedian(v.samples),
+    min: Math.round(Math.min(...v.samples) * 1000) / 1000,
+    max: Math.round(Math.max(...v.samples) * 1000) / 1000,
+  })).sort((a, b) => b.n - a.n || String(a.key).localeCompare(String(b.key), 'ru'));
+  return {
+    mode: 'live', measured: used, skipped, shiftMaxHours: c.SHIFT_MAX_HOURS,
+    byPart: pack(byPart), bySection: pack(bySection),
+  };
+}
+// подсказка «в прошлые разы ~2,5 ч/шт (3 замера)» для карточки задачи
+function stationNormHint(norms, opTypeCode, decNo, sectionCode) {
+  if (!norms || !opTypeCode) return null;
+  const exact = (norms.byPart || []).find((r) => r.opType === opTypeCode && r.decNo === String(decNo || '').trim());
+  if (exact && exact.n >= 2) return { ...exact, kind: 'part' };
+  const rough = (norms.bySection || []).find((r) => r.opType === opTypeCode && r.section === sectionCode);
+  if (rough && rough.n >= 2) return { ...rough, kind: 'section' };
+  return null;
+}
+
+// ============================================================================
 //  ОТК-приёмка — WRITE-путь (замыкает контур качества: DEF-02 Ф.4 + DEF-03 Ф.3)
 //  До этого acceptance_control/incoming_control были READ-ONLY (GET-модель в
 //  buildBoardLive, но актов нечем создать). Здесь — POST-создание акта приёмки
@@ -6951,6 +7478,8 @@ function settingsView() {
     // параметры продаж/КП (K-05 §5.3) — редактируются в «Настройках раздела», без деплоя кода
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
+    // параметры цеха (ТЗ «Цех, шаг 1») — правятся без деплоя, как и параметры КП
+    queueWarnDays: c.QUEUE_WARN_DAYS, shiftMaxHours: c.SHIFT_MAX_HOURS,
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -7003,6 +7532,7 @@ function saveSettings(body) {
   for (const [key, field] of [
     ['KP_SIGN_THRESHOLD', 'kpSignThreshold'], ['KP_VAT_RATE', 'kpVatRate'], ['KP_PROFIT_PCT', 'kpProfitPct'],
     ['KP_SLA_PREP_DAYS', 'kpSlaPrepDays'], ['KP_SLA_FOLLOWUP_DAYS', 'kpSlaFollowupDays'],
+    ['QUEUE_WARN_DAYS', 'queueWarnDays'], ['SHIFT_MAX_HOURS', 'shiftMaxHours'],
   ]) {
     if (body[field] === undefined || body[field] === null || body[field] === '') continue;
     const n = Number(body[field]);
@@ -7949,15 +8479,21 @@ const RBAC_MATRIX = {
   // Администратор — всё ✏ (обрабатывается отдельно как '*').
   'Администратор': '*',
   // Руководство — всё 👁; аппрувы ЛОВ/подпись КП = запись в Продажах/ЛОВ; Настройки — нет.
-  'Руководство': { _all: 'view', sales: 'write', lov: 'write', settings: null },
+  // ТЗ «Цех, шаг 1» п.8 (реш. Александра): выдавать в цех без МК вправе технолог, ДпП и мастер участка.
+  // ДпП в портальных ролях — «Руководство», поэтому ему нужна ЗАПИСЬ в новую секцию station
+  // (только рабочее место: очередь, выдача, отметки времени; доска/заказы/маршруты остаются 👁).
+  'Руководство': { _all: 'view', sales: 'write', lov: 'write', station: 'write', settings: null },
   // Продажи — Продажи(sales/lov/kp) ✏, Контрагенты ✏; Заказы/Склад/КД/Документы 👁; Каталог 👁.
   'Продажи': { sales: 'write', lov: 'write', counterparties: 'write', orders: 'view', warehouse: 'view', catalog: 'view', design: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // Конструктор — КД/Проектирование/Оборудование ✏; Заказы/Маршруты/Склад/Инструмент/Каталог/Документы 👁.
   'Конструктор': { design: 'write', equipment: 'write', prodgroups: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', docs: 'view' },
   // Технолог — Маршруты/Карты наладки/Произв.доска/Заказы ✏; КД/Инструмент/Оборуд/Склад/Каталог/Документы 👁.
   'Технолог': { routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', docs: 'view' },
-  // Цех — ЗнЗ ✏ (закупки); Доска/Заказы/Маршруты/Карты наладки/Склад/Инструмент/Каталог/Документы 👁.
-  'Цех': { purchase: 'write', board: 'view', station: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', docs: 'view' },
+  // Цех — Рабочее место ✏ (ТЗ «Цех, шаг 1» п.1, реш. Александра: рабочий должен мочь нажать
+  // «Начал/Закончил» и вести очередь участка) + ЗнЗ ✏ (закупки).
+  // ГРАНИЦА (риск Р1): запись ТОЛЬКО в секцию station. Доска/Заказы/Маршруты/Карты наладки/
+  // Склад/Инструмент/Каталог/Документы остаются 👁 — в заказы и маршруты цех не лезет.
+  'Цех': { station: 'write', purchase: 'write', board: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', docs: 'view' },
   // Кладовщик — Склад/Инструмент ✏, ЗнЗ ✏, Каталог ✏; Заказы/Поставщики/Документы 👁.
   'Кладовщик': { warehouse: 'write', tools: 'write', purchase: 'write', catalog: 'write', orders: 'view', counterparties: 'view', prodgroups: 'view', docs: 'view' },
   // Снабжение — ЗнЗ/Поставщики ✏, Склад-приход ✏, Каталог ✏ (справочник закупок), Контрагенты 👁; Заказы/Документы 👁.
@@ -8023,7 +8559,9 @@ function sessionPortalRoles(session) {
 const RBAC_API_PREFIX = [
   ['/api/board', 'board'], ['/api/station', 'station'], ['/api/orders', 'orders'],
   ['/api/position', 'orders'], ['/api/control', 'control'], // control → раздел ОТК (DEF-19: вердикт пишет только control-write роль)
-  ['/api/routes', 'routes'], ['/api/route', 'routes'], ['/api/task', 'board'],
+  // ТЗ «Цех, шаг 1»: запись задачи — это РАБОЧЕЕ МЕСТО, а не доска. Секция station (была board),
+  // иначе рабочему пришлось бы давать запись во всю производственную доску (риск Р1).
+  ['/api/routes', 'routes'], ['/api/route', 'routes'], ['/api/task', 'station'], ['/api/norms', 'station'],
   ['/api/setup-cards', 'setup'], ['/api/setup-card', 'setup'], // Конструктор карт наладки (Этап 2b)
   ['/api/tool-catalog', 'tools'], // ISO-каталог пластин/державок (Этап 2a) — под разделом «Инструмент»
   ['/api/equipment', 'equipment'], ['/api/tools', 'tools'], ['/api/metal', 'metal'], ['/api/warehouse', 'warehouse'],
@@ -8044,6 +8582,8 @@ const PRINT_SECTION = { pz: 'orders', route: 'routes', task: 'board', control: '
 // Раздел-владелец записи для /api/records/delete (body.key → раздел; право записи раздела).
 const RECORDS_SECTION = {
   orders: 'orders', positions: 'orders',
+  // УДАЛЕНИЕ задач намеренно осталось за секцией board (запись в неё есть у Технолога и
+  // Администратора). Цех получил station:'write' — он правит задачи, но НЕ удаляет их.
   tasks: 'board', task_param_values: 'board', journal: 'board',
   routes: 'routes', operations: 'routes',
   components_in: 'purchase',
@@ -9933,6 +10473,115 @@ const server = http.createServer(async (req, res) => {
         }
         return sendJson(res, 200, { ok: true, chatId, url, taskId });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+    }
+    // ══ ЦЕХ, ШАГ 1: рабочее место ═══════════════════════════════════════════
+    //  Секция RBAC — station (см. RBAC_API_PREFIX). Всё, что пишет время, пишет
+    //  его СЕРВЕРОМ; клиент присылает только факт нажатия.
+    if (p === '/api/station' && req.method === 'GET') {
+      if (!isLive()) return sendJson(res, 200, stationMock());
+      try { return sendJson(res, 200, await buildStationLive(req.session)); }
+      catch (e) { return sendJson(res, 200, { ...stationMock(), warning: 'LIVE недоступен: ' + String(e.message || e) }); }
+    }
+    // Чертёж рабочего места. НАМЕРЕННО отдельный эндпоинт под секцией station, а не
+    // ссылка на /api/design/kd/file: роли «Цех» доступ к разделу «Проектирование» не
+    // выдаётся (риск Р1), но свой чертёж по своей задаче рабочий видеть обязан.
+    // Отдаём ТОЛЬКО тот PDF, который привязан к позиции этой задачи.
+    if (p === '/api/station/drawing') {
+      const notFound = (msg) => { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(msg); };
+      if (!isLive()) return notFound('Чертёж доступен только в LIVE-режиме (нет токена NocoDB).');
+      const root = cfg().DESIGN_ROOT;
+      if (!root) return notFound('Путь к записям РКД не задан (DESIGN_ROOT / RECORDS_ROOT).');
+      try {
+        const { task } = await stationLoadTask(url.searchParams.get('taskId'));
+        const positions = await ncList('positions');
+        const pos = positions.find((x) => Number(idOf(x)) === Number(task.positions_id)) || {};
+        const decNo = String(pos['Чертёж / ТУ'] || '').trim();
+        if (!decNo) return notFound('У позиции этой задачи не указан чертёж (поле «Чертёж / ТУ»).');
+        const files = designResolveKdFiles(decNo);
+        const want = (url.searchParams.get('kind') || '').toLowerCase();
+        const pick = want ? files.find((f) => f.kind.toLowerCase() === want) : files[0];
+        if (!pick) return notFound(`Выпущенный чертёж «${decNo}» не найден в записях 03-КД.`);
+        const rootN = path.resolve(root), t = path.resolve(root, pick.rel);
+        if (!(t === rootN || t.startsWith(rootN + path.sep))) { res.writeHead(403); return res.end('Доступ запрещён'); }
+        let st; try { st = fs.statSync(t); } catch { return notFound('Файл не найден'); }
+        if (!st.isFile()) return notFound('Не файл');
+        const fn = encodeURIComponent(path.basename(t));
+        res.writeHead(200, {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `${url.searchParams.get('dl') === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${fn}`,
+          'Cache-Control': 'private, max-age=60',
+        });
+        const s = fs.createReadStream(t);
+        s.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
+        return s.pipe(res);
+      } catch (e) { return notFound(String(e.message || e)); }
+    }
+    // Накопленные нормы «на лету» (шаг 1 таблицу норм не материализует).
+    if (p === '/api/norms' && req.method === 'GET') {
+      if (!isLive()) return sendJson(res, 200, { mode: 'mock', measured: 0, skipped: 0, byPart: [], bySection: [], hint: null });
+      try {
+        const norms = await buildStationNorms();
+        // точечный запрос из карточки задачи: ?opType=ТОК&decNo=ПБС.…&section=У-01 → подсказка
+        const opType = url.searchParams.get('opType');
+        if (opType) norms.hint = stationNormHint(norms, opType, url.searchParams.get('decNo'), url.searchParams.get('section'));
+        return sendJson(res, 200, norms);
+      }
+      catch (e) { return sendJson(res, 200, { mode: 'mock', measured: 0, skipped: 0, byPart: [], bySection: [], warning: String(e.message || e) }); }
+    }
+    // «Выдать в цех» — лёгкий путь. Помимо RBAC (station:'write') — явный список ролей
+    // (п.8: технолог, ДпП, мастер участка), чтобы упрощённая выдача не расползлась.
+    if (p === '/api/task/create' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Выдача в цех доступна только в LIVE-режиме: задайте токен NocoDB.' });
+      const roles = (req.roles && req.roles.length) ? req.roles : [req.role || 'guest'];
+      if (rbacEnforceOn() && !roles.some((r) => STATION_ISSUE_ROLES.includes(r))) {
+        return sendJson(res, 403, { error: `Выдавать в цех без маршрутной карты вправе: ${STATION_ISSUE_ROLES.join(', ')}. Ваша роль — «${req.role}».` });
+      }
+      try {
+        const actor = (svc && svc.actor) || (req.session && req.session.fio) || req.role || '';
+        return sendJson(res, 200, await stationIssueTask(await readBody(req), { actor }));
+      } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/task/assign' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        if (!isLive()) return sendJson(res, 200, stationMockWrite('assign', body, null));
+        return sendJson(res, 200, await stationAssign(body));
+      } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/task/queue' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        if (!isLive()) return sendJson(res, 200, stationMockWrite('queue', body, null));
+        return sendJson(res, 200, await stationQueue(body));
+      } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
+    // стендовая утилита: сдвинуть «Начато» назад (проверка лимита смены без ожидания 12 ч).
+    // Живёт ТОЛЬКО в мок-режиме — в LIVE отвечает 501 и ничего не делает.
+    if (p === '/api/task/mock-backdate' && req.method === 'POST') {
+      if (isLive()) return sendJson(res, 501, { error: 'Утилита стенда доступна только в демо-режиме.' });
+      try { const b = await readBody(req); return sendJson(res, 200, stationMockBackdate(b.id, b.hours)); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
+    if ((p === '/api/task/start' || p === '/api/task/finish') && req.method === 'POST') {
+      if (!isLive()) {
+        try {
+          const body = await readBody(req);
+          const actor = (svc && svc.actor) || (req.session && req.session.fio) || '';
+          return sendJson(res, 200, stationMockWrite(p === '/api/task/start' ? 'start' : 'finish', body, { actor }));
+        } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+      }
+      try {
+        const body = await readBody(req);
+        const actor = (svc && svc.actor) || (req.session && req.session.fio) || '';
+        // сотрудник нажавшего — для авто-закрепления задачи из общей очереди («взял в работу»)
+        let employeeId = null;
+        try {
+          const emp = stationResolveEmployee(await ncListSoft('employees'), req.session);
+          employeeId = emp ? Number(idOf(emp)) : null;
+        } catch {}
+        const ctx = { actor, employeeId };
+        return sendJson(res, 200, p === '/api/task/start' ? await stationStart(body, ctx) : await stationFinish(body, ctx));
+      } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/task/update' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });

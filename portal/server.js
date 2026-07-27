@@ -8500,10 +8500,64 @@ async function catalogLookup(q) {
   return { query, matches: matches.slice(0, 50) };
 }
 
+// ── Канонический хост портала (продолжение K-95) ─────────────────────────────
+//  ФАКТ, проверенный в бою: Bitrix ИГНОРИРУЕТ передаваемый redirect_uri и всегда
+//  возвращает код на адрес, прописанный в «Пути вашего обработчика» локального
+//  приложения. Поэтому вход, начатый с НЕканонического адреса (старая закладка
+//  http://192.168.1.10:4173), падал с «Неверный state»: cookie pbs_oauth ставилась
+//  на IP-хост, а /auth/callback приходил на nas-pbs — другой origin, cookie не та.
+//  Лечение без изменений в Bitrix: портал сам уводит браузер 302-м на канонический
+//  хост из PORTAL_BASE, сохраняя путь и query. Дальше весь вход идёт на одном origin.
+//
+//  Границы сознательно узкие (что НЕ редиректим и почему):
+//   • не-GET/HEAD — 302 на POST/PATCH теряет метод и тело;
+//   • /api/* — XHR ушёл бы на ДРУГОЙ origin: cookie при credentials:'same-origin'
+//     не поедет, CORS-заголовков портал не отдаёт → запрос упал бы. Страницы
+//     редиректим (браузер сам перезайдёт на канон и все его XHR станут same-origin),
+//     а API отвечает тому хосту, на который пришёл. Сюда же попадает /api/health;
+//   • loopback (localhost / 127.0.0.0/8 / ::1) — healthcheck контейнера и локальные
+//     служебные вызовы; 302 их бы сломал;
+//   • запросы вообще без Host (HTTP/1.0, самописные проверки) — редиректить некуда;
+//   • сервисные вызовы MCP-агентов (заголовок X-Api-Token) — это не браузер.
+//
+//  Выключатели: PORTAL_BASE не задан явно (runtime/env) или не парсится → редиректа
+//  нет (хардкод-дефолт из cfg() здесь СОЗНАТЕЛЬНО не используется, чтобы стенд без
+//  настройки не начал вдруг кидать на 192.168.1.10); жёсткий стоп — CANONICAL_HOST_REDIRECT=0.
+function canonicalOrigin() {
+  const off = String(runtime.CANONICAL_HOST_REDIRECT ?? process.env.CANONICAL_HOST_REDIRECT ?? '').trim();
+  if (/^(0|off|false|no)$/i.test(off)) return null;
+  const raw = String(runtime.PORTAL_BASE || process.env.PORTAL_BASE || '').trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname) return null;
+    return { origin: u.origin, host: u.host.toLowerCase() };
+  } catch { return null; }
+}
+const LOOPBACK_HOST_RE = /^(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[::1\]|::1)(:\d{1,5})?$/i;
+function canonicalHostRedirect(req, res, url) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  if (req.headers['x-api-token'] != null) return false;                       // MCP-агент, не браузер
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return false; // XHR через 302 не гоняем
+  const canon = canonicalOrigin();
+  if (!canon) return false;                                                   // PORTAL_BASE пуст/битый или выключено
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  if (!host) return false;                                                    // запрос без Host
+  if (LOOPBACK_HOST_RE.test(host)) return false;                              // healthcheck и локальные вызовы
+  if (host.toLowerCase() === canon.host) return false;                        // уже канонический → циклов нет
+  const suffix = (req.url && req.url.startsWith('/') ? req.url : url.pathname + url.search).replace(/[\r\n]/g, '');
+  const loc = canon.origin + suffix;
+  console.log(`[canon] неканонический хост ${host} → 302 ${loc}`);
+  res.writeHead(302, { Location: loc, 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end(`Портал открывается по адресу ${canon.origin}`);
+  return true;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
   try {
+    if (canonicalHostRedirect(req, res, url)) return; // старая закладка/IP → 302 на PORTAL_BASE (иначе ломается OAuth-вход)
     const svc = serviceCtx(req); // null для браузера; { service, actor } для MCP-агента (иначе 401)
     if (p.startsWith('/auth/')) { if (await handleAuth(req, res, p, url)) return; }
     // K-49 middleware (МЯГКИЙ режим): определяем сессию/роль и кладём в контекст запроса.

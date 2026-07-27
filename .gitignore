@@ -20,3 +20,4 @@ nc-token*
 n8n/.n8n/
 scratchpad/
 *.bak-*
+*.local.json

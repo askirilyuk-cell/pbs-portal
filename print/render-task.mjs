@@ -19,6 +19,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as nc from '../nocodb/lib/nocodb-client.mjs';
+// Та же логика, что в BFF: «Входящие материалы» могут быть служебным JSON (заготовка /
+// внешняя кооперация со связкой 1С), а не текстом. См. portal/lib/mk-materials.mjs.
+import { mkMaterialsHuman } from '../portal/lib/mk-materials.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GOTENBERG = process.env.GOTENBERG_URL || process.env.GOTENBERG_INTERNAL_URL || 'http://localhost:3001';
@@ -109,7 +112,11 @@ async function main() {
   for (const c of compRows) {
     matRows.push(`<tr><td>${v(c['Компонент'])}</td><td class="c">${v(c['Кол-во'])}</td><td></td><td>${v(c['№ ПЗ-источника'])}</td></tr>`);
   }
-  const freeMat = task['Входящие материалы'] || operation['Входящие материалы'] || '';
+  // Фолбэк на поле ОПЕРАЦИИ отдавал его сырым: у первой операции там JSON заготовки, у
+  // кооперационной — coop-JSON СО СВЯЗКОЙ 1С (ИСМ-ид, Ref_Key, номера документов). В бумагу,
+  // уходящую на участок, это попадать не должно, да и рабочему нечитаемо. В BFF преобразование
+  // было, сюда не доехало (найдено QA) — теперь обе ветки зовут один и тот же mkMaterialsHuman.
+  const freeMat = task['Входящие материалы'] || mkMaterialsHuman(operation['Входящие материалы']);
   if (freeMat) matRows.push(`<tr><td colspan="4">${esc(freeMat)}</td></tr>`);
   while (matRows.length < 3) matRows.push('<tr class="blank"><td></td><td></td><td></td><td></td></tr>');
   const materialsHtml = matRows.join('\n');

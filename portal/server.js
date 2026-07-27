@@ -1379,6 +1379,37 @@ async function saveRoute(body) {
   const name = String(body.name || '').trim();
   if (!name) throw new Error('Не задано наименование изделия / компонента.');
   const opsIn = Array.isArray(body.operations) ? body.operations : [];
+  const routeId0 = (body.id != null && body.id !== '') ? Number(body.id) : null;
+
+  // ── (л) ОТКАЗ ЗНАЧИТ «НЕ ИЗМЕНИЛОСЬ НИЧЕГО» ────────────────────────────────
+  // Проверка связок с 1С (см. (и) ниже) раньше стояла ПОСЛЕ ncUpdate шапки: сохранение
+  // возвращало 400 «Сохранение отменено», а наименование и «Статус МК» в базе уже были
+  // переписаны — карта фактически выпускалась («Утверждена»), хотя технологу сказали,
+  // что сохранения не было (воспроизведено QA). Поэтому ВСЯ проверка поднята СЮДА, выше
+  // любой записи и даже выше ncEnsureColumn: до этой точки мы только читаем.
+  // Клиентский диалог-предупреждение проверку НЕ заменяет: снимок связок фронт берёт при
+  // загрузке мастера, и связку, созданную позже из другой вкладки, он не видит — решает
+  // сервер, по состоянию базы на момент запроса.
+  let existingRoute = null, oldOps = [], lostLinks = [];
+  if (routeId0 != null) {
+    const [routesBefore, opsBefore] = await Promise.all([ncListSoft('routes'), ncListSoft('operations')]);
+    existingRoute = routesBefore.find((x) => (x.Id ?? x.id) === routeId0) || null;
+    oldOps = opsBefore.filter((o) => o.routes_id === routeId0);
+    lostLinks = onecLostLinks(oldOps, opsIn);
+    if (lostLinks.length) {
+      const mkNo = (existingRoute && existingRoute['№ МК']) || routeId0;
+      if (body.dropOnecLinks !== true) {
+        onecLog('REFUSE', `сохранение МК ${mkNo} отклонено ДО записи: стёрло бы ${lostLinks.length} связку(и) с 1С`, lostLinks.map((l) => l.text));
+        throw new Error(
+          `Сохранение отменено: оно стёрло бы связку с черновиками 1С (${lostLinks.map((l) => l.text).join('; ')}). `
+          + 'В карте НИЧЕГО не изменено — ни наименование, ни статус, ни операции. '
+          + 'Сами документы в 1С останутся, но портал перестанет показывать их номера, а следующий клик «Создать черновики» задвоит выпуск. '
+          + 'Частая причина — операция стала в карте первой (на первой операции живёт заготовка, блока кооперации там нет) или снята галка «Внешняя кооперация». '
+          + 'Если отвязка осознанна — подтвердите её (флаг dropOnecLinks).');
+      }
+      onecLog('DROP', `МК ${mkNo}: связка с 1С отвязана по явному подтверждению оператора`, lostLinks.map((l) => l.text));
+    }
+  }
 
   const routeRow = { 'Тип МК': type, 'Наименование': name };
   if (body.designation) routeRow['Изделие / обозначение'] = String(body.designation).trim();
@@ -1410,7 +1441,7 @@ async function saveRoute(body) {
   const opTypes = await ncListSoft('op_types');
   const otById = new Map(opTypes.map((t) => [t.Id ?? t.id, t]));
 
-  let routeId = (body.id != null && body.id !== '') ? Number(body.id) : null;
+  let routeId = routeId0;
   let mk = '';
   let oldStatusMk = null; // МК-резерв металла (этап 1): нужен статус ДО этого сохранения — иначе не увидеть переход «→ В производстве»
   let droppedOnecLinks = []; // (и) связки с 1С, отвязанные этим сохранением по явному подтверждению
@@ -1422,42 +1453,21 @@ async function saveRoute(body) {
     const cr = await ncCreateMany('routes', [routeRow]);
     const c = Array.isArray(cr) ? cr[0] : cr; routeId = c.Id ?? c.id;
   } else {
-    // читаем ТЕКУЩУЮ строку МК ДО патча — источник oldStatusMk (после ncUpdate это будет уже новый статус)
-    const routesBefore = await ncListSoft('routes');
-    const existingRoute = routesBefore.find((x) => (x.Id ?? x.id) === routeId);
+    // строка МК прочитана ВЫШЕ, до всякой записи (см. (л)) — оттуда же oldStatusMk и № МК
     oldStatusMk = existingRoute ? String(existingRoute['Статус МК'] || 'Черновик').trim() : null;
     mk = existingRoute ? (existingRoute['№ МК'] || '') : '';
-    await ncUpdate('routes', routeId, routeRow);
-    // пересборка операций: удаляем прежние операции маршрута + их компоненты
-    const [ops, comps] = await Promise.all([ncListSoft('operations'), ncListSoft('components_in')]);
-    const oldOps = ops.filter((o) => o.routes_id === routeId);
-    const oldOpIds = new Set(oldOps.map((o) => o.Id ?? o.id));
     // ── (и) 1С-коннектор: НЕ ТЕРЯТЬ СВЯЗКУ МОЛЧА ─────────────────────────────
     // Связка с черновиками 1С живёт в coop-JSON операции, а пересохранение МК операции
     // ПЕРЕСОЗДАЁТ: всё, что клиент не прислал обратно, исчезает без следа. Так и терялась
     // связка у операции, ставшей в карте первой (на первой операции — заготовка, блок
     // кооперации там не рисуется) — после чего повторный клик задваивал выпуск в 1С.
-    // Сверяем связки ДО и ПОСЛЕ по идентификатору (см. onecLinkKey) и отказываем, пока
-    // отвязку не подтвердили явно (body.dropOnecLinks === true). Документы в 1С при этом
-    // никуда не деваются — портал их просто перестаёт видеть, о чём и предупреждаем.
-    const lostLinks = [];
-    const newKeys = new Set(opsIn.map((o) => onecLinkKey((mkCoopParse(o && o.materials) || {}).onec)).filter(Boolean));
-    for (const o of oldOps) {
-      const onec = (mkCoopParse(o['Входящие материалы']) || {}).onec;
-      const key = onecLinkKey(onec);
-      if (key && !newKeys.has(key)) lostLinks.push({ key, onec, opNo: o['№ операции'], text: onecLinkText(onec, o['№ операции']) });
-    }
-    if (lostLinks.length) {
-      if (body.dropOnecLinks !== true) {
-        onecLog('REFUSE', `сохранение МК ${mk || routeId} отклонено: стёрло бы ${lostLinks.length} связку(и) с 1С`, lostLinks.map((l) => l.text));
-        throw new Error(
-          `Сохранение отменено: оно стёрло бы связку с черновиками 1С (${lostLinks.map((l) => l.text).join('; ')}). `
-          + 'Сами документы в 1С останутся, но портал перестанет показывать их номера, а следующий клик «Создать черновики» задвоит выпуск. '
-          + 'Частая причина — операция стала в карте первой (на первой операции живёт заготовка, блока кооперации там нет) или снята галка «Внешняя кооперация». '
-          + 'Если отвязка осознанна — подтвердите её (флаг dropOnecLinks).');
-      }
-      onecLog('DROP', `МК ${mk || routeId}: связка с 1С отвязана по явному подтверждению оператора`, lostLinks.map((l) => l.text));
-    }
+    // Сверка связок ДО и ПОСЛЕ (onecLostLinks) и отказ без явного dropOnecLinks сделаны
+    // ВЫШЕ — до первой записи в базу (см. (л)). Документы в 1С при этом никуда не
+    // деваются — портал их просто перестаёт видеть, о чём и предупреждаем.
+    await ncUpdate('routes', routeId, routeRow);
+    // пересборка операций: удаляем прежние операции маршрута + их компоненты
+    const comps = await ncListSoft('components_in');
+    const oldOpIds = new Set(oldOps.map((o) => o.Id ?? o.id));
     const oldCompIds = comps.filter((c) => oldOpIds.has(c.operations_id)).map((c) => c.Id ?? c.id);
     if (oldCompIds.length) await ncDeleteMany('components_in', oldCompIds);
     if (oldOpIds.size) await ncDeleteMany('operations', [...oldOpIds]);
@@ -1591,6 +1601,31 @@ function mkCoopStatus(c) {
   }
   return { sentTotal, closedTotal, done, overdueDays };
 }
+// ── (к) КОПИРОВАНИЕ ОПЕРАЦИИ В ДРУГУЮ КАРТУ («Сформировать МК по образцу») ───
+// «Входящие материалы» — это НЕ просто текст: там же лежит coop-JSON, а в нём —
+// ФАКТЫ, принадлежащие ИМЕННО той карте, с которой копируют:
+//   • onec     — связка с черновиками 1С: идентификатор (uid), ссылки Ref_Key и
+//     номера документов. Скопированная связка означает, что новая МК «уже связана»:
+//     кнопка «Создать черновики» вернёт already со ссылкой на ЧУЖИЕ документы, в 1С
+//     по новой карте не появится НИЧЕГО и никогда, а бухгалтер увидит документы с
+//     комментарием другой карты (воспроизведено QA).
+//   • returned — приёмки возврата из кооперации (акты ВК, даты, годен/брак). Это
+//     свершившиеся факты по деталям ОБРАЗЦА; в новой карте они означали бы, что
+//     детали уже съездили к подрядчику и приняты, — mkCoopStatus сразу показал бы
+//     «возврат завершён», а строки актов ВК в журнале при этом отсутствуют.
+//   • sentDate / returnPlan — дата фактической отправки и срок возврата ТОГО же
+//     рейса. Вместе со сброшенным returned они дают ложную «просрочку возврата» на
+//     только что созданной карте (см. mkCoopStatus.overdueDays).
+// Копируется ЗАМЫСЕЛ ТЕХНОЛОГА (исполнитель, договор, спецификация, состав деталей) —
+// он и есть образец. Всё, что является событием, остаётся у карты-источника.
+// Заготовка ({blank:true}) и свободный текст копируются как есть: это норма расхода,
+// а не факт (резерв металла считается отдельно, по статусу МК).
+function mkMaterialsForCopy(raw) {
+  const coop = mkCoopParse(raw);
+  if (!coop) return String(raw == null ? '' : raw);
+  const { onec, returned, sentDate, returnPlan, ...plan } = coop;
+  return JSON.stringify(plan);
+}
 // человекочитаемая строка для карточки МК (аналог mkBlankText)
 function mkCoopText(c, status) {
   if (!c) return '';
@@ -1701,7 +1736,8 @@ async function syncMkMetalReserve({ routeId, mk, oldStatusMk, newStatusMk, blank
 // «Изделие / обозначение», для копирования операций) считает клиент — по уже загруженным
 // /api/design и /api/routes, без нового справочного эндпоинта; сюда приходит готовое
 // решение по позиции, сервер только создаёт запись(и) и линкует.
-// Копия операций/компонентов — те же поля, что пишет saveRoute() (см. выше), БЕЗ задач.
+// Копия операций/компонентов — те же поля, что пишет saveRoute() (см. выше), БЕЗ задач
+// и БЕЗ фактов карты-образца (связка с 1С, приёмки возврата) — см. mkMaterialsForCopy.
 async function createRouteForPosition({ type, name, designation, copyFromRouteId }) {
   const t = String(type || '').trim();
   if (!['КОМ', 'СБР'].includes(t)) throw new Error('Тип МК должен быть КОМ или СБР.');
@@ -1722,7 +1758,9 @@ async function createRouteForPosition({ type, name, designation, copyFromRouteId
       const srcOpId = op.Id ?? op.id;
       const opRow = { '№ операции': op['№ операции'], 'Операция': op['Операция'] || '', 'Точка контроля': op['Точка контроля'] || 'нет' };
       if (op['Оборудование']) opRow['Оборудование'] = op['Оборудование'];
-      if (op['Входящие материалы']) opRow['Входящие материалы'] = op['Входящие материалы'];
+      // (к) НЕ копируем факты карты-образца: связку с 1С и приёмки возврата (см. mkMaterialsForCopy)
+      const mats = mkMaterialsForCopy(op['Входящие материалы']);
+      if (mats) opRow['Входящие материалы'] = mats;
       if (op['Что контролировать']) opRow['Что контролировать'] = op['Что контролировать'];
       if (op['СИ']) opRow['СИ'] = op['СИ'];
       if (op['Допуски']) opRow['Допуски'] = op['Допуски'];
@@ -1820,8 +1858,12 @@ async function generateTasksFromRoute(routeId) {
         'Приоритет': order['Приоритет'] || 'Нормальный',
         'Дата плановая': pos['Срок готовности'] || order['Плановый срок'] || null,
         // МК-резерв металла (этап 1): на первой операции «Входящие материалы» может быть JSON заготовки
-        // (см. mkBlankParse) — оператору в карте задания Ф.14 нужен человекочитаемый текст, не сырой JSON
-        'Входящие материалы': mkBlankText(mkBlankParse(op['Входящие материалы'])) || op['Входящие материалы'] || '',
+        // (см. mkBlankParse) — оператору в карте задания Ф.14 нужен человекочитаемый текст, не сырой JSON.
+        // (к) На кооперационной операции там же лежит coop-JSON СО СВЯЗКОЙ 1С — сырой JSON с
+        // идентификатором и ссылками на документы не должен утекать в карту задания цеха: отдаём mkCoopText.
+        'Входящие материалы': mkBlankText(mkBlankParse(op['Входящие материалы']))
+          || mkCoopText(mkCoopParse(op['Входящие материалы']))
+          || op['Входящие материалы'] || '',
         'Оборудование': op['Оборудование'] || '',
         'Самоконтроль (С)': ctrl === 'С',
         'Контроль ОТК': ctrl === 'ОТК',
@@ -1974,6 +2016,28 @@ async function routeCoopAccept(body, session) {
 //       блок кооперации (на первой операции — заготовка) и её coop/onec стирались
 //       молча. ТЕПЕРЬ saveRoute сверяет связки ДО и ПОСЛЕ и отказывает, если
 //       сохранение стёрло бы связку, — пока клиент явно не подтвердит (dropOnecLinks).
+//
+//  ГРАБЛИ ТРЕТЬЕЙ ИТЕРАЦИИ (найдены QA, закрыты здесь — НЕ ОТКАТЫВАТЬ):
+//   (к) СВЯЗКА РАЗМНОЖАЛАСЬ КОПИРОВАНИЕМ. «Сформировать МК по образцу» копировала
+//       «Входящие материалы» операции дословно — вместе с coop.onec. Новая карта
+//       рождалась «уже связанной» с ЧУЖИМИ документами: клик отдавал already со
+//       ссылкой на документы образца, в 1С по новой карте не появлялось ничего и
+//       никогда, а бухгалтер видел документы с комментарием другой карты. ТЕПЕРЬ
+//       любое копирование операции чистит факты карты-источника — см.
+//       mkMaterialsForCopy (onec, returned, sentDate, returnPlan). Там же (к): в
+//       карту задания Ф.14 вместо сырого coop-JSON уходит mkCoopText.
+//   (л) ОТКАЗ, КОТОРЫЙ НЕ ОТМЕНЯЕТ. Проверка (и) стояла ПОСЛЕ записи шапки МК:
+//       ответ 400 «Сохранение отменено», а наименование и «Статус МК» в базе уже
+//       переписаны — карта фактически выпущена. ТЕПЕРЬ вся проверка выполняется
+//       ДО первой записи (см. (л) в saveRoute): отказ = не изменилось ничего.
+//   (м) ЛЕГАСИ-СВЯЗКА БЕЗ ИДЕНТИФИКАТОРА. Поиск по старой метке убран, фолбэка не
+//       было — связка с одним созданным документом давала два НОВЫХ документа и
+//       сироту, выпуск задваивался. ТЕПЕРЬ нет uid-совпадения → документы из связки
+//       проверяются чтением по Ref_Key и переиспользуются (onecFindDraftByRef).
+//   (н) DRY-RUN БОЛЬШЕ НЕ ПИШЕТ В КАРТУ. «Расчёт без записи» выдавал и СОХРАНЯЛ
+//       идентификатор связки в «Операции маршрута». Под флагом POST в 1С невозможен,
+//       сослаться на идентификатор некому — записывать нечего. В dry-run ид разовый
+//       (uidPreview), карта МК не меняется.
 //
 //  Хранение связки: JSON-объект `onec` внутри coop-JSON операции («Входящие
 //  материалы»), рядом с `returned`. Отдельных колонок не заводим — тот же паттерн,
@@ -2252,6 +2316,40 @@ async function onecFindExistingDraft(kind, uid) {
   if (!hit && rows.length) onecLog('SKIP', `предфильтр 1С вернул ${rows.length} строк, но точного совпадения идентификатора ${uid} нет — дублем НЕ считаем`, D.entity);
   return hit;
 }
+// ── (м) ЛЕГАСИ-СВЯЗКА БЕЗ ИДЕНТИФИКАТОРА ────────────────────────────────────
+// Поиск по старой метке «ИСМ/<№ МК>/оп.N» убран (он и находил чужое — грабли (е)), а
+// связки, созданные ДО введения uid, этой метки в комментарии и не имеют совпадения по
+// uid. Если у такой связки успел создаться только первый документ («Отчёт производства»),
+// клик создавал ДВА НОВЫХ документа: старый оставался сиротой, выпуск задваивался.
+// Асимметрия была видна и в коде: onecLinkKey фолбэк на Ref_Key документа имеет, а поиск
+// дубля — нет. ТЕПЕРЬ: нет uid-совпадения → проверяем ссылки из самой связки ЧТЕНИЕМ и
+// переиспользуем документ, если он жив.
+// Ошибку чтения (кроме «не найден») НЕ глотаем: молча пойти создавать второй документ —
+// ровно тот дубль, от которого защищаемся. Помеченный на удаление документ считаем
+// отсутствующим — бухгалтер его отбраковал, выпуск нужно оформить заново.
+async function onecFindDraftByRef(kind, ref) {
+  if (!onecIsGuid(ref)) return null;
+  const D = ONEC_DOC[kind];
+  let doc;
+  try {
+    doc = await onecCall('GET', `${D.entity}(guid'${ref}')?${onecQuery({ $format: 'json', $select: 'Ref_Key,Number,Date,Posted,DeletionMark,Комментарий' })}`);
+  } catch (e) {
+    if (e && e.onec && e.onec.status === 404) { onecLog('SKIP', `легаси-связка: ${D.title} по ссылке из карты в 1С не найден — считаем отсутствующим`, { kind }); return null; }
+    onecLog('REFUSE', `легаси-связка: не удалось проверить ${D.title} по ссылке из карты — создание отменено, чтобы не задвоить выпуск`, String(e.message || e));
+    throw onecErr(502, `Не удалось проверить ранее созданный документ «${D.title}» по ссылке из карты МК. `
+      + 'Создание черновиков отменено — иначе выпуск задвоился бы. Повторите, когда 1С ответит.');
+  }
+  if (!doc || !doc.Ref_Key) return null;
+  if (doc.DeletionMark) { onecLog('SKIP', `легаси-связка: ${D.title} №${doc.Number || '—'} помечен в 1С на удаление — переиспользовать нельзя`, { kind }); return null; }
+  onecLog('REUSE', `легаси-связка без идентификатора: переиспользован ${D.title} №${doc.Number || '—'} по ссылке из карты МК`, { kind });
+  return doc;
+}
+// Дубль ищем сперва по идентификатору (основной путь), затем — по ссылке из связки (легаси).
+async function onecFindExisting(kind, uid, savedDoc) {
+  const byUid = await onecFindExistingDraft(kind, uid);
+  if (byUid) return byUid;
+  return onecFindDraftByRef(kind, savedDoc && savedDoc.ref);
+}
 
 // ── Сборка тел документов ───────────────────────────────────────────────────
 function onecBuildProduction({ tpl, nomKey, unitKey, qty, comment }) {
@@ -2329,10 +2427,21 @@ async function onecCoopDrafts(body) {
 
   // Повторный клик: связка уже есть → ничего не создаём, возвращаем сохранённое.
   // Связка принадлежит ИМЕННО ЭТОЙ операции (её coop-JSON) — чужих номеров тут быть не может.
-  const saved = coop.onec && coop.onec.production && coop.onec.transfer ? coop.onec : null;
+  const savedLink = (coop.onec && typeof coop.onec === 'object') ? coop.onec : {};
+  const saved = savedLink.production && savedLink.transfer ? savedLink : null;
   if (saved) {
     onecLog('SKIP', `дубль предотвращён: МК ${mk} оп.${opNo} уже связана (ид ${saved.uid || '—'})`, { production: saved.production.number, transfer: saved.transfer.number });
-    return { ok: true, already: true, created: false, mk, opNo, resolvedBy: how, nomenclature: { name: nomName }, qty, ...saved };
+    // ЗАМЕЧАНИЕ QA (мелочь 1): № МК и № операции в СВЯЗКЕ — это снимок на момент её создания,
+    // а операции перенумеровываются при каждом пересохранении МК. Поэтому спрашивали оп.20, а
+    // ответ приходил про оп.21. Отдаём ФАКТИЧЕСКИЕ mk/opNo (кладём их ПОСЛЕ ...saved), а
+    // устаревшую подпись показываем отдельно — по ней видно, под каким номером ушли документы в 1С.
+    const drift = (saved.opNo != null && numOrNull(saved.opNo) !== opNo) || (saved.mk && saved.mk !== mk);
+    return {
+      ok: true, already: true, created: false, resolvedBy: how, nomenclature: { name: nomName }, qty,
+      ...saved, mk, opNo,
+      ...(drift ? { linkedAs: { mk: saved.mk || '', opNo: saved.opNo ?? null },
+        warning: `Документы создавались, когда операция была ${saved.mk ? `в МК ${saved.mk} ` : ''}под № ${saved.opNo ?? '—'} — с тех пор карта пересохранена и номер сменился. Связка та же (идентификатор не меняется), комментарий в 1С содержит прежний номер.` } : {}),
+    };
   }
 
   // (а) офлайн: кредов нет → к 1С не ходим совсем (и идентификатор не выдаём — писать некуда)
@@ -2343,17 +2452,28 @@ async function onecCoopDrafts(body) {
   // (е) Идентификатор связки: выдаётся ОДИН раз и сразу ложится в coop-JSON операции —
   // ДО любого обращения к 1С. Если POST пройдёт, а сохранение связки сорвётся, следующий
   // клик найдёт уже созданные документы по ЭТОМУ ЖЕ идентификатору и не задвоит выпуск.
-  const uidRes = await onecEnsureLinkUid(opId, coop);
+  //
+  // ЗАМЕЧАНИЕ QA (мелочь 2): в dry-run идентификатор В КАРТУ НЕ ПИШЕМ. «Расчёт без записи»
+  // обязан не менять ничего — ни в 1С, ни в «Операциях маршрута»; прежде dry-run молча
+  // правил карту МК, и обещание флага было неправдой. Смысла в записи здесь нет: под
+  // флагом POST в 1С физически невозможен (onecCall), значит ни один документ на этот
+  // идентификатор сослаться не может и осиротеть нечему. Настоящий идентификатор
+  // выдаётся при первом БОЕВОМ обращении; в плане показываем разовый (uidPreview).
+  const uidRes = await onecEnsureLinkUid(opId, coop, !dryRun);
   coop = uidRes.coop; const uid = uidRes.uid;
   ctx.uid = uid;
 
-  // Уже созданные ранее черновики (связка могла не доехать до NocoDB) — ищем ПО ИДЕНТИФИКАТОРУ.
-  const [exProd, exTran] = await Promise.all([onecFindExistingDraft('production', uid), onecFindExistingDraft('transfer', uid)]);
+  // Уже созданные ранее черновики (связка могла не доехать до NocoDB) — ищем ПО ИДЕНТИФИКАТОРУ,
+  // а для легаси-связок без идентификатора — по ссылкам на документы из самой связки (см. (м)).
+  const [exProd, exTran] = await Promise.all([
+    onecFindExisting('production', uid, savedLink.production),
+    onecFindExisting('transfer', uid, savedLink.transfer),
+  ]);
   if (exProd && exTran) {
     const link = { uid, ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName }, qty, production: onecDocView('production', exProd), transfer: onecDocView('transfer', exTran) };
-    await onecSaveLink(opId, coop, link);
+    if (!dryRun) await onecSaveLink(opId, coop, link);
     onecLog('SKIP', `дубль предотвращён по идентификатору ${uid}`, { production: exProd.Number, transfer: exTran.Number });
-    return { ok: true, already: true, created: false, mk, opNo, resolvedBy: how, ...link };
+    return { ok: true, already: true, created: false, resolvedBy: how, ...link, mk, opNo };
   }
 
   const [tpl, nom, contractor] = await Promise.all([
@@ -2372,9 +2492,10 @@ async function onecCoopDrafts(body) {
   };
 
   if (dryRun) {
-    onecLog('DRY', `МК ${mk} оп.${opNo}: расчёт без записи (ид ${uid})`, { nomenclature: nomName, qty, nomFound: !!nom, contractorFound: !!contractor, base: tpl.base });
+    onecLog('DRY', `МК ${mk} оп.${opNo}: расчёт без записи (ид ${uid}${uidRes.persisted ? '' : ', разовый — в карту не записан'})`, { nomenclature: nomName, qty, nomFound: !!nom, contractorFound: !!contractor, base: tpl.base });
     return {
       ok: true, dryRun: true, created: false, mk, opNo, resolvedBy: how, uid,
+      uidPreview: !uidRes.persisted,   // ид разовый: в карту МК ничего не записано (см. onecEnsureLinkUid)
       nomenclature: { name: nomName, foundIn1C: !!nom, ref: nom ? nom.Ref_Key : '' },
       qty, contractor: coop.contractor || '', contractorIn1C: contractor ? contractor.Description : '',
       organization: tpl.orgName, base: tpl.base,               // (ж) видно, из КАКОЙ базы взяты реквизиты плана
@@ -2383,7 +2504,8 @@ async function onecCoopDrafts(body) {
         { kind: 'transfer', doc: ONEC_DOC.transfer.title, vid: ONEC_DOC.transfer.vid, body: payloads.transfer },
       ],
       warnings,
-      warning: 'Включён режим ONEC_DRY_RUN — в 1С НИЧЕГО не записано. Показано, что будет отправлено.',
+      warning: 'Включён режим ONEC_DRY_RUN — не записано НИЧЕГО: ни в 1С, ни в карту МК. Показано, что будет отправлено.'
+        + (uidRes.persisted ? '' : ' Идентификатор связки в плане — разовый, настоящий будет выдан при первом боевом создании.'),
     };
   }
 
@@ -2413,13 +2535,18 @@ async function onecSaveLink(opId, coop, link) {
 // (е) Идентификатор связки. Выдаётся ОДИН раз на операцию и дальше НИКОГДА не меняется:
 // ни перенумерация операций, ни переименование МК на него не влияют. Хранится в coop-JSON
 // (coop.onec.uid) и пишется в «Комментарий» обоих документов 1С.
-async function onecEnsureLinkUid(opId, coop) {
+// persist=false (dry-run) — идентификатор НЕ сохраняем: «расчёт без записи» не меняет карту МК.
+async function onecEnsureLinkUid(opId, coop, persist = true) {
   const cur = coop && coop.onec ? String(coop.onec.uid || '') : '';
-  if (onecIsGuid(cur)) return { coop, uid: cur.toLowerCase(), issued: false };
+  if (onecIsGuid(cur)) return { coop, uid: cur.toLowerCase(), issued: false, persisted: true };
   const uid = crypto.randomUUID();
+  if (!persist) {
+    onecLog('DRY', `идентификатор ${uid} рассчитан для превью и НЕ записан в карту МК (dry-run)`, { opId });
+    return { coop, uid, issued: true, persisted: false };
+  }
   const next = await onecSaveLink(opId, coop, { uid, uidTs: new Date().toISOString() });
   onecLog('UID', `связке операции выдан идентификатор ${uid}`, { opId });
-  return { coop: next, uid, issued: true };
+  return { coop: next, uid, issued: true, persisted: true };
 }
 // Ключ связки для сверки «до/после» при пересохранении МК (см. saveRoute).
 // Приоритет — uid; для связок, созданных до введения uid, фолбэк на Ref_Key документов.
@@ -2430,6 +2557,20 @@ function onecLinkKey(onec) {
   if (onecIsGuid(p)) return 'ref:' + String(p).toLowerCase();
   if (onecIsGuid(t)) return 'ref:' + String(t).toLowerCase();
   return '';
+}
+// Связки, которые ИСЧЕЗНУТ, если сохранить маршрут присланным набором операций.
+// Вызывается ДО любой записи в базу (см. (л) в saveRoute): отказ обязан означать,
+// что не изменилось ничего.
+function onecLostLinks(oldOps, opsIn) {
+  const newKeys = new Set((Array.isArray(opsIn) ? opsIn : [])
+    .map((o) => onecLinkKey((mkCoopParse(o && o.materials) || {}).onec)).filter(Boolean));
+  const lost = [];
+  for (const o of (Array.isArray(oldOps) ? oldOps : [])) {
+    const onec = (mkCoopParse(o['Входящие материалы']) || {}).onec;
+    const key = onecLinkKey(onec);
+    if (key && !newKeys.has(key)) lost.push({ key, onec, opNo: o['№ операции'], text: onecLinkText(onec, o['№ операции']) });
+  }
+  return lost;
 }
 // Человекочитаемое описание связки для сообщений («оп.3 · Отчёт … №00-12 и Передача … №00-13»).
 function onecLinkText(onec, opNo) {
@@ -5595,7 +5736,9 @@ async function buildBoardLive() {
       ri: opType['РИ'] || '', normTime: operation['Норма времени (ч)'] ?? '',
       // МК-резерв металла (этап 1): фолбэк на «Входящие материалы» операции может попасть на JSON
       // заготовки (см. mkBlankParse) — рабочему нужен человекочитаемый текст, не сырой JSON
-      materials: t['Входящие материалы'] || mkBlankText(mkBlankParse(operation['Входящие материалы'])) || operation['Входящие материалы'] || '',
+      // (к) на кооперационной операции в том же поле лежит coop-JSON со связкой 1С — в цех отдаём mkCoopText
+      materials: t['Входящие материалы'] || mkBlankText(mkBlankParse(operation['Входящие материалы']))
+        || mkCoopText(mkCoopParse(operation['Входящие материалы'])) || operation['Входящие материалы'] || '',
       control: {
         point: operation['Точка контроля'] || '', what: operation['Что контролировать'] || '',
         tol: operation['Допуски'] || '', si: operation['СИ'] || '',

@@ -8156,20 +8156,37 @@ async function bitrixUserCurrent(endpoint, token) {
   if (j.error) throw new Error(`user.current: ${j.error}: ${j.error_description || ''}`);
   return j.result;
 }
+// K-95: адрес возврата OAuth берём из адреса ТЕКУЩЕГО запроса, а не из фиксированного PORTAL_BASE.
+// Пришли по http://nas-pbs:4173 (Tailscale) → вернёмся на nas-pbs; пришли по IP из LAN Храброво → на IP.
+// PORTAL_BASE остаётся для ссылок в чат Bitrix (там адрес обязан быть постоянным), BX_REDIRECT — приоритетное
+// переопределение. Оба адреса должны быть в белом списке redirect URI локального приложения Bitrix.
+// Прим.: bitrixOAuthToken() redirect_uri НЕ передаёт (oauth.bitrix.info его на обмене кода не требует),
+// поэтому расхождения «authorize ≠ token» тут возникнуть не может — точка сборки одна.
+function authRedirectUri(req) {
+  const c = cfg();
+  if (c.BX_REDIRECT) return c.BX_REDIRECT;
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  // Host из запроса не доверяем вслепую: только имя/IP[:порт], иначе — старое поведение через PORTAL_BASE.
+  if (!host || !/^[A-Za-z0-9._~\-]+(:\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](:\d{1,5})?$/.test(host)) {
+    return c.PORTAL_BASE + '/auth/callback';
+  }
+  return `${proto}://${host}/auth/callback`;
+}
 async function handleAuth(req, res, p, url) {
   const c = cfg();
   if (p === '/auth/login') {
     if (!c.BX_CLIENT_ID) { res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Вход через Bitrix не настроен (нет client_id в «Настройках»).'); return true; }
     const state = crypto.randomBytes(16).toString('hex');
     const next = url.searchParams.get('next') || '/';
-    const redirect = c.BX_REDIRECT || (c.PORTAL_BASE + '/auth/callback');
+    const redirect = authRedirectUri(req);
     setCookie(res, 'pbs_oauth', state + '|' + next, { maxAge: 600 });
     const a = new URL(`https://${c.BX_DOMAIN}/oauth/authorize/`);
     a.searchParams.set('client_id', c.BX_CLIENT_ID);
     a.searchParams.set('response_type', 'code');
     a.searchParams.set('redirect_uri', redirect);
     a.searchParams.set('state', state);
-    console.log(`[auth] login → 302 на Bitrix (domain=${c.BX_DOMAIN}, redirect=${redirect})`);
+    console.log(`[auth] login → 302 на Bitrix (domain=${c.BX_DOMAIN}, host=${req.headers.host || '-'}, redirect=${redirect}${c.BX_REDIRECT ? ' [из BX_REDIRECT]' : ''})`);
     res.writeHead(302, { Location: a.toString() }); res.end(); return true;
   }
   if (p === '/auth/callback') {
@@ -8178,7 +8195,7 @@ async function handleAuth(req, res, p, url) {
     const [savedState, next = '/'] = (parseCookies(req).pbs_oauth || '').split('|');
     setCookie(res, 'pbs_oauth', '', { maxAge: 0 });
     const fail = (m) => { console.error('[auth] callback FAIL:', m); res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(`<meta charset=utf-8><body style="font:15px 'Segoe UI';padding:40px;color:#1f3a52"><h3>Не удалось войти</h3><p>${m}</p><p><a href="/">← На главную</a></p>`); return true; };
-    console.log(`[auth] callback: code=${code ? 'есть' : 'НЕТ'} state=${state ? (state === savedState ? 'ok' : 'MISMATCH') : 'НЕТ'} cookie=${savedState ? 'есть' : 'НЕТ'}${errParam ? ' error=' + errParam : ''}`);
+    console.log(`[auth] callback: host=${req.headers.host || '-'} code=${code ? 'есть' : 'НЕТ'} state=${state ? (state === savedState ? 'ok' : 'MISMATCH') : 'НЕТ'} cookie=${savedState ? 'есть' : 'НЕТ'}${errParam ? ' error=' + errParam : ''}`);
     if (errParam) return fail('Bitrix вернул ошибку: ' + errParam + ' ' + (url.searchParams.get('error_description') || ''));
     if (!code) return fail('Bitrix не вернул код авторизации.');
     if (!state || state !== savedState) return fail('Неверный state (защита CSRF) или потеряна cookie pbs_oauth. Войдите заново через /auth/login.');

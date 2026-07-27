@@ -6955,6 +6955,26 @@ function settingsView() {
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
 }
+// PORTAL_BASE — единственная настройка, которой можно положить портал ВСЕМ сразу:
+// на неё завязан канонический редирект, и ошибка вида «https://nas-pbs» вместо
+// «http://nas-pbs:4173» уводит браузеры на несуществующий адрес, а чинить это
+// пришлось бы уже с самой NAS. Поэтому принимаем строго http(s)://хост[:порт] —
+// без пути, query, фрагмента и логина/пароля; всё прочее — ошибка, ничего не сохраняем.
+function normalizePortalBase(raw) {
+  const bad = (why) => { const e = new Error(`Адрес портала (PORTAL_BASE) задан неверно: ${why}. Ожидается вид http://nas-pbs:4173 — схема, хост и при необходимости порт, без пути.`); e.status = 400; throw e; };
+  const s = String(raw || '').trim().replace(/\/+$/, '');
+  if (!s) bad('пустое значение');
+  if (/[\s\\]/.test(s)) bad('пробелы или обратный слэш в адресе');
+  let u; try { u = new URL(s); } catch { bad('это не абсолютный URL'); }
+  if (!/^https?:$/.test(u.protocol)) bad(`схема «${u.protocol.replace(':', '')}» не поддерживается, нужна http или https`);
+  if (!u.hostname) bad('не указан хост');
+  if (u.username || u.password) bad('логин/пароль в адресе недопустимы');
+  if (u.search) bad('параметры запроса (?…) недопустимы');
+  if (u.hash) bad('якорь (#…) недопустим');
+  if (u.pathname && u.pathname !== '/') bad(`путь «${u.pathname}» недопустим — нужен только адрес хоста`);
+  if (u.port && !(Number(u.port) >= 1 && Number(u.port) <= 65535)) bad('порт вне диапазона 1–65535');
+  return u.origin; // http://nas-pbs:4173 — уже без хвостового слэша
+}
 function saveSettings(body) {
   const next = { ...runtime };
   if (typeof body.ncUrl === 'string' && body.ncUrl.trim()) next.NC_URL = body.ncUrl.trim();
@@ -6966,7 +6986,10 @@ function saveSettings(body) {
   if (typeof body.bitrixUsers === 'string') next.BITRIX_USERS = body.bitrixUsers.trim();
   if (typeof body.salesDept === 'string' && body.salesDept.trim()) next.SALES_DEPT_ID = body.salesDept.trim();
   if (typeof body.hubChat === 'string') next.BITRIX_HUB_CHAT = body.hubChat.trim();
-  if (typeof body.portalBase === 'string' && body.portalBase.trim()) next.PORTAL_BASE = body.portalBase.trim();
+  // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
+  // и вернуться к env/дефолту (заодно это штатный способ выключить канонический редирект).
+  if (body.portalBase === '__clear__') delete next.PORTAL_BASE;
+  else if (typeof body.portalBase === 'string' && body.portalBase.trim()) next.PORTAL_BASE = normalizePortalBase(body.portalBase);
   if (typeof body.recordsRoot === 'string') next.RECORDS_ROOT = body.recordsRoot.trim();
   if (typeof body.docsRoot === 'string') next.DOCS_ROOT = body.docsRoot.trim();
   if (body.bitrixClientId === '__clear__') delete next.BITRIX_CLIENT_ID;
@@ -8156,6 +8179,35 @@ async function bitrixUserCurrent(endpoint, token) {
   if (j.error) throw new Error(`user.current: ${j.error}: ${j.error_description || ''}`);
   return j.result;
 }
+// ── Кто и по какому адресу к нам постучался (доверие к обратному прокси) ─────
+//  X-Forwarded-Host/Proto подделываются одним curl'ом: сейчас портал слушает
+//  порт напрямую, значит эти заголовки НИКОГДА не легитимны и верить им нельзя
+//  (иначе `curl -H "X-Forwarded-Host: чужое"` крутит логикой хоста, а за будущим
+//  Caddy это ещё и даёт вечный цикл редиректов). Поэтому доверие — только при
+//  явном TRUST_PROXY=1 в runtime/env (по умолчанию ВЫКЛЮЧЕНО); включать его надо
+//  ровно тогда, когда порт портала закрыт и снаружи доступен только через прокси.
+//  Во всех остальных случаях решения принимаются по настоящему Host.
+function trustProxy() {
+  return /^(1|on|true|yes)$/i.test(String(runtime.TRUST_PROXY ?? process.env.TRUST_PROXY ?? '').trim());
+}
+const _fwdSeen = new Set(); // чтобы не залить лог одинаковыми предупреждениями
+function requestOrigin(req) {
+  const rawFwdHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const trust = trustProxy();
+  if (rawFwdHost && !trust && !_fwdSeen.has(rawFwdHost)) {
+    if (_fwdSeen.size > 50) _fwdSeen.clear();  // потоком разных значений память не раздуть
+    _fwdSeen.add(rawFwdHost);
+    console.warn(`[proxy] X-Forwarded-Host: ${rawFwdHost} ПРОИГНОРИРОВАН (TRUST_PROXY выключен), решаем по Host: ${req.headers.host || '-'}`);
+  }
+  const fwdHost = trust ? rawFwdHost : '';
+  const fwdProto = trust ? String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() : '';
+  return {
+    host: fwdHost || String(req.headers.host || '').split(',')[0].trim(),
+    proto: fwdProto === 'https' || fwdProto === 'http' ? fwdProto : 'http',
+    viaProxy: !!fwdHost,
+  };
+}
+
 // K-95: адрес возврата OAuth берём из адреса ТЕКУЩЕГО запроса, а не из фиксированного PORTAL_BASE.
 // Пришли по http://nas-pbs:4173 (Tailscale) → вернёмся на nas-pbs; пришли по IP из LAN Храброво → на IP.
 // PORTAL_BASE остаётся для ссылок в чат Bitrix (там адрес обязан быть постоянным), BX_REDIRECT — приоритетное
@@ -8165,8 +8217,7 @@ async function bitrixUserCurrent(endpoint, token) {
 function authRedirectUri(req) {
   const c = cfg();
   if (c.BX_REDIRECT) return c.BX_REDIRECT;
-  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
-  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  const { proto, host } = requestOrigin(req); // X-Forwarded-* — только при TRUST_PROXY=1, иначе настоящий Host
   // Host из запроса не доверяем вслепую: только имя/IP[:порт], иначе — старое поведение через PORTAL_BASE.
   if (!host || !/^[A-Za-z0-9._~\-]+(:\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](:\d{1,5})?$/.test(host)) {
     return c.PORTAL_BASE + '/auth/callback';
@@ -8523,6 +8574,8 @@ async function catalogLookup(q) {
 //  Выключатели: PORTAL_BASE не задан явно (runtime/env) или не парсится → редиректа
 //  нет (хардкод-дефолт из cfg() здесь СОЗНАТЕЛЬНО не используется, чтобы стенд без
 //  настройки не начал вдруг кидать на 192.168.1.10); жёсткий стоп — CANONICAL_HOST_REDIRECT=0.
+//  Аварийный клапан для клиента, который не резолвит каноническое имя, — ?nocanon=1
+//  (см. nocanonValve ниже): правка конфигурации не нужна, помогает по телефону.
 function canonicalOrigin() {
   const off = String(runtime.CANONICAL_HOST_REDIRECT ?? process.env.CANONICAL_HOST_REDIRECT ?? '').trim();
   if (/^(0|off|false|no)$/i.test(off)) return null;
@@ -8535,16 +8588,46 @@ function canonicalOrigin() {
   } catch { return null; }
 }
 const LOOPBACK_HOST_RE = /^(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[::1\]|::1)(:\d{1,5})?$/i;
+// ── Аварийный клапан «?nocanon=1» ────────────────────────────────────────────
+//  Зачем: редирект уводит всех на канонический хост (nas-pbs). Клиент, который это
+//  имя не резолвит (свой DNS, нет Tailscale), после редиректа теряет портал совсем —
+//  а раньше выручал вход по IP. Правку PORTAL_BASE по телефону не продиктуешь, да и
+//  чинить её пришлось бы с самой NAS. Поэтому: добавил ?nocanon=1 к адресу → портал
+//  ставит короткоживущую (30 мин) cookie, и ДЛЯ ЭТОГО БРАУЗЕРА редирект не срабатывает.
+//  ?nocanon=0 снимает её сразу. Конфигурация не меняется — клапан личный и временный.
+//  Почему это не дыра: cookie не даёт никаких прав, только отключает 302; HttpOnly
+//  (скриптом со страницы не поставить), Path=/, SameSite=Lax, живёт полчаса; худшее,
+//  чего добьётся злоумышленник по подсунутой ссылке, — жертва полчаса ходит по порталу
+//  с неканонического адреса, ровно как до K-95.
+//  Почему клапан НЕ распространяется на /auth/*: Bitrix возвращает код только на адрес
+//  из «Пути обработчика» (nas-pbs), поэтому вход, начатый с другого origin, гарантированно
+//  падает «Неверный state». Вход всегда уводим на канон — клапан OAuth не ломает.
+const NOCANON_COOKIE = 'pbs_nocanon', NOCANON_TTL = 1800; // 30 минут
+function nocanonValve(req, res, url, host) {
+  const q = url.searchParams.get('nocanon');
+  if (q != null) {
+    const on = !/^(0|off|false|no)$/i.test(q.trim());
+    setCookie(res, NOCANON_COOKIE, on ? '1' : '', { maxAge: on ? NOCANON_TTL : 0 });
+    console.log(`[canon] клапан nocanon ${on ? `ВКЛЮЧЁН на ${NOCANON_TTL / 60} мин` : 'СНЯТ'} для хоста ${host} (путь ${url.pathname})`);
+    return on;
+  }
+  if (parseCookies(req)[NOCANON_COOKIE] !== '1') return false;
+  // лог только по «документным» запросам, иначе каждый css/js засорял бы журнал
+  if (!/\.[a-z0-9]{2,5}$/i.test(url.pathname)) console.log(`[canon] клапан nocanon активен: ${host}${url.pathname} — редирект пропущен`);
+  return true;
+}
 function canonicalHostRedirect(req, res, url) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   if (req.headers['x-api-token'] != null) return false;                       // MCP-агент, не браузер
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return false; // XHR через 302 не гоняем
   const canon = canonicalOrigin();
   if (!canon) return false;                                                   // PORTAL_BASE пуст/битый или выключено
-  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  const { host } = requestOrigin(req);                                        // X-Forwarded-Host — только при TRUST_PROXY=1
   if (!host) return false;                                                    // запрос без Host
   if (LOOPBACK_HOST_RE.test(host)) return false;                              // healthcheck и локальные вызовы
   if (host.toLowerCase() === canon.host) return false;                        // уже канонический → циклов нет
+  const isAuth = url.pathname === '/auth' || url.pathname.startsWith('/auth/');
+  if (!isAuth && nocanonValve(req, res, url, host)) return false;             // аварийный клапан (вход им не отключается)
   const suffix = (req.url && req.url.startsWith('/') ? req.url : url.pathname + url.search).replace(/[\r\n]/g, '');
   const loc = canon.origin + suffix;
   console.log(`[canon] неканонический хост ${host} → 302 ${loc}`);
@@ -8574,7 +8657,12 @@ const server = http.createServer(async (req, res) => {
     if (await rbacEnforce(req, res, p)) return;
     if (p === '/api/health') return sendJson(res, 200, { ok: true, ...settingsView() });
     if (p === '/api/settings' && req.method === 'GET') return sendJson(res, 200, settingsView());
-    if (p === '/api/settings' && req.method === 'POST') { saveSettings(await readBody(req)); return sendJson(res, 200, settingsView()); }
+    if (p === '/api/settings' && req.method === 'POST') {
+      // невалидное значение (напр. кривой PORTAL_BASE) → 400 с внятным текстом и НИЧЕГО не сохраняем
+      try { saveSettings(await readBody(req)); }
+      catch (e) { console.warn('[settings] сохранение отклонено:', e.message); return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+      return sendJson(res, 200, settingsView());
+    }
     if (p === '/api/dict' && req.method === 'GET') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', dicts: [] });
       const out = [];

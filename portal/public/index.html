@@ -12312,6 +12312,7 @@
     function stgRender(){ ({conn:stgConn,integ:stgInteg,dict:stgDict,sales:stgSales,access:stgAccess,profile:stgProfile}[stgGroup]||stgConn)(); }
     async function stgSave(body,msgId){
       let r; try{ r=await (await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json(); }catch(e){ return stgMsg(msgId,false,'Сеть: '+e.message); }
+      if(r&&r.error){ return stgMsg(msgId,false,r.error); } // сервер отклонил (напр. кривой адрес портала) — ничего не сохранено
       STG=r; renderSettings(stgHost); stgMsg(msgId,true,'Сохранено. Режим: '+r.mode);
     }
     function stgConn(){

@@ -11242,6 +11242,32 @@
       const coopOpBadge=(st)=>st.overdueDays>0?`<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca">⚠ возврат просрочен ${st.overdueDays} дн</span>`
         :st.done?`<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700;color:#15803d;background:#ecfdf5;border:1px solid #a7f3d0">возврат завершён</span>`
         :`<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe">в кооперации</span>`;
+      // ── Блок «1С» на кооперационной операции (1С-коннектор, этап 1) ────────────────
+      // Одна кнопка создаёт в 1С ДВА НЕпроведённых черновика («Отчёт производства за смену» +
+      // «Передача товаров»/М-15); их номера и даты показываем прямо здесь. Кнопка блокируется,
+      // как только связка появилась (защита от дублей — вторая линия обороны, первая на сервере).
+      // (г) ошибка сервера рисуется ИНЛАЙН в этом блоке, не только тостом.
+      const onecDocLine=(x)=>{ if(!x)return ''; const badge=x.posted
+          ?'<span style="padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700;color:#15803d;background:#ecfdf5;border:1px solid #a7f3d0">проведён</span>'
+          :'<span style="padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700;color:#b45309;background:#fffbeb;border:1px solid #fde68a">черновик</span>';
+        return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;padding:2px 0"><span style="color:#5b6b7a;min-width:210px">${esc(x.doc||'')}</span><span class="code" style="font-family:monospace;color:var(--blue)">№ ${esc(x.number||'—')}</span><span class="c-gray">от ${esc(x.dateHuman||fmt(String(x.date||'').slice(0,10))||'—')}</span>${badge}</div>`; };
+      const onecBlockHtml=(o)=>{
+        const n=o.onec||null, has=!!(n&&(n.production||n.transfer));
+        const body=has
+          ?`${onecDocLine(n.production)}${onecDocLine(n.transfer)}${n.nomenclature&&n.nomenclature.name?`<div style="font-size:11.5px;color:#5b6b7a;margin-top:3px">Номенклатура: ${esc(n.nomenclature.name)}${n.qty?` · ${esc(String(n.qty))} шт`:''}</div>`:''}`
+          :'<div class="c-gray" style="font-size:12px">Черновики в 1С ещё не создавались.</div>';
+        return `<div data-onec="${esc(String(o.n))}" style="margin-top:9px;padding:9px 11px;border:1px solid #dbe4f0;border-radius:8px;background:#fff">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+            <b style="font-size:12.5px;color:var(--ink)">1С</b>
+            <span class="c-gray" style="font-size:11px">Отчёт производства за смену + Передача товаров (М-15) — НЕпроведённые черновики</span>
+            ${d.mode==='live'?`<span style="margin-left:auto;display:flex;gap:6px">
+              <button type="button" class="tbtn" data-onecmake="${esc(String(o.n))}"${has?' disabled title="Черновики уже созданы — повторный клик не плодит дубли"':''}>${has?'Черновики созданы':'Создать черновики в 1С'}</button>
+              <button type="button" class="tbtn" data-onecstat="${esc(String(o.n))}"${has?'':' disabled title="Сначала создайте черновики"'}>Обновить статус</button>
+            </span>`:''}
+          </div>
+          <div data-onecbody="${esc(String(o.n))}">${body}</div>
+          <div data-onecmsg="${esc(String(o.n))}" style="display:none;margin-top:7px;font-size:12px;padding:7px 9px;border-radius:6px"></div>
+        </div>`; };
       const coopRowHtml=(o)=>{ if(!o.coop)return ''; const st=o.coopStatus||{sentTotal:0,closedTotal:0,done:false,overdueDays:0};
         return `<tr class="rt-coop-row"><td></td><td colspan="7" style="padding:7px 8px 11px;background:#f8fafc;border-top:1px dashed #dbe1e9">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px">
@@ -11249,6 +11275,7 @@
             ${d.mode==='live'?`<button type="button" class="tbtn" data-coopaccept="${o.id}" style="margin-left:auto">Приёмка возврата</button>`:''}
           </div>
           <div data-coopform="${o.id}" style="display:none;margin-top:9px"></div>
+          ${onecBlockHtml(o)}
         </td></tr>`; };
       const opsTable=`<div class="tbl-wrap"><table class="dt" style="font-size:12.5px;width:100%;min-width:780px"><thead><tr><th style="width:30px">№</th><th>Операция</th><th style="width:104px">Участок</th><th style="width:150px">Оборуд.</th><th style="width:120px">Оснастка</th><th style="width:140px">Карта наладки</th><th class="ct" style="width:62px">Контроль</th><th class="nw" style="width:58px">Норма</th></tr></thead><tbody>${(d.operations||[]).map(o=>`<tr><td class="c-gray nw" style="font-weight:700">${esc(String(o.n))}</td><td><b style="color:var(--ink)">${esc(o.name)}</b>${o.tasks&&o.tasks.length?`<div style="font-size:10.5px;margin-top:2px">${tStat(o.tasks)}</div>`:''}</td><td class="code" style="white-space:normal;word-break:break-word">${esc(o.section||'—')}</td><td class="c-gray" style="white-space:normal;word-break:break-word">${esc(o.equip||'—')}</td><td class="c-gray" style="white-space:normal;line-height:1.5">${toolCell(o)}</td><td class="nw">${snCell(o)}</td><td class="ct nw">${ctl(o.control)}</td><td class="nw c-gray">${esc(String(o.norm||'—'))}</td></tr>${coopRowHtml(o)}`).join('')||'<tr><td colspan="8" class="c-gray" style="padding:12px">Операции не заведены</td></tr>'}</tbody></table></div>`;
       // сводный бейдж кооперации для шапки карты (максимум просрочки/статус по всем операциям маршрута)
@@ -11362,6 +11389,48 @@
           }catch(e){ toast('Ошибка приёмки: '+(e.message||e),'err'); submitBtn.disabled=false; }
         };
       };});
+
+      // ── 1С-коннектор, этап 1: wiring блока «1С» ─────────────────────────────────
+      // Операцию адресуем ПО routeId + «№ операции» (Id операций пересоздаются при каждом
+      // пересохранении МК — см. серверный onecResolveOp); opId отправляем лишь как фолбэк.
+      const onecMsg=(n,kind,text)=>{ const box=host.querySelector('[data-onecmsg="'+n+'"]'); if(!box)return;
+        if(!text){ box.style.display='none'; box.textContent=''; return; }
+        const sty=kind==='err'?'color:#b91c1c;background:#fef2f2;border:1px solid #fecaca'
+          :kind==='warn'?'color:#b45309;background:#fffbeb;border:1px solid #fde68a'
+          :'color:#15803d;background:#ecfdf5;border:1px solid #a7f3d0';
+        box.setAttribute('style','margin-top:7px;font-size:12px;padding:7px 9px;border-radius:6px;white-space:pre-wrap;'+sty);
+        box.textContent=text; box.style.display=''; };
+      const onecCall=async(url,init)=>{ const rr=await fetch(url,init); let jj={}; try{jj=await rr.json();}catch(e){}
+        if(!rr.ok||jj.error)throw new Error(jj.error||('HTTP '+rr.status)); return jj; };
+      host.querySelectorAll('[data-onecmake]').forEach(btn=>{ btn.onclick=async()=>{
+        const n=btn.dataset.onecmake; const op=(d.operations||[]).find(o=>String(o.n)===String(n)); if(!op)return;
+        btn.disabled=true; onecMsg(n,'ok','Обращение к 1С…');
+        try{
+          const jj=await onecCall('/api/1c/coop-drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({routeId:r.id,opNo:op.n,opId:op.id})});
+          const warns=[].concat(jj.warnings||[]).concat(jj.warning?[jj.warning]:[]).filter(Boolean);
+          if(jj.offline){ onecMsg(n,'warn','1С не настроена: '+(jj.warning||'')+'\nБудет создано: «'+((jj.nomenclature&&jj.nomenclature.name)||'—')+'», кол-во '+(jj.qty||0)+'.'); btn.disabled=false; return; }
+          if(jj.dryRun&&!jj.created){ onecMsg(n,'warn','Режим DRY-RUN — в 1С ничего не записано.\nНоменклатура: «'+((jj.nomenclature&&jj.nomenclature.name)||'—')+'»'+((jj.nomenclature&&jj.nomenclature.foundIn1C)?' (найдена в 1С)':' — В 1С ОТСУТСТВУЕТ')+'\nКол-во: '+(jj.qty||0)+'\nКонтрагент: '+(jj.contractorIn1C||('не найден в 1С: '+(jj.contractor||'—')))+(warns.length?'\n\n'+warns.join('\n'):'')); btn.disabled=false; return; }
+          toast(jj.already?'Черновики 1С уже были созданы — дубли не созданы.':'Черновики в 1С созданы.','ok');
+          if(warns.length)onecMsg(n,'warn',warns.join('\n')); else onecMsg(n,'ok',jj.already?'Черновики уже существовали — повторно не создавались.':'Черновики созданы (НЕпроведённые).');
+          openRouteCard(host,r.id);
+        }catch(e){ onecMsg(n,'err','Ошибка 1С: '+(e.message||e)); toast('Ошибка 1С: '+(e.message||e),'err'); btn.disabled=false; }
+      };});
+      host.querySelectorAll('[data-onecstat]').forEach(btn=>{ btn.onclick=async()=>{
+        const n=btn.dataset.onecstat; const op=(d.operations||[]).find(o=>String(o.n)===String(n)); if(!op)return;
+        btn.disabled=true; onecMsg(n,'ok','Проверка статуса в 1С…');
+        try{
+          const qs='routeId='+encodeURIComponent(r.id)+'&opNo='+encodeURIComponent(op.n)+(op.id!=null?'&opId='+encodeURIComponent(op.id):'');
+          const jj=await onecCall('/api/1c/coop-status?'+qs);
+          if(!jj.linked){ onecMsg(n,'warn','Связки с 1С нет — сначала создайте черновики.'); btn.disabled=false; return; }
+          const body=host.querySelector('[data-onecbody="'+n+'"]');
+          if(body)body.innerHTML=onecDocLine(jj.production)+onecDocLine(jj.transfer);
+          // сорванный запрос ≠ «проведено»: если хоть один документ не опросился, показываем ошибку,
+          // а не зелёную плашку — иначе интерфейс врёт про фактический статус в 1С.
+          if(jj.stale){ onecMsg(n,'err','Статус НЕ подтверждён (показан последний известный):\n'+(jj.errors||[]).join('\n')); }
+          else onecMsg(n,jj.allPosted?'ok':'warn',jj.offline?(jj.warning||'1С не настроена.'):(jj.allPosted?'Оба документа проведены бухгалтером.':'Документы пока НЕ проведены — ждём бухгалтера.'));
+        }catch(e){ onecMsg(n,'err','Ошибка 1С: '+(e.message||e)); }
+        btn.disabled=false;
+      };});
     }
 
     // ── K-18 Конструктор МК (создание/редактирование маршрута + операции + компоненты) ──
@@ -11430,7 +11499,10 @@
       return { enabled: c.coop===true, contractor:c.contractor||'', contractorId:(c.contractorId!=null&&c.contractorId!=='')?c.contractorId:null,
         contractNo:c.contractNo||'', specNo:c.specNo||'', sentDate:c.sentDate||'', returnPlan:c.returnPlan||'',
         parts: Array.isArray(c.parts)&&c.parts.length?c.parts.map(p=>({name:p.name||'',qty:p.qty!=null?p.qty:''})):[{name:'',qty:''}],
-        returned: Array.isArray(c.returned)?c.returned:[] }; }
+        returned: Array.isArray(c.returned)?c.returned:[],
+        // 1С-коннектор (этап 1): связка с черновиками 1С. В мастере только читается и едет обратно —
+        // если её не включить в rtCoopSerialize, пересохранение МК СОТРЁТ связку и кнопка задвоит документы.
+        onec: (c.onec&&typeof c.onec==='object')?c.onec:null }; }
     // сериализация в JSON для «Входящие материалы» (см. сервер mkCoopParse); пусто, если не включена/нет исполнителя
     function rtCoopSerialize(c){
       if(!c||!c.enabled)return '';
@@ -11444,6 +11516,7 @@
       if(c.returnPlan)out.returnPlan=c.returnPlan;
       if(parts.length)out.parts=parts;
       if(c.returned&&c.returned.length)out.returned=c.returned; // приёмки возврата — только чтение в мастере, не теряем при пересохранении МК
+      if(c.onec&&typeof c.onec==='object')out.onec=c.onec;      // связка с черновиками 1С — то же самое: без этой строки пересохранение МК стирает номера документов
       return JSON.stringify(out);
     }
     // сводка отправлено/закрыто/просрочка — клиентское зеркало server-side mkCoopStatus()
@@ -11666,6 +11739,8 @@
         :st.overdueDays>0?`<span class="rt-rt" style="color:#b91c1c;font-weight:700">⚠ возврат просрочен ${st.overdueDays} дн.</span>`
         :(c.returned&&c.returned.length?`<span class="rt-rt" style="color:#1d4ed8">принято ${rtNum(st.closedTotal)} из ${rtNum(st.sentTotal)}</span>`:'');
       const returnedList=(c.returned&&c.returned.length)?`<div style="margin-top:8px;font-size:11.5px;color:#5b6b7a">Приёмки возврата: ${c.returned.map(r=>`акт ${esc(r.aktNo)} от ${fmt(r.date)}`).join('; ')}</div>`:'';
+      // 1С-коннектор: в мастере связка ТОЛЬКО показывается (создаётся кнопкой на карте МК) — чтобы технолог видел, что операция уже уехала в 1С
+      const onecLine=(c.onec&&(c.onec.production||c.onec.transfer))?`<div style="margin-top:6px;font-size:11.5px;color:#5b6b7a">1С: ${[c.onec.production,c.onec.transfer].filter(Boolean).map(x=>`${esc(x.doc||'')} №${esc(x.number||'—')}`).join(' · ')}</div>`:'';
       return `<div class="rt-fld" data-coop="${i}" style="margin-top:12px;padding:12px 14px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc">
         <label style="display:flex;align-items:center;gap:7px;font-weight:700;cursor:pointer">
           <input type="checkbox" data-cf="en"${c.enabled?' checked':''}> Внешняя кооперация
@@ -11692,7 +11767,7 @@
             <div data-cf="parts">${c.parts.map((p,idx)=>rtCoopPartRowHtml(p,idx)).join('')}</div>
             <button type="button" class="tbtn" data-cf="addpart" style="margin-top:6px">+ деталь</button>
           </div>
-          ${returnedList}
+          ${returnedList}${onecLine}
           <div data-cf="preview" style="margin-top:9px;font-size:12px;color:#1e7d43;font-weight:600">${esc(rtCoopText(c,st))}</div>
         </div>
       </div>`;
@@ -11845,7 +11920,14 @@
           const c=op.coop;
           const refreshPrev=()=>{ const pv=box.querySelector('[data-cf="preview"]'); if(pv)pv.textContent=rtCoopText(c); const sb=host.querySelector('#rt-summbox'); if(sb)sb.innerHTML=rtSummaryHtml(); };
           const en=box.querySelector('[data-cf="en"]'); const body=box.querySelector('[data-cf="body"]');
-          if(en)en.onchange=()=>{ c.enabled=en.checked; if(body)body.style.display=c.enabled?'':'none'; refreshPrev(); };
+          if(en)en.onchange=()=>{
+            // 1С-коннектор: связка живёт ВНУТРИ coop-JSON — сняли галку, сохранили МК → номера черновиков 1С потеряны.
+            // Сами документы в 1С при этом останутся (портал их не удаляет), но кнопка перестанет видеть связку.
+            if(!en.checked&&c.onec&&(c.onec.production||c.onec.transfer)){
+              const nums=[c.onec.production&&c.onec.production.number,c.onec.transfer&&c.onec.transfer.number].filter(Boolean).join(' и ');
+              if(!confirm('На этой операции есть связка с черновиками 1С ('+(nums||'документы')+').\n\nЕсли снять «Внешняя кооперация» и сохранить МК, связка сотрётся: сами документы в 1С останутся, но портал перестанет показывать их номера и при повторном включении может создать дубли.\n\nСнять галку?')){ en.checked=true; return; }
+            }
+            c.enabled=en.checked; if(body)body.style.display=c.enabled?'':'none'; refreshPrev(); };
           const contractorSel=box.querySelector('[data-cf="contractor"]'), contractorFree=box.querySelector('[data-cf="contractorFree"]');
           if(contractorSel)contractorSel.onchange=()=>{
             if(contractorSel.value==='__custom__'){ c.contractorId=null; if(contractorFree){ contractorFree.style.display=''; contractorFree.focus(); } }
@@ -12334,8 +12416,16 @@
         ${card(aico('print',18),'Gotenberg — печать','Серверная генерация PDF (ПЗ, КП, карты задач) на NAS.', !!STG.gotenbergUrl, `<div style="margin-top:12px"><label class="stg-flab">Адрес Gotenberg</label><div class="stg-hint">NAS — <code>http://pbs-gotenberg:3000</code></div><input class="stg-inp" id="s_goten" value="${esc(STG.gotenbergUrl||'')}" placeholder="http://pbs-gotenberg:3000"></div>`)}
         ${card(aico('chat',18),'Bitrix24 — чаты запросов и проектов','Вебхук для авто-создания чата ЗП и «Создать чат». Права: <code>im</code>, <code>user</code>, <code>department</code>.', STG.bitrixSet, `<div style="margin-top:12px"><label class="stg-flab">Входящий вебхук</label><input class="stg-inp" id="s_bxhook" type="password" placeholder="https://endv.bitrix24.ru/rest/… — пусто = не менять" autocomplete="off"></div><div style="margin-top:12px"><label class="stg-flab">ID отдела продаж (Bitrix)</label><div class="stg-hint">Состав → участники чата ЗП по умолчанию. ПБС — <code>81</code></div><input class="stg-inp" id="s_bxdept" value="${esc(STG.salesDept||'81')}" placeholder="81"></div><div style="margin-top:12px"><label class="stg-flab">Хаб-чат «Запросы ПБС» (ID)</label><div class="stg-hint">Анонс новых ЗП. Напр. <code>4175</code>; пусто = не слать</div><input class="stg-inp" id="s_bxhub" value="${esc(STG.hubChat||'')}" placeholder="4175"></div><div style="margin-top:12px"><label class="stg-flab">Участники чата проектов ОКР (по умолчанию)</label><div class="stg-hint">ID Bitrix через запятую — для «Создать чат» в разделе «Проектирование»</div><input class="stg-inp" id="s_bxusers" value="${esc(STG.bitrixUsers||'')}" placeholder="напр. 11, 469"></div>`)}
         ${card(aico('folder',18),'NAS — записи и файлы','Папка «06-Записи-ПБС» для просмотра файлов запросов.', !!STG.recordsRoot, `<div style="margin-top:12px"><label class="stg-flab">Путь к записям</label><div class="stg-hint">На NAS — примонтированная папка, напр. <code>/records</code></div><input class="stg-inp" id="s_records" value="${esc(STG.recordsRoot||'')}" placeholder="/records"></div>`)}
+        ${card(aico('folder',18),'1С (БП 3.0) — черновики кооперации','OData боевой базы. Портал только ЧИТАЕТ и создаёт НЕпроведённые черновики: провести / изменить / удалить он не умеет технически.', STG.onecSet, `<div style="margin-top:12px"><label class="stg-flab">OData-адрес</label><div class="stg-hint">формат <code>https://&lt;хост&gt;/&lt;база&gt;/odata/standard.odata</code> — адрес выдаёт администратор 1С</div><input class="stg-inp" id="s_onecUrl" value="${esc(STG.onecUrl||'')}" placeholder="https://…/odata/standard.odata"></div>
+          <div style="margin-top:12px"><label class="stg-flab">Логин 1С</label><input class="stg-inp" id="s_onecLogin" placeholder="пусто = не менять" autocomplete="off"></div>
+          <div style="margin-top:12px"><label class="stg-flab">Пароль 1С</label><div class="stg-hint">Хранится только на сервере (<code>portal/.runtime.json</code>, в git не попадает) и в интерфейс не возвращается.</div><input class="stg-inp" id="s_onecPass" type="password" placeholder="•••• — пусто = не менять" autocomplete="off"></div>
+          <div style="margin-top:12px;padding:9px 11px;border-radius:6px;${STG.onecDryRun?'background:#ecfdf5;border:1px solid #a7f3d0':'background:#fef2f2;border:1px solid #fecaca'}">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;cursor:pointer"><input type="checkbox" id="s_onecDry"${STG.onecDryRun?' checked':''}> Режим DRY-RUN (запись в 1С запрещена)</label>
+            <div class="stg-hint" style="margin-top:5px">Включён по умолчанию. Пока галка стоит, ни один документ в 1С не создаётся — кнопка на карте МК показывает только расчёт. Снимать <b>после</b> согласования с владельцем.</div>
+          </div>`)}
         <div style="margin-top:14px"><button class="stg-btn primary" id="s_saveInteg">Сохранить</button></div><div class="stg-msg" id="s_integMsg"></div>`;
-      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value},'s_integMsg');
+      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,
+        onecUrl:$s('s_onecUrl').value,onecLogin:$s('s_onecLogin').value,onecPassword:$s('s_onecPass').value,onecDryRun:$s('s_onecDry').checked?1:0},'s_integMsg');
     }
     // Параметры продаж/КП (K-05 §5.3) — «магические числа» ДП–З.1 вынесены сюда: порог подписи,
     // ставка НДС, плановая прибыль, SLA. Правятся без деплоя кода (server: settingsView/saveSettings).

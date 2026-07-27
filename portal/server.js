@@ -82,6 +82,13 @@ function cfg() {
     KP_PROFIT_PCT: numOr(runtime.KP_PROFIT_PCT ?? process.env.KP_PROFIT_PCT, 15),                  // §5.3.4 плановая прибыль по умолчанию, % (утверждает ДпП)
     KP_SLA_PREP_DAYS: numOr(runtime.KP_SLA_PREP_DAYS ?? process.env.KP_SLA_PREP_DAYS, 5),          // §5.3.6 срок подготовки КП, раб.дн
     KP_SLA_FOLLOWUP_DAYS: numOr(runtime.KP_SLA_FOLLOWUP_DAYS ?? process.env.KP_SLA_FOLLOWUP_DAYS, 10), // §5.3.8 повтор при отсутствии ответа, раб.дн
+    // --- 1С-коннектор (этап 1: черновики кооперации) — см. большой блок «1С-КОННЕКТОР» ниже ---
+    // Креды НИКОГДА не в git: только portal/.runtime.json (в .gitignore) или env.
+    ONEC_URL: String(runtime.ONEC_URL || process.env.ONEC_URL || '').replace(/\/+$/, ''),
+    ONEC_LOGIN: runtime.ONEC_LOGIN || process.env.ONEC_LOGIN || '',
+    ONEC_PASSWORD: runtime.ONEC_PASSWORD || process.env.ONEC_PASSWORD || '',
+    // ЗАЩИТА: dry-run ВКЛЮЧЁН по умолчанию — POST в боевую 1С невозможен, пока флаг не снят вручную.
+    ONEC_DRY_RUN: onecDryFlag(runtime.ONEC_DRY_RUN ?? process.env.ONEC_DRY_RUN),
   };
 }
 // парсер числа из runtime/env с фолбэком (пустое/NaN → дефолт)
@@ -1216,6 +1223,8 @@ async function buildRouteCard(id) {
       tooling: op['Оснастка'] || '', setupCard: op['Карта наладки (№)'] || '',
       ncFiles: mkOpFiles(r['№ МК'], opN, 'nc'), setupFiles: mkOpFiles(r['№ МК'], opN, 'setup'),
       coop, coopStatus: coop ? mkCoopStatus(coop) : null, coopText: coop ? mkCoopText(coop) : '',
+      // 1С-коннектор (этап 1): связка с черновиками 1С живёт внутри coop-JSON (coop.onec) — выносим наверх для блока «1С»
+      onec: (coop && coop.onec) || null,
     };
   });
   const components = [];
@@ -1878,6 +1887,439 @@ async function routeCoopAccept(body, session) {
 
   const status = mkCoopStatus(coop);
   return { ok: true, aktNo, incIds, done: status.done, sentTotal: status.sentTotal, closedTotal: status.closedTotal };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  1С-КОННЕКТОР, ЭТАП 1 — «черновики кооперации» (термообработка у подрядчика).
+//
+//  Что делает: из операции-кооперации карты МК одной кнопкой создаёт в 1С (БП 3.0,
+//  OData) ДВА НЕпроведённых черновика и возвращает их номера/даты в блок «1С»
+//  карточки МК:
+//    1) «Отчёт производства за смену» (ВидОперации = ОтчетПроизводстваЗаСмену) —
+//       выпуск полуфабриката «Заготовка для ТО, деталь <децим.№>»;
+//    2) «Передача товаров» (ВидОперации = ВПереработку) — передача переработчику,
+//       из неё бухгалтер печатает М-15.
+//
+//  ЖЁСТКИЕ ГРАНИЦЫ (критерий приёмки 4):
+//    • к 1С разрешены ТОЛЬКО GET и POST — onecCall физически отказывает на
+//      PATCH/PUT/DELETE, поэтому «провести/изменить/удалить» из портала невозможно;
+//    • каждый POST обязан нести Posted:false (onecAssertDraft) — иначе отказ;
+//    • любой POST дополнительно закрыт флагом ONEC_DRY_RUN (по умолчанию ВКЛЮЧЁН).
+//      Первый настоящий POST — только после явного снятия флага оператором.
+//
+//  ГРАБЛИ, на которых прошлая команда потеряла три итерации (не повторять):
+//   (а) dry-run мокал только POST, а предшествующий РЕАЛЬНЫЙ GET номенклатуры падал
+//       без кредов и отдавал 400 «визуально ничего не произошло». Здесь честная
+//       ОФЛАЙН-ветка: нет кредов → к 1С не ходим ВООБЩЕ (ни GET, ни POST), отдаём
+//       200 + offline:true + понятный текст. См. onecOfflinePreview.
+//   (б) Id операций пересоздаются при каждом saveRoute (операции удаляются и заводятся
+//       заново) → операцию резолвим ПО routeId + «№ операции», opId только фолбэк.
+//       См. onecResolveOp.
+//   (в) Number(null) === 0 — параметры разбираем только через numOrNull.
+//   (г) Ошибку сервера фронт показывает ИНЛАЙН в блоке «1С» (не только тостом).
+//   (д) Причина ЛЮБОГО отказа по /api/1c/* пишется в постоянный серверный лог
+//       (.data/1c/requests.log) — см. onecLog.
+//
+//  Хранение связки: JSON-объект `onec` внутри coop-JSON операции («Входящие
+//  материалы»), рядом с `returned`. Отдельных колонок не заводим — тот же паттерн,
+//  что у заготовки/кооперации. Фронт обязан гонять `onec` туда-обратно при
+//  пересохранении МК (rtCoopDefault/rtCoopSerialize), иначе связка стирается.
+// ════════════════════════════════════════════════════════════════════════════
+const ONEC_DOC = {
+  production: { entity: 'Document_ОтчетПроизводстваЗаСмену', vid: 'ОтчетПроизводстваЗаСмену', title: 'Отчёт производства за смену', rows: 'Продукция' },
+  transfer: { entity: 'Document_ПередачаТоваров', vid: 'ВПереработку', title: 'Передача товаров (в переработку)', rows: 'Товары' },
+};
+const ONEC_ZERO_GUID = '00000000-0000-0000-0000-000000000000';
+const ONEC_LOG_FILE = path.join(__dirname, '.data', '1c', 'requests.log');
+const ONEC_TIMEOUT_MS = 25000;
+// dry-run по умолчанию ВКЛЮЧЁН: выключается только явным 0/false (пустое/не задано → true)
+function onecDryFlag(v) { return !(v === 0 || v === '0' || v === false || v === 'false'); }
+const onecConfigured = () => { const c = cfg(); return !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD); };
+const onecErr = (status, msg) => { const e = new Error(msg); e.status = status; return e; };
+// (в) Number(null)===0 и Number('')===0 — разбираем параметры ТОЛЬКО так
+const numOrNull = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+
+// (д) постоянный серверный лог: причина каждого отказа/вызова по /api/1c/*.
+// Кредов в лог не попадает НИКОГДА — сюда передаём только путь/статус/текст ошибки.
+function onecLog(kind, msg, extra) {
+  const line = `${new Date().toISOString()} [1С] ${kind} — ${msg}` + (extra ? ' :: ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '');
+  if (kind === 'ERR' || kind === 'REFUSE') console.warn(line); else console.log(line);
+  try { fs.mkdirSync(path.dirname(ONEC_LOG_FILE), { recursive: true }); fs.appendFileSync(ONEC_LOG_FILE, line + '\n'); } catch { /* лог — best-effort, работу не роняет */ }
+}
+
+// Черновик обязан быть НЕпроведённым и без пометки удаления — проверяем ПЕРЕД отправкой.
+function onecAssertDraft(payload) {
+  if (!payload || typeof payload !== 'object') throw onecErr(500, 'Пустое тело документа 1С.');
+  if (payload.Posted !== false) throw onecErr(500, 'Отказ: портал отправляет в 1С только НЕпроведённые черновики (Posted=false).');
+  if (payload.DeletionMark) throw onecErr(500, 'Отказ: портал не ставит пометку удаления в 1С.');
+}
+
+// Единственная точка выхода в 1С. GET — чтение, POST — создание черновика.
+// Любой другой метод (PATCH/PUT/DELETE = провести/изменить/удалить) отвергается здесь.
+const ONEC_METHODS = new Set(['GET', 'POST']);
+async function onecCall(method, pathQuery, payload) {
+  const m = String(method || '').toUpperCase();
+  if (!ONEC_METHODS.has(m)) { onecLog('REFUSE', `метод ${m} запрещён`, pathQuery); throw onecErr(500, `Метод ${m} к 1С запрещён: портал только читает и создаёт черновики.`); }
+  const c = cfg();
+  if (!onecConfigured()) throw onecErr(501, 'Интеграция с 1С не настроена (нужны ONEC_URL / ONEC_LOGIN / ONEC_PASSWORD).');
+  if (m === 'POST') {
+    if (c.ONEC_DRY_RUN) { onecLog('REFUSE', 'POST заблокирован флагом ONEC_DRY_RUN', pathQuery); throw onecErr(409, 'POST в 1С заблокирован флагом ONEC_DRY_RUN (снимается только вручную в «Настройках»).'); }
+    onecAssertDraft(payload);
+  }
+  const url = `${c.ONEC_URL}/${String(pathQuery).replace(/^\/+/, '')}`;
+  const auth = 'Basic ' + Buffer.from(`${c.ONEC_LOGIN}:${c.ONEC_PASSWORD}`).toString('base64');
+  let res;
+  try {
+    res = await fetch(url, {
+      method: m,
+      headers: { Authorization: auth, Accept: 'application/json', ...(m === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
+      body: m === 'POST' ? JSON.stringify(payload) : undefined,
+      signal: AbortSignal.timeout(ONEC_TIMEOUT_MS),
+    });
+  } catch (e) {
+    onecLog('ERR', `сеть/таймаут ${m} ${pathQuery}`, String(e.message || e));
+    throw onecErr(502, 'Не удалось связаться с 1С: ' + String(e.message || e));
+  }
+  const text = await res.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res.ok) {
+    const detail = (data && typeof data === 'object') ? (data['odata.error'] && data['odata.error'].message && data['odata.error'].message.value) || JSON.stringify(data) : (String(data || '').slice(0, 400) || `HTTP ${res.status}`);
+    onecLog('ERR', `${m} ${pathQuery} → HTTP ${res.status}`, detail);
+    const e = onecErr(res.status === 401 ? 502 : 502, `1С ответила ${res.status}: ${String(detail).slice(0, 300)}`);
+    e.onec = { status: res.status }; throw e;
+  }
+  onecLog('OK', `${m} ${String(pathQuery).split('?')[0]} → ${res.status}`);
+  return data;
+}
+// OData-запрос списка: возвращает массив value (или []).
+async function onecList(entity, query) {
+  const d = await onecCall('GET', `${entity}?${query}`);
+  return (d && Array.isArray(d.value)) ? d.value : [];
+}
+// экранирование строкового литерала OData ('' внутри) + кодирование всего $filter
+const onecLit = (s) => String(s == null ? '' : s).replace(/'/g, "''");
+const onecQuery = (parts) => Object.entries(parts).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+// дата документа в формате 1С (без таймзоны): 2026-07-27T14:05:00
+function onecDateNow() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+const onecDateHuman = (s) => { const t = String(s || '').slice(0, 10); return t ? t.split('-').reverse().join('.') : ''; };
+
+// ── Шаблон реквизитов «как в базе» ──────────────────────────────────────────
+// Счета учёта / номенклатурную группу / ответственного НЕ выдумываем: берём из
+// САМОГО СВЕЖЕГО существующего документа того же вида (только чтение). Так черновик
+// открывается у бухгалтера заполненным, а не пустым. Кэш 10 мин.
+let _onecTpl = null, _onecTplExp = 0;
+async function onecTemplate() {
+  if (_onecTpl && Date.now() < _onecTplExp) return _onecTpl;
+  const q = (extra) => onecQuery({ $format: 'json', $top: '1', $orderby: 'Date desc', ...extra });
+  const [prod, tran, orgs] = await Promise.all([
+    onecList(ONEC_DOC.production.entity, q({ $filter: `ВидОперации eq '${ONEC_DOC.production.vid}'` })).catch(() => []),
+    onecList(ONEC_DOC.transfer.entity, q({ $filter: `ВидОперации eq '${ONEC_DOC.transfer.vid}'` })).catch(() => []),
+    onecList('Catalog_Организации', onecQuery({ $format: 'json', $top: '1', $select: 'Ref_Key,Description', $filter: 'DeletionMark eq false' })).catch(() => []),
+  ]);
+  const p = prod[0] || {}, t = tran[0] || {}, o = orgs[0] || {};
+  const gid = (v) => (v && v !== ONEC_ZERO_GUID) ? v : null;
+  const pRow = (Array.isArray(p.Продукция) && p.Продукция[0]) || {};
+  const tRow = (Array.isArray(t.Товары) && t.Товары[0]) || {};
+  _onecTpl = {
+    orgKey: gid(p.Организация_Key) || gid(t.Организация_Key) || gid(o.Ref_Key) || ONEC_ZERO_GUID,
+    orgName: o.Description || '',
+    responsibleKey: gid(p.Ответственный_Key) || gid(t.Ответственный_Key) || ONEC_ZERO_GUID,
+    costAccountKey: gid(p.СчетЗатрат_Key) || ONEC_ZERO_GUID,
+    prodAccountKey: gid(pRow.Счет_Key) || ONEC_ZERO_GUID,          // счёт учёта продукции (43/21)
+    nomGroupKey: gid(pRow.НоменклатурнаяГруппа_Key) || ONEC_ZERO_GUID,
+    trAccountKey: gid(tRow.СчетУчета_Key) || ONEC_ZERO_GUID,        // счёт учёта товара при передаче
+    trTransferKey: gid(tRow.СчетПередачи_Key) || ONEC_ZERO_GUID,    // счёт «переданные в переработку» (10.07)
+    currencyKey: gid(t.ВалютаДокумента_Key) || ONEC_ZERO_GUID,
+  };
+  _onecTplExp = Date.now() + 10 * 60 * 1000;
+  return _onecTpl;
+}
+
+// ── Резолв справочников (только чтение) ─────────────────────────────────────
+// Номенклатуру портал НЕ создаёт (открытый вопрос: кто заводит «Заготовка для ТО…»
+// в 1С). Не нашли — честно сообщаем точное ожидаемое наименование.
+async function onecFindNomenclature(name) {
+  const exact = await onecList('Catalog_Номенклатура', onecQuery({
+    $format: 'json', $top: '1', $select: 'Ref_Key,Description,ЕдиницаИзмерения_Key,НоменклатурнаяГруппа_Key,IsFolder',
+    $filter: `Description eq '${onecLit(name)}' and IsFolder eq false and DeletionMark eq false`,
+  }));
+  if (exact.length) return exact[0];
+  const like = await onecList('Catalog_Номенклатура', onecQuery({
+    $format: 'json', $top: '1', $select: 'Ref_Key,Description,ЕдиницаИзмерения_Key,НоменклатурнаяГруппа_Key,IsFolder',
+    $filter: `substringof('${onecLit(name)}',Description) and IsFolder eq false and DeletionMark eq false`,
+  }));
+  return like[0] || null;
+}
+// Контрагент — best-effort ПО ИМЕНИ (маппинга портал→1С нет, это открытый вопрос).
+// Не нашли — НЕ блокируем: черновик создаётся с пустым контрагентом + предупреждение.
+async function onecFindContractor(name) {
+  const s = String(name || '').trim();
+  if (!s) return null;
+  const sel = 'Ref_Key,Description,ИНН';
+  const exact = await onecList('Catalog_Контрагенты', onecQuery({ $format: 'json', $top: '1', $select: sel, $filter: `Description eq '${onecLit(s)}' and DeletionMark eq false` }));
+  if (exact.length) return exact[0];
+  // «ООО «Ромашка»» → ищем по самому длинному словарному куску (кавычки/формы собственности отбрасываем)
+  const core = s.replace(/[«»"'()]/g, ' ').replace(/\b(ООО|АО|ЗАО|ПАО|ОАО|ИП|НАО)\b/gi, ' ').split(/\s+/).filter((w) => w.length > 3).sort((a, b) => b.length - a.length)[0];
+  if (!core) return null;
+  const like = await onecList('Catalog_Контрагенты', onecQuery({ $format: 'json', $top: '5', $select: sel, $filter: `substringof('${onecLit(core)}',Description) and DeletionMark eq false` }));
+  return like[0] || null;
+}
+
+// ── Резолв операции МК ──────────────────────────────────────────────────────
+// (б) Id операций пересоздаются при выпуске МК → ключ поиска «routeId + № операции»,
+// opId — только фолбэк (и только если операция реально принадлежит этому маршруту).
+async function onecResolveOp(q) {
+  const routeId = numOrNull(q && (q.routeId ?? q.route));
+  const opNo = numOrNull(q && (q.opNo ?? q.op ?? q.n));
+  const opId = numOrNull(q && (q.opId ?? q.operationId));
+  if (routeId == null && opId == null) throw onecErr(400, 'Не указана операция: нужен routeId + № операции (opNo) либо opId.');
+  const [ops, routes] = await Promise.all([ncListSoft('operations'), ncListSoft('routes')]);
+  let op = null, how = '';
+  if (routeId != null && opNo != null) {
+    op = ops.find((o) => numOrNull(o.routes_id) === routeId && numOrNull(o['№ операции']) === opNo) || null;
+    if (op) how = 'routeId+opNo';
+  }
+  if (!op && opId != null) {
+    const byId = ops.find((o) => (o.Id ?? o.id) === opId) || null;
+    if (byId && (routeId == null || numOrNull(byId.routes_id) === routeId)) { op = byId; how = 'opId (фолбэк)'; }
+  }
+  if (!op) throw onecErr(404, `Операция не найдена (routeId=${routeId ?? '—'}, № оп.=${opNo ?? '—'}, opId=${opId ?? '—'}). Возможно, МК пересохранена — откройте карту МК заново.`);
+  const route = routes.find((r) => (r.Id ?? r.id) === numOrNull(op.routes_id)) || null;
+  if (!route) throw onecErr(404, 'Маршрут операции не найден.');
+  const coop = mkCoopParse(op['Входящие материалы']);
+  if (!coop) throw onecErr(400, 'У этой операции не задана внешняя кооперация — блок «1С» доступен только на кооперационной операции.');
+  return { op, opId: op.Id ?? op.id, route, mk: route['№ МК'] || '', opNo: numOrNull(op['№ операции']), coop, how };
+}
+
+// Децим. № детали для наименования номенклатуры: «Изделие / обозначение» МК,
+// фолбэк — наименование первой детали блока кооперации.
+function onecDecNo(route, coop) {
+  const d = String((route && route['Изделие / обозначение']) || '').trim();
+  if (d) return d;
+  const p = (Array.isArray(coop && coop.parts) ? coop.parts : []).map((x) => String(x.name || '').trim()).filter(Boolean);
+  return p[0] || '';
+}
+const onecBlankName = (dec) => `Заготовка для ТО, деталь ${dec}`;
+// Кол-во: сумма по деталям блока кооперации.
+// ОТКРЫТЫЙ ВОПРОС: разные детали одного блока схлопываются в ОДНУ строку документа.
+function onecQty(coop) {
+  const parts = Array.isArray(coop && coop.parts) ? coop.parts : [];
+  const sum = parts.reduce((a, p) => a + (numOrNull(p.qty) || 0), 0);
+  return sum > 0 ? sum : 0;
+}
+// Метка идемпотентности в «Комментарий» обоих документов: по ней ищем уже созданные
+// черновики в 1С, даже если связка не доехала до NocoDB (повторный клик не плодит дубли).
+// ВАЖНО: без [ ] и прочей регулярочной пунктуации — 1С транслирует substringof в LIKE/regexp
+// СУБД, и квадратные скобки роняют запрос с «invalid regular expression: invalid character range».
+const ONEC_MARK_BAD = /[[\]{}()^$*+?\\|]/g;
+const onecMark = (mk, opNo) => `ИСМ/${String(mk || '?').replace(ONEC_MARK_BAD, '')}/оп.${opNo ?? '?'}`;
+function onecComment(mk, opNo, coop, dec) {
+  return `${onecMark(mk, opNo)} · Портал ИСМ: передача в термообработку, деталь ${dec || '—'}`
+    + (coop && coop.contractor ? `, исполнитель ${coop.contractor}` : '')
+    + (coop && coop.contractNo ? `, дог. №${coop.contractNo}` : '')
+    + (coop && coop.specNo ? `, спец. №${coop.specNo}` : '');
+}
+// Поиск уже созданного портальным клиентом черновика по метке (только чтение).
+async function onecFindExistingDraft(kind, mark) {
+  const D = ONEC_DOC[kind];
+  const rows = await onecList(D.entity, onecQuery({
+    $format: 'json', $top: '1', $orderby: 'Date desc', $select: 'Ref_Key,Number,Date,Posted,DeletionMark',
+    $filter: `substringof('${onecLit(mark)}',Комментарий) and DeletionMark eq false`,
+  }));
+  return rows[0] || null;
+}
+
+// ── Сборка тел документов ───────────────────────────────────────────────────
+function onecBuildProduction({ tpl, nomKey, unitKey, qty, comment }) {
+  return {
+    Date: onecDateNow(),
+    Posted: false,                                   // ЧЕРНОВИК — проводит бухгалтер
+    ВидОперации: ONEC_DOC.production.vid,
+    Организация_Key: tpl.orgKey,
+    Ответственный_Key: tpl.responsibleKey,
+    СчетЗатрат_Key: tpl.costAccountKey,
+    Комментарий: comment,
+    // Склад_Key НЕ заполняем — привязки складской заготовки у кооперационной операции нет (открытый вопрос)
+    Продукция: [{
+      LineNumber: '1', Номенклатура_Key: nomKey, Количество: qty, КоличествоМест: 0,
+      ЕдиницаИзмерения_Key: unitKey || ONEC_ZERO_GUID, Коэффициент: 1,
+      ПлановаяСтоимость: 0, СуммаПлановая: 0,
+      Счет_Key: tpl.prodAccountKey, НоменклатурнаяГруппа_Key: tpl.nomGroupKey,
+    }],
+  };
+}
+function onecBuildTransfer({ tpl, nomKey, qty, contractorKey, comment }) {
+  return {
+    Date: onecDateNow(),
+    Posted: false,                                   // ЧЕРНОВИК — проводит бухгалтер
+    ВидОперации: ONEC_DOC.transfer.vid,
+    Организация_Key: tpl.orgKey,
+    Ответственный_Key: tpl.responsibleKey,
+    Контрагент_Key: contractorKey || ONEC_ZERO_GUID, // best-effort по имени; договор — открытый вопрос
+    ВалютаДокумента_Key: tpl.currencyKey,
+    Комментарий: comment,
+    Товары: [{
+      LineNumber: '1', Номенклатура_Key: nomKey, Количество: qty,
+      СчетУчета_Key: tpl.trAccountKey, СчетПередачи_Key: tpl.trTransferKey,
+      Цена: 0, Сумма: 0, СтавкаНДС: '', СуммаНДС: 0,
+    }],
+  };
+}
+const onecDocView = (kind, d) => ({
+  kind, doc: ONEC_DOC[kind].title, entity: ONEC_DOC[kind].entity,
+  ref: d.Ref_Key || '', number: d.Number || '', date: String(d.Date || '').slice(0, 19),
+  dateHuman: onecDateHuman(d.Date), posted: !!d.Posted, deleted: !!d.DeletionMark,
+});
+
+// (а) ЧЕСТНАЯ ОФЛАЙН-ВЕТКА. Кредов нет → в 1С не ходим ВООБЩЕ (ни GET, ни POST).
+// Отдаём 200 с расчётом «что было бы отправлено» — пользователь видит результат,
+// а не молчаливую 400-ошибку «визуально ничего не произошло».
+function onecOfflinePreview(ctx, reason) {
+  return {
+    ok: true, offline: true, dryRun: true, created: false,
+    mk: ctx.mk, opNo: ctx.opNo, resolvedBy: ctx.how,
+    nomenclature: { name: ctx.nomName, foundIn1C: null },
+    qty: ctx.qty, contractor: ctx.coop.contractor || '',
+    plan: [
+      { kind: 'production', doc: ONEC_DOC.production.title, vid: ONEC_DOC.production.vid },
+      { kind: 'transfer', doc: ONEC_DOC.transfer.title, vid: ONEC_DOC.transfer.vid },
+    ],
+    warning: reason,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  POST /api/1c/coop-drafts — создать (или показать в dry-run) два черновика.
+//  body: { routeId, opNo, opId? }
+// ════════════════════════════════════════════════════════════════════════════
+async function onecCoopDrafts(body) {
+  const ctx0 = await onecResolveOp(body);
+  const { op, opId, route, mk, opNo, coop, how } = ctx0;
+  const dec = onecDecNo(route, coop);
+  if (!dec) throw onecErr(400, 'Не заполнено «Изделие / обозначение» МК (децим. №) и не задано ни одной детали кооперации — не из чего собрать наименование номенклатуры.');
+  const nomName = onecBlankName(dec);
+  const qty = onecQty(coop);
+  if (!(qty > 0)) throw onecErr(400, 'В блоке кооперации не указано количество деталей — нечего передавать в 1С.');
+  const ctx = { mk, opNo, how, coop, nomName, qty };
+
+  // Повторный клик: связка уже есть → ничего не создаём, возвращаем сохранённое.
+  const saved = coop.onec && coop.onec.production && coop.onec.transfer ? coop.onec : null;
+  if (saved) {
+    onecLog('SKIP', `дубль предотвращён: МК ${mk} оп.${opNo} уже связана`, { production: saved.production.number, transfer: saved.transfer.number });
+    return { ok: true, already: true, created: false, mk, opNo, resolvedBy: how, nomenclature: { name: nomName }, qty, ...saved };
+  }
+
+  // (а) офлайн: кредов нет → к 1С не ходим совсем
+  if (!onecConfigured()) return onecOfflinePreview(ctx, 'Креды 1С не заданы (ONEC_URL / ONEC_LOGIN / ONEC_PASSWORD в «Настройках»). Черновики НЕ создавались — показан расчёт того, что будет отправлено.');
+
+  const dryRun = !!cfg().ONEC_DRY_RUN;
+  const mark = onecMark(mk, opNo);
+
+  // Уже созданные ранее черновики (связка могла не доехать до NocoDB) — ищем по метке.
+  const [exProd, exTran] = await Promise.all([onecFindExistingDraft('production', mark), onecFindExistingDraft('transfer', mark)]);
+  if (exProd && exTran) {
+    const link = { ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName }, qty, production: onecDocView('production', exProd), transfer: onecDocView('transfer', exTran) };
+    await onecSaveLink(opId, coop, link);
+    onecLog('SKIP', `дубль предотвращён по метке ${mark}`, { production: exProd.Number, transfer: exTran.Number });
+    return { ok: true, already: true, created: false, mk, opNo, resolvedBy: how, ...link };
+  }
+
+  const [tpl, nom, contractor] = await Promise.all([
+    onecTemplate(),
+    onecFindNomenclature(nomName),
+    onecFindContractor(coop.contractor).catch(() => null),
+  ]);
+  const warnings = [];
+  if (!contractor) warnings.push(`Контрагент «${coop.contractor || '—'}» не найден в 1С — «Передача товаров» создана без контрагента, бухгалтер подставит вручную (маппинг портал→1С пока не заведён).`);
+  if (!nom) warnings.push(`Номенклатура «${nomName}» в 1С отсутствует — её нужно завести в справочнике «Номенклатура» (открытый вопрос: кто заводит).`);
+
+  const comment = onecComment(mk, opNo, coop, dec);
+  const payloads = {
+    production: onecBuildProduction({ tpl, nomKey: nom ? nom.Ref_Key : ONEC_ZERO_GUID, unitKey: nom ? nom.ЕдиницаИзмерения_Key : ONEC_ZERO_GUID, qty, comment }),
+    transfer: onecBuildTransfer({ tpl, nomKey: nom ? nom.Ref_Key : ONEC_ZERO_GUID, qty, contractorKey: contractor ? contractor.Ref_Key : null, comment }),
+  };
+
+  if (dryRun) {
+    onecLog('DRY', `МК ${mk} оп.${opNo}: расчёт без записи`, { nomenclature: nomName, qty, nomFound: !!nom, contractorFound: !!contractor });
+    return {
+      ok: true, dryRun: true, created: false, mk, opNo, resolvedBy: how,
+      nomenclature: { name: nomName, foundIn1C: !!nom, ref: nom ? nom.Ref_Key : '' },
+      qty, contractor: coop.contractor || '', contractorIn1C: contractor ? contractor.Description : '',
+      organization: tpl.orgName,
+      plan: [
+        { kind: 'production', doc: ONEC_DOC.production.title, vid: ONEC_DOC.production.vid, body: payloads.production },
+        { kind: 'transfer', doc: ONEC_DOC.transfer.title, vid: ONEC_DOC.transfer.vid, body: payloads.transfer },
+      ],
+      warnings,
+      warning: 'Включён режим ONEC_DRY_RUN — в 1С НИЧЕГО не записано. Показано, что будет отправлено.',
+    };
+  }
+
+  // ── боевой режим (флаг снят вручную) ───────────────────────────────────────
+  if (!nom) throw onecErr(400, `Номенклатура «${nomName}» не найдена в 1С. Заведите её в справочнике «Номенклатура» — портал справочники не создаёт.`);
+  const created = {};
+  created.production = exProd ? onecDocView('production', exProd) : onecDocView('production', await onecCall('POST', `${ONEC_DOC.production.entity}?$format=json`, payloads.production));
+  try {
+    created.transfer = exTran ? onecDocView('transfer', exTran) : onecDocView('transfer', await onecCall('POST', `${ONEC_DOC.transfer.entity}?$format=json`, payloads.transfer));
+  } catch (e) {
+    // первый документ уже создан — связку сохраняем, чтобы повтор не задвоил выпуск
+    await onecSaveLink(opId, coop, { ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName, ref: nom.Ref_Key }, qty, production: created.production, transfer: null });
+    throw e;
+  }
+  const link = { ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName, ref: nom.Ref_Key }, qty, contractor: coop.contractor || '', ...created };
+  await onecSaveLink(opId, coop, link);
+  onecLog('CREATE', `МК ${mk} оп.${opNo}: черновики созданы`, { production: created.production.number, transfer: created.transfer.number });
+  return { ok: true, created: true, dryRun: false, mk, opNo, resolvedBy: how, ...link, warnings };
+}
+
+// Сохраняем связку в coop-JSON операции (NocoDB). 1С здесь не участвует.
+async function onecSaveLink(opId, coop, link) {
+  const next = { ...coop, onec: { ...(coop.onec || {}), ...link } };
+  await ncUpdate('operations', opId, { 'Входящие материалы': JSON.stringify(next) });
+  return next;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  GET /api/1c/coop-status?routeId=&opNo=[&opId=] — подтянуть статус «проведено».
+//  Только GET в 1С. Если бухгалтер провёл документ — обновляем posted в связке.
+// ════════════════════════════════════════════════════════════════════════════
+async function onecCoopStatus(q) {
+  const { opId, mk, opNo, coop, how } = await onecResolveOp(q);
+  const link = coop.onec || null;
+  if (!link || !(link.production || link.transfer)) return { ok: true, linked: false, mk, opNo, resolvedBy: how };
+  if (!onecConfigured()) return { ok: true, linked: true, offline: true, mk, opNo, resolvedBy: how, production: link.production || null, transfer: link.transfer || null, warning: 'Креды 1С не заданы — показан последний известный статус, к 1С не обращались.' };
+
+  const out = { ok: true, linked: true, mk, opNo, resolvedBy: how, errors: [] };
+  let changed = false;
+  for (const kind of ['production', 'transfer']) {
+    const cur = link[kind];
+    if (!cur || !cur.ref) { out[kind] = cur || null; continue; }
+    let fresh = null;
+    try {
+      fresh = await onecCall('GET', `${ONEC_DOC[kind].entity}(guid'${cur.ref}')?${onecQuery({ $format: 'json', $select: 'Ref_Key,Number,Date,Posted,DeletionMark' })}`);
+    } catch (e) {
+      // ВАЖНО: сорванный запрос — это НЕ «статус подтверждён». Показываем последний известный
+      // статус, но помечаем строку ошибкой и не даём выставить allPosted (иначе зелёная плашка врёт).
+      const msg = String(e.message || e);
+      out[kind] = { ...cur, statusError: msg };
+      out.errors.push(`${ONEC_DOC[kind].title}: ${msg}`);
+      continue;
+    }
+    const view = onecDocView(kind, fresh || {});
+    if (view.posted !== cur.posted || view.number !== cur.number || view.deleted !== cur.deleted) changed = true;
+    out[kind] = view;
+  }
+  if (changed) {
+    await onecSaveLink(opId, coop, { ...link, production: out.production || link.production, transfer: out.transfer || link.transfer, checkedAt: new Date().toISOString() });
+    onecLog('STATUS', `МК ${mk} оп.${opNo}: статус обновлён`, { production: out.production && out.production.posted, transfer: out.transfer && out.transfer.posted });
+  }
+  out.stale = out.errors.length > 0;
+  out.allPosted = !out.stale && !!(out.production && out.production.posted && out.transfer && out.transfer.posted);
+  return out;
 }
 
 // K-72 / Узел 8: привязка позиции ПЗ к маршрутной карте (МК). Без связи
@@ -6952,6 +7394,8 @@ function settingsView() {
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
     schemaMap: hasMap(),
+    // 1С-коннектор: наружу отдаём только адрес и ФЛАГИ. Логин/пароль клиенту не уходят никогда.
+    onecUrl: c.ONEC_URL, onecSet: !!(c.ONEC_LOGIN && c.ONEC_PASSWORD), onecDryRun: !!c.ONEC_DRY_RUN,
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
 }
@@ -6985,6 +7429,15 @@ function saveSettings(body) {
     const n = Number(body[field]);
     if (Number.isFinite(n) && n >= 0) next[key] = n;
   }
+  // 1С-коннектор: адрес/логин/пароль/флаг dry-run. Пароль в ответы сервера не возвращается
+  // (settingsView отдаёт только onecSet), в git не попадает (.runtime.json в .gitignore).
+  if (typeof body.onecUrl === 'string') next.ONEC_URL = body.onecUrl.trim().replace(/\/+$/, '');
+  if (body.onecLogin === '__clear__') delete next.ONEC_LOGIN;
+  else if (typeof body.onecLogin === 'string' && body.onecLogin.trim()) next.ONEC_LOGIN = body.onecLogin.trim();
+  if (body.onecPassword === '__clear__') delete next.ONEC_PASSWORD;
+  else if (typeof body.onecPassword === 'string' && body.onecPassword.trim()) next.ONEC_PASSWORD = body.onecPassword.trim();
+  // снять dry-run можно ТОЛЬКО явным false/0 — любое другое значение оставляет защиту включённой
+  if (body.onecDryRun !== undefined && body.onecDryRun !== null && body.onecDryRun !== '') next.ONEC_DRY_RUN = onecDryFlag(body.onecDryRun) ? 1 : 0;
   runtime = next; _tm = null; _tmKey = ''; _docFileIdx = null; _docFileIdxKey = '';
   fs.writeFileSync(RUNTIME_FILE, JSON.stringify(runtime, null, 2));
 }
@@ -8001,6 +8454,7 @@ const RBAC_API_PREFIX = [
   ['/api/board', 'board'], ['/api/station', 'station'], ['/api/orders', 'orders'],
   ['/api/position', 'orders'], ['/api/control', 'control'], // control → раздел ОТК (DEF-19: вердикт пишет только control-write роль)
   ['/api/routes', 'routes'], ['/api/route', 'routes'], ['/api/task', 'board'],
+  ['/api/1c', 'routes'], // 1С-коннектор (черновики кооперации) — права как у раздела «Маршруты»
   ['/api/setup-cards', 'setup'], ['/api/setup-card', 'setup'], // Конструктор карт наладки (Этап 2b)
   ['/api/tool-catalog', 'tools'], // ISO-каталог пластин/державок (Этап 2a) — под разделом «Инструмент»
   ['/api/equipment', 'equipment'], ['/api/tools', 'tools'], ['/api/metal', 'metal'], ['/api/warehouse', 'warehouse'],
@@ -9575,6 +10029,28 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       try { return sendJson(res, 200, await routeCoopAccept(body, sessionFromReq(req))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    // ── 1С-коннектор, этап 1 (см. блок «1С-КОННЕКТОР» выше) ──────────────────
+    // (д) причина ЛЮБОГО отказа уходит в постоянный лог .data/1c/requests.log — «молчаливых 400» быть не должно.
+    if (p === '/api/1c/coop-drafts' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 400, { error: 'Связка с 1С доступна только в режиме LIVE (NocoDB).' });
+      const body = await readBody(req);
+      try { return sendJson(res, 200, await onecCoopDrafts(body)); }
+      catch (e) {
+        const st = Number(e.status) || 400;
+        onecLog('ERR', `POST /api/1c/coop-drafts → ${st}`, { reason: String(e.message || e), routeId: body && body.routeId, opNo: body && body.opNo, opId: body && body.opId });
+        return sendJson(res, st, { error: String(e.message || e) });
+      }
+    }
+    if (p === '/api/1c/coop-status' && req.method === 'GET') {
+      if (!isLive()) return sendJson(res, 400, { error: 'Связка с 1С доступна только в режиме LIVE (NocoDB).' });
+      const q = Object.fromEntries(url.searchParams.entries());
+      try { return sendJson(res, 200, await onecCoopStatus(q)); }
+      catch (e) {
+        const st = Number(e.status) || 400;
+        onecLog('ERR', `GET /api/1c/coop-status → ${st}`, { reason: String(e.message || e), q });
+        return sendJson(res, st, { error: String(e.message || e) });
+      }
     }
     // Этап 1 доработки МК: загрузка вложений операции (ЧПУ-программа / карта наладки) → rw /app/portal/.data/mk-files
     if (p === '/api/route/op/upload' && req.method === 'POST') {

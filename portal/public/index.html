@@ -1037,6 +1037,25 @@
       }catch{} };
       setTimeout(run,0);
     }
+    // ── …и то же самое для таблиц, собранных разделами ВРУЧНУЮ ────────────────
+    //  tblTitles зовут только два общих компонента (dataTable и erpGrid). Но 15+ разделов
+    //  клеят разметку сами (`.tbl-wrap > table.dt`) — и подсказок не получали: живой пример
+    //  QA — «Контроль качества», ячейка «Договор 12/ПЗ-2026-002 от 03.06» обрезана молча.
+    //  Вместо ручной правки каждого места — наблюдатель за #view/#modal: после любой
+    //  перерисовки (в т.ч. асинхронной, как loadProjRoutes) пересчитываем подсказки.
+    //  Своих подсказок разделов это не трогает — в tblTitles стоит `if(td.hasAttribute('title'))return`,
+    //  а снимаются только собственные метки [data-ttl]. Наблюдаем ТОЛЬКО childList: title/data-ttl —
+    //  атрибуты, они наблюдателя не будят, зацикливания нет.
+    (function autoTblTitles(){
+      let t=null;
+      const scan=()=>{ t=null; ['view','modal'].forEach(id=>{ const el=document.getElementById(id);
+        if(el&&el.querySelector('table.dt tbody td'))tblTitles(el); }); };
+      const kick=()=>{ if(t)clearTimeout(t); t=setTimeout(scan,140); };
+      ['view','modal'].forEach(id=>{ const el=document.getElementById(id); if(!el)return;
+        new MutationObserver(kick).observe(el,{childList:true,subtree:true}); });
+      window.addEventListener('resize',kick);   // «обрезано» зависит от ширины — пересчитываем
+      kick();
+    })();
 
     // ── ERP-таблица: поиск + сортировка + ресайз столбцов (.rz→localStorage) + скрытие столбцов («Колонки ▾»→localStorage) ──
     // cols: [{key,label,cell:(r)=>html,w?:px,align?,cls?,fixed?,sortVal?:(r)=>v}]
@@ -10058,29 +10077,62 @@
     // ── Контроль (Ф.3/Ф.4/Ф.5) по конкретному ПЗ ──────────────────────────────
     //  Связь акта с заказом в данных ЕСТЬ: /api/board отдаёт по каждому акту поле pz
     //  («Договор / Заказ №» Ф.3, «Заказ №» Ф.4, «Заказ № / МК №» Ф.5 в NocoDB).
-    //  Поле текстовое и может нести № договора/МК рядом с № ПЗ, поэтому сверяем
-    //  вхождением номера ПЗ — тот же приём, что в блоке «Риск срока».
+    //  Поле текстовое и может нести № договора/МК рядом с № ПЗ («Договор 12/ПЗ-2026-002
+    //  от 03.06»), поэтому ищем номер ВНУТРИ текста — но по ГРАНИЦЕ ТОКЕНА, а не голым
+    //  вхождением подстроки.
+    //  ЗАЧЕМ (QA, блокер): `ref.includes(pz)` — префиксное совпадение. Для ПЗ-2026-1
+    //  подходили ПЗ-2026-10, ПЗ-2026-100, ПЗ-2026-1000: подстрока «ПЗ-2026-1» есть в
+    //  каждом. Ошибка асимметричная (короткий номер тянул длинные, не наоборот) и била
+    //  сразу в три точки UI — вкладку «Контроль», модалку карточки и бейдж «Риск срока».
+    //  КАК: номер в тексте ссылки обязан КОНЧАТЬСЯ там же, где кончается искомый —
+    //  символ номера (цифра/буква) вплотную к совпадению означает ДРУГОЙ заказ. Слева
+    //  та же проверка, чтобы ПЗ-2026-1 не находился в хвосте чужого токена. Разделители
+    //  (пробел, «/», «,», «№», конец строки) границей НЕ считаются — поэтому «12/ПЗ-2026-002
+    //  от 03.06» по-прежнему находится, а внутренняя серия ПЗ-2026-С001 не путается с ПЗ-2026-С0011.
+    //  Occurrences перебираем ВСЕ: в «ПЗ-2026-100, ПЗ-2026-1» верное совпадение — второе.
     //  ВАЖНО (СМК): без такой фильтрации карточка показывала чужие акты. Пусто —
     //  показываем пустое состояние, а НЕ первый попавшийся акт раздела.
     const ctlPzRef=(r)=>String((r&&(r.pz??r.numPz??r.order??r.object??r.pzNo))||'').trim();
+    const CTL_NUMCH=/[0-9A-Za-zА-Яа-яЁё]/;                       // «символ номера»: продолжает токен
+    const ctlRefHasPz=(ref,pz)=>{ if(!ref||!pz)return false;
+      const R=ref.toUpperCase(), P=pz.toUpperCase();
+      for(let i=R.indexOf(P); i>-1; i=R.indexOf(P,i+1)){
+        const before=i>0?R[i-1]:'', after=(i+P.length<R.length)?R[i+P.length]:'';
+        if(CTL_NUMCH.test(before)||CTL_NUMCH.test(after))continue; // это кусок другого номера
+        return true;
+      }
+      return false; };
     const ctlOfPz=(arr,numPz)=>{ const pz=String(numPz||'').trim(); if(!pz)return [];
-      return (arr||[]).filter(r=>{ const ref=ctlPzRef(r); return !!ref&&ref.includes(pz); }); };
+      return (arr||[]).filter(r=>ctlRefHasPz(ctlPzRef(r),pz)); };
     // Единый блок «Контроль качества» карточки ПЗ: и модалка (orderDetailHtml), и вкладка «Контроль».
-    function orderCtlBlockHtml(o){
+    //  Показываем ТОЛЬКО те формы, по которым акты реально есть (претензия владельца:
+    //  «зачем там везде висит входной и приёмочный?»). Раньше рисовались все три колонки,
+    //  и две из них честно писали «актов по заказу нет» — шум и ложное впечатление, будто
+    //  по заказу чего-то не хватает. По смыслу Ф.3 — входной контроль ПОСТАВКИ (материал от
+    //  поставщика), в карточке производственного заказа он уместен, только если материал
+    //  закупался под этот ПЗ; пустая колонка ничего об этом не сообщает.
+    //  Ни одной формы — прежнее честное пустое состояние (не трогаем).
+    //  ctlOrderForms — единый источник и для блока, и для подписи под ним (odTabBody).
+    function ctlOrderForms(o){
       const c=DATA.controls||{};
-      const inc=ctlOfPz(c.incoming,o.numPz), acc=ctlOfPz(c.acceptance,o.numPz), nco=ctlOfPz(c.nonconformity,o.numPz);
-      if(!inc.length&&!acc.length&&!nco.length)
+      const vbadge=(v)=>badge(v==='ГОДЕН'?'Выполнено':v);
+      return [
+        {code:'Ф.3', head:'Ф.3 Входной',        arr:ctlOfPz(c.incoming,o.numPz),      render:x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`},
+        {code:'Ф.4', head:'Ф.4 Приёмочный',     arr:ctlOfPz(c.acceptance,o.numPz),    render:x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`},
+        {code:'Ф.5', head:'Ф.5 Несоответствия', arr:ctlOfPz(c.nonconformity,o.numPz), render:x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto;color:#334155">${esc(x.decision||'открыто')}</span>`},
+      ].filter(f=>f.arr.length);
+    }
+    function orderCtlBlockHtml(o){
+      const forms=ctlOrderForms(o);
+      if(!forms.length)
         return emptyState('По этому заказу актов контроля нет',{
           sub:'Ни входного (Ф.3), ни приёмочного (Ф.4), ни акта о несоответствии (Ф.5) со ссылкой на '+o.numPz+'.',
           action:{label:'Открыть «Контроль качества»',href:'#control'}});
-      const vbadge=(v)=>badge(v==='ГОДЕН'?'Выполнено':v);
       const qrow=(inner)=>`<div style="display:flex;align-items:center;gap:7px">${inner}</div>`;
-      const qcell=(hd,arr,render,none)=>`<div class="qcell"><div class="qh">${hd}</div><div class="qv" style="flex-direction:column;align-items:stretch;gap:5px">${
-        arr.length?arr.map(x=>qrow(render(x))).join(''):`<span style="color:var(--sub)">${esc(none)}</span>`}</div></div>`;
-      return `<div class="qc">
-        ${qcell('Ф.3 Входной',inc,x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`,'актов по заказу нет')}
-        ${qcell('Ф.4 Приёмочный',acc,x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`,'протоколов по заказу нет')}
-        ${qcell('Ф.5 Несоответствия',nco,x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto;color:#334155">${esc(x.decision||'открыто')}</span>`,'несоответствий по заказу нет')}
+      // .qc жёстко на 3 колонки — раскладку задаём по числу реально показанных форм
+      return `<div class="qc" style="grid-template-columns:repeat(${forms.length},minmax(0,1fr))">
+        ${forms.map(f=>`<div class="qcell"><div class="qh">${esc(f.head)}</div><div class="qv" style="flex-direction:column;align-items:stretch;gap:5px">${
+          f.arr.map(x=>qrow(f.render(x))).join('')}</div></div>`).join('')}
       </div>`;
     }
     const isDone=(s)=>s==='Выполнено'||s==='Отгружен'||s==='Закрыт';
@@ -11024,8 +11076,10 @@
       } else if(ordTab==='ctl'){
         // СМК: только акты, привязанные к этому ПЗ (см. ctlOfPz). Раньше сюда падал первый акт раздела.
         const ctlBlock=orderCtlBlockHtml(o);
-        const note=/empty-st/.test(ctlBlock)?''
-          :`<div style="font-size:11px;color:#5b6b7a;margin-top:8px">Показаны акты Ф.3/Ф.4/Ф.5 со ссылкой на ${esc(o.numPz)} (поле «Заказ №» в акте). Полный журнал — раздел <a href="#control" style="color:var(--blue)">Контроль качества</a>.</div>`;
+        // Подпись обязана описывать то, что РЕАЛЬНО показано: формы без актов больше не
+        // рисуются, значит и перечислять «Ф.3/Ф.4/Ф.5» скопом нельзя — интерфейс утверждал бы неверное.
+        const shown=ctlOrderForms(o).map(f=>f.code);
+        const note=shown.length?`<div style="font-size:11px;color:#5b6b7a;margin-top:8px">Показаны акты ${esc(shown.join('/'))} со ссылкой на ${esc(o.numPz)} (поле «Заказ №» в акте). Формы без актов по этому заказу не показаны. Полный журнал — раздел <a href="#control" style="color:var(--blue)">Контроль качества</a>.</div>`:'';
         h.innerHTML=`<div class="card pad">${ctlBlock}${note}</div>`;
       } else {
         const hist=(o.history||[]);

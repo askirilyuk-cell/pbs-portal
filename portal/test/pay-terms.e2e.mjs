@@ -234,6 +234,29 @@ async function startPortal(serverFile, stubPort, port) {
   return { child, logs };
 }
 
+// ── migrate-048 поверх той же заглушки NocoDB ───────────────────────────────
+// Критерий 5 («повторная миграция дублей не создаёт») проверяется прогоном
+// НАСТОЯЩЕГО скрипта миграции, а не чтением его исходника.
+const MIGRATION = path.join(__dirname, '..', '..', 'nocodb', 'schema', 'migrate-048-payment-terms.mjs');
+const PAY_TERM_TITLES = ['Ожидаемая дата оплаты', 'Тип оплаты', 'Процент аванса', 'Срок оплаты (портал)'];
+
+function runMigration(stubPort, { apply }) {
+  return new Promise((done) => {
+    const ch = spawn(process.execPath, [MIGRATION], {
+      env: {
+        ...process.env,
+        NC_URL: `http://127.0.0.1:${stubPort}`, NC_TOKEN: 'test-token',
+        ...(apply ? { DRY_RUN: '0', APPLY_CONFIRM: 'YES' } : { DRY_RUN: '1', APPLY_CONFIRM: '' }),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    ch.stdout.on('data', (d) => { out += d; });
+    ch.stderr.on('data', (d) => { out += d; });
+    ch.on('close', (code) => done({ code, out }));
+  });
+}
+
 // ── мини-раннер ─────────────────────────────────────────────────────────────
 let PASS = 0, FAIL = 0;
 const results = [];
@@ -443,12 +466,47 @@ async function main() {
     check('ЗнЗ: опрос не создаёт дату у предоплаты', !znz()['Ожидаемая дата оплаты'], `дата: ${znz()['Ожидаемая дата оплаты']}`);
 
     // ─────────────────────────────────────────────────────────────────────────
-    group('Критерий 6 / D-8 — мусор в колонке процента не превращается в «NaN»');
+    group('Критерий 6 / D-8 — старые счета без «undefined», мусор не превращается в «NaN»');
     resetDb();
     inv()['Процент аванса'] = '30%';                        // колонка оказалась текстовой
-    const jinv = await fetch(`${B}/api/procurement/invoices?znzId=7`, { headers: H }).then((x) => x.json()).catch(() => null);
-    const shaped = jinv && (jinv.invoices || []).find((x) => x.id === 1);
+    const invShape = () => fetch(`${B}/api/procurement/invoices?znzId=7`, { headers: H })
+      .then((x) => x.json()).then((d) => (d.invoices || []).find((x) => x.id === 1)).catch(() => null);
+    let shaped = await invShape();
     check('avansPercent не NaN-подобен', !shaped || shaped.avansPercent === null || Number.isFinite(shaped.avansPercent), JSON.stringify(shaped));
+    // счёт БЕЗ колонок migrate-048 (старый) — клиент рисует только заполненное, «undefined» взяться неоткуда
+    resetDb({ termCols: false });
+    shaped = await invShape();
+    check('старый счёт: условия платежа пусты, не «undefined»',
+      shaped && shaped.payType === '' && shaped.expectedPayDate === '' && shaped.avansPercent === null && shaped.portalPayDate === '',
+      JSON.stringify(shaped));
+    // расхождение сроков обязано доехать до карточки, а не жить только в тосте
+    resetDb(); S.portal.echoDate = '2026-09-30';
+    await pay(POST());
+    shaped = await invShape();
+    check('расхождение видно в карточке (portalPayDate)', shaped && shaped.portalPayDate === '2026-09-30', JSON.stringify(shaped));
+    check('наш срок в карточке — тот, что ушёл наружу', shaped && String(shaped.expectedPayDate).slice(0, 10) === '2026-08-15', JSON.stringify(shaped));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    group('Критерий 5 — migrate-048: повторный прогон дублей не создаёт');
+    resetDb({ termCols: false });
+    let mg = await runMigration(stubPort, { apply: true });
+    check('первый APPLY создаёт 4 колонки в «Счета-К»', S.columns.tblInv.filter((c) => PAY_TERM_TITLES.includes(c.title)).length === 4, mg.out);
+    check('первый APPLY создаёт 4 колонки в «Заявки ЗнЗ»', S.columns.tblZnz.filter((c) => PAY_TERM_TITLES.includes(c.title)).length === 4, mg.out);
+    mg = await runMigration(stubPort, { apply: true });
+    check('повторный APPLY не плодит дублей (Счета-К)', S.columns.tblInv.filter((c) => PAY_TERM_TITLES.includes(c.title)).length === 4, mg.out);
+    check('повторный APPLY не плодит дублей (Заявки ЗнЗ)', S.columns.tblZnz.filter((c) => PAY_TERM_TITLES.includes(c.title)).length === 4, mg.out);
+    check('повторный APPLY: 0 к созданию, 0 конфликтов', /к созданию: 0/.test(mg.out) && /конфликтов\/предупреждений: 0/.test(mg.out), mg.out);
+    mg = await runMigration(stubPort, { apply: false });
+    check('DRY_RUN на готовой схеме ничего не планирует', /к созданию: 0/.test(mg.out), mg.out);
+
+    group('D-4 (миграция) — чужой словарь SingleSelect виден, а не «уже есть»');
+    resetDb({ termCols: false });
+    S.columns.tblInv.push({ title: 'Тип оплаты', uidt: 'SingleSelect', colOptions: { options: [{ title: 'Аванс' }, { title: 'Отсрочка' }] } });
+    mg = await runMigration(stubPort, { apply: false });
+    check('расхождение словаря названо конфликтом', /В СЛОВАРЕ НЕТ ВАРИАНТОВ/.test(mg.out), mg.out);
+    check('конкретно перечислены недостающие варианты', /Предоплата/.test(mg.out) && /Постоплата/.test(mg.out), mg.out);
+    check('конфликт поднимает код возврата', mg.code === 2, `code=${mg.code}`);
+    check('чужая колонка НЕ тронута', (S.columns.tblInv.find((c) => c.title === 'Тип оплаты').colOptions.options || []).length === 2);
   } finally {
     child.kill('SIGKILL');
     stub.close();

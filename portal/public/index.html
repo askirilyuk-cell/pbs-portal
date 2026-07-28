@@ -5958,7 +5958,13 @@
         prb.disabled=true; prb.textContent='Опрашиваю…';
         try{
           const j=await postJson('/api/procurement/pay/refresh-all',{});
-          toast(`Проверено ${j.checked||0} счетов, обновилось ${j.updated||0}`+(j.errors?` (ошибок: ${j.errors})`:''),'ok');
+          // D-1: массовый опрос трогает ВСЕ счета разом, и раньше ответ {checked, updated,
+          // errors} молчал о том, что условия платежа где-то не сохранились или что портал
+          // сообщает другой срок. Теперь предупреждения приходят подписанными номером счёта
+          // — показываем первое и счётчик остальных, полный список есть в логе сервера.
+          const w=j.warningList||[];
+          toast(`Проверено ${j.checked||0} счетов, обновилось ${j.updated||0}`+(j.errors?` (ошибок: ${j.errors})`:'')
+            +(w.length?` · ${w[0]}`+(j.warnings>1?` (и ещё ${j.warnings-1})`:''):''), (j.warnings||j.errors)?'warn':'ok');
           PROC=null; await renderProcurement(viewHost);
         }catch(e){ prb.disabled=false; prb.textContent='⟳ Статусы оплат'; alert('Не удалось обновить статусы оплат: '+(e.message||e)); }
       };
@@ -6768,11 +6774,17 @@
     // Рисуем ТОЛЬКО заполненное: у старых счетов и до APPLY миграции полей нет → сегмент
     // не появляется вообще (никаких «undefined» и подписей без значения). Постоплата даёт
     // «срок дд.мм.гггг», предоплата — «аванс NN %»; взаимоисключающие поля сервер гасит.
+    // D-1 (правка по FAIL QA): «срок» — это ВСЕГДА наш срок, тот, что ушёл в платёжный
+    // портал; ответ портала его не заменяет. Если портал сообщает другой срок, сервер
+    // кладёт его в отдельное поле portalPayDate — показываем рядом красным «портал:
+    // дд.мм.гггг». Иначе расхождение жило бы только в тосте, который через пару секунд
+    // исчезает, и человек, поправивший срок, так и не узнал бы, что портал с ним не согласен.
     function invPayTerms(x){
       const out=[];
       if(x.payType)out.push(esc(x.payType));
       if(x.expectedPayDate)out.push('срок '+fmt(x.expectedPayDate));
       if(x.avansPercent!=null)out.push('аванс '+esc(String(x.avansPercent).replace('.',','))+' %');
+      if(x.portalPayDate)out.push(`<span style="color:var(--red)" title="Платёжный портал сообщает другой срок оплаты. У нас остался наш — тот, что был отправлен или проставлен вручную.">портал: ${fmt(x.portalPayDate)}</span>`);
       return out.join(' · ');
     }
     // короткое «чч:мм дд.мм» из ISO-строки «Оплата обновлена» (локальное время браузера)
@@ -6782,7 +6794,12 @@
       return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}.${p(d.getMonth()+1)}`;
     }
     // Загрузка и отрисовка списка счетов заявки r в контейнер #znz-inv-list (degrade-safe).
-    async function loadZnzInvoices(r,canAct){
+    // autoPoll (D-1) — можно ли запускать фоновый опрос платёжного портала. Перерисовка,
+    // вызванная САМИМ фоновым опросом, приходит с false: иначе она заводит опрос заново,
+    // тот снова возвращает payment, снова перерисовывает — и портал Алексея опрашивается
+    // по кругу без единого клика. Дефект был и раньше, но с D-1 он стал дорогим: этот
+    // же круг молча переписывал условия платежа.
+    async function loadZnzInvoices(r,canAct,autoPoll=true){
       const listEl=document.getElementById('znz-inv-list'), sumEl=document.getElementById('znz-inv-sum');
       if(!listEl)return;
       if(PROC.mode!=='live'||r.id==null){ listEl.innerHTML='<div class="c-gray" style="font-size:12.5px">Счета доступны в LIVE-режиме (задайте токен NocoDB).</div>'; return; }
@@ -6837,7 +6854,10 @@
             const rr=await fetch('/api/purchase/pay-status?znzId='+encodeURIComponent(r.id)+'&invoiceId='+encodeURIComponent(id));
             const j=await rr.json().catch(()=>({}));
             if(!rr.ok||j.error)throw new Error(j.error||('HTTP '+rr.status));
-            toast('Статус оплаты счёта: '+((j.payment&&j.payment.status)||'—'),'ok');
+            // D-1: опрос статуса мог не сохранить условия платежа или обнаружить, что
+            // портал сообщает другой срок оплаты. Раньше сервер это предупреждение
+            // выбрасывал, и провал записи при опросе не видел никто.
+            toast('Статус оплаты счёта: '+((j.payment&&j.payment.status)||'—')+(j.saveWarning?(' — '+j.saveWarning):''), j.saveWarning?'warn':'ok');
           }catch(e){ toast('Не удалось обновить статус: '+(e.message||e),'warn'); }
           await loadZnzInvoices(r,canAct);
         });
@@ -6846,10 +6866,18 @@
         // K-83 доп. (обратная связь): фоновый best-effort автообновление статусов счетов,
         // у которых уже есть оплата, но статус ещё не финальный — не блокирует рендер списка;
         // если хоть один статус реально обновился на сервере — просто перезагружаем список.
-        const pending=inv.filter(x=>x.payExternalRef&&!INV_PAY_FINAL.includes(x.payStatus));
+        const pending=autoPoll?inv.filter(x=>x.payExternalRef&&!INV_PAY_FINAL.includes(x.payStatus)):[];
         if(pending.length){
           Promise.allSettled(pending.map(x=>fetch('/api/purchase/pay-status?znzId='+encodeURIComponent(r.id)+'&invoiceId='+encodeURIComponent(x.id)).then(rr=>rr.json())))
-            .then(results=>{ if(results.some(x=>x.status==='fulfilled'&&x.value&&!x.value.error&&x.value.payment)) loadZnzInvoices(r,canAct); })
+            .then(results=>{
+              // D-1: этот опрос идёт САМ, при каждом открытии списка счетов — именно
+              // поэтому его предупреждения нельзя терять молча (человек ничего не
+              // нажимал, а условия платежа могли не сохраниться). Показываем одно
+              // сводное предупреждение, а не по тосту на счёт.
+              const warns=results.filter(x=>x.status==='fulfilled'&&x.value&&x.value.saveWarning).map(x=>x.value.saveWarning);
+              if(warns.length)toast('Условия платежа: '+warns[0]+(warns.length>1?` (и ещё ${warns.length-1})`:''),'warn');
+              if(results.some(x=>x.status==='fulfilled'&&x.value&&!x.value.error&&x.value.payment)) loadZnzInvoices(r,canAct,false);
+            })
             .catch(()=>{});
         }
       }
@@ -7199,7 +7227,8 @@
             if(!rr.ok||j.error)throw new Error(j.error||('HTTP '+rr.status));
             PROC=null; try{PROC=await (await fetch('/api/procurement')).json();}catch(e){}
             const upd=(PROC&&PROC.requests||[]).find(x=>x.id===r.id)||r;
-            toast('Статус оплаты: '+((j.payment&&j.payment.status)||'—'),'ok');
+            // D-1: см. такой же тост у счёта — предупреждение опроса больше не теряется.
+            toast('Статус оплаты: '+((j.payment&&j.payment.status)||'—')+(j.saveWarning?(' — '+j.saveWarning):''), j.saveWarning?'warn':'ok');
             loadZnzPayment(upd,canAct);
           }catch(e){ rb.disabled=false; rb.textContent='Обновить статус'; alert('Не удалось обновить статус: '+(e.message||e)); }
         };

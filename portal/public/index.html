@@ -5266,7 +5266,11 @@
       host.querySelectorAll('[data-kpmode]').forEach(b=>b.onclick=()=>{ salesKpMode=b.dataset.kpmode; renderKpPage(host); });
       const st=host.querySelector('#kpSaveTop'); if(st&&!lock)st.onclick=async()=>{ st.disabled=true; const old=st.textContent; st.textContent='Сохранение…'; try{ await kpSave(); st.textContent='Сохранено ✓'; setTimeout(()=>{const e=document.getElementById('kpSaveTop'); if(e){e.textContent=old;e.disabled=false;}},1400); }catch{ st.disabled=false; st.textContent=old; } };
       const bt=host.querySelector('#kpBlankTop'); if(bt)bt.onclick=()=>{ salesKpMode='blank'; renderKpPage(host); };
-      const sn=host.querySelector('#kpSendTop'); if(sn&&!lock)sn.onclick=()=>kpSend(false);
+      // Защита от двойного клика по «Отправить КП →»: гасим кнопку СИНХРОННО, до первого await,
+      // иначе два быстрых клика уходят двумя POST /kp/send (два номера КП + перезапись даты отправки).
+      // Восстанавливаем только если тулбар ещё жив: успешная отправка перерисовывает страницу (kpReload).
+      const sn=host.querySelector('#kpSendTop'); if(sn&&!lock)sn.onclick=async()=>{ sn.disabled=true; const old=sn.textContent; sn.textContent='Отправка…';
+        try{ await kpSend(false); } finally { if(sn.isConnected){ sn.disabled=false; sn.textContent=old; } } };
       renderKpBody();
     }
     // тело страницы КП по активному режиму: build → мастер (drawKp), blank → предпросмотр бланка Ф.3–З.1
@@ -5598,8 +5602,8 @@
       document.querySelectorAll('[data-postab]').forEach(bt=>bt.onclick=()=>{ kpState.cur=+bt.dataset.postab; kpState.step=(kpState.rows[kpState.cur]&&kpState.rows[kpState.cur].name)?3:1; drawKp(); });
       const add=document.getElementById('kpAdd'); if(add)add.onclick=()=>{ kpState.rows.push(kpEmptyRow()); kpState.cur=kpState.rows.length-1; kpState.step=1; kpState.q=''; drawKp(); };
       const pdf=document.getElementById('kpPdf'); if(pdf)pdf.onclick=()=>window.open('/api/sales/kp.pdf?zp='+encodeURIComponent(kpState.zp),'_blank','noopener');
-      const sv=document.getElementById('kpSave'); if(sv)sv.onclick=()=>kpSave();
-      const sn=document.getElementById('kpSend'); if(sn)sn.onclick=()=>kpSend(false);
+      // «Сохранить черновик» / «Отправить КП» живут в тулбаре страницы (#kpSaveTop/#kpSendTop, renderKpPage);
+      // в теле мастера их нет — прежние привязки к #kpSave/#kpSend были холостыми и удалены.
       const rs=document.getElementById('kpResult'); if(rs)rs.onchange=()=>{
         // DEF-29: при выборе «Выиграли частично» показываем поле суммы СРАЗУ (live, клиентски),
         // не сохраняя результат — сумма вводится в этом же шаге и уходит одним POST по «Сохранить сумму».
@@ -5658,20 +5662,20 @@
       return b; }); }
     async function kpReload(){ try{ const d=await (await fetch('/api/sales/kp?zp='+encodeURIComponent(kpState.zp))).json(); if(!d.error){ kpState.d=d; kpState.rows=(d.items||[]).map(it=>({...it})); kpState.locked=!(d.gates&&d.gates.kp); if(kpState.cur==null||kpState.cur>=kpState.rows.length)kpState.cur=Math.max(0,kpState.rows.length-1); if(salesKpZp){ renderKpPage(document.getElementById('view')); } else drawKp(); } }catch{} }
     async function kpSave(silent){
-      const sv=document.getElementById('kpSave'); if(sv){sv.disabled=true;}
+      // состоянием кнопки владеет обработчик #kpSaveTop (renderKpPage); прежний поиск #kpSave был холостым
       let r; try{ r=await fetch('/api/sales/kp/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zp:kpState.zp,positions:kpPositionsBody()})}); }
-      catch(e){ if(sv)sv.disabled=false; if(!silent)toast('Сеть: '+e.message,'err'); throw e; }
-      const j=await r.json(); if(sv)sv.disabled=false;
+      catch(e){ if(!silent)toast('Сеть: '+e.message,'err'); throw e; }
+      const j=await r.json();
       if(!r.ok){ if(!silent)toast('Не удалось сохранить КП: '+(j.error||r.status),'err'); throw new Error(j.error||'save'); }
       if(!silent){ toast(`КП сохранено: ${j.saved} поз. (${j.created} нов. · ${j.updated} изм. · ${j.deleted} удал.)`,'ok'); kpState.d=j; kpState.rows=(j.items||[]).map(it=>({...it})); kpState.locked=!(j.gates&&j.gates.kp); drawKp(); }
       return j;
     }
     async function kpSend(confirmSign){
       if(!confirmSign){ try{ await kpSave(true); }catch{ return; } }   // отправка читает сохранённые позиции — сначала фиксируем
-      const sn=document.getElementById('kpSend'); if(sn)sn.disabled=true;
+      // состоянием кнопки владеет обработчик #kpSendTop (renderKpPage); прежний поиск #kpSend был холостым
       let r; try{ r=await fetch('/api/sales/kp/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zp:kpState.zp,confirmSign:!!confirmSign})}); }
-      catch(e){ if(sn)sn.disabled=false; return toast('Сеть: '+e.message,'err'); }
-      const j=await r.json(); if(sn)sn.disabled=false;
+      catch(e){ return toast('Сеть: '+e.message,'err'); }
+      const j=await r.json();
       if(r.status===409){ // Гейт 2 §5.3.5 — требуется подпись по порогу
         if(confirm(`${j.error}\n\nПодтвердить подписание (${j.signer}) и отправить КП заказчику?`)) return kpSend(true);
         return;

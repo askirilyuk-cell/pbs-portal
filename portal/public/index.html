@@ -10135,6 +10135,17 @@
           f.arr.map(x=>qrow(f.render(x))).join('')}</div></div>`).join('')}
       </div>`;
     }
+    // Подпись под блоком контроля. Обязана описывать то, что РЕАЛЬНО показано: формы без
+    //  актов не рисуются, значит и перечислять «Ф.3/Ф.4/Ф.5» скопом нельзя — интерфейс
+    //  утверждал бы неверное. Пустого блока подпись не сопровождает (там своё пустое состояние).
+    //  ЗАЧЕМ ОБЩАЯ: подпись жила только во вкладке «Контроль», а в модалке карточки её не было —
+    //  человек, привыкший к трём колонкам, не понимал, куда делись остальные. Блок и подпись
+    //  ходят парой, поэтому и рисуются из одного места (см. orderCtlBlockHtml).
+    function orderCtlNoteHtml(o){
+      const shown=ctlOrderForms(o).map(f=>f.code);
+      if(!shown.length)return '';
+      return `<div style="font-size:11px;color:#5b6b7a;margin-top:8px">Показаны акты ${esc(shown.join('/'))} со ссылкой на ${esc(o.numPz)} (поле «Заказ №» в акте). Формы без актов по этому заказу не показаны. Полный журнал — раздел <a href="#control" style="color:var(--blue)">Контроль качества</a>.</div>`;
+    }
     const isDone=(s)=>s==='Выполнено'||s==='Отгружен'||s==='Закрыт';
     const orderDone=(o)=>{const t=(o.tasks||[]).length;return t>0&&doneCount(o)===t;};
     // «следующая операция»: первая в работе, иначе первая в очереди
@@ -10215,7 +10226,7 @@
         <div class="card pad nomen"><div class="sec-h" style="margin-bottom:8px">Номенклатура</div>${nomen}${genBtn}</div>
         <div class="card pad"><div class="sec-h" style="margin-bottom:10px">Задачи по участкам</div><div class="tasks">${tasks}</div></div>
         <div class="card pad"><div class="sec-h" style="margin-bottom:10px">Контроль качества</div>
-          ${orderCtlBlockHtml(o)}</div>`;
+          ${orderCtlBlockHtml(o)}${orderCtlNoteHtml(o)}</div>`;
     }
     // ══ Раздел «Учёт остатков металла» — реестр остатка (кг) + журнал + деловые остатки (migrate-035) ══
     //  Образец парадигмы — модуль «Инструмент» (renderTools): реестр + running-баланс «Остаток после»,
@@ -11076,11 +11087,7 @@
       } else if(ordTab==='ctl'){
         // СМК: только акты, привязанные к этому ПЗ (см. ctlOfPz). Раньше сюда падал первый акт раздела.
         const ctlBlock=orderCtlBlockHtml(o);
-        // Подпись обязана описывать то, что РЕАЛЬНО показано: формы без актов больше не
-        // рисуются, значит и перечислять «Ф.3/Ф.4/Ф.5» скопом нельзя — интерфейс утверждал бы неверное.
-        const shown=ctlOrderForms(o).map(f=>f.code);
-        const note=shown.length?`<div style="font-size:11px;color:#5b6b7a;margin-top:8px">Показаны акты ${esc(shown.join('/'))} со ссылкой на ${esc(o.numPz)} (поле «Заказ №» в акте). Формы без актов по этому заказу не показаны. Полный журнал — раздел <a href="#control" style="color:var(--blue)">Контроль качества</a>.</div>`:'';
-        h.innerHTML=`<div class="card pad">${ctlBlock}${note}</div>`;
+        h.innerHTML=`<div class="card pad">${ctlBlock}${orderCtlNoteHtml(o)}</div>`;
       } else {
         const hist=(o.history||[]);
         h.innerHTML=`<div class="card pad"><div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px">${hist.length?hist.map(x=>`<div style="display:flex;gap:8px"><span style="color:#5b6b7a;white-space:nowrap">${esc(x.date||'')}</span><span>${esc(x.text||'')}</span></div>`).join(''):'<span class="c-gray">Журнал по ПЗ в реестре не ведётся (движение задач — на производственной доске).</span>'}</div></div>`;
@@ -12776,7 +12783,20 @@
       const c=DATA.controls||{};
       const q=ctlQ.trim().toLowerCase();
       const match=(x)=>!q||[x.num,x.material,x.product,x.pz].some(v=>String(v||'').toLowerCase().includes(q));
-      const pzCell=(x)=>x.pz?`<span class="lnk" data-gopz="${esc(x.pz)}" style="cursor:pointer">${esc(x.pz)}</span>`:'<span class="muted">—</span>';
+      // Ячейка «Заказ / ПЗ». Поле в акте текстовое и часто несёт номер ВНУТРИ текста
+      //  («Договор 12/ПЗ-2026-002 от 03.06»). Раньше ячейка всегда рисовалась ссылкой, а
+      //  переход искал ТОЧНОЕ равенство numPz — для такого акта ссылка кликалась и не делала
+      //  ничего (QA: адрес страницы не менялся). При этом карточка заказа тот же акт показывала
+      //  как «свой» (ctlOfPz → ctlRefHasPz) — два экрана противоречили друг другу.
+      //  КАК: заказ ищем тем же хелпером ctlRefHasPz (граница токена), что и карточка, —
+      //  журнал и карточка обязаны согласовываться. Номер в тексте не распознан → ячейка
+      //  НЕ ссылка (просто текст), чтобы курсор-палец не обещал перехода, которого нет.
+      const ctlPzOrder=(ref)=>{ const r=String(ref||'').trim(); if(!r)return '';
+        const o=(DATA.orders||[]).find(o=>ctlRefHasPz(r,o.numPz)); return o?o.numPz:''; };
+      const pzCell=(x)=>{ const ref=ctlPzRef(x); if(!ref)return '<span class="muted">—</span>';
+        const pz=ctlPzOrder(ref);
+        return pz?`<span class="lnk" data-gopz="${esc(pz)}" style="cursor:pointer" title="Открыть заказ ${esc(pz)}">${esc(ref)}</span>`
+                 :`<span title="Заказ по этой ссылке не найден в реестре">${esc(ref)}</span>`; };
       const dCell=(x)=>x.date?esc(fmt(x.date)):'<span class="muted">—</span>';
       const vbadge=(v)=>`<span class="badge ${ctlGood(v)?'b-green':'b-red'}">${esc(ctlGood(v)?'годен':(v||'брак'))}</span>`;
       const cg=(ws)=>`<colgroup>${ws.map(w=>`<col${w?` style="width:${w}"`:''}>`).join('')}</colgroup>`;
@@ -12829,50 +12849,13 @@
       });
     }
 
-    function renderOrders(){
-      document.getElementById('orders').innerHTML=DATA.orders.map(o=>{
-        const tot=(o.tasks||[]).length, dn=doneCount(o), pct=tot?Math.round(dn/tot*100):0;
-        const nx=nextOp(o);
-        return `<div class="card ord ${o.numPz===sel?'sel':''}" data-pz="${esc(o.numPz)}"><div class="pad">
-          <div class="row"><span class="num">${esc(o.numPz)}</span><span class="spacer"></span>${badge(o.status)}</div>
-          <div class="cust">${esc(o.customer||'')}</div>
-          <div class="meta">${prio(o.priority)} · срок ${fmt(o.plan)}</div>
-          <div class="oprog"><div class="bar"><i style="width:${pct}%;background:${pct===100?'var(--green)':'var(--blue)'}"></i></div><span class="n">${dn}/${tot}</span></div>
-          ${nx?`<div class="nextop">${esc(nx)}</div>`:''}
-        </div></div>`;}).join('')||'<div style="color:#5b6b7a">Заказов нет</div>';
-      document.querySelectorAll('.ord').forEach(e=>e.onclick=()=>{sel=e.dataset.pz;renderOrders();renderDetail();});
-    }
-    function renderDetail(){
-      const o=DATA.orders.find(x=>x.numPz===sel);
-      const host=document.getElementById('detail');
-      if(!o){host.innerHTML='';return;}
-      const cols=STATUSES.map(st=>{const cs=o.tasks.filter(t=>t.status===st);
-        return `<div class="col"><div class="ch">${esc(st)} <span style="color:var(--gray4)">${cs.length}</span></div>
-          ${cs.map(t=>`<div class="tk ${TKCLASS[t.status]||''}" data-tid="${esc(t.id??t.num)}" style="cursor:pointer"><div class="sct">${esc(t.section||'')}</div>
-            <div class="tt">${esc(t.title||t.op)}</div><div class="op">${esc(t.op)}</div>
-            <div class="b"><span class="op">срок ${fmt(t.plan)}</span>${pbtn('task',t.num,'Ф.14')}</div></div>`).join('')||'<div class="op" style="opacity:.5">—</div>'}
-        </div>`;}).join('');
-      const pos=o.positions.map(p=>`<tr><td><b>${esc(p.numPos)}</b></td><td>${esc(p.name)}</td><td style="color:#64748b">${esc(p.drawing||'—')}</td><td>${esc(p.qty??'')} ${esc(p.unit||'')}</td><td>${badge(p.status)}</td></tr>`).join('');
-      const c=DATA.controls||{};
-      const ci=(arr,fld)=>(arr||[]).map(x=>`<div class="ci"><span><span class="n">${esc(x.num)}</span> ${esc(x.product||x.material||'')} ${badge(x[fld]==='ГОДЕН'?'Выполнено':x[fld])}</span>${pbtn('control',x.num,'Печать')}</div>`).join('')||'<div class="op" style="opacity:.5">нет</div>';
-      host.innerHTML=`
-        <div class="card pad"><div class="row"><span class="title">${esc(o.numPz)}</span>${badge(o.status)}
-          <span style="color:#64748b;font-size:13px">${esc(o.customer||'')} · ${esc(o.orderType||'')}</span>
-          <span class="spacer"></span>${pbtn('pz',o.numPz,'ПЗ (Ф.1–П.2)')}${(o.routes||[]).map(r=>pbtn('route',r.mk,'Ф.13 '+r.mk.replace('МК-',''))).join('')}</div></div>
-        <div class="card pad"><div class="h">Номенклатура</div><div class="tbl-wrap"><table>
-          <thead><tr><th>№</th><th>Наименование</th><th>Чертёж</th><th>Кол-во</th><th>Статус</th></tr></thead>
-          <tbody>${pos||'<tr><td colspan=5 style="opacity:.5">Позиции не заведены</td></tr>'}</tbody></table></div></div>
-        <div class="card pad"><div class="h">Задачи по участкам</div><div class="kb">${cols}</div></div>
-        <div class="card pad"><div class="h">Контроль качества</div><div class="ctrl">
-          <div><div style="font-size:12px;font-weight:600;margin-bottom:4px">Ф.3 Входной</div>${ci(c.incoming,'verdict')}</div>
-          <div><div style="font-size:12px;font-weight:600;margin-bottom:4px">Ф.4 Приёмочный</div>${ci(c.acceptance,'verdict')}</div>
-          <div><div style="font-size:12px;font-weight:600;margin-bottom:4px">Ф.5 Несоответствия</div>${ci(c.nonconformity,'decision')}</div>
-        </div></div>`;
-      host.querySelectorAll('.tk[data-tid]').forEach(el=>el.onclick=(ev)=>{
-        if(ev.target.closest('a'))return; // не перехватывать кнопку печати Ф.14
-        openTask(el.dataset.tid);
-      });
-    }
+    // Здесь лежали renderOrders/renderDetail — реликт первой вёрстки (два фиксированных
+    //  контейнера #orders и #detail). Оба контейнера из разметки давно ушли, реестр рисует
+    //  renderOrdersView через роутер, а звали эти функции только они сами друг друга.
+    //  Удалены: внутри жил СТАРЫЙ блок «Контроль качества», который печатал ВСЕ акты
+    //  раздела без фильтра по заказу — ровно та ошибка, что чинилась в 8a1ff24 (ctlOfPz).
+    //  Мёртвый код с такой миной опаснее отсутствия кода: при копировании образца ошибка
+    //  воскресает молча. Актуальный образец блока — orderCtlBlockHtml.
 
     // --- рабочее место: модалка записи задачи ---------------------------------
     const modal=document.getElementById('modal'), mscrim=document.getElementById('mscrim');

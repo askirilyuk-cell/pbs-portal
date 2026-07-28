@@ -6483,12 +6483,15 @@
     // позже кнопкой «＋ скан», у счёта такой кнопки нет — см. loadZnzInvoices).
     async function uploadScanOrFail(url,file,hint){
       const fd=new FormData(); fd.append('file',file,file.name);
-      const fail=(reason)=>new Error('скан «'+((file&&file.name)||'файл')+'» не загрузился — '+reason+'. '+hint);
+      const fail=(reason)=>new Error('скан «'+((file&&file.name)||'файл')+'» не загрузился — '
+        +String(reason).replace(/\s*[.;]+$/,'')+'. '+hint); // без задвоенной точки, если сервер уже её поставил
       let ur;
       try{ ur=await fetch(url,{method:'POST',body:fd}); }
       catch(e){ throw fail('нет связи с сервером ('+(e.message||e)+')'); }
       const uj=await ur.json().catch(()=>({}));
-      if(!ur.ok||!uj.scan)throw fail(uj.error||('сервер ответил HTTP '+ur.status));
+      // 200 без поля scan — отдельная формулировка: «HTTP 200» человека только запутает
+      if(ur.ok&&!uj.scan)throw fail(uj.error||'сервер принял файл, но не вернул ссылку на него (ответ без поля scan)');
+      if(!ur.ok)throw fail(uj.error||('сервер ответил HTTP '+ur.status));
       return uj.scan;
     }
     const SCAN_HINT_ACC='Приёмка НЕ проведена, акт не создан — ничего не потеряно. Повторите кнопку «Провести приёмку»; если файл не грузится — уберите его («✕ убрать» под зоной файлов) и проведите приёмку без скана, а скан приложите к акту позже кнопкой «＋ скан» в списке актов.';

@@ -5900,7 +5900,10 @@
     function procDash(h){
       const all=PROC.requests||[], sup=PROC.suppliers||[];
       const cBy=(f)=>all.filter(f).length;
-      const active=cBy(r=>znzActive(r.status)), onAppr=cBy(r=>r.status==='Согласована');
+      // KPI «Новые»: этап «Согласована» убран из ЗнЗ (правка владельца 22.07) — легаси-статус
+      // «Согласована» карточка показывает как «Новая» (dispStatus), считаем так же; прежняя
+      // плитка «На согласовании» выдавала уже согласованные заявки за находящиеся на согласовании.
+      const active=cBy(r=>znzActive(r.status)), fresh=cBy(r=>r.status==='Новая'||r.status==='Согласована');
       const inTransit=cBy(r=>r.status==='В пути'), overdueN=all.filter(znzOverdue).length;
       const searching=cBy(r=>r.status==='Поиск поставщика'), accepted=cBy(r=>/Принята|Закрыта/.test(r.status));
       const watch=all.filter(r=>/Поиск поставщика|Размещена|В пути/.test(r.status)&&r.duePlan)
@@ -5915,7 +5918,7 @@
       const ropBar=(lbl,n,col)=>`<div><div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:2px;background:${col}"></span><span style="color:var(--ink);font-weight:600">${lbl}</span><span style="margin-left:auto;color:#64748b">${n}</span></div><div style="height:8px;background:#eef2f6;border-radius:2px;overflow:hidden"><div style="height:100%;width:${Math.round(n/rTot*100)}%;background:${col}"></div></div></div>`;
       h.innerHTML=`<div class="mstrip">
           ${m('Заявок в работе',active)}
-          ${m('На согласовании',onAppr,'var(--amber)')}
+          ${m('Новые',fresh,'var(--amber)')}
           ${m('Поставки в пути',inTransit,'var(--blue)',overdueN?overdueN+' просрочка':'')}
           ${m('Поиск поставщика',searching,'var(--navy)')}
           ${m('Принято / закрыто',accepted,'var(--green)')}

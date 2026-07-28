@@ -57,12 +57,14 @@ async function main() {
   if (!task) throw new Error(`Задача «${numTask}» не найдена`);
   const taskId = idOf(task);
 
-  // парсинг ключей из номеров (без обращения к bt-колонкам)
+  // парсинг ключей из номеров. Два формата (QA M4): из МК — «ПЗ-…/1.0-оп1»,
+  // лёгкий путь «Выдать в цех» — «ПЗ-…/1.0-Ц1» (Ц = выдано в цех, МК нет).
   const numPz = String(numTask).split('/')[0];                 // «ПЗ-2026-001»
-  const posPart = String(numTask).slice(numPz.length + 1);     // «1.0-оп1»
-  const posNum = posPart.split('-оп')[0];                      // «1.0»
-  const opLabel = String(task['Операция (№ МК / № оп.)'] || ''); // «МК-КОМ-2026-001 оп.1»
-  const numMk = opLabel.split(' оп.')[0] || '';
+  const posPart = String(numTask).slice(numPz.length + 1);     // «1.0-оп1» | «1.0-Ц1»
+  const posNum = posPart.split(/-оп|-Ц/)[0];                   // «1.0»
+  const opLabel = String(task['Операция (№ МК / № оп.)'] || ''); // «МК-КОМ-2026-001 оп.1» | «без МК · Наплавка»
+  const noMk = task['Без МК'] === true || task['Без МК'] === 1 || /^без\s*МК/i.test(opLabel);
+  const numMk = noMk ? '' : (opLabel.split(' оп.')[0] || '');
 
   // индексы
   const orderByPz = await indexBy('orders', '№ ПЗ');
@@ -76,26 +78,38 @@ async function main() {
   const order = orderByPz.get(numPz) || {};
   const route = routeByMk.get(numMk) || {};
 
-  // позиция: ключевое поле «Позиция» начинается с № ПЗ + совпадает № позиции
-  const position = (await nc.listRows(TID('positions'))).find(
+  // позиция: ключевое поле «Позиция» начинается с № ПЗ + совпадает № позиции;
+  // ФОЛБЭК (QA M4) — FK самой задачи (positions_id): у лёгкого пути связь ставится
+  // при выдаче в цех, и опора на разбор строки больше не единственная.
+  const posRows = await nc.listRows(TID('positions'));
+  let position = posRows.find(
     (p) => String(p['Позиция'] || '').startsWith(numPz) && String(p['№ позиции']) === posNum) || {};
+  if (idOf(position) == null && task.positions_id != null) {
+    position = posRows.find((p) => Number(idOf(p)) === Number(task.positions_id)) || {};
+  }
 
-  // операция: совпадение по полю «Операция» (= «МК оп.N»)
+  // операция: совпадение по полю «Операция» (= «МК оп.N»); у лёгкого пути её НЕТ
   const operation = (await nc.listRows(TID('operations'))).find(
     (o) => String(o['Операция']) === opLabel.trim()) || {};
   const opId = idOf(operation);
 
-  // тип операции → участок / РИ / параметры (проверенный путь)
+  // тип операции → участок / РИ / параметры. Основной путь — через операцию маршрута;
+  // ФОЛБЭК (QA M4) — FK задачи (op_types_id / sections_id): лёгкий путь без МК и
+  // операции, но со связями, обязан печататься с участком и типом операции.
   let opType = {}, section = {}, opTypeParams = [];
-  if (opId != null) {
-    const otId = (await linkedIds('operations', 'Типы операций', opId))[0] || null;
-    if (otId != null) {
-      opType = opTypeById.get(otId) || {};
-      const secId = (await linkedIds('op_types', 'Участки', otId))[0] || null;
-      if (secId != null) section = sectionById.get(secId) || {};
-      const pIds = await linkedIds('op_types', 'Параметры', otId);
-      opTypeParams = pIds.map((id) => paramById.get(id)).filter(Boolean);
-    }
+  let otId = (opId != null) ? ((await linkedIds('operations', 'Типы операций', opId))[0] ?? null) : null;
+  if (otId == null && task.op_types_id != null) otId = Number(task.op_types_id);
+  if (otId != null) {
+    opType = opTypeById.get(otId) || {};
+    // участок: FK задачи авторитетен (мастер мог выдать на явно выбранный участок),
+    // затем — участок типа операции (как раньше)
+    let secId = (task.sections_id != null) ? Number(task.sections_id) : null;
+    if (secId == null) secId = (await linkedIds('op_types', 'Участки', otId))[0] ?? null;
+    if (secId != null) section = sectionById.get(secId) || {};
+    const pIds = await linkedIds('op_types', 'Параметры', otId);
+    opTypeParams = pIds.map((id) => paramById.get(id)).filter(Boolean);
+  } else if (task.sections_id != null) {
+    section = sectionById.get(Number(task.sections_id)) || {};
   }
 
   // §4 материалы: компоненты операции + свободный текст «Входящие материалы»
@@ -166,7 +180,7 @@ async function main() {
     DESIGNATION: v(route['Изделие / обозначение'] || position['Чертёж / ТУ']),
     DRAWING: v(position['Чертёж / ТУ']),
     APPLICABILITY: v(route['Тип продукции']),
-    NUM_MK: v(numMk || route['№ МК']),
+    NUM_MK: noMk ? 'без МК' : v(numMk || route['№ МК']),
     OP_NUM: v(operation['№ операции']),
     OP_TYPE: opType['Код типа'] ? `${esc(opType['Код типа'])} ${esc(opType['Наименование'] || '')}` : '—',
     SECTION: section['Код'] ? `${esc(section['Код'])} ${esc(section['Участок'] || '')}` : '—',

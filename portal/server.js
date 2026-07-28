@@ -4942,6 +4942,11 @@ async function buildBoardLive() {
     const position = posById.get(t.positions_id) || {};
     const mk = op.split(' оп.')[0] || '';
     const route = routeByMk.get(mk) || {};
+    // «Без МК» (лёгкий путь «Выдать в цех»): авторитетна колонка migrate-047; до APPLY —
+    // тот же консервативный фолбэк, что в buildStationLive (нет операции + явно «Выдал в цех»)
+    const noRoute = t['Без МК'] != null
+      ? !!t['Без МК']
+      : (!t.operations_id && !!String(t['Выдал в цех'] || '').trim());
     const secCode = section['Код'] || '', secName = section['Участок'] || '';
     // допущенные исполнители участка (связь «Сотрудники участка»): для выпадающего списка в журнале §7
     const executors = (section['Сотрудники участка'] || [])
@@ -4966,7 +4971,7 @@ async function buildBoardLive() {
           norm: p['Норматив'] ?? '', tol: p['Допуск'] ?? '', fact: '', verdict: '', value: '' }));
     }
     return {
-      id: idOf(t), num: t['№ задачи'], op,
+      id: idOf(t), num: t['№ задачи'], op, noRoute,
       title: opType['Наименование'] || '',
       section: secCode ? (secName ? `${secCode} · ${secName}` : secCode) : '',
       sectionCode: secCode, sectionName: secName,
@@ -5005,7 +5010,9 @@ async function buildBoardLive() {
       };
     });
     const tk = tasks.filter((t) => String(t['№ задачи'] || '').startsWith(numPz)).map(enrichTask);
-    const mks = [...new Set(tk.map((t) => t.op.split(' оп.')[0]).filter(Boolean))];
+    // M3 (QA): задачи «Без МК» маршрута не имеют — их «оп.» («без МК · Наплавка») не
+    // должна порождать фантомный маршрут с кнопкой печати Ф.13 («маршрут не найден»)
+    const mks = [...new Set(tk.filter((t) => !t.noRoute).map((t) => t.op.split(' оп.')[0]).filter(Boolean))];
     // DEF-04: статус карточки ПЗ — производный от хода задач (не сырое поле БД)
     const derivedStatus = derivePzStatus(tk.map((t) => t.status), o['Статус']);
     return {
@@ -5056,6 +5063,10 @@ const STATION_PRIORITY_RANK = { 'Срочный': 0, 'Высокий': 1, 'Но�
 // Кто вправе выдать в цех (п.8: технолог, ДпП и мастер участка). ДпП = «Руководство»,
 // мастер участка = «Цех». Проверка ДОПОЛНЯЕТ RBAC (station:'write'), а не заменяет его.
 const STATION_ISSUE_ROLES = ['Администратор', 'Технолог', 'Руководство', 'Цех'];
+// Кому чертёж рабочего места доступен по ЛЮБОЙ задаче (по должности видят всё
+// производство): Администратор, Технолог, Руководство. Остальным (Цех, Сотрудник,
+// прочие view-роли) — ТОЛЬКО «своя» задача, см. проверку в /api/station/drawing (QA B1).
+const STATION_DRAWING_FULL_ROLES = ['Администратор', 'Технолог', 'Руководство'];
 
 const stationNowIso = () => new Date().toISOString();          // отметка времени — только отсюда
 const stationToday = () => new Date().toISOString().slice(0, 10);
@@ -5226,6 +5237,8 @@ function stationMockWrite(kind, body, ctx) {
     return { ok: true, mode: 'mock', id: key, startedAt, resumed: !!cur.startedAt };
   }
   if (kind === 'finish') {
+    // зеркально LIVE-пути (QA M5): повторный «Закончил» не переписывает время
+    if (cur.finishedAt) throw Object.assign(new Error('Задача уже закрыта — повторный «Закончил» время не меняет.'), { status: 409 });
     if (!cur.startedAt) throw Object.assign(new Error('Сначала нажмите «Начал» — без отметки начала время посчитать не из чего.'), { status: 409 });
     const finishedAt = stationNowIso();
     const hours = stationHours(cur.startedAt, finishedAt);
@@ -5353,9 +5366,35 @@ async function stationIssueTask(body, ctx) {
   const seq = used.reduce((m, n) => Math.max(m, Number(n.slice(prefix.length)) || 0), 0) + 1;
   const taskNum = prefix + seq;
 
-  // новая задача встаёт В КОНЕЦ очереди участка (ТЗ): порядок = max по участку + 10
-  const maxOrder = tasks.filter((t) => Number(t.sections_id) === Number(sectionId))
-    .reduce((m, t) => Math.max(m, Number(t['Порядок в очереди']) || 0), 0);
+  // Новая задача встаёт В КОНЕЦ очереди участка (ТЗ). ГРАБЛЯ (QA B2): на проде
+  // «Порядок в очереди» у существующих задач ПУСТ, а сортировка stationQueueCmp
+  // трактует пустой порядок как ХВОСТ (Infinity). Голый max по числам дал бы 0,
+  // новая задача с порядком 10 обогнала бы всю очередь участка. Поэтому при первой
+  // записи порядок ИНИЦИАЛИЗИРУЕТСЯ: незакрытым задачам участка без порядка
+  // проставляются номера по их ТЕКУЩЕМУ видимому порядку (срок → приоритет → №,
+  // те же ключи, что в stationQueueCmp) — видимая очередь НЕ меняется, а новая
+  // задача получает max+10 и гарантированно встаёт в конец. Инициализация выбрана
+  // вместо «новой тоже пусто», потому что пустой порядок сортируется по сроку и
+  // задача с ранним сроком всё равно влезла бы в середину — «конец очереди» из ТЗ
+  // достижим только числом.
+  const qOrderOf = (t) => ((t['Порядок в очереди'] === '' || t['Порядок в очереди'] == null) ? null : Number(t['Порядок в очереди']));
+  const secTasks = tasks.filter((t) => Number(t.sections_id) === Number(sectionId));
+  let maxOrder = secTasks.reduce((m, t) => Math.max(m, qOrderOf(t) || 0), 0);
+  const blanks = secTasks.filter((t) => qOrderOf(t) == null && String(t['Статус'] || '') !== 'Выполнено');
+  if (blanks.length) {
+    const ordByPz = new Map(orders.map((o) => [String(o['№ ПЗ'] || ''), o]));
+    const rankOf = (t) => STATION_PRIORITY_RANK[(ordByPz.get(String(t['№ задачи'] || '').split('/')[0]) || {})['Приоритет'] || t['Приоритет']] ?? 9;
+    blanks.sort((a, b) =>
+      String(a['Дата плановая'] || '9999-12-31').localeCompare(String(b['Дата плановая'] || '9999-12-31'))
+      || (rankOf(a) - rankOf(b))
+      || String(a['№ задачи'] || '').localeCompare(String(b['№ задачи'] || ''), 'ru'));
+    // forward-tolerant: колонки может не быть до migrate-047 — тогда инициализировать нечего
+    const probe = await ncPickExisting('tasks', { 'Порядок в очереди': 0 });
+    if ('Порядок в очереди' in probe) {
+      await ncUpdateMany('tasks', blanks.map((t, i) => ({ Id: idOf(t), 'Порядок в очереди': maxOrder + (i + 1) * 10 })));
+      maxOrder += blanks.length * 10;
+    }
+  }
 
   const row = await ncPickExisting('tasks', {
     '№ задачи': taskNum,
@@ -5462,6 +5501,10 @@ async function stationFinish(body, ctx) {
   const c = cfg();
   const { task } = await stationLoadTask(body.id);
   const taskId = Number(idOf(task));
+  // Зеркало защиты «Начал» (QA M5): повторный «Закончил» по уже закрытой задаче не должен
+  // молча переписывать время завершения (и через него — «Время факт. (ч)» и будущие нормы).
+  // Осознанное исправление времени — только через возврат задачи в работу (смена статуса).
+  if (task['Статус'] === 'Выполнено') throw Object.assign(new Error('Задача уже закрыта — повторный «Закончил» время не меняет. Чтобы исправить время, верните задачу в работу и закройте заново.'), { status: 409 });
   const startedAt = task['Начато (факт)'] || '';
   if (!startedAt) throw Object.assign(new Error('Сначала нажмите «Начал» — без отметки начала время посчитать не из чего.'), { status: 409 });
   const finishedAt = stationNowIso();
@@ -10493,6 +10536,26 @@ const server = http.createServer(async (req, res) => {
       if (!root) return notFound('Путь к записям РКД не задан (DESIGN_ROOT / RECORDS_ROOT).');
       try {
         const { task } = await stationLoadTask(url.searchParams.get('taskId'));
+        // ── ПРАВА (QA B1): чертёж НЕ общий — иначе эндпоинт превращается в дыру,
+        //  через которую любой вошедший перебором целых taskId скачивает весь архив КД
+        //  (у роли «Сотрудник» раздела КД нет вовсе, а здесь она получала 200).
+        //  Правило: полный доступ — только должностным ролям (Администратор/Технолог/
+        //  Руководство); остальным задача «своя», если Я ИСПОЛНИТЕЛЬ ИЛИ задача МОЕГО
+        //  участка. Участок нужен, потому что задача из общей очереди участка ещё не
+        //  имеет исполнителя, а чертёж рабочему нужен ДО нажатия «Начал» (ТЗ, п.5 пути).
+        //  Ошибка — 403 с человеческим текстом (не 404: файл есть, прав нет).
+        const roles = (req.roles && req.roles.length) ? req.roles : [req.role || 'guest'];
+        if (!roles.some((r) => STATION_DRAWING_FULL_ROLES.includes(r))) {
+          const me = stationResolveEmployee(await ncListSoft('employees'), req.session);
+          const meId = me ? Number(idOf(me)) : null;
+          const mySec = (me && me.sections_id != null) ? Number(me.sections_id) : null;
+          const isMine = meId != null && task.employees_id != null && Number(task.employees_id) === meId;
+          const isMySection = mySec != null && task.sections_id != null && Number(task.sections_id) === mySec;
+          if (!isMine && !isMySection) {
+            res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+            return res.end('Чертёж доступен только по своей задаче: вы не исполнитель этой задачи, и она не с вашего участка. Если чертёж нужен по работе — обратитесь к мастеру или технологу.');
+          }
+        }
         const positions = await ncList('positions');
         const pos = positions.find((x) => Number(idOf(x)) === Number(task.positions_id)) || {};
         const decNo = String(pos['Чертёж / ТУ'] || '').trim();

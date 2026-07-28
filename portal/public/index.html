@@ -4156,7 +4156,7 @@
     function zpBucket(s){ s=String(s||'');
       if(/Отклон|Проигран|Отозв/.test(s)) return 'rej';
       if(/В архиве|Закрыт без/.test(s)) return 'closed';
-      if(/Принят|Согласовано|Выигран/.test(s)) return 'won';
+      if(/Принят|Согласовано|Выигран|В работе \(договор/.test(s)) return 'won';   // стадия договора = КП согласовано (server salesStep: шаг 4 «Договор / заказ»), не «Новый»
       if(/КП отправлено|Оферта|Ожидание ответа|согласовании руковод/.test(s)) return 'sent';
       if(/КП готовится/.test(s)) return 'prep';
       if(/^На оценке/.test(s)) return 'lov';

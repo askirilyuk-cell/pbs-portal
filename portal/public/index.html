@@ -4204,8 +4204,9 @@
       });
     }
     // создание заказа (ЗКЗ) из принятого запроса — реальная запись в NocoDB (D4)
-    async function createZkzFromReq(z){
-      const ob=modal.querySelector('[data-act="order"]'); if(ob){ob.disabled=true;ob.textContent='Создание…';}
+    async function createZkzFromReq(z,ob){
+      // кнопку передаёт вызывающий (wireReqCard) — она живёт либо в модалке, либо на полноэкранной странице ЗП
+      if(ob){ob.disabled=true;ob.textContent='Создание…';}
       try{
         const r=await fetch('/api/sales/order/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zp:z.numZp})});
         const j=await r.json(); if(!r.ok)throw new Error(j.error||'ошибка');
@@ -5019,7 +5020,7 @@
         await kpSetResult(v);
         salesSelZp=z.numZp; SALES=null; renderSales(document.getElementById('view'));
       };
-      const ob=root.querySelector('[data-act="order"]'); if(ob&&canOrder)ob.onclick=()=>createZkzFromReq(z);
+      const ob=root.querySelector('[data-act="order"]'); if(ob&&canOrder)ob.onclick=()=>createZkzFromReq(z,ob);
       wireInnHints(root);   // K-98: подсказка «без ИНН» у заказчика запроса
       loadReqFiles(z.numZp);
     }

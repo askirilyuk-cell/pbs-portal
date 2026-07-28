@@ -791,7 +791,30 @@
 
   <script>
     const STATUSES_FALLBACK=["В очереди","В работе","Выполнено","Приостановлено"];
-    const SCLASS={"Выполнено":"s-done","В работе":"s-work","В очереди":"s-queue","Приостановлено":"s-hold","Размещён":"s-plan","Отгружен":"s-plan","Закрыт":"s-queue"};
+
+    // ── ДВА СЛОВАРЯ СТАТУСОВ, а не один ────────────────────────────────────
+    //  Задача и заказ (ПЗ) — разные сущности с разными наборами статусов, и род
+    //  слов у них НЕ совпадает: задача «Выполнено», заказ «Выполнен».
+    //  Зеркало сервера: TASK_ST ← server.js STATUSES, ORDER_ST ← ORDER_OPTS['Статус'].
+    //  Раньше на оба словаря работал один предикат isDone = «Выполнено»/«Отгружен»/
+    //  «Закрыт» — смесь из обоих языков, не покрывавшая целиком ни один: формы
+    //  «Выполнен» и «Отменён» не знал никто. Из-за этого выполненный ПЗ с прошедшим
+    //  сроком попадал в «Просрочено», а SCLASS/ST_DOT рисовали ему серую точку
+    //  «нет данных» вместо зелёной.
+    const TASK_ST ={QUEUE:'В очереди',WORK:'В работе',DONE:'Выполнено',HOLD:'Приостановлено'};
+    const ORDER_ST={PLACED:'Размещён',WORK:'В работе',HOLD:'Приостановлен',DONE:'Выполнен',
+                    SHIPPED:'Отгружен',CLOSED:'Закрыт',CANCELLED:'Отменён'};
+    // задача завершена
+    const taskDone=(s)=>s===TASK_ST.DONE;
+    // заказ вышел из производства: срок к нему уже не применяется (в т.ч. отменённый)
+    const orderFinished=(s)=>s===ORDER_ST.DONE||s===ORDER_ST.SHIPPED||s===ORDER_ST.CLOSED||s===ORDER_ST.CANCELLED;
+    // заказ уже отгружен/закрыт/отменён — в очереди «К отгрузке» ему не место
+    //  («Выполнен» СЮДА НЕ ВХОДИТ: именно он и ждёт отгрузки)
+    const orderShipped=(s)=>s===ORDER_ST.SHIPPED||s===ORDER_ST.CLOSED||s===ORDER_ST.CANCELLED;
+
+    const SCLASS={"Выполнено":"s-done","В работе":"s-work","В очереди":"s-queue","Приостановлено":"s-hold","Размещён":"s-plan","Отгружен":"s-plan","Закрыт":"s-queue",
+                  // формы языка ПЗ — без них у заказа была серая точка «нет данных»
+                  "Выполнен":"s-done","Приостановлен":"s-hold","Отменён":"s-queue"};
     const TKCLASS={"Выполнено":"done","В очереди":"queue","Приостановлено":"hold","В работе":""};
     // приоритет в реестрах рисует prioCell (PRIO_ERP, единый язык реестров) — старая пара
     //  PRIOC/prioDot/prio осталась без читателей после сноса renderOrders и удалена.
@@ -963,7 +986,9 @@
     }
 
     // ── ERP: статус/приоритет точкой (бриф redesign-erp) ──
-    const ST_DOT={'В работе':'blue','Ждёт ОТК':'amber','Приостановлено':'amber','Размещён':'navy','Выполнено':'green','Отгружен':'green','Закрыт':'gray','В очереди':'gray'};
+    const ST_DOT={'В работе':'blue','Ждёт ОТК':'amber','Приостановлено':'amber','Размещён':'navy','Выполнено':'green','Отгружен':'green','Закрыт':'gray','В очереди':'gray',
+                  // формы языка ПЗ (ORDER_ST) — иначе у заказа серая точка «нет данных»
+                  'Выполнен':'green','Приостановлен':'amber','Отменён':'gray','Готово':'green'};
     const stCell=(s)=>{const k=ST_DOT[s]||'gray';return `<span class="st c-${k}"><i class="i-${k}"></i>${esc(s||'—')}</span>`;};
     const stCellDot=(c,t)=>`<span class="st c-${c}"><i class="i-${c}"></i>${esc(t)}</span>`;
 
@@ -10122,7 +10147,7 @@
     // #s2 — канбан заказов по статусу (острые карточки, цветная левая кромка)
     function renderStatusKanban(host){
       const cols=[['Размещён','navy'],['В работе','blue'],['Ждёт ОТК','amber'],['Готово','green']];
-      const place=(o)=>{ if(orderDone(o)&&(o.status==='Отгружен'||o.status==='Закрыт'))return 'Готово'; if(orderDone(o))return 'Ждёт ОТК'; if(o.status==='Размещён')return 'Размещён'; if(isDone(o.status))return 'Готово'; return 'В работе'; };
+      const place=(o)=>{ if(orderDone(o)&&orderShipped(o.status))return 'Готово'; if(orderDone(o))return 'Ждёт ОТК'; if(o.status===ORDER_ST.PLACED)return 'Размещён'; if(orderFinished(o.status))return 'Готово'; return 'В работе'; };
       const by={}; cols.forEach(([c])=>by[c]=[]); (DATA.orders||[]).forEach(o=>{(by[place(o)]||by['В работе']).push(o);});
       const card=(o)=>{const tot=(o.tasks||[]).length,dn=doneCount(o),pct=tot?Math.round(dn/tot*100):0;const nx=nextOp(o);
         return `<div class="kc" data-pz="${esc(o.numPz)}" style="border-left-color:${o.status==='Размещён'?'var(--navy)':(orderDone(o)?'var(--amber)':'var(--blue)')}">
@@ -10153,7 +10178,7 @@
           <td class="nw c-gray">${Q?Q+' в очереди':'—'}</td>
           <td class="nw">${stCellDot(st[0],st[1])}</td></tr>`;
         if(!open)return main;
-        const sub=e.tasks.slice().sort((a,b)=>(ord[a.status]??9)-(ord[b.status]??9)).map(t=>{const late=t.plan&&String(t.plan).slice(0,10)<today&&!isDone(t.status);
+        const sub=e.tasks.slice().sort((a,b)=>(ord[a.status]??9)-(ord[b.status]??9)).map(t=>{const late=t.plan&&String(t.plan).slice(0,10)<today&&!taskDone(t.status);
           return `<tr><td class="code" style="font-weight:400">${esc(t.op)}</td><td class="ell">${esc((t.title||'')+' · '+t.pz)}</td><td class="nw c-gray">${(t.normTime!==''&&t.normTime!=null)?esc(t.normTime)+' ч':'—'}</td><td class="nw${late?' c-red':''}"${late?' style="font-weight:600"':''}>${esc(fmt(t.plan))}</td><td class="nw">${stCell(t.status)}</td></tr>`;}).join('');
         return main+`<tr class="eq-detail"><td colspan="5"><div style="padding:10px 14px 12px 30px"><div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);margin-bottom:7px">Задачи на оборудовании (из маршрутных карт)</div>
           <table class="dt erp" style="font-size:12px;border:1px solid var(--line)"><thead><tr><th>МК · операция</th><th>Деталь / ПЗ</th><th style="width:80px">Норма</th><th style="width:92px">Срок</th><th style="width:122px">Статус</th></tr></thead><tbody>${sub}</tbody></table></div></td></tr>`;
@@ -10275,8 +10300,12 @@
       if(!shown.length)return '';
       return `<div style="font-size:11px;color:#5b6b7a;margin-top:8px">Показаны акты ${esc(shown.join('/'))} со ссылкой на ${esc(o.numPz)} (поле «Заказ №» в акте). Формы без актов по этому заказу не показаны. Полный журнал — раздел <a href="#control" style="color:var(--blue)">Контроль качества</a>.</div>`;
     }
-    const isDone=(s)=>s==='Выполнено'||s==='Отгружен'||s==='Закрыт';
     const orderDone=(o)=>{const t=(o.tasks||[]).length;return t>0&&doneCount(o)===t;};
+    // «Ждут ОТК» — ОДНО определение на все экраны (доска / реестр ПЗ / контроль качества):
+    //  операция требует ОТК по МК И работа по ней закончена, т.е. контролёру есть что смотреть.
+    //  Задача «В работе» контроля не ждёт — предъявлять ещё нечего.
+    const waitsOtk=(t)=>!!t.otk&&taskDone(t.status);
+    const countWaitsOtk=(orders)=>(orders||[]).reduce((s,o)=>s+(o.tasks||[]).filter(waitsOtk).length,0);
     // «следующая операция»: первая в работе, иначе первая в очереди
     function nextOp(o){const tk=o.tasks||[];const t=tk.find(x=>x.status==='В работе')||tk.find(x=>x.status==='В очереди');
       if(!t)return '';const ttl=t.title||t.op||'операция';return `След.: ${ttl}${t.sectionCode?' · '+t.sectionCode:''}`;}
@@ -10284,12 +10313,12 @@
     function boardKpis(){
       const today=new Date().toISOString().slice(0,10);
       const O=DATA.orders||[];
-      const overdue=O.filter(o=>o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status));
+      const overdue=O.filter(o=>o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status));
       const working=O.filter(o=>o.status==='В работе');
-      const waitOtk=O.flatMap(o=>o.tasks||[]).filter(t=>t.otk&&t.status==='Выполнено');
+      const waitOtk=O.flatMap(o=>o.tasks||[]).filter(waitsOtk);
       const ncRaw=(DATA.controls||{}).nonconformity;                 // undefined = данных о Ф.5 нет вообще
       const nc=ncRaw||[];
-      const ship=O.filter(o=>orderDone(o)&&o.status!=='Отгружен'&&o.status!=='Закрыт');
+      const ship=O.filter(o=>orderDone(o)&&!orderShipped(o.status));
       // п.5 аудита «честные нули»: n===null → раздел рисует прочерк с поясняющей подписью.
       //  Нет заказов — «Просрочено/В работе/К отгрузке» не 0, а «—»: 0 читается как «всё чисто».
       //  Нет ни одной задачи — «Ждут ОТК» тоже «—» (маршруты не заведены, а не «ОТК пуст»).
@@ -11141,9 +11170,9 @@
     function renderOrdersView(host,arg){
       if(arg)ordSel=arg;
       const today=new Date().toISOString().slice(0,10);
-      const rows=DATA.orders.map(o=>{const tot=(o.tasks||[]).length,dn=doneCount(o);const late=o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status);return {o,tot,dn,pct:tot?Math.round(dn/tot*100):0,late};});
+      const rows=DATA.orders.map(o=>{const tot=(o.tasks||[]).length,dn=doneCount(o);const late=o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status);return {o,tot,dn,pct:tot?Math.round(dn/tot*100):0,late};});
       const lateN=rows.filter(r=>r.late).length;
-      const otkN=DATA.orders.reduce((s,o)=>s+(o.tasks||[]).filter(t=>t.otk&&!isDone(t.status)).length,0);
+      const otkN=countWaitsOtk(DATA.orders);
       const cols=[
         {key:'numPz',label:'№ ПЗ',w:120,cls:'code',cell:r=>esc(r.o.numPz),sortVal:r=>r.o.numPz},
         {key:'customer',label:'Заказчик',cls:'ell',cell:r=>`<span title="${esc(r.o.customer||'')}">${esc(r.o.customer||'')}</span>`,sortVal:r=>r.o.customer},
@@ -11172,7 +11201,7 @@
       const o=numPz?(DATA.orders||[]).find(x=>x.numPz===numPz):null;
       if(!o){ host.innerHTML='<div class="card pad" style="color:var(--sub)">Выберите заказ слева (клик или ↑/↓). Enter — карточка целиком, Esc — закрыть.</div>'; return; }
       const today=new Date().toISOString().slice(0,10);
-      const late=o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status);
+      const late=o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status);
       // Риск срока: открытые НП, связанные с ПЗ (best-effort по ссылке на № ПЗ) + просрочка плана
       const nc=ctlOfPz((DATA.controls||{}).nonconformity,o.numPz).filter(n=>!/закры|устран|отклон/i.test(String(n.decision||n.status||'')));
       const riskBlock=(late||nc.length)?`<div class="card pad" style="border-left:3px solid var(--red);background:#fef2f2"><b class="c-red">Риск срока</b> <span style="color:#334155">${[late?'план '+esc(fmt(o.plan))+' просрочен':'',nc.length?('открытые НП: '+nc.map(n=>esc(n.num||n.numNp||'НП')).join(', ')):''].filter(Boolean).join(' · ')}</span></div>`:'';
@@ -12759,14 +12788,16 @@
         bad:a.filter(z=>verdictRejected(z.verdict)).length});
       const cntSub=(x)=>`${x.good} годен${x.rem?` · ${x.rem} с замеч.`:''} · ${x.bad} брак`;
       const ci=cnt(inc), ca=cnt(acc);
-      const waitOtk=(DATA.orders||[]).reduce((s,o)=>s+(o.tasks||[]).filter(t=>t.otk&&!isDone(t.status)).length,0);
+      const waitOtk=countWaitsOtk(DATA.orders);
       const kpi=(cls,kl,kn,ks)=>`<div class="kpi ${cls}"><div class="kl">${esc(kl)}</div><div class="kn">${kn}</div><div class="ks">${esc(ks)}</div></div>`;
       const forms=[['all','Все формы'],['incoming','Ф.3 входной'],['acceptance','Ф.4 приёмочный'],['nonconformity','Ф.5 несоответствия']];
       host.innerHTML=`<div class="kpis">
           ${kpi(ci.bad?'kpi-red':(ci.rem?'kpi-amber':'kpi-green'),'Входной Ф.3',ci.n,cntSub(ci))}
           ${kpi(ca.bad?'kpi-red':(ca.rem?'kpi-amber':'kpi-green'),'Приёмочный Ф.4',ca.n,cntSub(ca))}
           ${kpi(nc.length?'kpi-red':'kpi-green','Несоответствия Ф.5',nc.length,nc.length?'в доработке':'нет')}
-          ${kpi(waitOtk?'kpi-amber':'kpi-green','Ждут контроля',waitOtk,'единиц на ОТК')}
+          ${/* считаются ОПЕРАЦИИ (задачи), а не единицы: задача на партию 50 шт. даёт одну.
+                Подпись приведена к тому, что реально считается, и к формулировке доски. */''}
+          ${kpi(waitOtk?'kpi-amber':'kpi-green','Ждут ОТК',waitOtk,'операций на контроль')}
         </div>
         <div class="filters">
           ${DATA.mode==='live'?`<button class="tbtn green" id="ctl-new-acc" style="padding:8px 14px">+ Акт приёмки (Ф.4)</button><button class="tbtn green" id="ctl-new-inc" style="padding:8px 14px">+ Входной контроль (Ф.3)</button>`:''}

@@ -3266,24 +3266,29 @@ const PAY_COL_TYPE = 'Тип оплаты';
 const PAY_COL_AVANS = 'Процент аванса';
 const PAY_TERM_COLS = [PAY_COL_TYPE, PAY_COL_DATE, PAY_COL_AVANS, PAY_COL_PORTAL_DATE];
 
-// Разумные границы срока платежа поставщику, в годах от текущего.
+// Разумные границы дат, в годах от текущего.
 // Зачем вообще границы: «9999-12-31» и «1900-01-01» — календарно корректные даты,
-// но в расходном календаре (K-96) это не срок платежа, а порча данных. Окно
-// намеренно широкое и привязано к сегодняшнему дню, а не к константе-году.
+// но в расходном календаре (K-96) это не срок платежа, а порча данных. Окна
+// привязаны к сегодняшнему дню, а не к константе-году.
+//   СРОК ПЛАТЕЖА — узкое окно: платить в 2019 году мы уже не собираемся.
 const PAY_DATE_PAST_YEARS = 5;
 const PAY_DATE_FUTURE_YEARS = 10;
+//   ДАТЫ ДОКУМЕНТОВ (счёт, договор, поставка) — широкое: договор пятнадцатилетней
+//   давности это обычное дело, и заворачивать из-за него отправку на оплату нельзя.
+//   Здесь граница нужна только чтобы отсечь явную порчу вроде 1900/9999.
+const PAY_DOC_PAST_YEARS = 40;
 
 // ЕДИНСТВЕННЫЙ шлюз для любой даты платежа. Возвращает { date } либо { error }.
 // Пустой вход — это НЕ ошибка: { date: '' } (поле просто не задано).
 //   • формат строго ГГГГ-ММ-ДД (допускается хвост ISO-времени — так NocoDB отдаёт Date);
 //   • календарь настоящий: 2026-02-29 не существует (2026 не високосный) и не пройдёт;
-//   • границы см. выше.
+//   • границы см. выше; pastYears позволяет взять широкое окно для дат документов.
 // ПОЧЕМУ НЕ ПАРСИМ «15.08.2026». Контракта платёжного портала в репозитории нет
 // (docs/INTEGRATION_ISM.md отсутствует), проверить его формат нечем. «05.08.2026»
 // читается и как 5 августа, и как 8 мая — угадав неверно, мы молча испортим срок
 // в денежном календаре. Поэтому чужой формат отвергается ГРОМКО, с показом
 // исходного значения, а не переводится догадкой.
-function payDateCheck(v) {
+function payDateCheck(v, pastYears = PAY_DATE_PAST_YEARS) {
   const raw = String(v ?? '').trim();
   if (!raw) return { date: '' };
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/.exec(raw);
@@ -3293,7 +3298,7 @@ function payDateCheck(v) {
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d)
     return { error: `даты ${m[1]}-${m[2]}-${m[3]} нет в календаре` };
   const nowY = new Date().getUTCFullYear();
-  const lo = nowY - PAY_DATE_PAST_YEARS, hi = nowY + PAY_DATE_FUTURE_YEARS;
+  const lo = nowY - pastYears, hi = nowY + PAY_DATE_FUTURE_YEARS;
   if (y < lo || y > hi) return { error: `дата ${m[1]}-${m[2]}-${m[3]} вне разумных границ (${lo}–${hi})` };
   return { date: `${m[1]}-${m[2]}-${m[3]}` };
 }
@@ -3378,7 +3383,11 @@ function payTermsPlan(current, terms, payment) {
   // ── ОПРОС СТАТУСА. Тип и процент в ответе не приходят — их не трогаем НИКОГДА.
   // Нашу дату опрос тоже не трогает: единственное исключение — законный бэкофилл.
   const storedType = String(cur[PAY_COL_TYPE] || '').trim();
-  const storedDate = payDateStored(cur[PAY_COL_DATE]);
+  // РАЗЛИЧАЕМ «пусто» и «лежит что-то, чего мы не понимаем». Если бы непонятное
+  // значение приравнивалось к пустому, бэкофилл затёр бы его ответом портала —
+  // то есть ровно то, что мы и чиним, только через другую дверь.
+  const storedRaw = String(cur[PAY_COL_DATE] ?? '').trim();
+  const storedDate = payDateStored(storedRaw);
   if (storedType === PAY_TYPE_RU.AVANS) {
     // Предоплата: срока быть не должно ни при каком ответе портала (критерий 2).
     noteDivergence('', 'по предоплате срок оплаты у нас не хранится');
@@ -3386,6 +3395,11 @@ function payTermsPlan(current, terms, payment) {
     // Срок у нас есть — возможно, человек перенёс его с поставщиком. Ответ портала
     // его не заменяет НИКОГДА (критерий 7), расхождение уходит в отдельную колонку.
     noteDivergence(storedDate, 'портал сообщает другой срок оплаты');
+  } else if (storedRaw) {
+    // Значение есть, но датой не является. Чужую порчу опрос статуса не чинит и не
+    // затирает — это работа человека; наше дело сказать, что она есть.
+    warns.push(`срок оплаты в записи («${storedRaw}») не распознан как дата — опрос статуса его не трогает, поправьте вручную`);
+    noteDivergence('', 'портал сообщает срок оплаты');
   } else if (storedType === PAY_TYPE_RU.POSTOPLATA && echo.date) {
     // Пусто у нас + известно, что это постоплата → законный бэкофилл старого счёта.
     patch[PAY_COL_DATE] = echo.date;
@@ -3631,7 +3645,7 @@ async function createPayment(body, session) {
   // молча её выбросить значит отправить наружу не то, что человек видел на экране.
   // Дата, ВЫВЕДЕННАЯ из записи счёта, наоборот, из-за порчи в базе не должна ронять
   // отправку — такое поле просто не уходит, с записью в лог.
-  const bodyDate = (label, v) => { const c = payDateCheck(v); if (c.error) throw payErr(400, `${label}: ${c.error}.`); return c.date; };
+  const bodyDate = (label, v) => { const c = payDateCheck(v, PAY_DOC_PAST_YEARS); if (c.error) throw payErr(400, `${label}: ${c.error}.`); return c.date; };
   const sup = bodyDate('Дата поставки', body.supplyDate); if (sup) payload.supplyDate = sup;
   const contractDate = bodyDate('Дата договора', body.contractDate); if (contractDate) payload.contractDate = contractDate;
   const invNo = String(body.invoiceNumber || '').trim() || (invoice ? String(invoice['№ счёта'] || '').trim() : '');
@@ -3639,7 +3653,7 @@ async function createPayment(body, session) {
   let invDate = '';
   if (body.invoiceDate) invDate = bodyDate('Дата счёта', body.invoiceDate);
   else if (invoice && invoice['Дата счёта']) {
-    const c = payDateCheck(invoice['Дата счёта']);
+    const c = payDateCheck(invoice['Дата счёта'], PAY_DOC_PAST_YEARS);
     if (c.error) console.warn(`D-1: «Дата счёта» в записи #${invoice.Id ?? invoice.id} не распознана (${c.error}) — в payload не пойдёт`);
     invDate = c.date || '';
   }

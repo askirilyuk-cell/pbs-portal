@@ -385,6 +385,33 @@ async function main() {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    group('Границы дат: срок платежа — узко, даты документов — широко');
+    resetDb(); S.portal.echoDate = null;
+    // старый договор/счёт не должен заворачивать отправку: платить будем в 2026-м,
+    // а подписан договор мог быть и пятнадцать лет назад
+    r = await pay(POST({ contractDate: '2011-03-04', invoiceDate: '2011-03-05', contractNumber: 'Д-1' }));
+    check('договор 2011 года отправку не ломает', r.status === 200 && r.j.ok, JSON.stringify(r.j));
+    check('старая дата договора ушла в payload', S.portal.calls[0]?.payload?.contractDate === '2011-03-04', JSON.stringify(S.portal.calls[0]?.payload));
+    resetDb();
+    r = await pay(POST({ contractDate: '1899-01-01' }));
+    check('дата договора 1899 всё же отвергнута', r.status === 400, `status=${r.status} ${JSON.stringify(r.j)}`);
+    resetDb();
+    r = await pay(POST({ invoiceDate: '2011-02-29' }));
+    check('несуществующая дата счёта отвергнута', r.status === 400, `status=${r.status} ${JSON.stringify(r.j)}`);
+    // а вот порча в САМОЙ записи счёта отправку ронять не должна — поле просто не уходит
+    resetDb(); inv()['Дата счёта'] = '31.12.2025';
+    r = await pay(POST());
+    check('порча «Даты счёта» в записи не роняет отправку', r.status === 200 && r.j.ok, JSON.stringify(r.j));
+    check('порченая дата счёта наружу не ушла', S.portal.calls[0]?.payload?.invoiceDate === undefined, JSON.stringify(S.portal.calls[0]?.payload));
+
+    group('Нераспознанный срок В НАШЕЙ записи опрос не затирает');
+    resetDb(); S.portal.echoDate = '2026-08-15';
+    await pay(POST());
+    inv()['Ожидаемая дата оплаты'] = 'после отгрузки';       // кто-то вписал текст руками
+    r1 = await refresh1(1);
+    check('текст в колонке срока не затёрт ответом портала', inv()['Ожидаемая дата оплаты'] === 'после отгрузки', `в базе: ${inv()['Ожидаемая дата оплаты']}`);
+    check('о нераспознанном сроке сказано', /не распознан/.test(String(r1.j.saveWarning || '')), `saveWarning=${r1.j.saveWarning}`);
+
     group('Критерий 8 / D-4 — одно негодное значение не уносит остальные');
     resetDb(); S.portal.echoDate = '15.08.2026';           // мусор для Date-колонки
     r = await pay(POST());

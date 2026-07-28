@@ -7038,7 +7038,7 @@
 
       // drag-and-drop/клик по зоне → выбор файла → OCR-автозаполнение (degrade-safe: любая ошибка — форма просто без автозаполнения)
       const drop=document.getElementById('iv-drop'), fileEl=document.getElementById('iv-file'), dropStatus=document.getElementById('iv-drop-status');
-      let scanFile=null, scanUrl=null;
+      let scanFile=null, scanUrl=null, ivOcrRun=0;
       // имя файла + «👁 открыть» (посмотреть, ЧТО отправляешь, ещё ДО сохранения — просьба владельца 22.07)
       const dropInfo=(suffix)=>{
         if(!scanFile){dropStatus.textContent='';return;}
@@ -7051,16 +7051,24 @@
         // ровно то, что предлагает подсказка при отказе загрузки (SCAN_HINT_INV).
         const cl=document.getElementById('iv-drop-clear');
         if(cl)cl.onclick=(e)=>{ e.stopPropagation();
+          ivOcrRun++;                                 // отменяем распознавание «в полёте» (см. runOcr)
           if(scanUrl){try{URL.revokeObjectURL(scanUrl);}catch(_){} scanUrl=null;}
           scanFile=null; try{fileEl.value='';}catch(err){} dropStatus.textContent=''; };
       };
+      // K-99 (N-2, приём D-5 из формы приёмки): каждый запуск получает номер; «✕ убрать» и новый
+      // выбор файла его сдвигают. Человек снимает файл ИМЕННО потому, что счёт не тот, — а ответ
+      // OCR ждётся без клиентского таймаута, и пришедший после снятия молча заполнял пять полей
+      // (№ счёта, дата, поставщик, сумма, ИНН) из уже снятого файла. Поэтому протухший ответ не
+      // применяется НИКУДА: ни к полям, ни к статус-строке, ни к пересчёту сверки сумм.
       const runOcr=async(file)=>{
+        const myRun=++ivOcrRun;
         if(scanUrl){try{URL.revokeObjectURL(scanUrl);}catch(_){} scanUrl=null;}
         scanFile=file; dropInfo('Распознаю…');
         try{
           const fd=new FormData(); fd.append('file',file);
           const rr=await fetch('/api/procurement/invoice/ocr',{method:'POST',body:fd});
           const j=await rr.json().catch(()=>({ok:false}));
+          if(myRun!==ivOcrRun)return; // пока ждали — файл сняли или выбрали другой: ответ протух
           if(j&&j.ok&&j.fields){
             const f=j.fields;
             if(f.number){const el=document.getElementById('iv-no'); if(el&&!el.value)el.value=f.number;}
@@ -7081,7 +7089,7 @@
           }else{
             dropInfo(j&&j.reason==='no-key'?'':'автозаполнение недоступно, заполните вручную');
           }
-        }catch(e){ dropInfo(''); }
+        }catch(e){ if(myRun!==ivOcrRun)return; dropInfo(''); }
         updateIvAmtWarn(); // быстрое улучшение 1: пересчитать сверку сумм после OCR-автозаполнения
       };
       drop.onclick=()=>fileEl.click();

@@ -6724,6 +6724,12 @@
         const links=Array.from({length:a.scanCount},(_,n)=>`<a class="c-blue" href="/api/procurement/incoming/file?id=${encodeURIComponent(a.id)}&n=${n}" target="_blank" rel="noopener">👁 скан${a.scanCount>1?' '+(n+1):''}</a>`).join(' · ');
         return `<div style="font-size:12.5px">${esc(a.name)}: ${links}</div>`;
       }).join('');
+      // K-99: сервер сообщил, что загруженные файлы в акт НЕ попали (нет колонки «Сканы» до
+      // применения миграции). Приёмка уже проведена — откатывать нечего, поэтому единственно
+      // честное — сказать это в той же зелёной сводке, красным и с указанием, что делать.
+      const droppedLine=out.scansDropped>0
+        ? `<div style="color:#b91c1c;font-weight:600">⚠ Приёмка проведена, но скан(ы) к акту НЕ приложены (${esc(String(out.scansDropped))} файл(ов)): в таблице «Входной контроль» нет колонки «Сканы» — миграция ещё не применена. Сохраните файлы у себя и приложите их к акту кнопкой «＋ скан» после применения миграции.</div>`
+        : '';
       // К-97: срок годности истёк — предупреждение (не блокирует приёмку, решение — за человеком)
       const todayIso=new Date().toISOString().slice(0,10);
       const expiredLines=(out.accepted||[]).filter(a=>a.expiry&&a.expiry<todayIso).map(a=>
@@ -6735,6 +6741,7 @@
           <div>Статус заявки: ${out.partial?'<span style="color:#b45309">частично принята — есть недопринятые позиции</span>':'<span style="color:#2e7d32">Принята</span>'}</div>
           ${stockLines?`<div style="margin-top:8px">${stockLines}</div>`:''}
           ${scanLines?`<div style="margin-top:8px">${scanLines}</div>`:''}
+          ${droppedLine?`<div style="margin-top:8px">${droppedLine}</div>`:''}
           ${expiredLines?`<div style="margin-top:8px">${expiredLines}</div>`:''}
         </div>
         <div style="margin-top:12px"><button class="tbtn primary" id="acc-done">Готово</button></div>
@@ -11694,7 +11701,10 @@
               if(!ur.ok||uj.error)throw new Error(uj.error||('HTTP '+ur.status)); scans=uj.scan||[]; }
             const rr=await fetch('/api/route/coop-accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({opId,aktNo:String(aktNo).trim(),items,scans})});
             const jj=await rr.json().catch(()=>({})); if(!rr.ok||jj.error)throw new Error(jj.error||('HTTP '+rr.status));
-            toast(jj.done?`Приёмка проведена (акт ${jj.aktNo}) — возврат завершён.`:`Приёмка проведена (акт ${jj.aktNo}).`,'ok');
+            // K-99: сервер сообщил, что скан в акт не попал (нет колонки «Сканы») — говорим вслух,
+            // а не молча зелёным «Приёмка проведена» (тот же признак, что и в znzAccept).
+            const dropTxt=jj.scansDropped>0?' ⚠ СКАН НЕ ПРИЛОЖЕН к акту (нет колонки «Сканы» — миграция не применена): сохраните файл и приложите позже.':'';
+            toast((jj.done?`Приёмка проведена (акт ${jj.aktNo}) — возврат завершён.`:`Приёмка проведена (акт ${jj.aktNo}).`)+dropTxt, dropTxt?'warn':'ok');
             openRouteCard(host,r.id);
           }catch(e){ toast('Ошибка приёмки: '+(e.message||e),'err'); submitBtn.disabled=false; }
         };

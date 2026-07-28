@@ -10150,7 +10150,7 @@
       const place=(o)=>{ if(orderDone(o)&&orderShipped(o.status))return 'Готово'; if(orderDone(o))return 'Ждёт ОТК'; if(o.status===ORDER_ST.PLACED)return 'Размещён'; if(orderFinished(o.status))return 'Готово'; return 'В работе'; };
       const by={}; cols.forEach(([c])=>by[c]=[]); (DATA.orders||[]).forEach(o=>{(by[place(o)]||by['В работе']).push(o);});
       const card=(o)=>{const tot=(o.tasks||[]).length,dn=doneCount(o),pct=tot?Math.round(dn/tot*100):0;const nx=nextOp(o);
-        return `<div class="kc" data-pz="${esc(o.numPz)}" style="border-left-color:${o.status==='Размещён'?'var(--navy)':(orderDone(o)?'var(--amber)':'var(--blue)')}">
+        return `<div class="kc" data-pz="${esc(o.numPz)}" style="border-left-color:${o.status===ORDER_ST.PLACED?'var(--navy)':(orderDone(o)?'var(--amber)':'var(--blue)')}">
           <div class="pz">${esc(o.numPz)}</div><div class="cu" title="${esc(o.customer||'')}">${esc(o.customer||'')}</div>
           ${tot?`<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span class="bar2" style="flex:1;width:auto"><i style="width:${pct}%;${pct===100?'background:var(--green)':''}"></i></span><span class="c-gray" style="font-size:11px">${dn}/${tot}</span></div>`:'<div style="font-size:11px;color:#5b6b7a;margin-top:5px">маршрут не заведён</div>'}
           ${nx?`<div style="font-size:11px;color:var(--navy);margin-top:6px">${esc(nx)}</div>`:''}</div>`;};
@@ -10227,7 +10227,7 @@
       const pct=total?Math.round(d/total*100):0;
       return `<div class="prog"><div class="bar"><i style="width:${pct}%;background:${pct===100?'var(--green)':'var(--blue)'}"></i></div><span class="n">${d}/${total}</span></div>`;
     }
-    function doneCount(o){return (o.tasks||[]).filter(t=>t.status==='Выполнено').length;}
+    function doneCount(o){return (o.tasks||[]).filter(t=>taskDone(t.status)).length;}
     // ── Контроль (Ф.3/Ф.4/Ф.5) по конкретному ПЗ ──────────────────────────────
     //  Связь акта с заказом в данных ЕСТЬ: /api/board отдаёт по каждому акту поле pz
     //  («Договор / Заказ №» Ф.3, «Заказ №» Ф.4, «Заказ № / МК №» Ф.5 в NocoDB).

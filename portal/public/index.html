@@ -11257,6 +11257,20 @@
           ?'<span style="padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700;color:#15803d;background:#ecfdf5;border:1px solid #a7f3d0">проведён</span>'
           :'<span style="padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700;color:#b45309;background:#fffbeb;border:1px solid #fde68a">черновик</span>';
         return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;padding:2px 0"><span style="color:#5b6b7a;min-width:210px">${esc(x.doc||'')}</span><span class="code" style="font-family:monospace;color:var(--blue)">№ ${esc(x.number||'—')}</span><span class="c-gray">от ${esc(x.dateHuman||fmt(String(x.date||'').slice(0,10))||'—')}</span>${badge}</div>`; };
+      // (задача 1) Склад, в который ушёл выпуск: раньше Склад_Key не заполнялся вовсе,
+      // теперь он берётся из настройки и обязан быть ВИДЕН в карте — иначе «куда выпустили»
+      // приходится выяснять в 1С.
+      const onecWhLine=(n)=>(n&&n.warehouse&&n.warehouse.name)
+        ?`<div style="font-size:11.5px;color:#5b6b7a;margin-top:2px">Склад: ${esc(n.warehouse.name)}</div>`:'';
+      // (задача 2/3) Контрагент. Сопоставление ТОЛЬКО по ИНН; «не сопоставлен» — это результат,
+      // который человек обязан увидеть в карте, а не догадаться о нём по пустому полю в 1С.
+      const onecCpLine=(n)=>{ const c=n&&n.contractorMatch; if(!c)return '';
+        const made=!!(c.draft&&c.draft.created);
+        if(c.matched||made){
+          const dr=made?' <span style="padding:1px 6px;border-radius:9px;font-size:10.5px;font-weight:700;color:#b45309;background:#fffbeb;border:1px solid #fde68a">заведён порталом — проверить бухгалтеру</span>':'';
+          return `<div style="font-size:11.5px;color:#5b6b7a;margin-top:2px">Контрагент 1С: ${esc(c.onecName||c.portalName||'—')}${c.inn?` · ИНН ${esc(c.inn)}`:''} (${made?'создан порталом по ИНН':'сопоставлен по ИНН'})${dr}</div>`;
+        }
+        return `<div style="font-size:11.5px;margin-top:3px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 8px">⚠ Контрагент НЕ сопоставлен: ${esc(c.reason||'причина не указана')}.<br>«Передача товаров» ушла без контрагента — подставит бухгалтер.${c.hint?`<br><span style="color:#7c6114">Подсказка: ${esc(c.hint)}.</span>`:''}</div>`; };
       const onecBlockHtml=(o)=>{
         const n=o.onec||null, has=!!(n&&(n.production||n.transfer));
         // если хоть один документ связки помечен в 1С на удаление — кнопку НЕ блокируем:
@@ -11268,7 +11282,7 @@
         // чтобы связку можно было сверить с «Комментарием» документа в 1С глазами.
         const uidLine=(n&&n.uid)?`<div style="font-size:11px;color:#8a97a6;margin-top:3px">Идентификатор связки: <span class="code" style="font-family:monospace">${esc(n.uid)}</span> — он же в «Комментарии» документов 1С</div>`:'';
         const body=has
-          ?`${onecDocLine(n.production)}${onecDocLine(n.transfer)}${n.nomenclature&&n.nomenclature.name?`<div style="font-size:11.5px;color:#5b6b7a;margin-top:3px">Номенклатура: ${esc(n.nomenclature.name)}${n.qty?` · ${esc(String(n.qty))} шт`:''}</div>`:''}${uidLine}`
+          ?`${onecDocLine(n.production)}${onecDocLine(n.transfer)}${n.nomenclature&&n.nomenclature.name?`<div style="font-size:11.5px;color:#5b6b7a;margin-top:3px">Номенклатура: ${esc(n.nomenclature.name)}${n.qty?` · ${esc(String(n.qty))} шт`:''}</div>`:''}${onecWhLine(n)}${onecCpLine(n)}${uidLine}`
           :'<div class="c-gray" style="font-size:12px">Черновики в 1С ещё не создавались.</div>';
         return `<div data-onec="${esc(String(o.n))}" style="margin-top:9px;padding:9px 11px;border:1px solid #dbe4f0;border-radius:8px;background:#fff">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
@@ -11434,7 +11448,11 @@
           }
           const warns=[].concat(jj.warnings||[]).concat(jj.warning?[jj.warning]:[]).filter(Boolean);
           if(jj.offline){ onecMsg(n,'warn','1С не настроена: '+(jj.warning||'')+'\nБудет создано: «'+((jj.nomenclature&&jj.nomenclature.name)||'—')+'», кол-во '+(jj.qty||0)+'.'); btn.disabled=false; return; }
-          if(jj.dryRun&&!jj.created){ onecMsg(n,'warn','Режим DRY-RUN — в 1С ничего не записано.\nНоменклатура: «'+((jj.nomenclature&&jj.nomenclature.name)||'—')+'»'+((jj.nomenclature&&jj.nomenclature.foundIn1C)?' (найдена в 1С)':' — В 1С ОТСУТСТВУЕТ')+'\nКол-во: '+(jj.qty||0)+'\nКонтрагент: '+(jj.contractorIn1C||('не найден в 1С: '+(jj.contractor||'—')))+(warns.length?'\n\n'+warns.join('\n'):'')); btn.disabled=false; return; }
+          if(jj.dryRun&&!jj.created){
+            const cm=jj.contractorMatch||null;
+            const cpTxt=cm?(cm.matched?((cm.onecName||cm.portalName||'—')+(cm.inn?' · ИНН '+cm.inn:'')+' (по ИНН)')
+              :('НЕ сопоставлен — '+(cm.reason||'причина не указана'))):(jj.contractorIn1C||'—');
+            onecMsg(n,'warn','Режим DRY-RUN — в 1С ничего не записано.\nНоменклатура: «'+((jj.nomenclature&&jj.nomenclature.name)||'—')+'»'+((jj.nomenclature&&jj.nomenclature.foundIn1C)?' (найдена в 1С)':' — В 1С ОТСУТСТВУЕТ')+'\nКол-во: '+(jj.qty||0)+'\nСклад: '+((jj.warehouse&&jj.warehouse.name)||'—')+'\nКонтрагент: '+cpTxt+(warns.length?'\n\n'+warns.join('\n'):'')); btn.disabled=false; return; }
           toast(jj.already?'Черновики 1С уже были созданы — дубли не созданы.':'Черновики в 1С созданы.','ok');
           if(warns.length)onecMsg(n,'warn',warns.join('\n')); else onecMsg(n,'ok',jj.already?'Черновики уже существовали — повторно не создавались.':'Черновики созданы (НЕпроведённые).');
           openRouteCard(host,r.id);
@@ -12509,13 +12527,14 @@
         ${card(aico('folder',18),'1С (БП 3.0) — черновики кооперации','OData боевой базы. Портал только ЧИТАЕТ и создаёт НЕпроведённые черновики: провести / изменить / удалить он не умеет технически.', STG.onecSet, `<div style="margin-top:12px"><label class="stg-flab">OData-адрес</label><div class="stg-hint">формат <code>https://&lt;хост&gt;/&lt;база&gt;/odata/standard.odata</code> — адрес выдаёт администратор 1С</div><input class="stg-inp" id="s_onecUrl" value="${esc(STG.onecUrl||'')}" placeholder="https://…/odata/standard.odata"></div>
           <div style="margin-top:12px"><label class="stg-flab">Логин 1С</label><input class="stg-inp" id="s_onecLogin" placeholder="пусто = не менять" autocomplete="off"></div>
           <div style="margin-top:12px"><label class="stg-flab">Пароль 1С</label><div class="stg-hint">Хранится только на сервере (<code>portal/.runtime.json</code>, в git не попадает) и в интерфейс не возвращается.</div><input class="stg-inp" id="s_onecPass" type="password" placeholder="•••• — пусто = не менять" autocomplete="off"></div>
+          <div style="margin-top:12px"><label class="stg-flab">Склад в 1С</label><div class="stg-hint">Склад «Отчёта производства за смену». Наименование должно совпадать со справочником «Склады» 1С <b>точно</b>; пусто = <code>${esc(STG.onecWarehouseDefault||'Склад производство')}</code>. Если имя не найдено, портал откажет и покажет список складов базы.</div><input class="stg-inp" id="s_onecWh" value="${esc(STG.onecWarehouse||'')}" placeholder="${esc(STG.onecWarehouseDefault||'Склад производство')}"></div>
           <div style="margin-top:12px;padding:9px 11px;border-radius:6px;${STG.onecDryRun?'background:#ecfdf5;border:1px solid #a7f3d0':'background:#fef2f2;border:1px solid #fecaca'}">
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;cursor:pointer"><input type="checkbox" id="s_onecDry"${STG.onecDryRun?' checked':''}> Режим DRY-RUN (запись в 1С запрещена)</label>
-            <div class="stg-hint" style="margin-top:5px">Включён по умолчанию. Пока галка стоит, ни один документ в 1С не создаётся — кнопка на карте МК показывает только расчёт. Снимать <b>после</b> согласования с владельцем.</div>
+            <div class="stg-hint" style="margin-top:5px">Включён по умолчанию. Пока галка стоит, ни один документ и ни один контрагент в 1С не создаётся — кнопка на карте МК показывает только расчёт. Снимать <b>после</b> согласования с владельцем.</div>
           </div>`)}
         <div style="margin-top:14px"><button class="stg-btn primary" id="s_saveInteg">Сохранить</button></div><div class="stg-msg" id="s_integMsg"></div>`;
       $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,
-        onecUrl:$s('s_onecUrl').value,onecLogin:$s('s_onecLogin').value,onecPassword:$s('s_onecPass').value,onecDryRun:$s('s_onecDry').checked?1:0},'s_integMsg');
+        onecUrl:$s('s_onecUrl').value,onecLogin:$s('s_onecLogin').value,onecPassword:$s('s_onecPass').value,onecWarehouse:$s('s_onecWh').value,onecDryRun:$s('s_onecDry').checked?1:0},'s_integMsg');
     }
     // Параметры продаж/КП (K-05 §5.3) — «магические числа» ДП–З.1 вынесены сюда: порог подписи,
     // ставка НДС, плановая прибыль, SLA. Правятся без деплоя кода (server: settingsView/saveSettings).

@@ -1911,6 +1911,12 @@ async function routeCoopAccept(body, session) {
   const dateNow = new Date().toISOString().slice(0, 10);
   const controller = String(body.controller || (session && session.fio) || '').trim();
   const scans = Array.isArray(body.scans) ? body.scans : [];
+  // K-99 (та же четвёртая точка, что и в znzAccept): нет колонки «Сканы» → ncPickExisting молча
+  // выбросит скан сертификата/протокола ТО, акт кооперации создастся без основания, а человек
+  // увидит «Приёмка проведена». Признак уходит в ответ, клиент говорит об этом вслух.
+  const scansStored = scans.length
+    ? Object.prototype.hasOwnProperty.call(await ncPickExisting('incoming_control', { 'Сканы': scans }), 'Сканы')
+    : false;
   const basis = `Возврат из кооперации по МК-${mk || '?'}, ${coop.contractor || '—'}`
     + (coop.contractNo ? `, дог. №${coop.contractNo}` : '') + (coop.specNo ? `, спец. №${coop.specNo}` : '') + `, акт ${aktNo}`;
 
@@ -1940,7 +1946,8 @@ async function routeCoopAccept(body, session) {
   await ncUpdate('operations', opId, { 'Входящие материалы': JSON.stringify(coop) });
 
   const status = mkCoopStatus(coop);
-  return { ok: true, aktNo, incIds, done: status.done, sentTotal: status.sentTotal, closedTotal: status.closedTotal };
+  return { ok: true, aktNo, incIds, done: status.done, sentTotal: status.sentTotal, closedTotal: status.closedTotal,
+    scansDropped: (scans.length && !scansStored) ? scans.length : 0 };
 }
 
 // K-72 / Узел 8: привязка позиции ПЗ к маршрутной карте (МК). Без связи
@@ -2379,6 +2386,22 @@ async function znzAccept(body, session) {
   // через /api/procurement/znz/accept-upload; пишутся в «Сканы» КАЖДОЙ строки этого акта.
   // ncPickExisting сам отфильтрует поле, если колонки «Сканы» ещё нет в таблице (degrade-safe).
   const scans = Array.isArray(body.scans) ? body.scans : [];
+  // K-99 (третья точка молчаливой потери скана, аудитом не найдена): «Сканы» — attachment-колонка,
+  // которой может не быть в таблице до применения миграции. ncPickExisting МОЛЧА выбрасывает такое
+  // поле (forward-tolerant), акт создаётся без скана — а клиенту всё равно уходил
+  // scanCount: scans.length, и сводка приёмки рисовала ссылки «👁 скан», отдающие 404 «нет скана».
+  // Проверяем колонку заранее тем же ncPickExisting и честно возвращаем признак — ровно как
+  // сделано для платёжного портала (createPayment → fileAttached).
+  // ПОЧЕМУ здесь «провести и предупредить», а не «прервать», хотя проверка идёт ДО создания акта
+  // и прервать технически можно: отсутствие колонки — состояние РАЗВЁРТЫВАНИЯ (миграция не
+  // применена), а не ошибка ввода и не сбой хранилища; блокировать приёмку физически полученного
+  // товара из-за него хуже, чем провести акт и громко сказать. Цена размена честная и её надо
+  // знать: акт остаётся без основания навсегда — доложить скан кнопкой «＋ скан» тоже не выйдёт,
+  // пока колонки нет (znzAddIncomingScan в этом случае отвечает ошибкой). Это решение владельца,
+  // а не техническая неизбежность.
+  const scansStored = scans.length
+    ? Object.prototype.hasOwnProperty.call(await ncPickExisting('incoming_control', { 'Сканы': scans }), 'Сканы')
+    : false;
 
   const accepted = [];
   for (const it of inItems) {
@@ -2421,7 +2444,7 @@ async function znzAccept(body, session) {
 
     const created = await ncCreateMany('incoming_control', [await ncPickExisting('incoming_control', row)]);
     const rec = Array.isArray(created) ? created[0] : created;
-    accepted.push({ id: rec.Id ?? rec.id, itemId: base ? base.id : null, name, category, unit, qtyReceived, certNo, certScanName, verdict: verdictRu, expiry, scanCount: scans.length });
+    accepted.push({ id: rec.Id ?? rec.id, itemId: base ? base.id : null, name, category, unit, qtyReceived, certNo, certScanName, verdict: verdictRu, expiry, scanCount: scansStored ? scans.length : 0 });
   }
   if (!accepted.length) throw new Error('Ни одна позиция не принята.');
 
@@ -2480,7 +2503,10 @@ async function znzAccept(body, session) {
     await ncUpdate('procurement_requests', znzId, { 'История изменений': JSON.stringify(history) });
   } catch (e) { console.warn('ЗнЗ приёмка: запись в историю не выполнена:', e.message); }
 
-  return { ok: true, aktNo, accepted, partial, status: complete ? 'Принята' : String(znz['Статус'] || ''), stock };
+  // K-99: scansDropped > 0 — файлы загрузились в хранилище, но в акт не попали (нет колонки
+  // «Сканы»). Клиент обязан сказать это вслух: приёмка проведена, основание не приложено.
+  return { ok: true, aktNo, accepted, partial, status: complete ? 'Принята' : String(znz['Статус'] || ''), stock,
+    scansDropped: (scans.length && !scansStored) ? scans.length : 0 };
 }
 
 // быстрое улучшение 4 (премортем, утв. владельцем «Остальное да»): персистентный список актов ВК
@@ -2517,6 +2543,15 @@ async function znzAddIncomingScan(body) {
   const rows = await ncListSoft('incoming_control');
   const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
   if (!row) throw new Error('Строка входного контроля не найдена.');
+  // K-99 (пятая точка): здесь ncUpdate идёт БЕЗ ncPickExisting — если колонки «Сканы» нет
+  // (миграция не применена), запись либо отвергается, либо молча игнорируется, а мы всё равно
+  // возвращали scanCount по ВХОДУ, и клиент показывал «Скан добавлен к акту». Это средство
+  // восстановления, на которое ссылается предупреждение самой приёмки (scansDropped), — оно
+  // обязано быть громким. Ничего не создаётся, прикрепление и есть единственная операция,
+  // поэтому нет колонки → честная ошибка, а не мнимый успех.
+  if (!Object.prototype.hasOwnProperty.call(await ncPickExisting('incoming_control', { 'Сканы': scan }), 'Сканы')) {
+    throw new Error('В таблице «Входной контроль» нет колонки «Сканы»: миграция не применена, приложить скан к акту пока нельзя. Сохраните файл и повторите после применения миграции.');
+  }
   const existing = Array.isArray(row['Сканы']) ? row['Сканы'] : [];
   const merged = [...existing, ...scan];
   await ncUpdate('incoming_control', id, { 'Сканы': merged });

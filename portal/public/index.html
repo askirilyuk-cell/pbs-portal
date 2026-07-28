@@ -6489,13 +6489,19 @@
       try{ ur=await fetch(url,{method:'POST',body:fd}); }
       catch(e){ throw fail('нет связи с сервером ('+(e.message||e)+')'); }
       const uj=await ur.json().catch(()=>({}));
-      // 200 без поля scan — отдельная формулировка: «HTTP 200» человека только запутает
-      if(ur.ok&&!uj.scan)throw fail(uj.error||'сервер принял файл, но не вернул ссылку на него (ответ без поля scan)');
+      // 200 без поля scan — отдельная формулировка: «HTTP 200» человека только запутает.
+      // Пустой массив scan:[] — тоже отказ (хранилище ничего не сохранило), а как значение он
+      // истинный, поэтому проверяем длину явно; uploadInvoiceScan всегда отдаёт массив.
+      const okScan=Array.isArray(uj.scan)&&uj.scan.length>0;
+      if(ur.ok&&!okScan)throw fail(uj.error||'сервер принял файл, но не вернул ссылку на него (ответ без файлов в поле scan)');
       if(!ur.ok)throw fail(uj.error||('сервер ответил HTTP '+ur.status));
       return uj.scan;
     }
     const SCAN_HINT_ACC='Приёмка НЕ проведена, акт не создан — ничего не потеряно. Повторите кнопку «Провести приёмку»; если файл не грузится — уберите его («✕ убрать» под зоной файлов) и проведите приёмку без скана, а скан приложите к акту позже кнопкой «＋ скан» в списке актов.';
     const SCAN_HINT_INV='Счёт НЕ сохранён — ничего не потеряно. Повторите сохранение; если файл не грузится — уберите его («✕ убрать» под зоной файла) и сохраните счёт без скана, но учтите: приложить скан к уже сохранённому счёту в портале нельзя, и при отправке на оплату скан в платёжный портал не уйдёт.';
+    // Приёмка возврата из кооперации: акт пишется в тот же «Входной контроль», но в списке актов
+    // ЗнЗ не показывается (матчинг по № МК, а не по № ЗнЗ) — значит кнопки «＋ скан» для него нет.
+    const SCAN_HINT_COOP='Приёмка возврата НЕ проведена, акт не создан — ничего не потеряно. Повторите; если файл не грузится — уберите его («✕ убрать» у поля скана) и проведите приёмку без него, но учтите: приложить скан к акту кооперации позже в портале нельзя.';
 
     // ══ К-92 (фаза 2, утв. владельцем): инлайн-форма «Провести приёмку» ══
     // Акт входного контроля Ф.3–Д.1 (один № акта на все отмеченные позиции) + опц. приход
@@ -6571,17 +6577,41 @@
       // drag-drop зона (К-97): скан(ы) грузятся на сервер перед проведением приёмки и
       // пишутся вложением в поле «Сканы» каждой созданной строки акта ВК (см. acc-save ниже).
       const drop=document.getElementById('acc-drop'), fileEl=document.getElementById('acc-file'), dropStatus=document.getElementById('acc-drop-status'), ocrListEl=document.getElementById('acc-ocr-list');
-      let pickedFiles=[], lastScanTypes=[];
-      // K-99: «✕ убрать» — снять выбранные файлы. Без этого у человека не было способа
-      // отказаться от неотдающегося скана иначе как закрыв форму (и потеряв ввод) — а именно
-      // это предлагает подсказка при отказе загрузки (SCAN_HINT_ACC).
+      let pickedFiles=[], lastScanTypes=[], ocrRun=0;
+      // K-99 (D-1): OCR не только показывает распознанное — он ПРОСТАВЛЯЕТ в форму утверждения:
+      // галочки «Накладная»/«Сертификат качества» (уходят в поле «Документы» акта ВК), № сертификата
+      // вместе с именем файла-основания (certScanName → «Основание/комментарий» проводки прихода
+      // металла) и шапку накладной. Снять файлы, не сняв утверждений, — значит записать в акт, что
+      // накладная и сертификат имеются, и сослаться на файл, которого нигде нет: ровно тот дефект,
+      // который чинит эта ветка. Поэтому каждое заполненное OCR поле помечается dataset.ocrFill с
+      // записанным значением и откатывается ТОЛЬКО если человек его с тех пор не менял — иначе это
+      // уже его ввод, и стирать его нельзя (иначе чиним потерю скана ценой потери ручного ввода).
+      const acOcrMark=(el,val)=>{ if(el)el.dataset.ocrFill=String(val); };
+      const acOcrRevert=()=>{
+        ['acc-wbno','acc-wbdate','acc-sup'].forEach(id=>{ const el=document.getElementById(id); if(!el)return;
+          if(el.dataset.ocrFill!=null&&el.value===el.dataset.ocrFill)el.value='';
+          delete el.dataset.ocrFill; });
+        host.querySelectorAll('.acc-cert').forEach(el=>{
+          if(el.dataset.ocrFill!=null&&el.value===el.dataset.ocrFill){ el.value=''; el.placeholder='№ сертификата/плавки'; el.title=''; }
+          delete el.dataset.ocrFill;
+          delete el.dataset.scanName; // имя файла-основания: файлов больше нет — ссылаться не на что
+        });
+        // «Документы»: снимаем только те галочки, что проставил OCR, — отмеченные руками не трогаем
+        host.querySelectorAll('.acc-doc').forEach(c=>{ if(c.dataset.ocrFill){ c.checked=false; delete c.dataset.ocrFill; } });
+        lastScanTypes=[];
+      };
+      // K-99: «✕ убрать» — снять выбранные файлы вместе со всем, что OCR по ним утверждал. Без
+      // этой кнопки у человека не было способа отказаться от неотдающегося скана иначе как закрыв
+      // форму (и потеряв ввод) — а именно это предлагает подсказка при отказе (SCAN_HINT_ACC).
       const showPicked=()=>{
         if(!pickedFiles.length){ dropStatus.textContent=''; return; }
         dropStatus.innerHTML='Файл(ы): '+esc(pickedFiles.map(f=>f.name).join(', '))
-          +' · <a class="c-blue" id="acc-drop-clear" style="cursor:pointer" title="Снять выбранные файлы (приёмку можно провести без скана)">✕ убрать</a>';
+          +' · <a class="c-blue" id="acc-drop-clear" style="cursor:pointer" title="Снять выбранные файлы и всё, что по ним подставило распознавание (приёмку можно провести без скана)">✕ убрать</a>';
         const cl=document.getElementById('acc-drop-clear');
-        if(cl)cl.onclick=(e)=>{ e.stopPropagation(); pickedFiles=[]; lastScanTypes=[];
-          try{fileEl.value='';}catch(err){} if(ocrListEl)ocrListEl.innerHTML=''; showPicked(); };
+        if(cl)cl.onclick=(e)=>{ e.stopPropagation();
+          ocrRun++;                                  // отменяем распознавание «в полёте» (см. D-5 в runAcceptOcr)
+          pickedFiles=[]; try{fileEl.value='';}catch(err){}
+          acOcrRevert(); if(ocrListEl)ocrListEl.innerHTML=''; showPicked(); };
       };
       drop.onclick=()=>fileEl.click();
       fileEl.onchange=()=>{ if(fileEl.files&&fileEl.files.length){pickedFiles=[...fileEl.files];showPicked();runAcceptOcr();} };
@@ -6602,9 +6632,11 @@
       const acAutoFillWaybill=(wb)=>{
         const f=wb.fields||{};
         const wbEl=document.getElementById('acc-wbno'), wdEl=document.getElementById('acc-wbdate'), supEl=document.getElementById('acc-sup');
-        if(f.number&&wbEl&&!wbEl.value.trim())wbEl.value=f.number;
-        if(f.date&&wdEl&&!wdEl.value)wdEl.value=f.date;
-        if(f.supplier&&supEl&&!supEl.value.trim())supEl.value=f.supplier;
+        // K-99: помечаем ровно то, что подставили сами (см. acOcrRevert) — снятие файлов должно
+        // убирать подставленное распознаванием и не трогать введённое человеком.
+        if(f.number&&wbEl&&!wbEl.value.trim()){wbEl.value=f.number;acOcrMark(wbEl,f.number);}
+        if(f.date&&wdEl&&!wdEl.value){wdEl.value=f.date;acOcrMark(wdEl,f.date);}
+        if(f.supplier&&supEl&&!supEl.value.trim()){supEl.value=f.supplier;acOcrMark(supEl,f.supplier);}
       };
       // сопоставление сертификата с позицией: матчим марку/размер из cert.fields с именем
       // позиции; сматчилось однозначно → в эту позицию, иначе → в первую позицию без
@@ -6623,6 +6655,7 @@
         const certInput=rows[targetIdx].querySelector('.acc-cert');
         if(certInput.value.trim())return; // не перетираем введённое руками
         certInput.value=certVal;
+        acOcrMark(certInput,certVal); // K-99: см. acOcrRevert
         certInput.dataset.scanName=cert.name||'';
         if(ambiguous){ certInput.placeholder='№ сертификата/плавки (проверь)'; certInput.title='Не удалось однозначно сопоставить со сканом — проверьте номер'; }
       };
@@ -6632,7 +6665,14 @@
       // подсказка вместо голого кода; прочие reason (нет ключа/сеть/ошибка) — общей фразой.
       const OCR_REASON_HINT={ 'too-large':'файл слишком большой', 'too-big':'PDF слишком большой/много страниц (лимит 20 МБ / 30 стр.)', 'not-ready':'не успел распознаться за отведённое время' };
       async function runAcceptOcr(){
-        if(!pickedFiles.length){ ocrListEl.innerHTML=''; lastScanTypes=[]; return; }
+        // K-99 (D-5): каждое распознавание отменяет предыдущее. Ответ ждётся без клиентского
+        // таймаута — по собственному спиннеру «до 1–2 минут»; за это окно файлы могут снять
+        // («✕ убрать») или выбрать другие, и пришедший позже ответ воскрешал галочки, шапку и
+        // lastScanTypes уже НЕ существующего набора файлов — те же ложные утверждения в акте.
+        // Поэтому: номер запуска + откат утверждений прошлого набора на входе.
+        const myRun=++ocrRun;
+        acOcrRevert();
+        if(!pickedFiles.length){ ocrListEl.innerHTML=''; return; }
         // многостраничный PDF распознаётся асинхронно на сервере (до ~90 сек) — показываем
         // отдельную подсказку, чтобы не казалось, что форма зависла; спиннер висит до ответа
         // fetch без клиентского таймаута (сервер сам ограничивает ожидание async-операции).
@@ -6648,6 +6688,7 @@
           const dj=await r.json().catch(()=>({}));
           results=(dj&&dj.files)||[];
         }catch(e){ results=[]; }
+        if(myRun!==ocrRun)return; // пока ждали — набор файлов сменился или файлы сняли: ответ протух
         // фаза 1б: один прикреплённый PDF-файл сервер может развернуть в НЕСКОЛЬКО «виртуальных»
         // записей-сегментов (по диапазону страниц — каждая своего типа); lastScanTypes используется
         // только для передачи типов на /accept (см. acc-save) — там достаточно списка типов.
@@ -6656,8 +6697,12 @@
         const firstWaybill=results.find(x=>x.type==='waybill');
         if(firstWaybill)acAutoFillWaybill(firstWaybill);
         results.filter(x=>x.type==='cert').forEach(cr=>acAutoFillCert(rows,cr));
-        if(results.some(x=>x.type==='waybill')){const c=host.querySelector('.acc-doc[value="Накладная"]');if(c)c.checked=true;}
-        if(results.some(x=>x.type==='cert')){const c=host.querySelector('.acc-doc[value="Сертификат качества"]');if(c)c.checked=true;}
+        // K-99: галочку помечаем ocrFill только если ставим её МЫ — уже отмеченную человеком
+        // «✕ убрать» снимать не должна (см. acOcrRevert)
+        const acOcrCheck=(val,on)=>{ if(!on)return; const c=host.querySelector(`.acc-doc[value="${val}"]`);
+          if(c&&!c.checked){ c.checked=true; c.dataset.ocrFill='1'; } };
+        acOcrCheck('Накладная',results.some(x=>x.type==='waybill'));
+        acOcrCheck('Сертификат качества',results.some(x=>x.type==='cert'));
         ocrListEl.innerHTML=results.length?results.map(f=>{
           if(f.type==='waybill'){const fl=f.fields||{};return `<div>📄 ${esc(f.name)} → Накладная № ${esc(fl.number||'—')}${fl.date?' от '+fmt(fl.date):''}</div>`;}
           if(f.type==='cert'){const fl=f.fields||{};const cv=fl.certNo||fl.heatNo||'—';return `<div>📜 ${esc(f.name)} → Сертификат № ${esc(cv)}${(fl.heatNo&&fl.certNo)?', плавка '+esc(fl.heatNo):''}</div>`;}
@@ -11667,7 +11712,7 @@
             <tbody>${rows||'<tr><td colspan="4" class="c-gray">Детали не заданы — откройте «✎ Редактировать» и укажите детали в блоке кооперации.</td></tr>'}</tbody></table>
           <div class="rt-g2" style="margin-top:10px">
             <div class="rt-fld"><label>№ акта</label><input class="rt-inp" data-cap="aktno" placeholder="ВК-2026-…"></div>
-            <div class="rt-fld"><label>Скан (сертификат / протокол ТО)</label><input class="rt-inp" type="file" data-cap="scan" accept=".pdf,.jpg,.jpeg,.png,.webp"></div>
+            <div class="rt-fld"><label>Скан (сертификат / протокол ТО) <a class="c-blue" data-cap="scanclear" style="cursor:pointer;font-weight:400" title="Снять выбранный файл (приёмку можно провести без скана)">✕ убрать</a></label><input class="rt-inp" type="file" data-cap="scan" accept=".pdf,.jpg,.jpeg,.png,.webp"></div>
           </div>
           <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
             <button type="button" class="tbtn" data-coopcancel="1">Отмена</button>
@@ -11682,6 +11727,11 @@
         const op=(d.operations||[]).find(o=>String(o.id)===String(opId)); if(!op)return;
         panel.innerHTML=coopAcceptFormHtml(op); panel.style.display='';
         const cancelBtn=panel.querySelector('[data-coopcancel]'); if(cancelBtn)cancelBtn.onclick=()=>{ panel.style.display='none'; panel.innerHTML=''; };
+        // K-99: снять выбранный файл, не закрывая панель и не теряя введённые количества —
+        // ровно то, что предлагает SCAN_HINT_COOP при отказе загрузки. OCR в этой панели нет,
+        // подставленных утверждений тоже нет — очищаем только сам input.
+        const scanClear=panel.querySelector('[data-cap="scanclear"]');
+        if(scanClear)scanClear.onclick=()=>{ const fi=panel.querySelector('[data-cap="scan"]'); if(fi)try{fi.value='';}catch(e){} };
         const submitBtn=panel.querySelector('[data-coopsubmit]'); if(submitBtn)submitBtn.onclick=async()=>{
           const aktNo=(panel.querySelector('[data-cap="aktno"]')||{}).value||'';
           if(!String(aktNo).trim()){ toast('Укажите № акта.','err'); return; }
@@ -11696,9 +11746,12 @@
           try{
             let scans=[];
             const fileInp=panel.querySelector('[data-cap="scan"]'); const file=fileInp&&fileInp.files&&fileInp.files[0];
-            if(file){ const fd=new FormData(); fd.append('file',file);
-              const ur=await fetch('/api/procurement/znz/accept-upload',{method:'POST',body:fd}); const uj=await ur.json().catch(()=>({}));
-              if(!ur.ok||uj.error)throw new Error(uj.error||('HTTP '+ur.status)); scans=uj.scan||[]; }
+            // K-99: четвёртая точка того же дефекта. Прежняя проверка (!ur.ok||uj.error) ловила
+            // два вида отказа из трёх — ответ 200 без поля scan проходил как успех, scans
+            // оставался пустым, и акт кооперации создавался без основания молча (scansDropped
+            // на сервере тоже был бы 0 — там уже нечего терять). Документа на момент загрузки
+            // ещё нет → та же конвенция прерывания, что и в приёмке ЗнЗ/счёте.
+            if(file)scans=await uploadScanOrFail('/api/procurement/znz/accept-upload',file,SCAN_HINT_COOP);
             const rr=await fetch('/api/route/coop-accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({opId,aktNo:String(aktNo).trim(),items,scans})});
             const jj=await rr.json().catch(()=>({})); if(!rr.ok||jj.error)throw new Error(jj.error||('HTTP '+rr.status));
             // K-99: сервер сообщил, что скан в акт не попал (нет колонки «Сканы») — говорим вслух,

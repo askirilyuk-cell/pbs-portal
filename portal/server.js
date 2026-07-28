@@ -140,6 +140,28 @@ const KEY2TITLE = {
   dict_deal_nature: 'Характер сделки', dict_product_groups: 'Продуктовые группы', dict_product_subgroups: 'Продуктовые подгруппы',
   casing_sizes: 'Типоразмеры колонн', // справочник Ø/стенок колонн (GF/FMT/MAGNA) для конструктора обозначения ПЧ
 };
+// ── (с) ТАЙМАУТ НА ВЫЗОВЫ NocoDB ────────────────────────────────────────────
+// У fetch() таймаута нет: ЗАВИСШЕЕ (не разорванное) соединение с базой держало вызов
+// столько, сколько живёт сам HTTP-запрос портала, — по умолчанию около пяти минут.
+// Для сохранения МК это хуже обычного отказа: вызовы идут ПОД ОЧЕРЕДЬЮ ПО КАРТЕ
+// (withRouteLock), и вместе с зависшим вызовом встают все следующие сохранения ЭТОЙ карты
+// и кнопка «Создать черновики» по ней. Портал при этом работает — «висит» именно работа по
+// карте, и внешне это выглядит не как сбой базы, а как поломка карты. Явный таймаут
+// превращает зависание в штатный сбой вызова: срабатывает компенсация (см. (р)/(т)),
+// очередь освобождается, технолог получает внятный текст и повторяет сохранение.
+// 25 с — тот же порог, что у 1С-коннектора (ONEC_TIMEOUT_MS).
+// Файловые потоки (загрузка скана в /storage/upload, скачивание вложения) сюда НЕ входят
+// намеренно: их время определяется размером файла, и очередь по карте они не держат.
+const NC_TIMEOUT_MS = Number(process.env.NC_TIMEOUT_MS) || 25000;
+async function ncFetch(url, init) {
+  try {
+    return await fetch(url, { ...(init || {}), signal: AbortSignal.timeout(NC_TIMEOUT_MS) });
+  } catch (e) {
+    const nm = String((e && e.name) || '');
+    if (nm === 'TimeoutError' || nm === 'AbortError') throw new Error(`NocoDB не ответила за ${Math.round(NC_TIMEOUT_MS / 1000)} с (таймаут).`);
+    throw new Error('Нет связи с NocoDB: ' + String((e && e.message) || e));
+  }
+}
 let _tm = null, _tmKey = '';
 async function tableMap() {
   const c = cfg();
@@ -147,12 +169,12 @@ async function tableMap() {
   const key = c.NC_URL + '|' + c.NC_TOKEN;
   if (_tm && _tmKey === key) return _tm;
   const h = { 'xc-token': c.NC_TOKEN };
-  const pr = await fetch(`${c.NC_URL}/api/v1/db/meta/projects`, { headers: h });
+  const pr = await ncFetch(`${c.NC_URL}/api/v1/db/meta/projects`, { headers: h });
   if (!pr.ok) throw new Error(`NocoDB meta ${pr.status}: ${await pr.text()}`);
   const bases = (await pr.json()).list || [];
   const base = bases.find((b) => b.title === 'Производство ПБС') || bases[0];
   if (!base) throw new Error('База «Производство ПБС» не найдена.');
-  const tr = await fetch(`${c.NC_URL}/api/v1/db/meta/projects/${base.id}/tables?includeM2M=false`, { headers: h });
+  const tr = await ncFetch(`${c.NC_URL}/api/v1/db/meta/projects/${base.id}/tables?includeM2M=false`, { headers: h });
   if (!tr.ok) throw new Error(`NocoDB tables ${tr.status}`);
   const tables = (tr.json ? (await tr.json()).list : []) || [];
   _tm = { base: base.title, byTitle: Object.fromEntries(tables.map((t) => [t.title, t.id])) };
@@ -168,7 +190,7 @@ async function tid(key) {
 async function ncList(key) {
   const c = cfg();
   const url = `${c.NC_URL}/api/v2/tables/${await tid(key)}/records?limit=1000`;
-  const res = await fetch(url, { headers: { 'xc-token': c.NC_TOKEN } });
+  const res = await ncFetch(url, { headers: { 'xc-token': c.NC_TOKEN } });
   if (!res.ok) throw new Error(`NocoDB ${res.status}: ${await res.text()}`);
   return (await res.json()).list || [];
 }
@@ -181,11 +203,11 @@ async function ismDocsTid() {
   const key = c.NC_URL + '|' + c.NC_TOKEN;
   if (_docsTid && _docsKey === key) return _docsTid;
   const h = { 'xc-token': c.NC_TOKEN };
-  const pr = await fetch(`${c.NC_URL}/api/v1/db/meta/projects`, { headers: h });
+  const pr = await ncFetch(`${c.NC_URL}/api/v1/db/meta/projects`, { headers: h });
   if (!pr.ok) throw new Error(`NocoDB meta ${pr.status}`);
   const base = ((await pr.json()).list || []).find((b) => b.title === 'ИСМ ПБС');
   if (!base) throw new Error('База «ИСМ ПБС» не найдена.');
-  const tr = await fetch(`${c.NC_URL}/api/v1/db/meta/projects/${base.id}/tables?includeM2M=false`, { headers: h });
+  const tr = await ncFetch(`${c.NC_URL}/api/v1/db/meta/projects/${base.id}/tables?includeM2M=false`, { headers: h });
   const t = ((await tr.json()).list || []).find((x) => x.title === 'Документы ИСМ');
   if (!t) throw new Error('Таблица «Документы ИСМ» не найдена.');
   _docsTid = t.id; _docsKey = key;
@@ -197,7 +219,7 @@ async function buildDocs() {
   const c = cfg();
   // без fields= — берём все колонки таблицы (схема «ИСМ ПБС» может отличаться/расширяться)
   const url = `${c.NC_URL}/api/v2/tables/${await ismDocsTid()}/records?limit=1000`;
-  const res = await fetch(url, { headers: { 'xc-token': c.NC_TOKEN } });
+  const res = await ncFetch(url, { headers: { 'xc-token': c.NC_TOKEN } });
   if (!res.ok) throw new Error(`NocoDB ${res.status}: ${await res.text()}`);
   return ((await res.json()).list || []).filter((r) => r['Код']).map((r) => {
     let file = '';
@@ -236,7 +258,7 @@ async function ncDocsWrite(method, rows) {
   const c = cfg();
   if (!c.NC_TOKEN) throw new Error('Не задан токен NocoDB.');
   const url = `${c.NC_URL}/api/v2/tables/${await ismDocsTid()}/records`;
-  const res = await fetch(url, {
+  const res = await ncFetch(url, {
     method, headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify(rows),
   });
@@ -1564,26 +1586,56 @@ async function saveRouteLocked(body) {
     // компенсацией:
     //   1) сначала СОЗДАЁМ новые операции и компоненты, старые пока живы (значит, жив и
     //      их coop-JSON со связкой — потерять её физически невозможно);
-    //   2) если запись сорвалась — удаляем то, что успели создать, и возвращаем шапку:
-    //      карта остаётся ровно такой, какой была, отказ снова значит «не изменилось ничего»;
-    //   3) только когда новый набор записан ЦЕЛИКОМ — удаляем старые операции.
+    //   2) когда новый набор записан ЦЕЛИКОМ — пишем шапку МК (см. (т): до этого шага
+    //      шапку откатывать не приходится, потому что её ещё не трогали);
+    //   3) если что-то сорвалось — удаляем то, что успели создать, и возвращаем шапку,
+    //      если её уже писали: карта остаётся ровно такой, какой была, отказ снова значит
+    //      «не изменилось ничего»;
+    //   4) и только теперь удаляем старые операции.
     // Цена: на доли секунды в таблице живут обе версии операций маршрута (было — не жило
     // НИ ОДНОЙ, что для читателей хуже). Сбой на шаге 3 не теряет ни данных, ни связки:
     // остаётся видимый дубль операций, о нём честно предупреждаем, и следующее успешное
     // сохранение его вычищает (удаляются ВСЕ операции маршрута).
+    //
+    // ── (т) ПОСЛЕ ЗАПИСИ ШАПКИ КОМПЕНСИРУЕТСЯ КАЖДЫЙ БРОСОК ──────────────────
+    // Компенсация была навешена только на mkWriteOps, а следом шла сверка перед удалением
+    // (см. (п)) — ВНЕ try/catch. Её строгое чтение (ncListForCheck) бросает при сбое, и
+    // исключение улетало наружу МИМО rollback(): технолог получал 400 «в карте НИЧЕГО не
+    // изменено», а в карте были переписаны шапка и «Статус МК» и задвоены операции —
+    // ровно те два дефекта, ради которых сделаны (л) и (р), только через новый путь
+    // (воспроизведено QA: 503 на GET «Входящие компоненты» — их читает только сверка).
+    // Хуже того, переписанный статус тихо ломал СЛЕДУЮЩЕЕ сохранение: переход
+    // «→ В производстве» уже считался состоявшимся, и резерв металла по заготовке не
+    // выставлялся без единого слова (см. syncMkMetalReserve).
+    // Правило: НИ ОДИН бросок между первой записью и последним шагом пересборки не уходит
+    // наружу без rollback(). Ниже это два try/catch (запись операций, сверка) и явная
+    // ветка raceLost; удаление старых операций компенсации не требует — оно последнее и
+    // деградирует в предупреждение.
+    //
+    // Порядок записи: ШАПКА — ПОСЛЕ пересборки операций, а не до неё. Запись операций —
+    // самый длинный участок (N созданий + N связываний), и именно на нём вероятнее всего
+    // рвётся база; пока шапка не тронута, откатывать её не нужно ВООБЩЕ, а значит не
+    // существует и остаточного риска «сам возврат шапки не удался, карта осталась
+    // «Утверждена»/«В производстве» без ведома технолога». Дальше шапки не двигаем: сверка
+    // (п) обязана быть ПОСЛЕДНИМ действием перед удалением старых операций, иначе окно
+    // гонки вкладок снова расширяется на целый вызов.
     const routeBack = {};
     for (const k of Object.keys(routeRow)) routeBack[k] = (existingRoute && k in existingRoute) ? existingRoute[k] : null;
     const created = { ops: [], comps: [] };
+    let headerWritten = false; // шапку возвращаем, только если её успели тронуть
     // Полный откат пересборки: убираем всё, что успели создать, и возвращаем шапку МК.
     // Старые операции к этому моменту ещё НЕ удалены, поэтому карта становится прежней.
     const rollback = async () => {
       const undo = [];
       try { if (created.comps.length) await ncDeleteMany('components_in', created.comps); } catch (e) { undo.push(`компоненты (${created.comps.length}): ${e.message}`); }
       try { if (created.ops.length) await ncDeleteMany('operations', created.ops); } catch (e) { undo.push(`операции (${created.ops.length}): ${e.message}`); }
-      try { await ncUpdate('routes', routeId, routeBack); } catch (e) { undo.push(`шапка МК: ${e.message}`); }
+      if (headerWritten) { try { await ncUpdate('routes', routeId, routeBack); } catch (e) { undo.push(`шапка МК: ${e.message}`); } }
       return undo;
     };
-    await ncUpdate('routes', routeId, routeRow);
+    // общий хвост отказа после начала пересборки: компенсируем и говорим правду про откат
+    const undoText = (undo) => (undo.length
+      ? ` ВНИМАНИЕ: откат выполнен не полностью (${undo.join('; ')}) — проверьте состав операций карты вручную.`
+      : '');
     try {
       ({ opCount, compCount } = await mkWriteOps(routeId, opPlan, created));
     } catch (e) {
@@ -1595,6 +1647,18 @@ async function saveRouteLocked(body) {
           ? `ВНИМАНИЕ: откат выполнен не полностью (${undo.join('; ')}) — проверьте состав операций карты вручную. `
           : 'Карта возвращена в прежний вид: операции, входящие компоненты и связка с черновиками 1С не изменены. ')
         + 'Повторите сохранение, когда база ответит.');
+    }
+
+    // шапка МК — когда новый набор операций уже записан целиком (см. (т) выше)
+    try {
+      headerWritten = true; // сбой записи бывает и неоднозначным (таймаут) — считаем шапку тронутой
+      await ncUpdate('routes', routeId, routeRow);
+    } catch (e) {
+      const undo = await rollback();
+      onecLog('REFUSE', `МК ${mk}: шапка МК не записана — пересборка откачена, старые операции и связка с 1С не тронуты`, { error: String(e.message || e), undo });
+      throw new Error(`Сохранение не выполнено: сбой записи в базу (${String(e.message || e)}). `
+        + (undo.length ? '' : 'Карта возвращена в прежний вид: ни наименование, ни статус, ни операции не изменены. ')
+        + 'Повторите сохранение, когда база ответит.' + undoText(undo));
     }
 
     // ── (п) ГОНКА ВКЛАДОК: ПЕРЕПРОВЕРКА ПО СВЕЖЕМУ ЧТЕНИЮ ────────────────────
@@ -1611,7 +1675,19 @@ async function saveRouteLocked(body) {
     // прошли развилку «отказ / dropOnecLinks» выше, и второй раз спрашивать не за что.
     // Отказ здесь тоже значит «не изменилось ничего»: новый набор ещё можно снять, а
     // старые операции целы — откатываемся тем же rollback().
-    const [opsNow, compsNow] = await Promise.all([ncListForCheck('operations'), ncListForCheck('components_in')]);
+    // (т) Чтение СТРОГОЕ (ncListForCheck) — сбой чтения тут обязан быть отказом, а не
+    // «связок нет». Значит, оно БРОСАЕТ, и бросок обязан пройти через ту же компенсацию,
+    // что и запись операций: к этому моменту записаны и новый набор операций, и шапка.
+    let opsNow, compsNow;
+    try {
+      [opsNow, compsNow] = await Promise.all([ncListForCheck('operations'), ncListForCheck('components_in')]);
+    } catch (e) {
+      const undo = await rollback();
+      onecLog('REFUSE', `МК ${mk || routeId0}: сбой чтения на сверке перед удалением — пересборка откачена, старые операции и связка с 1С не тронуты`, { error: String(e.message || e), undo });
+      // текст ncListForCheck уже говорит «Сохранение отменено — в карте НИЧЕГО не изменено»;
+      // после компенсации это правда, но если откат прошёл не полностью — честно дописываем
+      throw new Error(String(e.message || e) + undoText(undo));
+    }
     const newIds = new Set(created.ops);
     const oldOpsNow = opsNow.filter((o) => o.routes_id === routeId0 && !newIds.has(o.Id ?? o.id));
     const knownKeys = new Set(lostLinks.map((l) => l.key));
@@ -1619,8 +1695,7 @@ async function saveRouteLocked(body) {
     if (raceLost.length && body.dropOnecLinks !== true) {
       const undo = await rollback();
       onecLog('REFUSE', `сохранение МК ${mk || routeId0} отклонено: пока оно шло, появилась ${raceLost.length} связка(и) с 1С`, { links: raceLost.map((l) => l.text), undo });
-      throw new Error(onecLostLinksMsg(raceLost, true)
-        + (undo.length ? ` ВНИМАНИЕ: откат выполнен не полностью (${undo.join('; ')}) — проверьте состав операций карты вручную.` : ''));
+      throw new Error(onecLostLinksMsg(raceLost, true) + undoText(undo));
     }
     if (raceLost.length) onecLog('DROP', `МК ${mk}: связка с 1С, появившаяся во время сохранения, отвязана по явному подтверждению оператора`, raceLost.map((l) => l.text));
 
@@ -4705,7 +4780,7 @@ async function ncUpdateMany(key, rows) {
   if (!rows.length) return null;
   const c = cfg();
   const url = `${c.NC_URL}/api/v2/tables/${await tid(key)}/records`;
-  const res = await fetch(url, {
+  const res = await ncFetch(url, {
     method: 'PATCH',
     headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify(rows),
@@ -4718,7 +4793,7 @@ async function ncCreateMany(key, rows) {
   if (!rows.length) return null;
   const c = cfg();
   const url = `${c.NC_URL}/api/v2/tables/${await tid(key)}/records`;
-  const res = await fetch(url, {
+  const res = await ncFetch(url, {
     method: 'POST', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify(rows),
   });
@@ -4756,7 +4831,7 @@ async function ncEnsureColumn(key, title, uidt) {
   const meta = await ncTableMeta(key);
   if ((meta.columns || []).some((x) => x.title === title)) return false;
   const c = cfg();
-  const res = await fetch(`${c.NC_URL}/api/v1/db/meta/tables/${await tid(key)}/columns`, {
+  const res = await ncFetch(`${c.NC_URL}/api/v1/db/meta/tables/${await tid(key)}/columns`, {
     method: 'POST', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, uidt }),
   });
@@ -4769,7 +4844,7 @@ async function ncLinkRecords(key, linkTitle, rowId, childIds) {
   const c = cfg();
   const colId = await ncColId(key, linkTitle);
   const url = `${c.NC_URL}/api/v2/tables/${await tid(key)}/links/${colId}/records/${rowId}`;
-  const res = await fetch(url, { method: 'POST', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(childIds.map((id) => ({ Id: id }))) });
+  const res = await ncFetch(url, { method: 'POST', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(childIds.map((id) => ({ Id: id }))) });
   if (!res.ok) throw new Error(`NocoDB link ${res.status}: ${await res.text()}`);
   return res.json().catch(() => null);
 }
@@ -4779,7 +4854,7 @@ async function ncUnlinkRecords(key, linkTitle, rowId, childIds) {
   const c = cfg();
   const colId = await ncColId(key, linkTitle);
   const url = `${c.NC_URL}/api/v2/tables/${await tid(key)}/links/${colId}/records/${rowId}`;
-  const res = await fetch(url, { method: 'DELETE', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(childIds.map((id) => ({ Id: id }))) });
+  const res = await ncFetch(url, { method: 'DELETE', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(childIds.map((id) => ({ Id: id }))) });
   if (!res.ok) throw new Error(`NocoDB unlink ${res.status}: ${await res.text()}`);
   return res.json().catch(() => null);
 }
@@ -5766,14 +5841,14 @@ async function updateContact(body) {
 // --- справочники: редактирование из «Настроек» (CRUD по reference-таблицам) ---
 async function ncTableMeta(key) {
   const c = cfg();
-  const res = await fetch(`${c.NC_URL}/api/v1/db/meta/tables/${await tid(key)}`, { headers: { 'xc-token': c.NC_TOKEN } });
+  const res = await ncFetch(`${c.NC_URL}/api/v1/db/meta/tables/${await tid(key)}`, { headers: { 'xc-token': c.NC_TOKEN } });
   if (!res.ok) throw new Error(`NocoDB meta ${res.status}: ${await res.text()}`);
   return res.json();
 }
 async function ncDeleteMany(key, ids) {
   if (!ids.length) return null;
   const c = cfg();
-  const res = await fetch(`${c.NC_URL}/api/v2/tables/${await tid(key)}/records`, {
+  const res = await ncFetch(`${c.NC_URL}/api/v2/tables/${await tid(key)}/records`, {
     method: 'DELETE', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify(ids.map((id) => ({ Id: id }))),
   });
@@ -8019,7 +8094,7 @@ async function ncListLinked(key, linkTitle, rowId) {
   const c = cfg();
   const colId = await ncColId(key, linkTitle);
   const url = `${c.NC_URL}/api/v2/tables/${await tid(key)}/links/${colId}/records/${rowId}?limit=1000`;
-  const res = await fetch(url, { headers: { 'xc-token': c.NC_TOKEN } });
+  const res = await ncFetch(url, { headers: { 'xc-token': c.NC_TOKEN } });
   if (!res.ok) throw new Error(`NocoDB link list ${res.status}: ${await res.text()}`);
   const r = await res.json();
   return Array.isArray(r) ? r : (r && Array.isArray(r.list) ? r.list : []);
@@ -9798,7 +9873,7 @@ const server = http.createServer(async (req, res) => {
         // ввод в действие → публикуем черновик в утверждённую папку NAS (по уровню), каноничное имя
         if (/действ/i.test(String(body['Статус'])) && cfg().DOCS_ROOT) {
           const tid = await ismDocsTid();
-          const recRes = await fetch(`${cfg().NC_URL}/api/v2/tables/${tid}/records/${id}`, { headers: { 'xc-token': cfg().NC_TOKEN } });
+          const recRes = await ncFetch(`${cfg().NC_URL}/api/v2/tables/${tid}/records/${id}`, { headers: { 'xc-token': cfg().NC_TOKEN } });
           const rec = recRes.ok ? await recRes.json() : {};
           const unc = String(rec['UNC мастера'] || '');
           if (unc.startsWith('draft:')) {

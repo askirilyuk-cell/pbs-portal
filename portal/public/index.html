@@ -4339,7 +4339,7 @@
         {key:'prod',label:'Продукция / работы',cls:'ell',cell:o=>`<span title="${esc(o.product)}">${esc(o.product)}</span>`,sortVal:o=>o.product},
         {key:'sum',label:'Сумма',w:116,align:'right',cls:'nw',cell:o=>o.sum?esc(o.sum):'<span class="c-gray">—</span>',sortVal:o=>moneyVal(o.sum)},
         {key:'pay',label:'Оплата',w:158,cls:'nw',cell:o=>payCell(o.payStatus),sortVal:o=>o.payStatus},
-        {key:'plan',label:'План срок',w:112,cls:'nw',cell:o=>esc(o.planDate||'—'),sortVal:o=>String(o.planDate||'')},
+        {key:'plan',label:'План срок',w:112,cls:'nw',cell:o=>esc(o.planDate||'—'),sortVal:o=>{const m=/^(\d{2})\.(\d{2})\.(\d{4})/.exec(String(o.planDate||''));return m?`${m[3]}-${m[2]}-${m[1]}`:'';}},
         {key:'stage',label:'Текущий этап',w:152,cls:'nw c-gray',cell:o=>esc(o.stage||'—'),sortVal:o=>o.stage},
         {key:'status',label:'Статус',w:140,cls:'nw',cell:o=>zkzCell(o.status),sortVal:o=>o.status},
       ];

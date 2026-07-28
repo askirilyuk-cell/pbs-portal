@@ -5695,12 +5695,29 @@
         ${sm('План. срок',esc(z.planDate||'—')+(z.planDays?' · '+esc(z.planDays):''))}
         ${sm('Источник (ЗП)',z.srcZp?`<span class="code" style="color:var(--blue);cursor:pointer" data-gozp="${esc(z.srcZp)}">${esc(z.srcZp)}</span>`:'<span class="c-gray">—</span>')}
         ${sm('Ответственный',esc(z.owner||'—'))}</div>`;
+      // «Дочерний документ» — тоже ТЕКСТОВОЕ поле NocoDB («Дочерние док-ты (ПЗ / ЗнЗ)»):
+      //  в childDoc приходит вся строка целиком («ПЗ-2026-001, ЗнЗ-2026-014»), а childType —
+      //  лишь результат regex-а на сервере. Раньше в data-gopz клали ВЕСЬ текст поля: точного
+      //  совпадения с № ПЗ не получалось, клик заканчивался alert-ом вместо перехода.
+      //  Теперь заказ ищем тем же хелпером, что и журнал контроля (ctlRefHasPz, граница
+      //  токена), и синий «код со стрелкой» рисуем ТОЛЬКО когда переход реально будет.
+      //  Строка ЗнЗ перехода не имеет вовсе (карточка заявки не адресуется хешем) — значит
+      //  и вида ссылки у неё быть не должно: остаётся обычный текст с подсказкой.
+      const posPz=(d)=>{ const s=String(d||''); if(typeof DATA==='undefined'||!DATA)return '';
+        const o=(DATA.orders||[]).find(o=>ctlRefHasPz(s,o.numPz)); return o?o.numPz:''; };
+      const posDocCell=(p)=>{ const d=String(p.childDoc||'').trim();
+        if(!d||d==='—')return '<span class="c-gray">—</span>';
+        const pz=posPz(d);
+        if(pz)return `<span class="code" style="color:var(--blue);cursor:pointer" data-gopz="${esc(pz)}" title="Открыть заказ ${esc(pz)}">${esc(d)} →</span>`;
+        const hint=p.childType==='znz'?'Заявка на закупку (ДП–К) — карточка открывается в разделе «Закупки»'
+                  :(p.childType==='pz'?'Производственный заказ по этому документу в реестре не найден':'');
+        return `<span class="c-gray"${hint?` title="${esc(hint)}"`:''}>${esc(d)}</span>`; };
       const posRows=(z.positions||[]).map(p=>`<tr>
           <td class="nw" style="color:#5b6b7a">${esc(p.n)}</td>
           <td class="ell" title="${esc(p.name)}">${esc(p.name)}</td>
           <td class="nw">${esc(p.qty||'')}</td>
           <td class="nw">${supplyChip(p.supply)}</td>
-          <td class="nw">${p.childType==='pz'?`<span class="code" style="color:var(--blue);cursor:pointer" data-gopz="${esc(p.childDoc)}">${esc(p.childDoc)} →</span>`:(p.childType==='znz'?`<span class="code" style="color:var(--blue)">${esc(p.childDoc)} →</span>`:`<span class="c-gray">${esc(p.childDoc||'—')}</span>`)}</td>
+          <td class="nw">${posDocCell(p)}</td>
           <td class="nw">${stCellDot(POS_DOT[p.status]||'gray',p.status)}</td></tr>`).join('')||'<tr><td colspan="6" class="c-gray" style="padding:12px">Позиции не заведены</td></tr>';
       const posCard=`<div class="card" style="overflow:hidden">
         <div class="pad" style="border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="sec-h">Позиции заказа</span><span style="font-size:11.5px;color:#64748b">1 строка = 1 позиция · способ обеспечения определяет дочерний документ (§5.5)</span></div>
@@ -5727,7 +5744,10 @@
       // переход в реестр заказов — ТОЛЬКО через роут '#orders/<№ ПЗ>': реестр рисует
       //  renderOrdersView, он берёт номер из аргумента роута (ordSel). Писать в глобальный
       //  sel было бесполезно (его читал удалённый renderOrders) — открывался прошлый заказ.
-      modal.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if(pz&&(DATA.orders||[]).some(o=>o.numPz===pz)){closeModal();location.hash='#orders/'+encodeURIComponent(pz);}else if(pz){alert(pz+': производственное задание появится на доске после заведения в NocoDB.');}});
+      //  data-gopz теперь ставится ТОЛЬКО на существующий № ПЗ (см. posDocCell и lo выше),
+      //  поэтому ветка с alert-ом «задание появится на доске» ушла: объяснение переехало
+      //  в подсказку ячейки, а кликабельного вида без перехода больше не остаётся.
+      modal.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if(pz&&(DATA.orders||[]).some(o=>o.numPz===pz)){closeModal();location.hash='#orders/'+encodeURIComponent(pz);}});
       modal.querySelectorAll('[data-gozp]').forEach(e=>e.onclick=()=>{const zp=e.dataset.gozp;const r=((SALES&&SALES.requests)||[]).find(x=>x.numZp===zp);if(r){closeModal();openReqCard(r);}});
     }
 
@@ -12791,12 +12811,25 @@
       //  КАК: заказ ищем тем же хелпером ctlRefHasPz (граница токена), что и карточка, —
       //  журнал и карточка обязаны согласовываться. Номер в тексте не распознан → ячейка
       //  НЕ ссылка (просто текст), чтобы курсор-палец не обещал перехода, которого нет.
+      //  БОЕВОЙ СЛУЧАЙ (найден после деплоя): у актов Ф.3 в этом поле стоит номер ЗАЯВКИ НА
+      //  ЗАКУПКУ «ЗнЗ-ГГГГ-NNN» — входной контроль по смыслу про ПОСТАВКУ, а не про ПЗ.
+      //  Заказа с таким номером нет и быть не может → ячейка остаётся ОБЫЧНЫМ ТЕКСТОМ.
+      //  Перехода на карточку ЗнЗ тоже не делаем: раздел «Закупки» не адресуется хешем —
+      //  роут '#purchase' аргумент не принимает (renderProcurement(host) без arg), карточку
+      //  открывает только openZnzCard изнутри раздела. Изобретать адресацию тут не место.
+      //  Подсказка объясняет КАЖДЫЙ случай своими словами: раньше на любой нераспознанный
+      //  текст висело «Заказ … не найден в реестре» — для ЗнЗ это прямая дезинформация.
       const ctlPzOrder=(ref)=>{ const r=String(ref||'').trim(); if(!r)return '';
         const o=(DATA.orders||[]).find(o=>ctlRefHasPz(r,o.numPz)); return o?o.numPz:''; };
+      const CTL_ZNZ_RE=/ЗнЗ-\d{4}-[0-9A-Za-zА-Яа-яЁё]+/i;                 // заявка на закупку (ДП–К)
+      const CTL_PZ_RE=/ПЗ-\d{4}-[0-9A-Za-zА-Яа-яЁё]+/i;                   // похоже на № ПЗ, но в реестре не нашлось
+      const ctlNoPzHint=(ref)=>{ const z=CTL_ZNZ_RE.exec(ref); if(z)return z[0]+' — заявка на закупку (раздел «Закупки»), а не производственный заказ';
+        const p=CTL_PZ_RE.exec(ref); if(p)return 'Заказ '+p[0]+' не найден в реестре заказов';
+        return 'Номер производственного заказа в этой ссылке не распознан'; };
       const pzCell=(x)=>{ const ref=ctlPzRef(x); if(!ref)return '<span class="muted">—</span>';
         const pz=ctlPzOrder(ref);
         return pz?`<span class="lnk" data-gopz="${esc(pz)}" style="cursor:pointer" title="Открыть заказ ${esc(pz)}">${esc(ref)}</span>`
-                 :`<span title="Заказ по этой ссылке не найден в реестре">${esc(ref)}</span>`; };
+                 :`<span title="${esc(ctlNoPzHint(ref))}">${esc(ref)}</span>`; };
       const dCell=(x)=>x.date?esc(fmt(x.date)):'<span class="muted">—</span>';
       const vbadge=(v)=>`<span class="badge ${ctlGood(v)?'b-green':'b-red'}">${esc(ctlGood(v)?'годен':(v||'брак'))}</span>`;
       const cg=(ws)=>`<colgroup>${ws.map(w=>`<col${w?` style="width:${w}"`:''}>`).join('')}</colgroup>`;

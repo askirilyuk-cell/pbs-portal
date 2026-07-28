@@ -201,6 +201,9 @@
     .b-blue{background:#eff6ff;color:var(--blue);border-color:#bfdbfe;} .b-navy{background:#eef6ff;color:var(--navy);border-color:#cfe0f5;}
     .b-green{background:#ecfdf5;color:var(--green);border-color:#a7f3d0;} .b-amber{background:#fffbeb;color:var(--amber);border-color:#fde68a;}
     .b-gray{background:#f3f4f6;color:#4b5563;border-color:#e5e7eb;}
+    /* брак: класс отсутствовал — бейдж «НЕ ГОДЕН» выходил прозрачным и терялся среди годных.
+       Палитра та же, что у красного чипа склада (whChip out). */
+    .b-red{background:#fef2f2;color:var(--red);border-color:#fecaca;}
     .pyramid{display:flex;flex-direction:column;align-items:center;gap:10px;}
     .plevel{color:#fff;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:12px;}
     .plevel .t{flex:1;min-width:0;} .plevel .t b{font-size:14px;font-weight:700;} .plevel .t small{display:block;font-size:11.5px;opacity:.82;}
@@ -791,7 +794,30 @@
 
   <script>
     const STATUSES_FALLBACK=["В очереди","В работе","Выполнено","Приостановлено"];
-    const SCLASS={"Выполнено":"s-done","В работе":"s-work","В очереди":"s-queue","Приостановлено":"s-hold","Размещён":"s-plan","Отгружен":"s-plan","Закрыт":"s-queue"};
+
+    // ── ДВА СЛОВАРЯ СТАТУСОВ, а не один ────────────────────────────────────
+    //  Задача и заказ (ПЗ) — разные сущности с разными наборами статусов, и род
+    //  слов у них НЕ совпадает: задача «Выполнено», заказ «Выполнен».
+    //  Зеркало сервера: TASK_ST ← server.js STATUSES, ORDER_ST ← ORDER_OPTS['Статус'].
+    //  Раньше на оба словаря работал один предикат isDone = «Выполнено»/«Отгружен»/
+    //  «Закрыт» — смесь из обоих языков, не покрывавшая целиком ни один: формы
+    //  «Выполнен» и «Отменён» не знал никто. Из-за этого выполненный ПЗ с прошедшим
+    //  сроком попадал в «Просрочено», а SCLASS/ST_DOT рисовали ему серую точку
+    //  «нет данных» вместо зелёной.
+    const TASK_ST ={QUEUE:'В очереди',WORK:'В работе',DONE:'Выполнено',HOLD:'Приостановлено'};
+    const ORDER_ST={PLACED:'Размещён',WORK:'В работе',HOLD:'Приостановлен',DONE:'Выполнен',
+                    SHIPPED:'Отгружен',CLOSED:'Закрыт',CANCELLED:'Отменён'};
+    // задача завершена
+    const taskDone=(s)=>s===TASK_ST.DONE;
+    // заказ вышел из производства: срок к нему уже не применяется (в т.ч. отменённый)
+    const orderFinished=(s)=>s===ORDER_ST.DONE||s===ORDER_ST.SHIPPED||s===ORDER_ST.CLOSED||s===ORDER_ST.CANCELLED;
+    // заказ уже отгружен/закрыт/отменён — в очереди «К отгрузке» ему не место
+    //  («Выполнен» СЮДА НЕ ВХОДИТ: именно он и ждёт отгрузки)
+    const orderShipped=(s)=>s===ORDER_ST.SHIPPED||s===ORDER_ST.CLOSED||s===ORDER_ST.CANCELLED;
+
+    const SCLASS={"Выполнено":"s-done","В работе":"s-work","В очереди":"s-queue","Приостановлено":"s-hold","Размещён":"s-plan","Отгружен":"s-plan","Закрыт":"s-queue",
+                  // формы языка ПЗ — без них у заказа была серая точка «нет данных»
+                  "Выполнен":"s-done","Приостановлен":"s-hold","Отменён":"s-queue"};
     const TKCLASS={"Выполнено":"done","В очереди":"queue","Приостановлено":"hold","В работе":""};
     // приоритет в реестрах рисует prioCell (PRIO_ERP, единый язык реестров) — старая пара
     //  PRIOC/prioDot/prio осталась без читателей после сноса renderOrders и удалена.
@@ -963,9 +989,37 @@
     }
 
     // ── ERP: статус/приоритет точкой (бриф redesign-erp) ──
-    const ST_DOT={'В работе':'blue','Ждёт ОТК':'amber','Приостановлено':'amber','Размещён':'navy','Выполнено':'green','Отгружен':'green','Закрыт':'gray','В очереди':'gray'};
+    const ST_DOT={'В работе':'blue','Ждёт ОТК':'amber','Приостановлено':'amber','Размещён':'navy','Выполнено':'green','Отгружен':'green','Закрыт':'gray','В очереди':'gray',
+                  // формы языка ПЗ (ORDER_ST) — иначе у заказа серая точка «нет данных»
+                  'Выполнен':'green','Приостановлен':'amber','Отменён':'gray','Готово':'green'};
     const stCell=(s)=>{const k=ST_DOT[s]||'gray';return `<span class="st c-${k}"><i class="i-${k}"></i>${esc(s||'—')}</span>`;};
     const stCellDot=(c,t)=>`<span class="st c-${c}"><i class="i-${c}"></i>${esc(t)}</span>`;
+
+    // ── Заключение ОТК: ЕДИНЫЙ разбор на весь портал ────────────────────────
+    //  Было четыре независимых разбора одного и того же поля «Заключение»:
+    //  ctlGood (Контроль качества), vColor (акты ЗнЗ), whAcceptedV (склад) и
+    //  whAccepted на сервере. ctlGood проверял /годен/i БЕЗ отрицания, поэтому
+    //  «НЕ ГОДЕН» проходил как годный: KPI показывали «0 брак», бейдж брака был
+    //  зелёным, фильтр «только брак» отдавал пустоту.
+    //  Значения перечислений — server.js INC_VERDICTS/ACC_VERDICTS:
+    //    Ф.3: ГОДЕН · ГОДЕН С ЗАМЕЧАНИЯМИ · НЕ ГОДЕН
+    //    Ф.4: ГОДЕН · ГОДЕН С ОТКЛОНЕНИЕМ · НЕ ГОДЕН
+    //  Отрицание ищем в любом месте строки (как это делал vColor) — так брак
+    //  распознаётся и в легаси-формулировках; ошибиться в сторону «брак» безопаснее.
+    //  'remark' = ГОДЕН С ЗАМЕЧАНИЯМИ/ОТКЛОНЕНИЕМ: это НЕ брак (ГЕЙТ 1 пускает такой
+    //  материал на склад, см. whAccepted), но и не чистый годен — отсюда отдельный вид.
+    const verdictKind=(v)=>{
+      const s=String(v==null?'':v).trim().toUpperCase();
+      if(!s)return 'none';                                  // вердикт не вынесен
+      if(/НЕ\s*ГОДЕН/.test(s))return 'reject';              // «НЕ ГОДЕН», «НЕГОДЕН», «НЕ ГОДЕН (брак)»
+      if(s.startsWith('ГОДЕН')||s.includes('ПРИНЯТ'))       // + легаси-текст «принято»
+        return /ЗАМЕЧ|ОТКЛОНЕН/.test(s)?'remark':'pass';
+      return 'none';
+    };
+    const verdictRejected=(v)=>verdictKind(v)==='reject';                          // брак
+    const verdictAccepted=(v)=>{const k=verdictKind(v);return k==='pass'||k==='remark';}; // допущен (ГЕЙТ 1)
+    const VERDICT_TONE={reject:'red',remark:'amber',pass:'green',none:'gray'};
+    const verdictTone=(v)=>VERDICT_TONE[verdictKind(v)];
     // бейдж источника: зелёный «из базы» (реальные данные NocoDB) / янтарный «демо» (таблица пуста или нет подключения)
     const srcChip=(live,extra)=>live
       ? `<span class="src-chip src-live" title="Реальные данные из боевой базы NocoDB">● из базы${extra?' · '+esc(extra):''}</span>`
@@ -7127,7 +7181,6 @@
       catch(e){ listEl.innerHTML='<div class="c-gray" style="font-size:12.5px">Не удалось загрузить акты: '+esc(e.message||e)+'</div>'; return; }
       if(sumEl)sumEl.textContent=acts.length?('· '+acts.length+' шт'):'· пока нет';
       if(!acts.length){ listEl.innerHTML='<div class="c-gray" style="font-size:12.5px">Актов пока нет — появятся после проведения приёмки («Провести приёмку»).</div>'; return; }
-      const vColor=(v)=>/НЕ\s*ГОДЕН/i.test(v)?'red':/ЗАМЕЧ/i.test(v)?'amber':'green';
       listEl.innerHTML='<div style="display:flex;flex-direction:column;gap:8px">'+acts.map(a=>{
         const scanLinks=a.scanCount>0?Array.from({length:a.scanCount},(_,n)=>`<a class="c-blue" href="/api/procurement/incoming/file?id=${encodeURIComponent(a.id)}&n=${n}" target="_blank" rel="noopener" style="font-size:11px;white-space:nowrap">👁${a.scanCount>1?' '+(n+1):''}</a>`).join(' '):'';
         const addBtn=canAct?`<label class="tbtn" style="padding:3px 9px;font-size:11.5px;cursor:pointer;white-space:nowrap">＋ скан<input type="file" data-act-scan="${a.id}" accept=".pdf,.jpg,.jpeg,.png" style="display:none"></label>`:'';
@@ -7136,7 +7189,7 @@
             <span class="code" style="font-family:monospace;color:var(--navy);white-space:nowrap">${esc(a.aktNo||'—')}</span>
             <span class="ell" title="${esc(a.material)}" style="flex:1;color:#334155">${esc(a.material||'—')}</span>
             <span class="c-gray" style="white-space:nowrap">${a.qty!==''&&a.qty!=null?esc(String(a.qty)):''}${a.unit?' '+esc(a.unit):''}</span>
-            ${stCellDot(vColor(a.verdict),a.verdict||'—')}
+            ${stCellDot(verdictTone(a.verdict),a.verdict||'—')}
             ${a.date?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${fmt(a.date)}</span>`:''}
             ${scanLinks}${addBtn}
           </div>
@@ -7361,7 +7414,7 @@
     let WH=null, whTab='items', whSelCode=null, whFilter='all', whCardCache={};
     const WH_DIRS=['Производство','Ремонт','Испытание','Прочее'];
     const whQty=(n,u)=>Number(n||0).toLocaleString('ru-RU',{maximumFractionDigits:3})+(u?(' '+u):'');
-    const whAcceptedV=(v)=>{const s=String(v||'').trim().toUpperCase();if(!s)return false;if(s.startsWith('НЕ ГОДЕН')||s.startsWith('НЕГОДЕН'))return false;return s.startsWith('ГОДЕН')||s.includes('ПРИНЯТ');};
+    const whAcceptedV=verdictAccepted; // ГЕЙТ 1: единый разбор заключения (см. verdictKind)
     // чип (нет глобального .chip — инлайн, палитра ДП–Л.1.2): kind = in/out/metal/dav/warn/gray
     const whChip=(txt,kind)=>{const c={in:['#f0fdf4','#bbf7d0','#15803d'],out:['#fef2f2','#fecaca','#b91c1c'],metal:['#eff6ff','#cfe0f5','#1F4E79'],dav:['#f0f9ff','#bae6fd','#0369a1'],warn:['#fffbeb','#fde68a','#b45309']}[kind]||['#f1f5f9','#e2e8f0','#475569'];return `<span style="font-size:11px;font-weight:600;border-radius:2px;padding:2px 8px;white-space:nowrap;color:${c[2]};background:${c[0]};border:1px solid ${c[1]}">${esc(txt)}</span>`;};
     const whYmd=()=>new Date().toISOString().slice(0,10);
@@ -10096,15 +10149,18 @@
     }
     // #s2 — канбан заказов по статусу (острые карточки, цветная левая кромка)
     function renderStatusKanban(host){
+      //  ВНИМАНИЕ: колонка считает ЗАКАЗЫ, а KPI «Ждут ОТК» на этой же странице — ОПЕРАЦИИ.
+      //  Единицы разные, поэтому числа законно не совпадают; подпись колонки это проговаривает.
       const cols=[['Размещён','navy'],['В работе','blue'],['Ждёт ОТК','amber'],['Готово','green']];
-      const place=(o)=>{ if(orderDone(o)&&(o.status==='Отгружен'||o.status==='Закрыт'))return 'Готово'; if(orderDone(o))return 'Ждёт ОТК'; if(o.status==='Размещён')return 'Размещён'; if(isDone(o.status))return 'Готово'; return 'В работе'; };
+      const colHint={'Ждёт ОТК':'Заказы, где все операции выполнены (штук заказов, а не операций — KPI «Ждут ОТК» считает операции)'};
+      const place=(o)=>{ if(orderDone(o)&&orderShipped(o.status))return 'Готово'; if(orderDone(o))return 'Ждёт ОТК'; if(o.status===ORDER_ST.PLACED)return 'Размещён'; if(orderFinished(o.status))return 'Готово'; return 'В работе'; };
       const by={}; cols.forEach(([c])=>by[c]=[]); (DATA.orders||[]).forEach(o=>{(by[place(o)]||by['В работе']).push(o);});
       const card=(o)=>{const tot=(o.tasks||[]).length,dn=doneCount(o),pct=tot?Math.round(dn/tot*100):0;const nx=nextOp(o);
-        return `<div class="kc" data-pz="${esc(o.numPz)}" style="border-left-color:${o.status==='Размещён'?'var(--navy)':(orderDone(o)?'var(--amber)':'var(--blue)')}">
+        return `<div class="kc" data-pz="${esc(o.numPz)}" style="border-left-color:${o.status===ORDER_ST.PLACED?'var(--navy)':(orderDone(o)?'var(--amber)':'var(--blue)')}">
           <div class="pz">${esc(o.numPz)}</div><div class="cu" title="${esc(o.customer||'')}">${esc(o.customer||'')}</div>
           ${tot?`<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span class="bar2" style="flex:1;width:auto"><i style="width:${pct}%;${pct===100?'background:var(--green)':''}"></i></span><span class="c-gray" style="font-size:11px">${dn}/${tot}</span></div>`:'<div style="font-size:11px;color:#5b6b7a;margin-top:5px">маршрут не заведён</div>'}
           ${nx?`<div style="font-size:11px;color:var(--navy);margin-top:6px">${esc(nx)}</div>`:''}</div>`;};
-      host.innerHTML=`<div class="kan" style="margin-top:10px">${cols.map(([c,tone])=>`<div class="kcol"><div class="kh c-${tone}"><i class="i-${tone}" style="width:7px;height:7px;border-radius:50%;display:inline-block"></i>${c} <span class="cnt">${by[c].length}</span></div>${by[c].map(card).join('')||'<div class="kempty">нет заказов</div>'}</div>`).join('')}</div>`;
+      host.innerHTML=`<div class="kan" style="margin-top:10px">${cols.map(([c,tone])=>`<div class="kcol"><div class="kh c-${tone}"${colHint[c]?` title="${esc(colHint[c])}"`:''}><i class="i-${tone}" style="width:7px;height:7px;border-radius:50%;display:inline-block"></i>${c} <span class="cnt">${by[c].length}</span></div>${by[c].map(card).join('')||'<div class="kempty">нет заказов</div>'}</div>`).join('')}</div>`;
       host.querySelectorAll('.kc[data-pz]').forEach(el=>el.onclick=()=>openOrderModal((DATA.orders||[]).find(o=>o.numPz===el.dataset.pz)));
     }
     // #s3 — доска по оборудованию: загрузка + разворот строки в задачи из МК
@@ -10128,7 +10184,7 @@
           <td class="nw c-gray">${Q?Q+' в очереди':'—'}</td>
           <td class="nw">${stCellDot(st[0],st[1])}</td></tr>`;
         if(!open)return main;
-        const sub=e.tasks.slice().sort((a,b)=>(ord[a.status]??9)-(ord[b.status]??9)).map(t=>{const late=t.plan&&String(t.plan).slice(0,10)<today&&!isDone(t.status);
+        const sub=e.tasks.slice().sort((a,b)=>(ord[a.status]??9)-(ord[b.status]??9)).map(t=>{const late=t.plan&&String(t.plan).slice(0,10)<today&&!taskDone(t.status);
           return `<tr><td class="code" style="font-weight:400">${esc(t.op)}</td><td class="ell">${esc((t.title||'')+' · '+t.pz)}</td><td class="nw c-gray">${(t.normTime!==''&&t.normTime!=null)?esc(t.normTime)+' ч':'—'}</td><td class="nw${late?' c-red':''}"${late?' style="font-weight:600"':''}>${esc(fmt(t.plan))}</td><td class="nw">${stCell(t.status)}</td></tr>`;}).join('');
         return main+`<tr class="eq-detail"><td colspan="5"><div style="padding:10px 14px 12px 30px"><div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);margin-bottom:7px">Задачи на оборудовании (из маршрутных карт)</div>
           <table class="dt erp" style="font-size:12px;border:1px solid var(--line)"><thead><tr><th>МК · операция</th><th>Деталь / ПЗ</th><th style="width:80px">Норма</th><th style="width:92px">Срок</th><th style="width:122px">Статус</th></tr></thead><tbody>${sub}</tbody></table></div></td></tr>`;
@@ -10177,7 +10233,7 @@
       const pct=total?Math.round(d/total*100):0;
       return `<div class="prog"><div class="bar"><i style="width:${pct}%;background:${pct===100?'var(--green)':'var(--blue)'}"></i></div><span class="n">${d}/${total}</span></div>`;
     }
-    function doneCount(o){return (o.tasks||[]).filter(t=>t.status==='Выполнено').length;}
+    function doneCount(o){return (o.tasks||[]).filter(t=>taskDone(t.status)).length;}
     // ── Контроль (Ф.3/Ф.4/Ф.5) по конкретному ПЗ ──────────────────────────────
     //  Связь акта с заказом в данных ЕСТЬ: /api/board отдаёт по каждому акту поле pz
     //  («Договор / Заказ №» Ф.3, «Заказ №» Ф.4, «Заказ № / МК №» Ф.5 в NocoDB).
@@ -10219,7 +10275,11 @@
     //  ctlOrderForms — единый источник и для блока, и для подписи под ним (odTabBody).
     function ctlOrderForms(o){
       const c=DATA.controls||{};
-      const vbadge=(v)=>badge(v==='ГОДЕН'?'Выполнено':v);
+      //  ПЯТАЯ копия разбора вердикта: сравнивала строку ровно с 'ГОДЕН' и подменяла её на
+      //  'Выполнено' ради цвета из SCLASS. Любое другое заключение (в т.ч. «НЕ ГОДЕН»)
+      //  класса не находило и рисовалось серым — брак в карточке ПЗ был неотличим от «нет данных».
+      //  Теперь через общий verdictKind; точечный вид (как у прочих статусов карточки) сохранён.
+      const vbadge=(v)=>stCellDot(verdictTone(v),v||'—');
       return [
         {code:'Ф.3', head:'Ф.3 Входной',        arr:ctlOfPz(c.incoming,o.numPz),      render:x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`},
         {code:'Ф.4', head:'Ф.4 Приёмочный',     arr:ctlOfPz(c.acceptance,o.numPz),    render:x=>`<span style="color:var(--sub)">${esc(x.num)}</span><span style="margin-left:auto">${vbadge(x.verdict)}</span>`},
@@ -10250,8 +10310,12 @@
       if(!shown.length)return '';
       return `<div style="font-size:11px;color:#5b6b7a;margin-top:8px">Показаны акты ${esc(shown.join('/'))} со ссылкой на ${esc(o.numPz)} (поле «Заказ №» в акте). Формы без актов по этому заказу не показаны. Полный журнал — раздел <a href="#control" style="color:var(--blue)">Контроль качества</a>.</div>`;
     }
-    const isDone=(s)=>s==='Выполнено'||s==='Отгружен'||s==='Закрыт';
     const orderDone=(o)=>{const t=(o.tasks||[]).length;return t>0&&doneCount(o)===t;};
+    // «Ждут ОТК» — ОДНО определение на все экраны (доска / реестр ПЗ / контроль качества):
+    //  операция требует ОТК по МК И работа по ней закончена, т.е. контролёру есть что смотреть.
+    //  Задача «В работе» контроля не ждёт — предъявлять ещё нечего.
+    const waitsOtk=(t)=>!!t.otk&&taskDone(t.status);
+    const countWaitsOtk=(orders)=>(orders||[]).reduce((s,o)=>s+(o.tasks||[]).filter(waitsOtk).length,0);
     // «следующая операция»: первая в работе, иначе первая в очереди
     function nextOp(o){const tk=o.tasks||[];const t=tk.find(x=>x.status==='В работе')||tk.find(x=>x.status==='В очереди');
       if(!t)return '';const ttl=t.title||t.op||'операция';return `След.: ${ttl}${t.sectionCode?' · '+t.sectionCode:''}`;}
@@ -10259,12 +10323,12 @@
     function boardKpis(){
       const today=new Date().toISOString().slice(0,10);
       const O=DATA.orders||[];
-      const overdue=O.filter(o=>o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status));
+      const overdue=O.filter(o=>o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status));
       const working=O.filter(o=>o.status==='В работе');
-      const waitOtk=O.flatMap(o=>o.tasks||[]).filter(t=>t.otk&&t.status==='Выполнено');
+      const waitOtk=O.flatMap(o=>o.tasks||[]).filter(waitsOtk);
       const ncRaw=(DATA.controls||{}).nonconformity;                 // undefined = данных о Ф.5 нет вообще
       const nc=ncRaw||[];
-      const ship=O.filter(o=>orderDone(o)&&o.status!=='Отгружен'&&o.status!=='Закрыт');
+      const ship=O.filter(o=>orderDone(o)&&!orderShipped(o.status));
       // п.5 аудита «честные нули»: n===null → раздел рисует прочерк с поясняющей подписью.
       //  Нет заказов — «Просрочено/В работе/К отгрузке» не 0, а «—»: 0 читается как «всё чисто».
       //  Нет ни одной задачи — «Ждут ОТК» тоже «—» (маршруты не заведены, а не «ОТК пуст»).
@@ -11116,9 +11180,9 @@
     function renderOrdersView(host,arg){
       if(arg)ordSel=arg;
       const today=new Date().toISOString().slice(0,10);
-      const rows=DATA.orders.map(o=>{const tot=(o.tasks||[]).length,dn=doneCount(o);const late=o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status);return {o,tot,dn,pct:tot?Math.round(dn/tot*100):0,late};});
+      const rows=DATA.orders.map(o=>{const tot=(o.tasks||[]).length,dn=doneCount(o);const late=o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status);return {o,tot,dn,pct:tot?Math.round(dn/tot*100):0,late};});
       const lateN=rows.filter(r=>r.late).length;
-      const otkN=DATA.orders.reduce((s,o)=>s+(o.tasks||[]).filter(t=>t.otk&&!isDone(t.status)).length,0);
+      const otkN=countWaitsOtk(DATA.orders);
       const cols=[
         {key:'numPz',label:'№ ПЗ',w:120,cls:'code',cell:r=>esc(r.o.numPz),sortVal:r=>r.o.numPz},
         {key:'customer',label:'Заказчик',cls:'ell',cell:r=>`<span title="${esc(r.o.customer||'')}">${esc(r.o.customer||'')}</span>`,sortVal:r=>r.o.customer},
@@ -11147,7 +11211,7 @@
       const o=numPz?(DATA.orders||[]).find(x=>x.numPz===numPz):null;
       if(!o){ host.innerHTML='<div class="card pad" style="color:var(--sub)">Выберите заказ слева (клик или ↑/↓). Enter — карточка целиком, Esc — закрыть.</div>'; return; }
       const today=new Date().toISOString().slice(0,10);
-      const late=o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status);
+      const late=o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status);
       // Риск срока: открытые НП, связанные с ПЗ (best-effort по ссылке на № ПЗ) + просрочка плана
       const nc=ctlOfPz((DATA.controls||{}).nonconformity,o.numPz).filter(n=>!/закры|устран|отклон/i.test(String(n.decision||n.status||'')));
       const riskBlock=(late||nc.length)?`<div class="card pad" style="border-left:3px solid var(--red);background:#fef2f2"><b class="c-red">Риск срока</b> <span style="color:#334155">${[late?'план '+esc(fmt(o.plan))+' просрочен':'',nc.length?('открытые НП: '+nc.map(n=>esc(n.num||n.numNp||'НП')).join(', ')):''].filter(Boolean).join(' · ')}</span></div>`:'';
@@ -12722,21 +12786,31 @@
     // Раздел «Контроль качества» — сводка годен/брак + фильтры + столбцы Заказ/ПЗ и Дата (бриф п.3)
     let ctlForm='all', ctlBad=false, ctlQ='', ctlSelMode=false; // K-10 #4: чекбоксы актов по требованию
     let ctlSel={incoming:new Set(),acceptance:new Set(),nonconformity:new Set()};
-    const ctlGood=(v)=>/годен/i.test(String(v||''));
     function renderControlView(host){
       ctlSel={incoming:new Set(),acceptance:new Set(),nonconformity:new Set()};
       const c=DATA.controls||{};
       const inc=c.incoming||[], acc=c.acceptance||[], nc=c.nonconformity||[];
-      const cnt=(a)=>({n:a.length,good:a.filter(z=>ctlGood(z.verdict)).length,bad:a.filter(z=>!ctlGood(z.verdict)).length});
+      //  «с замечаниями» — отдельным числом, а не молча в «годен»: материал допущен (ГЕЙТ 1),
+      //  но оговорка не должна теряться. Красный тон KPI включает только брак.
+      //  слагаемые обязаны давать n: акт без заключения — тоже акт, иначе подпись не сходится
+      //  с числом на плитке («5 · 1 годен · 1 с замеч. · 2 брак» = 4).
+      const cnt=(a)=>({n:a.length,
+        good:a.filter(z=>verdictKind(z.verdict)==='pass').length,
+        rem:a.filter(z=>verdictKind(z.verdict)==='remark').length,
+        bad:a.filter(z=>verdictRejected(z.verdict)).length,
+        none:a.filter(z=>verdictKind(z.verdict)==='none').length});
+      const cntSub=(x)=>`${x.good} годен${x.rem?` · ${x.rem} с замеч.`:''} · ${x.bad} брак${x.none?` · ${x.none} без заключения`:''}`;
       const ci=cnt(inc), ca=cnt(acc);
-      const waitOtk=(DATA.orders||[]).reduce((s,o)=>s+(o.tasks||[]).filter(t=>t.otk&&!isDone(t.status)).length,0);
+      const waitOtk=countWaitsOtk(DATA.orders);
       const kpi=(cls,kl,kn,ks)=>`<div class="kpi ${cls}"><div class="kl">${esc(kl)}</div><div class="kn">${kn}</div><div class="ks">${esc(ks)}</div></div>`;
       const forms=[['all','Все формы'],['incoming','Ф.3 входной'],['acceptance','Ф.4 приёмочный'],['nonconformity','Ф.5 несоответствия']];
       host.innerHTML=`<div class="kpis">
-          ${kpi(ci.bad?'kpi-red':'kpi-green','Входной Ф.3',ci.n,`${ci.good} годен · ${ci.bad} брак`)}
-          ${kpi(ca.bad?'kpi-red':'kpi-green','Приёмочный Ф.4',ca.n,`${ca.good} годен · ${ca.bad} брак`)}
+          ${kpi(ci.bad?'kpi-red':(ci.rem?'kpi-amber':'kpi-green'),'Входной Ф.3',ci.n,cntSub(ci))}
+          ${kpi(ca.bad?'kpi-red':(ca.rem?'kpi-amber':'kpi-green'),'Приёмочный Ф.4',ca.n,cntSub(ca))}
           ${kpi(nc.length?'kpi-red':'kpi-green','Несоответствия Ф.5',nc.length,nc.length?'в доработке':'нет')}
-          ${kpi(waitOtk?'kpi-amber':'kpi-green','Ждут контроля',waitOtk,'единиц на ОТК')}
+          ${/* считаются ОПЕРАЦИИ (задачи), а не единицы: задача на партию 50 шт. даёт одну.
+                Подпись приведена к тому, что реально считается, и к формулировке доски. */''}
+          ${kpi(waitOtk?'kpi-amber':'kpi-green','Ждут ОТК',waitOtk,'операций на контроль')}
         </div>
         <div class="filters">
           ${DATA.mode==='live'?`<button class="tbtn green" id="ctl-new-acc" style="padding:8px 14px">+ Акт приёмки (Ф.4)</button><button class="tbtn green" id="ctl-new-inc" style="padding:8px 14px">+ Входной контроль (Ф.3)</button>`:''}
@@ -12915,7 +12989,9 @@
         return pz?`<span class="lnk" data-gopz="${esc(pz)}" style="cursor:pointer" title="Открыть заказ ${esc(pz)}">${esc(ref)}</span>`
                  :`<span title="${esc(ctlNoPzHint(ref))}">${esc(ref)}</span>`; };
       const dCell=(x)=>x.date?esc(fmt(x.date)):'<span class="muted">—</span>';
-      const vbadge=(v)=>`<span class="badge ${ctlGood(v)?'b-green':'b-red'}">${esc(ctlGood(v)?'годен':(v||'брак'))}</span>`;
+      //  бейдж показывает САМ вердикт: свёртка к «годен/брак» скрывала и замечания, и пустой вердикт
+      const VB_CLS={reject:'b-red',remark:'b-amber',pass:'b-green',none:'b-gray'};
+      const vbadge=(v)=>{const k=verdictKind(v);return `<span class="badge ${VB_CLS[k]}">${esc(v||(k==='none'?'вердикт не вынесен':'брак'))}</span>`;};
       const cg=(ws)=>`<colgroup>${ws.map(w=>`<col${w?` style="width:${w}"`:''}>`).join('')}</colgroup>`;
       const show=(k)=>ctlForm==='all'||ctlForm===k;
       const empty=(n)=>`<tr><td colspan="${n}" style="opacity:.5;padding:12px">${ctlBad?'Брака нет':'Нет записей'}</td></tr>`;
@@ -12932,16 +13008,16 @@
       };
       let out='';
       if(show('incoming')){
-        const arr=(c.incoming||[]).filter(match).filter(x=>!ctlBad||!ctlGood(x.verdict));
+        const arr=(c.incoming||[]).filter(match).filter(x=>!ctlBad||verdictRejected(x.verdict));
         const head=`<th>№ акта</th><th>Материал</th><th>Заказ / ПЗ</th><th>Дата</th><th>Заключение</th><th></th>`;
         const body=arr.map(x=>`<tr>${chkTd('incoming',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.material||'')}">${esc(x.material||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap">${dCell(x)}</td><td>${vbadge(x.verdict)}</td><td>${pbtn('control',x.num,'Печать')}</td></tr>`).join('');
-        out+=ctlCard('incoming','Ф.3','Входной контроль',false,['140px',null,'150px','120px','120px','96px'],head,body,720,6);
+        out+=ctlCard('incoming','Ф.3','Входной контроль',false,['140px',null,'150px','120px','176px','96px'],head,body,776,6);
       }
       if(show('acceptance')){
-        const arr=(c.acceptance||[]).filter(match).filter(x=>!ctlBad||!ctlGood(x.verdict));
+        const arr=(c.acceptance||[]).filter(match).filter(x=>!ctlBad||verdictRejected(x.verdict));
         const head=`<th>№ протокола</th><th>Изделие</th><th>Заказ / ПЗ</th><th>Дата</th><th>Заключение</th><th></th>`;
         const body=arr.map(x=>`<tr>${chkTd('acceptance',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.product||'')}">${esc(x.product||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap">${dCell(x)}</td><td>${vbadge(x.verdict)}</td><td>${pbtn('control',x.num,'Печать')}</td></tr>`).join('');
-        out+=ctlCard('acceptance','Ф.4','Приёмочный контроль',false,['140px',null,'150px','120px','120px','96px'],head,body,720,6);
+        out+=ctlCard('acceptance','Ф.4','Приёмочный контроль',false,['140px',null,'150px','120px','176px','96px'],head,body,776,6);
       }
       if(show('nonconformity')){
         const arr=(c.nonconformity||[]).filter(match); // Ф.5 — все несоответствия (брак по определению)

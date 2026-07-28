@@ -793,10 +793,8 @@
     const STATUSES_FALLBACK=["В очереди","В работе","Выполнено","Приостановлено"];
     const SCLASS={"Выполнено":"s-done","В работе":"s-work","В очереди":"s-queue","Приостановлено":"s-hold","Размещён":"s-plan","Отгружен":"s-plan","Закрыт":"s-queue"};
     const TKCLASS={"Выполнено":"done","В очереди":"queue","Приостановлено":"hold","В работе":""};
-    const PRIOC={"Высокий":"high","Нормальный":"norm","Низкий":"low"};
-    // приоритет: цветная точка + текст (без эмодзи, ISO 9241-112)
-    const prioDot=(p)=>p?`<span class="pdot pdot-${PRIOC[p]||'norm'}" aria-hidden="true"></span>`:'';
-    const prio=(p)=>p?`${prioDot(p)}${esc(p)}`:'';
+    // приоритет в реестрах рисует prioCell (PRIO_ERP, единый язык реестров) — старая пара
+    //  PRIOC/prioDot/prio осталась без читателей после сноса renderOrders и удалена.
     // единый набор линейных иконок навигации (stroke currentColor, 1.6px)
     // навигационные иконки — дословно из эталонов (redesign-style-audit, раздел F), сетка viewBox 20
     const ICONS={
@@ -1163,7 +1161,7 @@
       return { host, get visible(){return lastVisible;}, redraw:draw, selectKey(k,fire){ selKey=k; markSel(); if(fire&&opts.onRow){const r=rows.find(x=>rowKey&&rowKey(x)===k); if(r)opts.onRow(r);} } };
     }
 
-    let DATA=null, sel=null, STATUSES=STATUSES_FALLBACK;
+    let DATA=null, STATUSES=STATUSES_FALLBACK;
     // меню на телефоне
     const side=document.getElementById('side'), scrim=document.getElementById('scrim');
     const toggle=(v)=>{side.classList.toggle('open',v);scrim.classList.toggle('open',v);};
@@ -1398,7 +1396,6 @@
       updateDbBadge(); // бейдж по факту подключения (ME.live), а не по доступности «Доски» для роли
       document.getElementById('warn').innerHTML=DATA.warning?`<div class="warn">${esc(DATA.warning)}</div>`:'';
       document.getElementById('today').textContent='на '+fmt(new Date().toISOString().slice(0,10));
-      sel=(sel&&DATA.orders.some(o=>o.numPz===sel))?sel:(DATA.orders[0]?.numPz||null);
       route();
     }
 
@@ -5727,7 +5724,10 @@
         <div class="mb">${summary}<div style="height:var(--gap)"></div>${posCard}${bridgeWrap?`<div style="height:var(--gap)"></div>${bridgeWrap}`:''}</div>`;
       modal.classList.add('open'); mscrim.classList.add('open');
       document.getElementById('mx').onclick=closeModal;
-      modal.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if(pz&&(DATA.orders||[]).some(o=>o.numPz===pz)){sel=pz;closeModal();location.hash='#orders';}else if(pz){alert(pz+': производственное задание появится на доске после заведения в NocoDB.');}});
+      // переход в реестр заказов — ТОЛЬКО через роут '#orders/<№ ПЗ>': реестр рисует
+      //  renderOrdersView, он берёт номер из аргумента роута (ordSel). Писать в глобальный
+      //  sel было бесполезно (его читал удалённый renderOrders) — открывался прошлый заказ.
+      modal.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if(pz&&(DATA.orders||[]).some(o=>o.numPz===pz)){closeModal();location.hash='#orders/'+encodeURIComponent(pz);}else if(pz){alert(pz+': производственное задание появится на доске после заведения в NocoDB.');}});
       modal.querySelectorAll('[data-gozp]').forEach(e=>e.onclick=()=>{const zp=e.dataset.gozp;const r=((SALES&&SALES.requests)||[]).find(x=>x.numZp===zp);if(r){closeModal();openReqCard(r);}});
     }
 
@@ -12833,7 +12833,11 @@
         out+=ctlCard('nonconformity','Ф.5','Несоответствия',true,['140px',null,'150px','180px','120px','96px'],head,body,760,6);
       }
       wrap.innerHTML=out||'<div class="card pad" style="color:var(--sub)">Нет записей для выбранного фильтра</div>';
-      wrap.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if((DATA.orders||[]).some(o=>o.numPz===pz)){sel=pz;location.hash='#orders';}});
+      // ссылка «Заказ / ПЗ» ведёт в реестр РОВНО на тот заказ, что обещает тултип:
+      //  роут '#orders/<№ ПЗ>' → renderOrdersView(arg) → ordSel. Прежняя запись в глобальный
+      //  sel не влияла ни на что (единственный читатель — удалённый renderOrders), и реестр
+      //  открывался на ранее выбранном заказе, т.е. на ЧУЖОМ.
+      wrap.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if((DATA.orders||[]).some(o=>o.numPz===pz))location.hash='#orders/'+encodeURIComponent(pz);});
       // выбор + удаление актов контроля (Ф.3/Ф.4/Ф.5)
       const CTL_KEY={incoming:'incoming_control',acceptance:'acceptance_control',nonconformity:'nonconformity'};
       const updCtlDel=(form)=>{const b=wrap.querySelector(`[data-ctldel="${form}"]`);if(b){const n=ctlSel[form].size;b.innerHTML=`${aico('trash',13)} Удалить (${n})`;b.disabled=!n;}};
@@ -12857,88 +12861,18 @@
     //  Мёртвый код с такой миной опаснее отсутствия кода: при копировании образца ошибка
     //  воскресает молча. Актуальный образец блока — orderCtlBlockHtml.
 
-    // --- рабочее место: модалка записи задачи ---------------------------------
+    // --- общая модалка портала: шторка, закрытие по клику вне и по Esc --------
     const modal=document.getElementById('modal'), mscrim=document.getElementById('mscrim');
     function closeModal(){modal.classList.remove('open');mscrim.classList.remove('open');modal.innerHTML='';modal.style.width='';}
     mscrim.onclick=closeModal;
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modal.classList.contains('open'))closeModal();});
-    function openTask(key){
-      const o=DATA.orders.find(x=>x.numPz===sel);
-      const t=o&&o.tasks.find(x=>String(x.id??x.num)===String(key));
-      if(!t)return;
-      const ro=DATA.mode!=='live';
-      const opt=STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${esc(s)}</option>`).join('');
-      const d=v=>ro?'disabled':'';
-      const ir=(k,v)=>`<div class="ir"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
-      const C=t.control||{};
-      const ctl=(C.point&&C.point!=='нет')?([C.what,C.tol,C.si].filter(Boolean).join(' · ')+(C.point?` (${esc(C.point)})`:'')):'';
-      const opLine=[t.opTypeCode,t.title].filter(Boolean).join(' ')+((t.opNum!==''&&t.opNum!=null)?` · оп.${t.opNum}`:'');
-      const info=`<div class="info">
-        ${ir('Участок', t.section||'—')}
-        ${ir('Операция', opLine||t.op||'—')}
-        ${t.equip?ir('Оборудование', t.equip):''}
-        ${t.ri?ir('РИ (план/факт)', t.ri):''}
-        ${(t.normTime!==''&&t.normTime!=null)?ir('Норма времени', t.normTime+' ч'):''}
-        ${t.materials?ir('Материалы', t.materials):''}
-        ${ctl?ir('Контроль', ctl):''}</div>`;
-      const nrm=p=>[p.norm,p.tol].filter(x=>x!==''&&x!=null).join(' ');
-      const params=(t.params&&t.params.length)?`
-          <div class="fld"><label>Параметры (норматив → факт)</label>
-            <table class="ptbl"><thead><tr><th>Параметр</th><th>Ед.</th><th>Норматив</th><th>Факт</th></tr></thead><tbody>
-            ${t.params.map(p=>`<tr><td>${esc(p.name)}</td><td style="color:#64748b">${esc(p.unit||'')}</td>
-              <td style="color:#64748b">${esc(nrm(p))||'—'}</td>
-              <td>${p.pid!=null?`<input data-pid="${esc(p.pid)}" value="${esc(p.fact)}" ${d()}>`:`<span style="color:#5b6b7a">${esc(p.fact||'—')}</span>`}</td></tr>`).join('')}
-            </tbody></table></div>`:'';
-      modal.innerHTML=`
-        <div class="mh"><b>${esc(t.num)}</b><span class="op">${esc(t.op)}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
-        <div class="mb">
-          ${ro?'<div class="warn">Запись доступна только в режиме LIVE (NocoDB). Сейчас — демо-данные, изменения не сохраняются.</div>':''}
-          ${info}
-          <div class="fld"><label>Статус</label><select id="f-status" ${d()}>${opt}</select></div>
-          ${params}
-          <div class="grid2">
-            <div class="fld"><label>Кол-во факт.</label><input id="f-qty" type="number" step="any" value="${esc(t.factQty)}" ${d()}></div>
-            <div class="fld"><label>Время факт. (ч)</label><input id="f-time" type="number" step="any" value="${esc(t.factTime)}" ${d()}></div>
-          </div>
-          <div class="fld"><label>Дата факт.</label><input id="f-date" type="date" value="${esc(String(t.factDate||'').slice(0,10))}" ${d()}></div>
-          <div class="grid2">
-            <div class="fld ck"><input id="f-self" type="checkbox" ${t.selfControl?'checked':''} disabled><label for="f-self">Требует самоконтроля (по МК)</label></div>
-            <div class="fld ck"><input id="f-otk" type="checkbox" ${t.otk?'checked':''} disabled><label for="f-otk">Требует ОТК (по МК)</label></div>
-          </div>
-          <div class="fld"><label>Примечание</label><textarea id="f-note" ${d()}>${esc(t.note||'')}</textarea></div>
-        </div>
-        <div class="mf">
-          ${ro?'':'<button class="btn btn-p" id="msave">Сохранить</button>'}
-          <button class="btn btn-g" id="mcancel">${ro?'Закрыть':'Отмена'}</button>
-          <span class="msg" id="mmsg"></span>
-        </div>`;
-      modal.classList.add('open'); mscrim.classList.add('open');
-      document.getElementById('mx').onclick=closeModal;
-      document.getElementById('mcancel').onclick=closeModal;
-      if(!ro)document.getElementById('msave').onclick=()=>saveTask(t.id);
-    }
-    async function saveTask(id){
-      const msg=document.getElementById('mmsg'), btn=document.getElementById('msave');
-      const body={
-        id,
-        status:document.getElementById('f-status').value,
-        factQty:document.getElementById('f-qty').value,
-        factTime:document.getElementById('f-time').value,
-        factDate:document.getElementById('f-date').value,
-        // самоконтроль/ОТК — требование технолога (read-only), не пишем из портала
-        note:document.getElementById('f-note').value,
-        params:[...modal.querySelectorAll('.ptbl input[data-pid]')].map(i=>({pid:Number(i.dataset.pid),value:i.value})),
-      };
-      btn.disabled=true; msg.style.color='#64748b'; msg.textContent='Сохранение…';
-      try{
-        const r=await fetch('/api/task/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        const j=await r.json().catch(()=>({}));
-        if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-        msg.style.color='var(--green)'; msg.textContent='Сохранено ✓';
-        await load();
-        setTimeout(closeModal,600);
-      }catch(e){ btn.disabled=false; msg.style.color='var(--red)'; msg.textContent='Ошибка: '+e.message; }
-    }
+    // Здесь лежали openTask/saveTask — старая «модалка записи задачи» первой вёрстки.
+    //  Единственным вызывающим openTask был удалённый renderDetail, а saveTask звал только
+    //  openTask, т.е. обе функции были недостижимы. Живой путь записи задачи — панель
+    //  renderStationTask («Рабочее место»): у неё свой doSave (/api/task/update + /api/task/journal).
+    //  Мина: openTask искал задачу через глобальный sel (в который уже никто не писал
+    //  осмысленно) и НЕ умел §7 «Журнал по единицам» — при копировании образца запись
+    //  ушла бы мимо журнала. См. тот же разбор выше про renderOrders/renderDetail.
     /* ── A11y-энхансер (UX-02/UX-03): аддитивно, только ARIA/for-id, идемпотентно, всё в try/catch.
        Формы рендерятся из JS (часть — real <label>, часть — <div>-подпись+input), поэтому связываем на лету через MutationObserver. */
     (function(){

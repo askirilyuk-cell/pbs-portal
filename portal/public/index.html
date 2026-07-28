@@ -4115,7 +4115,43 @@
     let SALES=null, salesTab='req', kpState=null;
     let salesFilter=null, salesSelZp=null, salesSearch='', salesOpenZp=null;   // K-05: воронка (фильтр по состоянию K-06) + выбранный ЗП в реестре; salesOpenZp — открытый на всё окно запрос («Работа по запросу»)
     let salesKpZp=null, salesKpMode='build';   // полноэкранная страница «Конструктор КП»: открытый ЗП + режим-таб (build=Составление · blank=Предпросмотр бланка)
-    let CPS=null, cpRole='all', cpCardTab='overview';
+    let CPS=null, cpRole='all', cpCardTab='overview', cpNoInn=false;
+    // ── K-98 · ИНН как ключ связи ──────────────────────────────────────────────
+    // ИНН — единственное, по чему портал сопоставляет контрагента с базой 1С и с реестром
+    // договоров. Пустой ИНН НЕ запрещаем: в жизни сначала известен бренд, а юрлицо
+    // выясняется позже. Поэтому только предупреждаем и даём дозаполнить в один клик.
+    // Формат проверяем по длине — 10 цифр (организация) или 12 (ИП); контрольную сумму
+    // не считаем (её в портале нет, и заводить её здесь не требовалось).
+    const innDigits=(v)=>String(v==null?'':v).replace(/\D/g,'');
+    const innFormatOk=(v)=>{const d=innDigits(v);return d.length===10||d.length===12;};
+    const INN_WHY='Пока ИНН не заполнен, портал не свяжет контрагента с базой 1С и с реестром договоров — подставить его в документы не получится.';
+    const INN_OK='Это не ошибка: заводить контрагента без ИНН нормально, ИНН вписывается позже.';
+    const INN_FORMAT_HINT='Похоже на опечатку: ИНН — это 10 цифр у организации или 12 у ИП. Сохранить всё равно можно.';
+    // индекс контрагентов по наименованию — для подсказок в «Продажах» и «Закупках»
+    // (у ЗП/ЗнЗ хранится только имя контрагента, реквизиты — в справочнике)
+    let CPBYNAME=null;
+    async function cpByName(){ if(CPBYNAME)return CPBYNAME;
+      let list=(CPS&&CPS.counterparties)||null;
+      if(!list){ try{ const j=await (await fetch('/api/counterparties')).json(); list=j.counterparties||[]; }catch{ list=[]; } }
+      CPBYNAME=new Map(list.map(c=>[String(c.name||'').trim(),c])); return CPBYNAME; }
+    const cpIndexReset=()=>{ CPBYNAME=null; CPS=null; };
+    // Якорь подсказки «без ИНН» рядом с названием контрагента: в разметку ставится пустой
+    // <span>, наполняется асинхронно в wireInnHints (справочник грузится один раз).
+    // Имя держим в Map, а не в атрибуте — esc() не экранирует кавычки.
+    let _innSeq=0; const _innNames=new Map();
+    const innHintAnchor=(name)=>{ const nm=String(name||'').trim(); if(!nm)return '';
+      const k='ih'+(++_innSeq); _innNames.set(k,nm); return `<span data-innhint="${k}"></span>`; };
+    async function wireInnHints(root){
+      const els=[...((root||document).querySelectorAll('[data-innhint]'))]; if(!els.length)return;
+      const ix=await cpByName();
+      els.forEach(el=>{ const c=ix.get(_innNames.get(el.dataset.innhint)||'');
+        // контрагента нет в справочнике или ИНН уже заполнен → молчим
+        if(!c||String(c.inn||'').trim()){ el.innerHTML=''; return; }
+        el.innerHTML=`<a class="nw" title="${esc(INN_WHY+' '+INN_OK)}" style="margin-left:8px;font-size:11px;font-weight:600;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:1px 8px;cursor:pointer;text-decoration:none;vertical-align:middle">без ИНН · указать</a>`;
+        el.firstChild.onclick=(e)=>{ e.preventDefault(); closeModal(); location.hash='#counterparties';
+          setTimeout(()=>openCounterpartyCard(document.getElementById('view'),c.id),60); };
+      });
+    }
     // K-06 состояния для воронки продаж: ЗП раскладывается в бакет по статусу (5 активных + 2 терминала)
     function zpBucket(s){ s=String(s||'');
       if(/Отклон|Проигран|Отозв/.test(s)) return 'rej';
@@ -4649,11 +4685,12 @@
       if(!CPS){ try{CPS=await (await fetch('/api/counterparties')).json();}catch(e){CPS={mode:'mock',warning:String(e.message||e),counterparties:[],metrics:{}};} }
       const all=(CPS&&CPS.counterparties)||[], m=(CPS&&CPS.metrics)||{};
       const filt=cpRole==='cust'?(c=>c.isCustomer):cpRole==='sup'?(c=>c.isSupplier):cpRole==='part'?(c=>c.isPartner):(()=>true);
-      const rows=all.filter(filt);
+      const noInnCount=m.noInn??all.filter(c=>!String(c.inn||'').trim()).length;
+      const rows=all.filter(filt).filter(c=>!cpNoInn||!String(c.inn||'').trim());   // K-98: «без ИНН» — отдельный фильтр поверх ролей
       const tag=srcChip(CPS.mode==='live', CPS.mode==='live'?(all.length+' контр.'):'демо');
       const mt=(lbl,num,col)=>`<div class="m"><div class="lbl">${lbl}</div><div class="num"${col?` style="color:${col}"`:''}>${num}</div></div>`;
       host.innerHTML=`<div class="mstrip">
-          ${mt('Всего',m.total??all.length)}${mt('Заказчики',m.customers??0,'var(--navy)')}${mt('Поставщики',m.suppliers??0,'var(--green)')}${mt('Партнёры',m.partners??0,'#7c3aed')}${mt('Проверка не пройдена',m.unchecked??0,'var(--amber)')}
+          ${mt('Всего',m.total??all.length)}${mt('Заказчики',m.customers??0,'var(--navy)')}${mt('Поставщики',m.suppliers??0,'var(--green)')}${mt('Партнёры',m.partners??0,'#7c3aed')}${mt('Проверка не пройдена',m.unchecked??0,'var(--amber)')}${mt('Без ИНН',noInnCount,'var(--amber)')}
         </div>
         <div class="filters" style="margin-top:var(--gap)">
           <div class="seg" id="cprseg">
@@ -4661,13 +4698,22 @@
             <button data-r="cust" class="${cpRole==='cust'?'on':''}">Заказчики</button>
             <button data-r="sup" class="${cpRole==='sup'?'on':''}">Поставщики</button>
             <button data-r="part" class="${cpRole==='part'?'on':''}">Партнёры</button>
-          </div><span class="spacer" style="margin-left:auto"></span>${tag}</div>
+          </div>
+          <button class="tbtn" id="cpnoinn" title="${esc(INN_WHY+' '+INN_OK)}" style="margin-left:10px;${cpNoInn?'color:#92400e;background:#fffbeb;border-color:#fde68a;font-weight:600':''}">${cpNoInn?'✓ ':''}Без ИНН · ${noInnCount}</button>
+          <span class="spacer" style="margin-left:auto"></span>${tag}</div>
         <div id="cpgrid" style="margin-top:8px"></div>`;
       host.querySelectorAll('#cprseg button').forEach(b=>b.onclick=()=>{cpRole=b.dataset.r; renderCounterparties(host);});
+      const noInnBtn=host.querySelector('#cpnoinn'); if(noInnBtn)noInnBtn.onclick=()=>{cpNoInn=!cpNoInn; renderCounterparties(host);};
       const ropBadge=(c)=>{ if(!c.ropCategory&&c.ropScore==null) return '<span class="c-gray">—</span>'; const L=(/^([ABC])/.exec(c.ropCategory||'')||[])[1]; const col=L==='A'?'var(--green)':L==='B'?'var(--amber)':L==='C'?'var(--red)':'var(--ink)'; return `<span class="nw" style="color:${col};font-weight:600">${esc(c.ropCategory||'—')}${c.ropScore!=null?' · '+c.ropScore:''}</span>`; };
       const cols=[
         {key:'name',label:'Наименование',cls:'ell',cell:c=>`<span title="${esc(c.name)}" style="font-weight:600;color:var(--ink)">${esc(c.name)}</span>`,sortVal:c=>c.name},
-        {key:'inn',label:'ИНН',w:118,cls:'nw c-gray',cell:c=>c.inn?`<span style="font-family:monospace">${esc(c.inn)}</span>`:'<span class="c-gray">—</span>',sortVal:c=>c.inn},
+        // K-98: пустой ИНН — заметная, но спокойная пометка (не красная): контрагент заведён
+        // корректно, просто пока не связывается с 1С и реестром договоров.
+        {key:'inn',label:'ИНН',w:132,cls:'nw c-gray',cell:c=>{
+          if(!String(c.inn||'').trim()) return `<span class="nw" style="color:var(--amber);font-weight:600" title="${esc(INN_WHY+' '+INN_OK)}">⚠ не заполнен</span>`;
+          const bad=!innFormatOk(c.inn);
+          return `<span style="font-family:monospace${bad?';color:var(--amber)':''}"${bad?` title="${esc(INN_FORMAT_HINT)}"`:''}>${esc(c.inn)}${bad?' ?':''}</span>`;
+        },sortVal:c=>String(c.inn||'')},
         {key:'roles',label:'Роли',w:184,cls:'nw',cell:c=>cpRoleChips(c.roles),sortVal:c=>(c.roles||[]).join(',')},
         {key:'region',label:'Регион',w:150,cls:'nw c-gray',cell:c=>esc(c.region||'—'),sortVal:c=>c.region},
         {key:'contact',label:'Контактное лицо',cls:'ell c-gray',cell:c=>esc(c.contact||'—'),sortVal:c=>c.contact},
@@ -4677,7 +4723,8 @@
       erpGrid(document.getElementById('cpgrid'),{key:'cps2',cols,rows,onRow:c=>openCounterpartyCard(host,c.id),
         del:CPS.mode==='live'?{key:'sales_counterparties',idOf:c=>c.id,reload:()=>{CPS=null;renderCounterparties(host);}}:undefined,
         info:`${srcChip(CPS.mode==='live')}<span>Контрагентов: <b style="color:var(--ink)">${rows.length}</b></span>${CPS.warning?'<span class="c-red">'+esc(CPS.warning)+'</span>':''}`,
-        empty:{text:'Контрагентов пока нет',sub:CPS.mode==='live'?'Реестр заполнится по мере заведения заказчиков и поставщиков.':'Реестр контрагентов появится в LIVE-режиме.'},
+        empty:cpNoInn?{text:'Контрагентов без ИНН нет',sub:'Снимите фильтр «Без ИНН», чтобы увидеть весь реестр.'}
+          :{text:'Контрагентов пока нет',sub:CPS.mode==='live'?'Реестр заполнится по мере заведения заказчиков и поставщиков.':'Реестр контрагентов появится в LIVE-режиме.'},
         toolbar:[{label:'+ Контрагент',cls:'primary',onClick:()=>alert('Создание контрагента — дедуп по ИНН, запись в NocoDB (T2).')}]});
     }
 
@@ -4728,16 +4775,51 @@
             </div></div>
         </div>`;
         const mono=(v)=>`<span style="font-family:monospace">${esc(v)}</span>`;
+        // K-98: плашка про ИНН. Пусто → объясняем по-человечески, чем это мешает, и сразу
+        // даём вписать (кнопка открывает форму из одного поля — без общего «Изменить»).
+        // Заполнен, но не похож на ИНН → мягкая заметка, ничего не блокируем.
+        const innBanner=()=>{
+          if(!String(c.inn||'').trim()) return `<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:3px;padding:11px 13px;margin-bottom:12px">
+            <div style="font-size:13px;font-weight:700;color:#92400e">ИНН пока не указан — и это нормально</div>
+            <div style="font-size:12.5px;color:#7a5b16;line-height:1.6;margin-top:5px">Часто сначала известен только бренд, а юрлицо выясняется позже — заводить контрагента без ИНН можно.
+              Но пока ИНН не вписан, портал не находит этого контрагента в базе 1С и в реестре договоров, поэтому подставить его в документы не получится. Впишите ИНН, как только узнаете.</div>
+            <div style="margin-top:9px"><button class="tbtn" id="cp-inn-add" style="padding:5px 12px;font-size:12px;font-weight:600;color:#92400e;border-color:#fcd34d;background:#fff">Указать ИНН</button></div>
+            <div id="cp-inn-form"></div></div>`;
+          if(!innFormatOk(c.inn)) return `<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:3px;padding:9px 13px;margin-bottom:12px;font-size:12.5px;color:#7a5b16">
+            Проверьте ИНН <b style="font-family:monospace">${esc(c.inn)}</b>: обычно это 10 цифр у организации или 12 у ИП. Если так и есть — оставьте как есть.
+            <button class="tbtn" id="cp-inn-add" style="margin-left:8px;padding:3px 10px;font-size:12px;color:#92400e;border-color:#fcd34d;background:#fff">Исправить</button>
+            <div id="cp-inn-form"></div></div>`;
+          return '';
+        };
+        // форма из одного поля «ИНН» прямо в плашке (Александр: «я потом введу через портал»)
+        function innQuickForm(){ const wrap=document.getElementById('cp-inn-form'); if(!wrap)return;
+          wrap.innerHTML=`<div style="margin-top:9px;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+              <input id="cp-inn-val" style="${FINP};max-width:190px;font-family:monospace" inputmode="numeric" placeholder="10 или 12 цифр" value="${esc(c.inn||'')}">
+              <button class="tbtn primary" id="cp-inn-save">Сохранить</button><button class="tbtn" id="cp-inn-cancel">Отмена</button>
+              <div id="cp-inn-note" style="flex-basis:100%;font-size:12px;color:#7a5b16"></div>
+            </div>`;
+          const inp=document.getElementById('cp-inn-val'), note=document.getElementById('cp-inn-note');
+          const check=()=>{ const v=inp.value.trim(); note.textContent=(!v||innFormatOk(v))?'':INN_FORMAT_HINT; };
+          inp.oninput=check; check(); inp.focus();
+          document.getElementById('cp-inn-cancel').onclick=()=>{wrap.innerHTML='';};
+          inp.onkeydown=(e)=>{ if(e.key==='Enter')document.getElementById('cp-inn-save').click(); };
+          document.getElementById('cp-inn-save').onclick=async()=>{
+            const b=document.getElementById('cp-inn-save'); b.disabled=true; b.textContent='…';
+            try{ await postJson('/api/counterparty/update',{id:c.id,inn:inp.value.trim()}); cpIndexReset(); reloadCard(); }
+            catch(e){ note.style.color='#b91c1c'; note.textContent=String(e.message||e); b.disabled=false; b.textContent='Сохранить'; } };
+        }
         // Реквизиты — просмотр/редактирование
         function renderReq(){ const el=document.getElementById('cp-req'); if(!el)return;
           el.innerHTML=`<div class="row" style="margin-bottom:10px"><span class="sec-h">Реквизиты организации</span><span class="spacer"></span><button class="tbtn" id="cp-req-edit" style="padding:4px 10px;font-size:12px">✎ Изменить</button></div>
+            ${innBanner()}
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 18px">
               ${fld('Полное наим.',esc(c.name))}${fld('Краткое наим.',esc(c.shortName))}${fld('Роли',cpRoleChips(c.roles))}
               ${fld('ИНН',c.inn?mono(c.inn):'')}${fld('КПП',c.kpp?mono(c.kpp):'')}${fld('ОГРН',c.ogrn?mono(c.ogrn):'')}
               ${fld('Регион',esc(c.region))}${fld('Отрасль',esc(c.industry))}${fld('Связь с холдингом',c.holding?`<span style="color:#7c3aed;font-weight:600">${esc(c.holding)}</span>`:'')}
               ${fld('Примечание',esc(c.note))}
             </div>`;
-          el.querySelector('#cp-req-edit').onclick=editReq; }
+          el.querySelector('#cp-req-edit').onclick=editReq;
+          const ib=el.querySelector('#cp-inn-add'); if(ib)ib.onclick=innQuickForm; }
         function editReq(){ const el=document.getElementById('cp-req');
           const I=(id,label,val,span)=>`<div${span?` style="grid-column:span ${span}"`:''}>${FLAB(label)}<input id="${id}" style="${FINP}" value="${esc(val||'')}"></div>`;
           el.innerHTML=`<div class="sec-h" style="margin-bottom:10px">Реквизиты — редактирование</div>
@@ -4755,7 +4837,7 @@
             const body={id:c.id,name:g('cpe-name'),shortName:g('cpe-short'),inn:g('cpe-inn'),kpp:g('cpe-kpp'),ogrn:g('cpe-ogrn'),region:g('cpe-region'),industry:g('cpe-industry'),holding:g('cpe-holding'),note:g('cpe-note')};
             if(!body.name){document.getElementById('cpe-err').textContent='Наименование обязательно.';return;}
             const b=el.querySelector('#cpe-save');b.disabled=true;b.textContent='…';
-            try{ await postJson('/api/counterparty/update',body); CPS=null; reloadCard(); }catch(e){ document.getElementById('cpe-err').textContent=String(e.message||e); b.disabled=false; b.textContent='Сохранить'; } }; }
+            try{ await postJson('/api/counterparty/update',body); cpIndexReset(); reloadCard(); }catch(e){ document.getElementById('cpe-err').textContent=String(e.message||e); b.disabled=false; b.textContent='Сохранить'; } }; }
         // Контактные лица — список + add/edit/delete
         function renderContacts(){ const el=document.getElementById('cp-contacts'); if(!el)return; const list=d.contacts||[];
           const rows=list.map(ct=>`<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--line2)">
@@ -4833,7 +4915,7 @@
       const fld=(k,v)=>v?`<div>${lblSm(k)}<div style="font-size:13px;color:#334155">${v}</div></div>`:'';
       const reqCard=`<div class="card pad"><div class="sec-h" style="margin-bottom:10px;display:flex;align-items:center;gap:10px">Запрос (Ф.1–З.1)${z.chat?`<a href="${esc(z.chat)}" target="_blank" rel="noopener" class="tbtn" style="margin-left:auto;padding:3px 11px;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">${aico('chat',14)} Чат Bitrix →</a>`:''}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 22px">
-          ${fld('Заказчик','<b style="color:var(--navy)">'+esc(z.customer)+'</b>')}${fld('Контакт',esc(z.contact))}
+          ${fld('Заказчик','<b style="color:var(--navy)">'+esc(z.customer)+'</b>'+innHintAnchor(z.customer))}${fld('Контакт',esc(z.contact))}
           ${fld('Источник',esc(z.source))}${fld('Характер сделки',(esc(z.dealNature||z.type)||'—')+(z.ved?' <span class="badge b-navy" style="font-size:9px;vertical-align:middle">ВЭД</span>':''))}
           ${fld('Вид обращения',z.kind?(z.kind==='Тендер'?'<b style="color:var(--amber)">Тендер</b>':esc(z.kind)):'')}${fld('Срок подачи (МСК)',z.deadline?'<span class="due-txt">'+esc(z.deadline)+'</span>':'')}
           <div style="grid-column:1/-1">${fld('Продукция (ДП–Д.1.2)',prodChips(z.products))}</div>
@@ -4938,6 +5020,7 @@
         salesSelZp=z.numZp; SALES=null; renderSales(document.getElementById('view'));
       };
       const ob=root.querySelector('[data-act="order"]'); if(ob&&canOrder)ob.onclick=()=>createZkzFromReq(z);
+      wireInnHints(root);   // K-98: подсказка «без ИНН» у заказчика запроса
       loadReqFiles(z.numZp);
     }
     // модалка карточки ЗП — оставлена для входа из data-gozp; основной вход в разделе — полноэкранная страница (salesReqPage)
@@ -6236,7 +6319,7 @@
       const ropChip=sup&&sup.category?stCellDot(ropColor(ropLetter(sup)),sup.category+(sup.score!=null?' · '+sup.score+' б.':'')):'<span class="c-gray">не в РОП</span>';
       const supCard=r.supplier?`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Заказ поставщику</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;font-size:13px">
-          ${fld('Поставщик','<b style="color:var(--ink)">'+esc(r.supplier)+'</b>')}${fld('Категория РОП',ropChip)}
+          ${fld('Поставщик','<b style="color:var(--ink)">'+esc(r.supplier)+'</b>'+innHintAnchor(r.supplier))}${fld('Категория РОП',ropChip)}
           ${fld('Сумма заказа',r.orderSum!=null?'<b style="color:var(--ink)">'+esc(procMoney(r.orderSum))+'</b>':'—')}${fld('Срок поставки',r.duePlan?fmt(r.duePlan):'—')}
         </div>${sup?`<div style="margin-top:10px"><a class="c-blue" style="font-size:12px;cursor:pointer" data-gosup="${sup.id}">Открыть карточку поставщика (РОП/ЛОП) →</a></div>`:''}</div>`:'';
       const apprCard=r.approval?`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">Согласование (пороги ДП–К §4)</div>
@@ -6314,6 +6397,7 @@
           ${acceptHost}${reqCard}${itemsCard}${actsCard}${midRow}${invCard}${payCard}${histCard}
         </div>`);
       document.getElementById('znz-back').onclick=znzFormBack;
+      wireInnHints(host);   // K-98: подсказка «без ИНН» у поставщика заказа (счёт/оплата без ИНН не свяжутся с 1С)
       const acceptBtn=document.getElementById('znz-accept-btn'); if(acceptBtn)acceptBtn.onclick=()=>openZnzAcceptFormInline(r);
       // K-86 этап 3: секция «Позиции» (многопозиционная заявка) — асинхронная загрузка (degrade-safe)
       loadZnzItems(r,canAct);

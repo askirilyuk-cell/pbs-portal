@@ -1102,15 +1102,20 @@ async function buildCounterpartiesLive() {
       counts: { salesRequests: cReq[name] || 0, salesOrders: cOrd[name] || 0, procRequests: pReq[name] || 0, evaluations: eEv[name] || 0 },
     };
   }).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-  const metrics = {
-    total: counterparties.length,
-    customers: counterparties.filter((c) => c.isCustomer).length,
-    suppliers: counterparties.filter((c) => c.isSupplier).length,
-    partners: counterparties.filter((c) => c.isPartner).length,
-    unchecked: counterparties.filter((c) => !c.checkStatus || /не\s*провед/i.test(c.checkStatus)).length,
-  };
-  return { mode: 'live', counterparties, metrics };
+  return { mode: 'live', counterparties, metrics: cpMetrics(counterparties) };
 }
+// метрики реестра контрагентов — общие для LIVE и MOCK.
+// K-98 noInn: ИНН — единственный ключ, по которому портал сопоставляет контрагента с 1С
+// и с реестром договоров; пустой ИНН не запрещён (сначала бывает известен только бренд),
+// но такой контрагент не подставится в документы → считаем его отдельной метрикой.
+const cpMetrics = (list) => ({
+  total: list.length,
+  customers: list.filter((c) => c.isCustomer).length,
+  suppliers: list.filter((c) => c.isSupplier).length,
+  partners: list.filter((c) => c.isPartner).length,
+  unchecked: list.filter((c) => !c.checkStatus || /не\s*провед/i.test(c.checkStatus)).length,
+  noInn: list.filter((c) => !String(c.inn || '').trim()).length,
+});
 
 // карточка контрагента: единая история (ЗП/ЗКЗ/ЗнЗ) + ЛОП + сводка
 async function buildCounterpartyCard(id) {
@@ -1152,6 +1157,64 @@ async function buildCounterpartyCard(id) {
       conversion: myReq.length ? Math.round(myOrd.length / myReq.length * 100) : 0, firstContact: allDates[0] ? salesDate(allDates[0]) : '',
     },
   };
+}
+
+// ── MOCK-режим раздела «Контрагенты» ────────────────────────────────────────
+// Демо-реестр берётся из portal/mock/counterparties.json (имена согласованы с
+// mock/sales.json, часть записей намеренно без ИНН). Правки реквизитов из карточки
+// в MOCK живут в памяти процесса (MOCK_CP_PATCH) — файл фикстуры и рабочее дерево
+// не переписываем. В LIVE всё по-прежнему идёт в NocoDB.
+const MOCK_CP_PATCH = new Map();
+function mockCpRows() {
+  let rows = [];
+  try { rows = JSON.parse(fs.readFileSync(path.join(__dirname, 'mock', 'counterparties.json'), 'utf8')); } catch { rows = []; }
+  if (!Array.isArray(rows)) rows = [];
+  return rows.map((r) => ({ ...r, ...(MOCK_CP_PATCH.get(Number(r.id)) || {}) }));
+}
+function mockCpShape(c) {
+  const roles = Array.isArray(c.roles) ? c.roles : String(c.roles || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return {
+    contactsList: [], counts: { salesRequests: 0, salesOrders: 0, procRequests: 0, evaluations: 0 },
+    shortName: '', kpp: '', ogrn: '', region: '', industry: '', holding: '', contact: '', contacts: '',
+    checkStatus: '', note: '', ropCategory: '', ropScore: null, ropProductCat: '', ropReassess: '', ropStatus: '',
+    ...c, roles,
+    isCustomer: roles.includes('Заказчик'), isSupplier: roles.includes('Поставщик'), isPartner: roles.includes('Партнёр'),
+  };
+}
+function counterpartiesMock() {
+  const counterparties = mockCpRows().map(mockCpShape).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ru'));
+  return { mode: 'mock', counterparties, metrics: cpMetrics(counterparties) };
+}
+// карточка контрагента в MOCK: история и сводка собираются из демо-сида продаж
+function counterpartyCardMock(id) {
+  const c = mockCpRows().map(mockCpShape).find((r) => Number(r.id) === Number(id));
+  if (!c) return null;
+  const sm = salesMock();
+  const myReq = (sm.requests || []).filter((r) => r.customer === c.name);
+  const myOrd = (sm.orders || []).filter((o) => o.customer === c.name);
+  const history = [
+    ...myReq.map((r) => ({ doc: r.numZp || '', kind: 'ЗП', subject: r.name || '', date: (r.kp && r.kp.date) || '', status: r.status || '' })),
+    ...myOrd.map((o) => ({ doc: o.numZkz || '', kind: 'ЗКЗ', subject: o.product || '', date: o.planDate || '', status: o.status || '' })),
+  ];
+  const sumOrders = myOrd.reduce((s, o) => s + (Number(String(o.sum || '').replace(/\D/g, '')) || 0), 0);
+  return {
+    mode: 'mock', contractor: c, contacts: [], history, evaluations: [],
+    summary: {
+      requests: myReq.length, orders: myOrd.length, znz: 0, sumOrders: sumOrders ? salesMoney(sumOrders) : '',
+      conversion: myReq.length ? Math.round(myOrd.length / myReq.length * 100) : 0, firstContact: '',
+    },
+  };
+}
+// правка реквизитов контрагента в MOCK — только в памяти (см. MOCK_CP_PATCH)
+function updateCounterpartyMock(body) {
+  const id = Number(body.id); if (!id) throw new Error('Не указан id контрагента.');
+  if (!mockCpRows().some((r) => Number(r.id) === id)) throw new Error('Контрагент не найден.');
+  const patch = {};
+  for (const k of Object.keys(CP_FIELD_MAP)) if (k in body) patch[k] = String(body[k] == null ? '' : body[k]).trim();
+  if (!Object.keys(patch).length) throw new Error('Нет полей для изменения.');
+  if ('name' in patch && !patch.name) throw new Error('Наименование не может быть пустым.');
+  MOCK_CP_PATCH.set(id, { ...(MOCK_CP_PATCH.get(id) || {}), ...patch });
+  return { ok: true, mock: true };
 }
 
 // раздел «Маршрутные карты» (Ф.13–Д.1) — реестр МК + карта МК-КОМ/МК-СБР.
@@ -8769,7 +8832,12 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/counterparty/update' && req.method === 'POST') {
-      if (!isLive()) return sendJson(res, 501, { error: 'Редактирование доступно только в LIVE-режиме.' });
+      // MOCK: правка (в первую очередь дозаполнение ИНН) применяется к демо-реестру в памяти —
+      // чтобы сценарий «вписал ИНН из карточки» проверялся и без NocoDB.
+      if (!isLive()) {
+        try { return sendJson(res, 200, updateCounterpartyMock(await readBody(req))); }
+        catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+      }
       try { return sendJson(res, 200, await updateCounterparty(await readBody(req))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
@@ -9282,12 +9350,13 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 200, { ...salesMock(), warning: String(e.message || e) }); }
     }
     if (p === '/api/counterparties') {
-      if (!isLive()) return sendJson(res, 200, { mode: 'mock', counterparties: [] });
+      if (!isLive()) return sendJson(res, 200, counterpartiesMock());
       try { return sendJson(res, 200, await buildCounterpartiesLive()); }
+      // в LIVE при ошибке NocoDB демо-контрагентов НЕ подставляем: их нельзя выбрать в документ
       catch (e) { return sendJson(res, 200, { mode: 'mock', counterparties: [], warning: String(e.message || e) }); }
     }
     if (p === '/api/counterparty') {
-      if (!isLive()) return sendJson(res, 200, { mode: 'mock' });
+      if (!isLive()) { const m = counterpartyCardMock(url.searchParams.get('id')); return m ? sendJson(res, 200, m) : sendJson(res, 404, { error: 'контрагент не найден' }); }
       try { const d = await buildCounterpartyCard(url.searchParams.get('id')); return d ? sendJson(res, 200, d) : sendJson(res, 404, { error: 'контрагент не найден' }); }
       catch (e) { return sendJson(res, 200, { mode: 'mock', warning: String(e.message || e) }); }
     }

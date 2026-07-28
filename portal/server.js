@@ -2015,6 +2015,10 @@ async function buildProcurementLive() {
     // K-83 этап 1a: сохранённый статус оплаты (degrade-safe — пусто до migrate-046)
     paymentId: r['Оплата Id'] || '', paymentStatus: r['Оплата статус'] || '',
     paymentAmount: numOrNull(r['Оплата сумма']), paymentUpdatedAt: r['Оплата обновлено'] || '',
+    // D-1 (migrate-048): условия платежа для оплат «на всю ЗнЗ» (без счёта);
+    // FORWARD-TOLERANT — до APPLY миграции колонок нет → ''/null
+    payType: r['Тип оплаты'] || '', expectedPayDate: r['Ожидаемая дата оплаты'] || '',
+    avansPercent: numOrNull(r['Процент аванса']),
     // история изменений заявки (переименования и т.п.) — read-only список в карточке
     history: znzHistoryParse(r['История изменений']),
     // «Проверяющий» (правка владельца 22.07, замена согласования) — degrade-safe: колонок может не быть до миграции
@@ -2579,6 +2583,11 @@ function invoiceShape(r) {
     itemIds: invoiceItemIdsParse(r['Позиции счёта (Ids)']), // K-83: позиции заявки, покрытые этим счётом ([] = не задано/весь охват)
     // K-83 этап 2: статус заявки на оплату ЭТОГО счёта (per-invoice externalRef)
     payExternalRef: r['Оплата ExternalRef'] || '', payId: r['Оплата ID'] || '', payUpdatedAt: r['Оплата обновлена'] || '',
+    // D-1 (migrate-048): условия платежа поставщику — то, что ушло в платёжный портал.
+    // FORWARD-TOLERANT: до APPLY миграции и у старых счетов колонок нет → ''/null,
+    // клиент такие поля просто не рисует (никаких «undefined» и пустых подписей).
+    payType: r['Тип оплаты'] || '', expectedPayDate: r['Ожидаемая дата оплаты'] || '',
+    avansPercent: invNumOrNull(r['Процент аванса']),
   };
 }
 // проверить, что таблица «Счета-К» существует (для дружелюбной ошибки записи)
@@ -3221,19 +3230,97 @@ async function resolveInitiatorEmail(session) {
   return null;
 }
 
+// ── D-1: условия платежа поставщику (migrate-048) ─────────────────────────────
+// Дефект: expectedPaymentDate/avansPercent/paymentType уходили во внешний платёжный
+// портал и НЕ сохранялись у нас — срок платежа жил только на стороне Смирнова, и
+// расходную часть денежного календаря (K-96) построить было не из чего. Пишем в
+// «Счета-К»/«Заявки ЗнЗ» ровно то, что реально ушло в payload (см. createPayment).
+const PAY_TYPE_RU = { AVANS: 'Предоплата', POSTOPLATA: 'Постоплата' };
+const PAY_TERM_COLS = ['Тип оплаты', 'Ожидаемая дата оплаты', 'Процент аванса'];
+
+// Какие из колонок условий платежа реально существуют в таблице (null — meta-API
+// недоступен, не гадаем). Живой запрос без кеша: после APPLY migrate-048 портал
+// подхватывает колонки сам, перезапуск не нужен.
+async function payTermColsPresent(key) {
+  try {
+    const meta = await ncTableMeta(key);
+    const have = new Set((meta.columns || []).map((c) => c.title));
+    return PAY_TERM_COLS.filter((t) => have.has(t));
+  } catch { return null; }
+}
+// Патч колонок условий платежа. terms — то, что ушло в payload: { paymentType (AVANS|
+// POSTOPLATA), expectedPaymentDate, avansPercent }. payment — ответ портала; по контракту
+// (§2/§3 INTEGRATION_ISM) он возвращает expectedPaymentDate, поэтому дату берём ИЗ ОТВЕТА,
+// а отправленное значение — только фолбэк: храним то, что реально стоит у Смирнова.
+// Взаимоисключающие поля гасим явным null — при повторной отправке с другим типом
+// оплаты (постоплата→предоплата) в счёте не должно остаться протухшей даты/процента.
+// Без terms (опрос статуса) — только бэкофилл даты, если портал её вернул: тип и процент
+// в ответе не приходят, и затирать их опросом нельзя.
+function payTermsPatch(terms, payment) {
+  const echoDate = String((payment && payment.expectedPaymentDate) || '').slice(0, 10);
+  if (!terms) return echoDate ? { 'Ожидаемая дата оплаты': echoDate } : {};
+  const type = String(terms.paymentType || '').toUpperCase();
+  const patch = { 'Тип оплаты': PAY_TYPE_RU[type] || null };
+  if (type === 'AVANS') {
+    const ap = Number(terms.avansPercent);
+    patch['Процент аванса'] = Number.isFinite(ap) ? ap : null;
+    patch['Ожидаемая дата оплаты'] = echoDate || null; // предоплата: даты нет (если портал её не вернул)
+  } else {
+    patch['Ожидаемая дата оплаты'] = echoDate || String(terms.expectedPaymentDate || '').slice(0, 10) || null;
+    patch['Процент аванса'] = null;
+  }
+  return patch;
+}
+// Записать условия платежа в таблицу key, запись rowId. НИКОГДА не бросает: платёж
+// во внешнем портале уже создан, и потеря записи у нас не должна его «отменять»
+// (тот же degrade-safe контур, что у скана счёта, K-83). Но и молчать нельзя —
+// возвращаем текст предупреждения, он уходит в ответ API и виден пользователю.
+async function savePayTerms(key, rowId, terms, payment) {
+  const patch = payTermsPatch(terms, payment);
+  const keys = Object.keys(patch);
+  if (!keys.length) return '';
+  const present = await payTermColsPresent(key);
+  if (present && !present.length) {
+    // Колонок нет вовсе — миграция 048 не применена. Молча слать бесполезно:
+    // NocoDB неизвестные поля в PATCH просто игнорирует, и потеря была бы тихой.
+    const msg = 'условия платежа (срок/тип/аванс) НЕ сохранены: нет колонок migrate-048 — примените миграцию';
+    console.warn(`D-1: ${msg} [${key} #${rowId}]`);
+    return msg;
+  }
+  const send = present ? Object.fromEntries(keys.filter((k) => present.includes(k)).map((k) => [k, patch[k]])) : patch;
+  const skipped = keys.filter((k) => !(k in send));
+  try {
+    if (Object.keys(send).length) await ncUpdate(key, rowId, send);
+  } catch (e) {
+    const msg = `условия платежа (срок/тип/аванс) НЕ сохранены: ${e.message}`;
+    console.warn(`D-1: ${msg} [${key} #${rowId}]`);
+    return msg;
+  }
+  if (skipped.length) {
+    const msg = `частично не сохранено (нет колонок migrate-048): ${skipped.join(', ')}`;
+    console.warn(`D-1: ${msg} [${key} #${rowId}]`);
+    return msg;
+  }
+  return '';
+}
+
 // Сохранить статус оплаты из ответа портала в запись ЗнЗ (поля migrate-046). Best-effort/degrade-safe.
 // Используется только для СТАРЫХ оплат «на всю ЗнЗ» (без invoiceId) — обратная совместимость.
-async function savePaymentToZnz(znzId, payment) {
-  if (!payment) return;
+// terms (D-1, опц.) — условия платежа из payload; отдельным PATCH-ом, чтобы отказ по новым
+// колонкам не утащил за собой сохранение статуса. Возвращает текст предупреждения или ''.
+async function savePaymentToZnz(znzId, payment, terms) {
+  if (!payment) return '';
   const patch = {};
   if (payment.id != null) patch['Оплата Id'] = String(payment.id);
   if (payment.status != null) patch['Оплата статус'] = String(payment.status);
   if (payment.externalRef != null) patch['Оплата ExternalRef'] = String(payment.externalRef);
   if (payment.amount != null) { const a = Number(payment.amount); if (Number.isFinite(a)) patch['Оплата сумма'] = a; }
   if (payment.updatedAt != null) patch['Оплата обновлено'] = String(payment.updatedAt);
-  if (!Object.keys(patch).length) return;
-  try { await ncUpdate('procurement_requests', znzId, patch); }
-  catch (e) { console.warn('K-83: статус оплаты не сохранён в ЗнЗ (колонок может не быть до migrate-046):', e.message); }
+  if (Object.keys(patch).length) {
+    try { await ncUpdate('procurement_requests', znzId, patch); }
+    catch (e) { console.warn('K-83: статус оплаты не сохранён в ЗнЗ (колонок может не быть до migrate-046):', e.message); }
+  }
+  return savePayTerms('procurement_requests', znzId, terms, payment);
 }
 
 // K-83 этап 2: маппинг статуса payment-portal (PAID/REJECTED/APPROVED/…) в русский статус
@@ -3254,16 +3341,27 @@ function payStatusToInvoiceStatus(status) {
 // каждый счёт = отдельная заявка на оплату) в «Счета-К»: «Оплата ExternalRef», «Оплата ID»,
 // «Статус оплаты» (маппинг выше), «Оплата обновлена». Best-effort/degrade-safe — до создания
 // новых колонок в таблице просто не пишет (см. каталог try/catch).
-async function savePaymentToInvoice(invoiceId, payment) {
-  if (!payment) return;
+// terms (D-1, опц.) — условия платежа, реально ушедшие в payload: { paymentType,
+// expectedPaymentDate, avansPercent }. Пишутся ОТДЕЛЬНЫМ PATCH-ом намеренно: если новых
+// колонок ещё нет или NocoDB отверг значение, статус оплаты обязан сохраниться как раньше
+// (регресса быть не должно). Возвращает текст предупреждения или '' — вызывающий обязан
+// довести его до пользователя, но НЕ обязан откатывать платёж: он уже создан снаружи.
+async function savePaymentToInvoice(invoiceId, payment, terms) {
+  if (!payment) return '';
   const patch = {
     'Статус оплаты': payStatusToInvoiceStatus(payment.status),
     'Оплата обновлена': new Date().toISOString(),
   };
   if (payment.externalRef != null) patch['Оплата ExternalRef'] = String(payment.externalRef);
   if (payment.id != null) patch['Оплата ID'] = String(payment.id);
+  let warn = '';
   try { await ncUpdate('invoices', invoiceId, patch); }
-  catch (e) { console.warn('K-83: статус оплаты не сохранён в счёте (колонок «Оплата …» может ещё не быть):', e.message); }
+  catch (e) {
+    warn = `статус оплаты не сохранён в счёте: ${e.message}`;
+    console.warn('K-83: статус оплаты не сохранён в счёте (колонок «Оплата …» может ещё не быть):', e.message);
+  }
+  const termWarn = await savePayTerms('invoices', invoiceId, terms, payment);
+  return [warn, termWarn].filter(Boolean).join('; ');
 }
 
 // K-83 доп.: скачать байты NocoDB-вложения (attachment-объект «Файл-скан») по его url/path —
@@ -3382,9 +3480,13 @@ async function createPayment(body, session) {
   // 4) вызов (обрабатываем оба кода — 201 создано / 200 idempotent)
   const { data } = await ingestCall('POST', '/payments', payload);
   const payment = (data && data.payment) ? data.payment : data;
+  // D-1: условия платежа берём ИЗ СОБРАННОГО payload, а не из body — сохраняем ровно то,
+  // что ушло наружу (body мог прийти с лишними/сырыми полями, payload прошёл валидации).
+  const terms = { paymentType, expectedPaymentDate: payload.expectedPaymentDate || '', avansPercent: payload.avansPercent };
+  let saveWarning = '';
   let fileAttached = false;
   if (invoice) {
-    await savePaymentToInvoice(invoice.Id ?? invoice.id, payment);
+    saveWarning = await savePaymentToInvoice(invoice.Id ?? invoice.id, payment, terms);
     // K-83 доп.: владелец просит автоматически дублировать скан счёта в платёжный портал
     // (иначе снабженцу приходится прикладывать его там вручную второй раз) — используем
     // уже готовый 3-фазный механизм uploadPaymentFile. Degrade-safe: не получилось —
@@ -3400,9 +3502,12 @@ async function createPayment(body, session) {
       } catch (e) { console.warn('K-83: скан счёта не передан в платёжный портал (приложите вручную):', e.message); }
     }
   } else {
-    await savePaymentToZnz(znzId, payment);
+    saveWarning = await savePaymentToZnz(znzId, payment, terms);
   }
-  return { ok: true, idempotent: !!(data && data.idempotent), payment, ...(invoice ? { fileAttached } : {}) };
+  // D-1: платёж создан снаружи в любом случае — саму отправку не роняем даже при провале
+  // записи к нам. Но и не проглатываем: saveWarning уходит в ответ, клиент показывает его
+  // предупреждением (как ', но скан НЕ передан' у K-83).
+  return { ok: true, idempotent: !!(data && data.idempotent), payment, ...(invoice ? { fileAttached } : {}), ...(saveWarning ? { saveWarning } : {}) };
 }
 
 // Опрос статуса заявки на оплату (GET /payments?externalRef=…&externalSource=ISM), обновляет

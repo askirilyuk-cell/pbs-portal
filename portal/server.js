@@ -2126,7 +2126,8 @@ async function routeCoopAcceptLocked(body, session) {
 //  карточки МК:
 //    1) «Отчёт производства за смену» (ВидОперации = ОтчетПроизводстваЗаСмену) —
 //       выпуск полуфабриката «Заготовка для ТО, деталь <децим.№>»;
-//    2) «Передача товаров» (ВидОперации = ВПереработку) — передача переработчику,
+//    2) «Передача сырья в переработку» (объект ПередачаТоваров, ВидОперации =
+//       ВПереработку; в интерфейсе 1С — Производство → Передача в переработку) —
 //       из неё бухгалтер печатает М-15.
 //
 //  ЖЁСТКИЕ ГРАНИЦЫ (критерий приёмки 4):
@@ -2222,10 +2223,18 @@ async function routeCoopAcceptLocked(body, session) {
 //  пересохранении МК (rtCoopDefault/rtCoopSerialize), иначе связка стирается
 //  (и saveRoute это ловит — см. (и)).
 // ════════════════════════════════════════════════════════════════════════════
+// title — ИМЯ, КОТОРОЕ ЧЕЛОВЕК УВИДИТ В 1С. Объект называется ПередачаТоваров, но в этой
+// конфигурации документ подписан «Передача сырья в переработку» (Производство → Передача в
+// переработку). Технолог ищет в 1С по тому слову, которое видит у нас, — поэтому в текстах
+// портала стоит имя из интерфейса 1С, а не имя объекта метаданных.
 const ONEC_DOC = {
   production: { entity: 'Document_ОтчетПроизводстваЗаСмену', vid: 'ОтчетПроизводстваЗаСмену', title: 'Отчёт производства за смену', rows: 'Продукция' },
-  transfer: { entity: 'Document_ПередачаТоваров', vid: 'ВПереработку', title: 'Передача товаров (в переработку)', rows: 'Товары' },
+  transfer: { entity: 'Document_ПередачаТоваров', vid: 'ВПереработку', title: 'Передача сырья в переработку', rows: 'Товары', where: 'Производство → Передача в переработку' },
 };
+// Справочные группы 1С, заведённые бухгалтерией под портал (проверено чтением 27.07.2026).
+const ONEC_NOM_GROUP = 'Заготовки для ТО';        // Полуфабрикаты → Заготовки для ТО
+const ONEC_CP_GROUP = 'Создано порталом';          // корень справочника «Контрагенты»
+const ONEC_CONTRACT_VID = 'СПоставщиком';          // договор кооперации — «С поставщиком»
 const ONEC_ZERO_GUID = '00000000-0000-0000-0000-000000000000';
 const ONEC_LOG_FILE = path.join(__dirname, '.data', '1c', 'requests.log');
 const ONEC_TIMEOUT_MS = 25000;
@@ -2264,7 +2273,9 @@ function onecAssertDraft(payload, kind) {
 // (у) Белый список объектов, в которые портал вообще имеет право писать. Раньше POST был
 // разрешён по любому пути — код собирал их сам, но щель на запись должна быть УЗКОЙ и явной:
 // два документа кооперации + справочник контрагентов (черновик по ИНН, задача 3).
-const ONEC_POST_ALLOWED = new Set(['Document_ОтчетПроизводстваЗаСмену', 'Document_ПередачаТоваров', 'Catalog_Контрагенты']);
+// Договоров контрагентов в списке НЕТ намеренно: договор — бухгалтерское решение, портал
+// его не создаёт ни при каких условиях (см. блок «ДОГОВОР КОНТРАГЕНТА»).
+const ONEC_POST_ALLOWED = new Set(['Document_ОтчетПроизводстваЗаСмену', 'Document_ПередачаТоваров', 'Catalog_Контрагенты', 'Catalog_Номенклатура']);
 
 // (з) GUID 1С (Ref_Key). Ссылки приходят из coop-JSON, то есть управляются клиентом —
 // подставлять их в путь запроса можно ТОЛЬКО после строгой проверки формата.
@@ -2397,6 +2408,20 @@ async function onecTemplate() {
     warehouseKey: wh.Ref_Key,                                        // (задача 1) склад выпуска — из настройки, резолвится по наименованию
     warehouseName: wh.Description || '',
   };
+  // ── СЧЕТА ТАБЛИЧНОЙ ЧАСТИ ОБЯЗАТЕЛЬНЫ (проверено формой 1С 28.07.2026) ─────
+  // «Счёт учёта» и «Счёт передачи» в строке «Передачи сырья в переработку» — обязательные
+  // реквизиты (в свежих документах базы это 43 и 10.07). Портал берёт их ИЗ ОБРАЗЦА
+  // свежего документа того же вида — так же, как организацию, ответственного и счёт затрат,
+  // — и константами не подставляет: план счетов у бухгалтерии свой, и «43» из чужой базы
+  // здесь было бы выдумкой. Не удалось прочитать образец — отказ, а не нулевой GUID:
+  // документ с пустым счётом бухгалтер всё равно не проведёт, а разбираться будет долго.
+  if (!gid(tpl.trAccountKey) || !gid(tpl.trTransferKey)) {
+    onecLog('REFUSE', 'в образце «Передачи сырья в переработку» не заполнены счета учёта/передачи', { trAccountKey: tpl.trAccountKey, trTransferKey: tpl.trTransferKey, sample: t.Number || '—' });
+    throw onecErr(400, `Не удалось взять обязательные счета строки «${ONEC_DOC.transfer.title}» из образца документа 1С`
+      + (t.Number ? ` (последний документ №${t.Number})` : ' (документов этого вида в базе нет)') + '. '
+      + 'Нужны «Счёт учёта» и «Счёт передачи» — портал берёт их из свежего документа того же вида и не подставляет константами. '
+      + `Проведите в 1С хотя бы один «${ONEC_DOC.transfer.title}» руками (${ONEC_DOC.transfer.where}) — дальше портал будет копировать реквизиты с него.`);
+  }
   _onecTplCache.set(tplKey, { tpl, exp: Date.now() + ONEC_TPL_TTL_MS });
   return tpl;
 }
@@ -2434,20 +2459,78 @@ async function onecFindWarehouse(name) {
     + ' Поправьте поле «Склад в 1С» в «Настройках» — точное совпадение наименования.');
 }
 
+// ── Группа справочника, заведённая бухгалтерией под портал ───────────────────
+// Портал кладёт свои записи ТОЛЬКО в отведённую ему группу — не в корень справочника
+// и не «куда-нибудь». Группы нет — отказ с перечнем групп: значит, договорённость с
+// бухгалтерией изменилась, и молча выбирать другое место нельзя.
+async function onecFindGroup(entity, name, what) {
+  const rows = await onecList(entity, onecQuery({
+    $format: 'json', $top: '2', $select: 'Ref_Key,Description,IsFolder',
+    $filter: `Description eq '${onecLit(name)}' and IsFolder eq true and DeletionMark eq false`,
+  }));
+  const hit = rows.find((g) => String(g.Description || '').trim() === name && onecIsGuid(g.Ref_Key));
+  if (hit) return hit;
+  let avail = [];
+  try {
+    avail = (await onecList(entity, onecQuery({ $format: 'json', $top: '60', $select: 'Ref_Key,Description,IsFolder', $filter: 'IsFolder eq true and DeletionMark eq false' })))
+      .map((g) => String(g.Description || '').trim()).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ru'));
+  } catch { /* перечень — украшение сообщения */ }
+  onecLog('REFUSE', `группа «${name}» в справочнике ${entity} не найдена`, { available: avail });
+  throw onecErr(400, `В 1С нет группы «${name}» для ${what}.`
+    + (avail.length ? ` Есть группы: ${avail.map((s) => `«${s}»`).join(', ')}.` : '')
+    + ' Портал кладёт свои записи только в отведённую группу — заведите её в 1С или сообщите новое название.');
+}
+
 // ── Резолв справочников (только чтение) ─────────────────────────────────────
-// Номенклатуру портал НЕ создаёт (открытый вопрос: кто заводит «Заготовка для ТО…»
-// в 1С). Не нашли — честно сообщаем точное ожидаемое наименование.
+// Поиск ТОЛЬКО по точному наименованию. Прежний фолбэк «substringof» убран намеренно:
+// после смены шаблона (см. onecBlankName) частичное совпадение цепляло бы соседние
+// заготовки той же детали, а выпуск ушёл бы не на ту номенклатуру.
 async function onecFindNomenclature(name) {
   const exact = await onecList('Catalog_Номенклатура', onecQuery({
-    $format: 'json', $top: '1', $select: 'Ref_Key,Description,ЕдиницаИзмерения_Key,НоменклатурнаяГруппа_Key,IsFolder',
+    $format: 'json', $top: '2', $select: 'Ref_Key,Description,ЕдиницаИзмерения_Key,НоменклатурнаяГруппа_Key,IsFolder,Parent_Key',
     $filter: `Description eq '${onecLit(name)}' and IsFolder eq false and DeletionMark eq false`,
   }));
-  if (exact.length) return exact[0];
-  const like = await onecList('Catalog_Номенклатура', onecQuery({
-    $format: 'json', $top: '1', $select: 'Ref_Key,Description,ЕдиницаИзмерения_Key,НоменклатурнаяГруппа_Key,IsFolder',
-    $filter: `substringof('${onecLit(name)}',Description) and IsFolder eq false and DeletionMark eq false`,
+  return exact.find((n) => String(n.Description || '').trim() === String(name).trim()) || null;
+}
+// ── (задача 3-бис) ЧЕРНОВИК НОМЕНКЛАТУРЫ ────────────────────────────────────
+// Эталон в группе «Заготовки для ТО» заведён бухгалтерией руками, и реквизиты для него
+// СКОПИРОВАНЫ с существующей позиции — ровно тот же приём, которым портал берёт реквизиты
+// документа из свежего образца. Поэтому и здесь: ничего не выдумываем и не подставляем
+// константами (вид номенклатуры, единица, ставка НДС, страна — из эталона группы), кладём
+// в ту же группу, метим комментарием «Портал ИСМ» и говорим, что запись требует проверки.
+// Дубль не плодим: перед записью повторный точный поиск по наименованию.
+async function onecNomEtalon(groupKey) {
+  const rows = await onecList('Catalog_Номенклатура', onecQuery({
+    $format: 'json', $top: '1', $select: 'Ref_Key,Description,ВидНоменклатуры_Key,ЕдиницаИзмерения_Key,ВидСтавкиНДС,СтранаПроисхождения_Key,НоменклатурнаяГруппа_Key',
+    $filter: `Parent_Key eq guid'${groupKey}' and IsFolder eq false and DeletionMark eq false`,
   }));
-  return like[0] || null;
+  if (!rows.length) {
+    throw onecErr(400, `В группе «${ONEC_NOM_GROUP}» справочника «Номенклатура» нет ни одной позиции-эталона. `
+      + 'Портал заводит заготовки, копируя реквизиты (вид номенклатуры, единицу, ставку НДС, страну) с эталонной позиции этой группы, '
+      + 'а константами их не подставляет. Заведите эталон в 1С руками — дальше портал справится сам.');
+  }
+  return rows[0];
+}
+function onecNomComment(uid, mk, opNo) {
+  return `${onecUidToken(uid)} · ${onecMark(mk, opNo)} · Портал ИСМ: заготовка под термообработку заведена порталом автоматически, ТРЕБУЕТ ПРОВЕРКИ бухгалтером`;
+}
+async function onecCreateNomenclatureDraft({ name, groupKey, etalon, uid, mk, opNo }) {
+  const pre = await onecFindNomenclature(name);
+  if (pre) { onecLog('SKIP', `номенклатура «${name}» появилась в 1С до записи — дубль не создаём`, { ref: pre.Ref_Key }); return { row: pre, created: false }; }
+  const payload = {
+    Description: String(name).slice(0, 100),
+    НаименованиеПолное: String(name),
+    Parent_Key: groupKey,
+    ВидНоменклатуры_Key: etalon.ВидНоменклатуры_Key,
+    ЕдиницаИзмерения_Key: etalon.ЕдиницаИзмерения_Key,
+    ВидСтавкиНДС: etalon.ВидСтавкиНДС,
+    СтранаПроисхождения_Key: etalon.СтранаПроисхождения_Key,
+    Комментарий: onecNomComment(uid, mk, opNo),
+    DeletionMark: false, IsFolder: false,
+  };
+  const row = await onecCall('POST', 'Catalog_Номенклатура?$format=json', payload, 'catalog');
+  onecLog('CREATE', `номенклатура «${name}» создана в 1С ЧЕРНОВИКОМ в группе «${ONEC_NOM_GROUP}» — требует проверки бухгалтером`, { ref: row && row.Ref_Key, uid });
+  return { row, created: true };
 }
 // (задача 2) Подсказка ПО ИМЕНИ. ВНИМАНИЕ: результат этой функции НЕЛЬЗЯ подставлять
 // в документ — совпадение имён ничего не доказывает («ООО «Ромашка»» в 1С может быть две,
@@ -2556,6 +2639,80 @@ async function onecNameHint(name) {
   } catch { return ''; }
 }
 // ════════════════════════════════════════════════════════════════════════════
+//  ДОГОВОР КОНТРАГЕНТА (проверено формой 1С 28.07.2026)
+//
+//  В форме «Передача сырья в переработку» Договор становится ОБЯЗАТЕЛЬНЫМ сразу после
+//  выбора контрагента, автоподстановки нет. Значит портал обязан его передавать, иначе
+//  документ у бухгалтера не соберётся.
+//
+//  Правило (утв. Александром), в порядке применения:
+//    (а) договор с признаком «основной» — берём его;
+//    (б) основного нет, но активный «С поставщиком» РОВНО ОДИН — берём его;
+//    (в) их несколько и основного нет — НЕ УГАДЫВАЕМ: отдаём список человеку, он
+//        выбирает ОДИН РАЗ, выбор ложится в блок кооперации рядом с «дог. №»
+//        (coop.contractRef) и дальше применяется молча;
+//    (г) договоров нет вовсе (в т.ч. у только что заведённого черновика контрагента) —
+//        честное «договор не сопоставлен, подставит бухгалтер», выпуск не блокируем.
+//  Договор портал НЕ СОЗДАЁТ никогда: это бухгалтерское решение (реквизиты договора —
+//  вид взаиморасчётов, НДС, сроки оплаты — портал знать не может и знать не должен).
+//
+//  ФАКТ ПО БАЗЕ (чтение 28.07.2026), важный для чтения кода: признака «основной» в этой
+//  конфигурации НЕТ — булева реквизита «использовать как основной» у договора не
+//  существует, а устаревший «ОсновнойДоговорКонтрагента» контрагента пуст у всех 557.
+//  Поэтому ветка (а) написана ЗАЩИТНО (сработает, если признак появится), а фактически
+//  работают (б)/(в)/(г). Это не догадка: у 373 из 447 контрагентов активный договор
+//  «С поставщиком» ровно один, так что (б) закрывает подавляющее большинство, а (в)
+//  честно спрашивает человека там, где выбор действительно есть (у «ЛИДЕР-ГРУПП» — 41).
+// ════════════════════════════════════════════════════════════════════════════
+const ONEC_CONTRACT_SELECT = 'Ref_Key,Description,Номер,Дата,Owner_Key,ВидДоговора,ДоговорЗакрыт,IsFolder,СрокДействия';
+// Признак «основной» ищем ЗАЩИТНО: в этой конфигурации его нет, но если бухгалтерия
+// перейдёт на релиз/доработку, где он есть, правило (а) заработает без правки кода.
+const onecIsMainContract = (d) => d && (d.ОсновнойДоговор === true || d.ИспользоватьКакОсновной === true);
+// Срок действия: 1С отдаёт «пустую дату» как 0001-01-01 — это НЕ просрочка.
+function onecContractLive(d) {
+  if (!d || d.IsFolder === true || d.DeletionMark || d.ДоговорЗакрыт) return false;
+  const s = String(d.СрокДействия || '');
+  if (!s || s.startsWith('0001-01-01')) return true;
+  return s.slice(0, 10) >= new Date().toISOString().slice(0, 10);
+}
+const onecContractView = (d) => ({
+  ref: d.Ref_Key, name: d.Description || '', no: d.Номер || '',
+  date: String(d.Дата || '').slice(0, 10), dateHuman: onecDateHuman(d.Дата),
+});
+const onecContractLabel = (d) => `${d.Description || '—'}${d.Номер ? ` (№${d.Номер}` : ''}${d.Номер && d.Дата ? ` от ${onecDateHuman(d.Дата)}` : ''}${d.Номер ? ')' : ''}`;
+async function onecFindContracts(ownerRef) {
+  if (!onecIsGuid(ownerRef)) return [];
+  const rows = await onecList('Catalog_ДоговорыКонтрагентов', onecQuery({
+    $format: 'json', $top: '100', $select: ONEC_CONTRACT_SELECT,
+    $filter: `Owner_Key eq guid'${ownerRef}' and ВидДоговора eq '${ONEC_CONTRACT_VID}' and DeletionMark eq false`,
+  }));
+  return rows.filter(onecContractLive);
+}
+// Возвращает ВСЕГДА объект: «не сопоставлен» и «нужен выбор человека» — такие же законные
+// исходы, как найденный договор, и оба обязаны доехать до блока «1С» карточки МК.
+async function onecMatchContract(contractorRef, coop) {
+  const out = { matched: false, ref: '', name: '', by: '', reason: '', needChoice: false, choices: [] };
+  if (!onecIsGuid(contractorRef)) { out.reason = 'контрагент не сопоставлен — договор искать не у кого'; return out; }
+  const list = await onecFindContracts(contractorRef);
+  if (!list.length) { out.reason = `у контрагента в 1С нет действующих договоров вида «${ONEC_CONTRACT_VID}»`; return out; }
+  // выбор человека, сделанный ранее и сохранённый в блоке кооперации — приоритетнее правил
+  const picked = String((coop && coop.contractRef) || '');
+  if (onecIsGuid(picked)) {
+    const hit = list.find((d) => String(d.Ref_Key).toLowerCase() === picked.toLowerCase());
+    if (hit) { out.matched = true; out.ref = hit.Ref_Key; out.name = onecContractLabel(hit); out.by = 'выбран человеком'; return out; }
+    // договор из карты МК больше не действует — не подставляем его молча, спрашиваем заново
+    out.staleChoice = true;
+  }
+  const main = list.filter(onecIsMainContract);
+  if (main.length === 1) { out.matched = true; out.ref = main[0].Ref_Key; out.name = onecContractLabel(main[0]); out.by = 'основной договор'; return out; }
+  if (list.length === 1) { out.matched = true; out.ref = list[0].Ref_Key; out.name = onecContractLabel(list[0]); out.by = 'единственный действующий договор'; return out; }
+  out.needChoice = true;
+  out.choices = list.map(onecContractView);
+  out.reason = `у контрагента ${list.length} действующих договоров «${ONEC_CONTRACT_VID}» и ни один не помечен основным`;
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 //  (задача 3) ЧЕРНОВИК КОНТРАГЕНТА В 1С — та же узкая щель, что у документов.
 //
 //  Создаём ТОЛЬКО когда ИНН у нас заполнен И в 1С по этому ИНН ничего не найдено
@@ -2583,9 +2740,13 @@ async function onecCreateContractorDraft({ name, inn, uid, mk, opNo }) {
     onecLog('SKIP', `контрагент с ИНН ${digits} появился в 1С до записи — дубль не создаём`, { ref: pre.rows[0].Ref_Key });
     return { row: pre.rows[0], created: false };
   }
+  // Группа «Создано порталом» заведена бухгалтерией в корне справочника: свои записи портал
+  // кладёт ТОЛЬКО туда, чтобы их было видно одним взглядом среди 557 существующих карточек.
+  const group = await onecFindGroup('Catalog_Контрагенты', ONEC_CP_GROUP, 'черновиков контрагентов, заводимых порталом');
   const payload = {
     Description: nm.slice(0, 100),          // наименование справочника 1С — 100 символов
     ИНН: digits,
+    Parent_Key: group.Ref_Key,
     Комментарий: onecContractorComment(uid, mk, opNo),
     DeletionMark: false, IsFolder: false,
   };
@@ -2628,7 +2789,12 @@ function onecDecNo(route, coop) {
   const p = (Array.isArray(coop && coop.parts) ? coop.parts : []).map((x) => String(x.name || '').trim()).filter(Boolean);
   return p[0] || '';
 }
-const onecBlankName = (dec) => `Заготовка для ТО, деталь ${dec}`;
+// Наименование полуфабриката. ФОРМАТ ЗАДАН БУХГАЛТЕРИЕЙ, не нами: в 1С уже заведена группа
+// «Полуфабрикаты → Заготовки для ТО» с эталонной позицией «Заготовка для термообработки
+// ПБС.ПЧ0001.01.001-ТО». Прежний шаблон портала («Заготовка для ТО, деталь <№>») не совпадал
+// с фактическим ни одним символом — поиск не находил бы НИЧЕГО. Меняем шаблон у себя,
+// справочник 1С не трогаем.
+const onecBlankName = (dec) => `Заготовка для термообработки ${dec}-ТО`;
 // Кол-во: сумма по деталям блока кооперации.
 // ОТКРЫТЫЙ ВОПРОС: разные детали одного блока схлопываются в ОДНУ строку документа.
 function onecQty(coop) {
@@ -2788,19 +2954,26 @@ function onecBuildProduction({ tpl, nomKey, unitKey, qty, comment }) {
     }],
   };
 }
-function onecBuildTransfer({ tpl, nomKey, qty, contractorKey, comment }) {
+function onecBuildTransfer({ tpl, nomKey, qty, contractorKey, contractKey, comment }) {
   return {
     Date: onecDateNow(),
     Posted: false,                                   // ЧЕРНОВИК — проводит бухгалтер
     ВидОперации: ONEC_DOC.transfer.vid,
+    // Поля «Организация» в форме нет — организация в базе одна («ПБС ООО», проверено чтением).
+    // Передаём её явно: OData формой не ограничен, а явная ссылка защищает от сюрприза, если
+    // в базе когда-нибудь заведут второе юрлицо. Ссылка берётся из образца/справочника, не из кода.
     Организация_Key: tpl.orgKey,
     Ответственный_Key: tpl.responsibleKey,
     // (задача 2) Контрагент попадает сюда ТОЛЬКО из сопоставления по ИНН (onecMatchContractor)
     // или из только что заведённого по ИНН черновика. Подбор по имени сюда не доходит.
     // Нулевой GUID остаётся возможным (ИНН не заполнен / в 1С нет) — но теперь это не молчание:
     // ответ несёт contractorMatch.reason, и он же виден в блоке «1С» карточки МК.
-    // ОТКРЫТЫЙ ВОПРОС: ДоговорКонтрагента_Key — см. отчёт по задаче 3.
     Контрагент_Key: contractorKey || ONEC_ZERO_GUID,
+    // Договор в форме 1С обязателен сразу после выбора контрагента. Портал его НЕ создаёт —
+    // только подставляет уже существующий (правила см. в блоке «ДОГОВОР КОНТРАГЕНТА»).
+    // Нулевой GUID остаётся возможным только в случае (г) «договоров нет вовсе» — и тогда
+    // об этом сказано вслух, а не молча.
+    ДоговорКонтрагента_Key: contractKey || ONEC_ZERO_GUID,
     // (задача 1) Склад, ОТКУДА уходят детали подрядчику. Проверено чтением боевой базы:
     // реквизит у «Передачи товаров» есть и заполнен в 100 из 100 последних документов
     // (95 из них — как раз «Склад производство»), поэтому оставлять его пустым нельзя.
@@ -2864,6 +3037,11 @@ async function onecCoopDraftsLocked(body) {
   const qty = onecQty(coop);
   if (!(qty > 0)) throw onecErr(400, 'В блоке кооперации не указано количество деталей — нечего передавать в 1С.');
   const ctx = { mk, opNo, how, coop, nomName, qty };
+  // Договор, ВЫБРАННЫЙ человеком в ответ на needContract (ветка (в)). В карту МК он ляжет
+  // ТОЛЬКО после проверки, что такой договор реально принадлежит этому контрагенту и
+  // действует, — иначе в блоке кооперации осела бы ссылка «из воздуха» (тот же принцип,
+  // что и с Ref_Key документов: значение пришло от клиента, значит доверять ему нельзя).
+  const pickedContract = onecIsGuid(body && body.contractRef) ? String(body.contractRef).toLowerCase() : '';
 
   // Повторный клик: связка уже есть → ничего не создаём, возвращаем сохранённое.
   // Связка принадлежит ИМЕННО ЭТОЙ операции (её coop-JSON) — чужих номеров тут быть не может.
@@ -2961,23 +3139,65 @@ async function onecCoopDraftsLocked(body) {
     onecMatchContractor(coop),
   ]);
   const warnings = [];
-  if (!nom) warnings.push(`Номенклатура «${nomName}» в 1С отсутствует — её нужно завести в справочнике «Номенклатура» (открытый вопрос: кто заводит).`);
   if (cm.ambiguous) warnings.push(`В 1С ${cm.ambiguous} контрагента с ИНН ${cm.inn} — взят «${cm.onecName}». Дубли в справочнике стоит убрать.`);
 
   // (задача 3) Черновик контрагента: ТОЛЬКО когда ИНН у нас есть, а в 1С по нему пусто.
   // В dry-run ничего не пишем — показываем, что было бы создано (флаг ONEC_DRY_RUN тот же).
   let contractorKey = cm.matched ? cm.ref : null;
   let contractorDraft = null;
-  if (cm.canCreate && dryRun) {
-    contractorDraft = { would: true, created: false, name: cm.name, inn: cm.inn };
+  if (cm.canCreate && dryRun) contractorDraft = { would: true, created: false, name: cm.name, inn: cm.inn };
+  // (задача 3-бис) То же самое для номенклатуры: шаблон имени сменился на фактический,
+  // и для каждой новой детали позиции в 1С ещё нет. Заводим её сами — в отведённую группу,
+  // с реквизитами эталона (см. onecCreateNomenclatureDraft).
+  let nomKey = nom ? nom.Ref_Key : null;
+  let nomUnitKey = nom ? nom.ЕдиницаИзмерения_Key : null;
+  let nomDraft = null;
+  if (!nom && dryRun) nomDraft = { would: true, created: false, name: nomName };
+
+  // ДОГОВОР. Ищем ТОЛЬКО когда контрагент известен: без контрагента договор не у кого искать.
+  // Ветка (в) «несколько договоров, основного нет» — не ошибка данных, а вопрос человеку,
+  // поэтому она не бросает исключение, а доезжает до ответа отдельным признаком needChoice.
+  // Причина «договор не сопоставлен» обязана быть ЧЕСТНОЙ: «контрагента вообще нет» и
+  // «контрагента мы только что завели, договоров у него ещё нет» — разные ситуации, и
+  // бухгалтер по ним делает разное. Поэтому текст зависит от состояния контрагента.
+  const noContractorReason = () => (cm.canCreate
+    ? `контрагент заведён порталом только что — договоров у него в 1С ещё нет`
+    : 'контрагент не сопоставлен — договор искать не у кого');
+  const matchContract = async (ref) => (ref
+    ? onecMatchContract(ref, { ...coop, contractRef: pickedContract || coop.contractRef })
+    : { matched: false, ref: '', name: '', by: '', reason: noContractorReason(), needChoice: false, choices: [] });
+  let ct = await matchContract(contractorKey);
+  let contractKey = ct.matched ? ct.ref : null;
+  // Выбор ПРОВЕРЕН (нашёлся среди действующих договоров этого контрагента) — только теперь
+  // он попадает в блок кооперации, рядом с «дог. №», и дальше подставляется молча.
+  // Запись произойдёт вместе со связкой (onecSaveLink пишет весь coop-JSON целиком),
+  // то есть в dry-run — не произойдёт вовсе, как и обещает флаг.
+  if (pickedContract && ct.matched && ct.by === 'выбран человеком') {
+    coop = { ...coop, contractRef: pickedContract, contractName1C: ct.name };
   }
+  if (ct.staleChoice) warnings.push('Договор, выбранный в этой карте раньше, больше не действует (закрыт, помечен на удаление или истёк срок) — выберите договор заново.');
 
   const comment = onecComment(uid, mk, opNo, coop, dec);
   const buildPayloads = () => ({
-    production: onecBuildProduction({ tpl, nomKey: nom ? nom.Ref_Key : ONEC_ZERO_GUID, unitKey: nom ? nom.ЕдиницаИзмерения_Key : ONEC_ZERO_GUID, qty, comment }),
-    transfer: onecBuildTransfer({ tpl, nomKey: nom ? nom.Ref_Key : ONEC_ZERO_GUID, qty, contractorKey, comment }),
+    production: onecBuildProduction({ tpl, nomKey: nomKey || ONEC_ZERO_GUID, unitKey: nomUnitKey || ONEC_ZERO_GUID, qty, comment }),
+    transfer: onecBuildTransfer({ tpl, nomKey: nomKey || ONEC_ZERO_GUID, qty, contractorKey, contractKey, comment }),
   });
   let payloads = buildPayloads();
+
+  // Сопоставление договора — часть ответа ВСЕГДА, как и сопоставление контрагента.
+  const contractMatch = () => ({
+    matched: ct.matched, ref: contractKey || '', name: ct.name || '', by: ct.by || '',
+    ...(ct.matched ? {} : { reason: ct.reason, needChoice: !!ct.needChoice, choices: ct.choices || [] }),
+  });
+  const contractWarn = () => {
+    if (ct.matched) return '';
+    if (contractorDraft && (contractorDraft.created || contractorDraft.would)) {
+      return `Договор НЕ сопоставлен: контрагент в 1С только что заведён порталом, договоров у него ещё нет. `
+        + `Договор — решение бухгалтерии, портал его не создаёт: бухгалтер заведёт договор и подставит его в «${ONEC_DOC.transfer.title}».`;
+    }
+    return `Договор НЕ сопоставлен: ${ct.reason}. «${ONEC_DOC.transfer.title}» уйдёт БЕЗ договора — подставит бухгалтер. `
+      + 'Портал договоры не создаёт: их реквизиты (вид взаиморасчётов, НДС, сроки оплаты) — бухгалтерское решение.';
+  };
 
   // Сопоставление контрагента — часть ответа ВСЕГДА (и в успехе, и в отказе): «не сопоставлен»
   // с причиной обязано доехать до блока «1С» карточки МК, а не потеряться в молчании.
@@ -2997,25 +3217,53 @@ async function onecCoopDraftsLocked(body) {
       return `Контрагент «${cm.name}» (ИНН ${cm.inn}) в 1С отсутствует — БУДЕТ создан черновиком (наименование + ИНН + метка «Портал ИСМ») и потребует проверки бухгалтером.`;
     }
     if (!cm.matched) {
-      return `Контрагент НЕ сопоставлен: ${cm.reason}. «Передача товаров» уйдёт БЕЗ контрагента — подставит бухгалтер.`
+      return `Контрагент НЕ сопоставлен: ${cm.reason}. «${ONEC_DOC.transfer.title}» уйдёт БЕЗ контрагента — подставит бухгалтер.`
         + (cm.hint ? ` Подсказка: ${cm.hint}.` : '');
     }
     return '';
   };
+  const nomWarn = () => {
+    if (nomDraft && nomDraft.created) {
+      return `Номенклатура «${nomName}» СОЗДАНА в 1С порталом (группа «${ONEC_NOM_GROUP}»): вид номенклатуры, единица, ставка НДС и страна скопированы с эталонной позиции группы. `
+        + 'Запись ТРЕБУЕТ ПРОВЕРКИ бухгалтером, в комментарии стоит метка «Портал ИСМ».';
+    }
+    if (nomDraft && nomDraft.would) {
+      return `Номенклатуры «${nomName}» в 1С нет — она БУДЕТ заведена порталом в группе «${ONEC_NOM_GROUP}» по реквизитам эталонной позиции и потребует проверки бухгалтером.`;
+    }
+    return '';
+  };
+
+  // ── (в) НЕСКОЛЬКО ДОГОВОРОВ, ОСНОВНОГО НЕТ — СПРАШИВАЕМ ЧЕЛОВЕКА ───────────
+  // Документ НЕ создаём: в форме 1С договор обязателен, и «Передачу сырья в переработку»
+  // без него бухгалтер всё равно не проведёт — получился бы мусорный черновик, который
+  // потом надо искать и удалять. Отказ здесь стоит ДО любой записи (никаких документов,
+  // никакого контрагента, никакой номенклатуры), поэтому «отказ = не изменилось ничего».
+  // Выбор делается ОДИН РАЗ и живёт в блоке кооперации (coop.contractRef).
+  if (ct.needChoice) {
+    onecLog('REFUSE', `МК ${mk} оп.${opNo}: у контрагента ${ct.choices.length} действующих договоров — нужен выбор человека`, ct.choices.map((c) => c.name));
+    return {
+      ok: true, created: false, needContract: true, mk, opNo, resolvedBy: how,
+      contractorMatch: contractorMatch(), contractMatch: contractMatch(),
+      contracts: ct.choices,
+      warning: `У контрагента «${cm.onecName || cm.name}» в 1С ${ct.choices.length} действующих договоров вида «${ONEC_CONTRACT_VID}», и ни один не помечен основным. `
+        + `В форме «${ONEC_DOC.transfer.title}» договор обязателен, поэтому портал ничего не создавал: выберите договор — он запомнится в этой карте МК и дальше будет подставляться сам.`,
+    };
+  }
 
   if (dryRun) {
-    const w = contractorWarn(); if (w) warnings.push(w);
-    onecLog('DRY', `МК ${mk} оп.${opNo}: расчёт без записи (ид ${uid}${uidRes.persisted ? '' : ', разовый — в карту не записан'})`, { nomenclature: nomName, qty, nomFound: !!nom, warehouse: tpl.warehouseName, contractorMatched: cm.matched, contractorReason: cm.reason || '', base: tpl.base });
+    for (const w of [contractorWarn(), nomWarn(), contractWarn()]) if (w) warnings.push(w);
+    onecLog('DRY', `МК ${mk} оп.${opNo}: расчёт без записи (ид ${uid}${uidRes.persisted ? '' : ', разовый — в карту не записан'})`, { nomenclature: nomName, qty, nomFound: !!nom, warehouse: tpl.warehouseName, contractorMatched: cm.matched, contractMatched: ct.matched, base: tpl.base });
     return {
       ok: true, dryRun: true, created: false, mk, opNo, resolvedBy: how, uid,
       uidPreview: !uidRes.persisted,   // ид разовый: в карту МК ничего не записано (см. onecEnsureLinkUid)
-      nomenclature: { name: nomName, foundIn1C: !!nom, ref: nom ? nom.Ref_Key : '' },
+      nomenclature: { name: nomName, foundIn1C: !!nom, ref: nom ? nom.Ref_Key : '', ...(nomDraft ? { draft: nomDraft } : {}) },
       qty, contractor: coop.contractor || '', contractorIn1C: cm.matched ? cm.onecName : '',
-      contractorMatch: contractorMatch(),
+      contractorMatch: contractorMatch(), contractMatch: contractMatch(),
       warehouse: { name: tpl.warehouseName, ref: tpl.warehouseKey },   // (задача 1) виден склад, который уйдёт в документ
       organization: tpl.orgName, base: tpl.base,               // (ж) видно, из КАКОЙ базы взяты реквизиты плана
       plan: [
-        ...(contractorDraft ? [{ kind: 'contractor', doc: 'Контрагент (справочник)', entity: 'Catalog_Контрагенты', body: { Description: cm.name, ИНН: cm.inn, Комментарий: onecContractorComment(uid, mk, opNo) } }] : []),
+        ...(nomDraft ? [{ kind: 'nomenclature', doc: `Номенклатура (справочник, группа «${ONEC_NOM_GROUP}»)`, entity: 'Catalog_Номенклатура', body: { Description: nomName, Комментарий: onecNomComment(uid, mk, opNo) } }] : []),
+        ...(contractorDraft ? [{ kind: 'contractor', doc: `Контрагент (справочник, группа «${ONEC_CP_GROUP}»)`, entity: 'Catalog_Контрагенты', body: { Description: cm.name, ИНН: cm.inn, Комментарий: onecContractorComment(uid, mk, opNo) } }] : []),
         { kind: 'production', doc: ONEC_DOC.production.title, vid: ONEC_DOC.production.vid, body: payloads.production },
         { kind: 'transfer', doc: ONEC_DOC.transfer.title, vid: ONEC_DOC.transfer.vid, body: payloads.transfer },
       ],
@@ -3026,35 +3274,57 @@ async function onecCoopDraftsLocked(body) {
   }
 
   // ── боевой режим (флаг снят вручную) ───────────────────────────────────────
-  // Порядок важен: проверка номенклатуры ДО заведения контрагента — иначе прогон, который
-  // всё равно упадёт, оставлял бы в справочнике 1С новую запись.
-  if (!nom) throw onecErr(400, `Номенклатура «${nomName}» не найдена в 1С. Заведите её в справочнике «Номенклатура» — портал справочники не создаёт.`);
+  // Порядок: сначала справочники (номенклатура, контрагент), потом документы. Обе записи
+  // справочников дедуплицированы повторным поиском прямо перед POST, поэтому повторный
+  // прогон после сбоя на документах ничего не задваивает.
+  if (!nom) {
+    const grp = await onecFindGroup('Catalog_Номенклатура', ONEC_NOM_GROUP, 'заготовок под термообработку, заводимых порталом');
+    const etalon = await onecNomEtalon(grp.Ref_Key);
+    const res = await onecCreateNomenclatureDraft({ name: nomName, groupKey: grp.Ref_Key, etalon, uid, mk, opNo });
+    nomKey = res.row.Ref_Key; nomUnitKey = res.row.ЕдиницаИзмерения_Key || etalon.ЕдиницаИзмерения_Key;
+    nomDraft = res.created ? { would: false, created: true, name: nomName, ref: nomKey } : null;
+    payloads = buildPayloads();
+  }
   if (cm.canCreate) {
     const res = await onecCreateContractorDraft({ name: cm.name, inn: cm.inn, uid, mk, opNo });
     contractorKey = res.row.Ref_Key;
     contractorDraft = { would: false, created: res.created, name: cm.name, inn: cm.inn, ref: contractorKey };
     if (!res.created) { cm.matched = true; cm.onecName = res.row.Description || cm.name; cm.ref = contractorKey; contractorDraft = null; }
-    payloads = buildPayloads();          // контрагент появился — пересобираем «Передачу товаров»
+    // Контрагент появился — договор ищем ЗАНОВО, уже у него. Прежний ответ («договор искать
+    // не у кого») к этому моменту устарел, а в карте МК он бы так и остался.
+    ct = await matchContract(contractorKey);
+    contractKey = ct.matched ? ct.ref : null;
+    if (ct.needChoice) {
+      onecLog('REFUSE', `МК ${mk} оп.${opNo}: контрагент подхвачен из 1С, у него ${ct.choices.length} действующих договоров — нужен выбор человека`, ct.choices.map((c) => c.name));
+      return {
+        ok: true, created: false, needContract: true, mk, opNo, resolvedBy: how,
+        contractorMatch: contractorMatch(), contractMatch: contractMatch(), contracts: ct.choices,
+        warning: `У контрагента «${cm.onecName || cm.name}» в 1С ${ct.choices.length} действующих договоров вида «${ONEC_CONTRACT_VID}», и ни один не помечен основным. `
+          + `В форме «${ONEC_DOC.transfer.title}» договор обязателен, поэтому документы не создавались: выберите договор — он запомнится в этой карте МК.`,
+      };
+    }
+    payloads = buildPayloads();          // контрагент появился — пересобираем «Передачу сырья в переработку»
   }
-  { const w = contractorWarn(); if (w) warnings.push(w); }
+  for (const w of [nomWarn(), contractorWarn(), contractWarn()]) if (w) warnings.push(w);
   const created = {};
   created.production = exProd ? onecDocView('production', exProd) : onecDocView('production', await onecCall('POST', `${ONEC_DOC.production.entity}?$format=json`, payloads.production));
   try {
     created.transfer = exTran ? onecDocView('transfer', exTran) : onecDocView('transfer', await onecCall('POST', `${ONEC_DOC.transfer.entity}?$format=json`, payloads.transfer));
   } catch (e) {
     // первый документ уже создан — связку сохраняем, чтобы повтор не задвоил выпуск
-    await onecSaveLink(opId, coop, { uid, ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName, ref: nom.Ref_Key }, qty, production: created.production, transfer: null });
+    await onecSaveLink(opId, coop, { uid, ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName, ref: nomKey }, qty, production: created.production, transfer: null });
     throw e;
   }
   const link = {
-    uid, ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName, ref: nom.Ref_Key }, qty,
+    uid, ts: new Date().toISOString(), mk, opNo, nomenclature: { name: nomName, ref: nomKey }, qty,
     contractor: coop.contractor || '',
     contractorMatch: contractorMatch(),                              // (задача 2) видно в карточке МК и после перезагрузки
+    contractMatch: contractMatch(),                                  // договор: чем закрыт обязательный реквизит формы
     warehouse: { name: tpl.warehouseName, ref: tpl.warehouseKey },   // (задача 1) в какой склад ушёл выпуск
     ...created,
   };
   await onecSaveLink(opId, coop, link);
-  onecLog('CREATE', `МК ${mk} оп.${opNo}: черновики созданы (ид ${uid})`, { production: created.production.number, transfer: created.transfer.number, warehouse: tpl.warehouseName, contractor: cm.matched || (contractorDraft && contractorDraft.created) ? cm.inn : 'НЕ сопоставлен' });
+  onecLog('CREATE', `МК ${mk} оп.${opNo}: черновики созданы (ид ${uid})`, { production: created.production.number, transfer: created.transfer.number, warehouse: tpl.warehouseName, contractor: cm.matched || (contractorDraft && contractorDraft.created) ? cm.inn : 'НЕ сопоставлен', contract: ct.matched ? ct.by : 'НЕ сопоставлен' });
   return { ok: true, created: true, dryRun: false, mk, opNo, resolvedBy: how, ...link, warnings };
 }
 

@@ -11149,7 +11149,16 @@
       const today=new Date().toISOString().slice(0,10);
       const late=o.plan&&String(o.plan).slice(0,10)<today&&!isDone(o.status);
       // Риск срока: открытые НП, связанные с ПЗ (best-effort по ссылке на № ПЗ) + просрочка плана
-      const nc=ctlOfPz((DATA.controls||{}).nonconformity,o.numPz).filter(n=>!/закры|устран|отклон/i.test(String(n.decision||n.status||'')));
+      //  ПОЛЯ ДВА — И СМОТРЕТЬ НАДО В ОБА. Было String(n.decision||n.status||''): «||» отдаёт
+      //  первое НЕПУСТОЕ, а «Решение» у живого НП заполнено почти всегда, поэтому до status
+      //  (сервер выводит его из «Результата проверки»: заполнен → 'закрыто') очередь не
+      //  доходила НИКОГДА. Закрытое НП с решением «Вернуть поставщику» карточка ПЗ показывала
+      //  как открытое. Не всплывало, потому что в демо не было закрытых НП, а в боевой базе
+      //  таблица несоответствий пока пуста; как только её начнут вести — соврало бы постоянно.
+      //  Закрыть НП может любое из двух: статус ИЛИ само решение («Принять с отклонением» —
+      //  отклонение согласовано, риска для срока больше нет).
+      const ncOpen=(n)=>!/закры|устран|отклон/i.test([n.status,n.decision].map(x=>String(x||'')).join(' '));
+      const nc=ctlOfPz((DATA.controls||{}).nonconformity,o.numPz).filter(ncOpen);
       const riskBlock=(late||nc.length)?`<div class="card pad" style="border-left:3px solid var(--red);background:#fef2f2"><b class="c-red">Риск срока</b> <span style="color:#334155">${[late?'план '+esc(fmt(o.plan))+' просрочен':'',nc.length?('открытые НП: '+nc.map(n=>esc(n.num||n.numNp||'НП')).join(', ')):''].filter(Boolean).join(' · ')}</span></div>`:'';
       const routeBtns=(o.routes||[]).map(r=>`<button class="tbtn" data-mk="${esc(r.mk)}">${aico('route',14)} Маршрут ${esc(String(r.mk).replace('МК-',''))}</button>`).join('');
       const tabs=[['pos','Позиции'],['tasks','Задачи'],['ctl','Контроль'],['hist','История']];

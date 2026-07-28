@@ -6467,6 +6467,33 @@
       };
     }
 
+    // ══ K-99: загрузка скана-основания — единая точка отказа ══════════════════════════════
+    // Скан здесь не «приятное дополнение», а основание документа: накладная/сертификат для
+    // акта ВК, файл счёта для счёта (его же сервер дублирует в платёжный портал при отправке
+    // на оплату, см. createPayment→uploadPaymentFile). Раньше обе формы глотали неудачу в
+    // console.warn и проводили документ дальше — человек видел зелёное «проведено», а
+    // основания не было. Теперь три вида отказа приводятся к ОДНОМУ Error:
+    //   1) сеть  — fetch бросает (раньше это единственное и всплывало наверх);
+    //   2) HTTP-ошибка сервера (в т.ч. 501 «только в LIVE-режиме», 400 «Файл не передан»);
+    //   3) ответ 200 без ожидаемого поля scan.
+    // Прерывание безопасно: на ОБЕИХ точках вызова загрузка идёт ДО POST'а, создающего
+    // документ, поэтому в момент отказа документа ещё не существует — терять нечего, форма
+    // остаётся заполненной, кнопка разблокируется в общем catch вызывающей формы.
+    // hint — что делать человеку; он свой у каждой формы (у акта ВК скан можно доложить
+    // позже кнопкой «＋ скан», у счёта такой кнопки нет — см. loadZnzInvoices).
+    async function uploadScanOrFail(url,file,hint){
+      const fd=new FormData(); fd.append('file',file,file.name);
+      const fail=(reason)=>new Error('скан «'+((file&&file.name)||'файл')+'» не загрузился — '+reason+'. '+hint);
+      let ur;
+      try{ ur=await fetch(url,{method:'POST',body:fd}); }
+      catch(e){ throw fail('нет связи с сервером ('+(e.message||e)+')'); }
+      const uj=await ur.json().catch(()=>({}));
+      if(!ur.ok||!uj.scan)throw fail(uj.error||('сервер ответил HTTP '+ur.status));
+      return uj.scan;
+    }
+    const SCAN_HINT_ACC='Приёмка НЕ проведена, акт не создан — ничего не потеряно. Повторите кнопку «Провести приёмку»; если файл не грузится — уберите его («✕ убрать» под зоной файлов) и проведите приёмку без скана, а скан приложите к акту позже кнопкой «＋ скан» в списке актов.';
+    const SCAN_HINT_INV='Счёт НЕ сохранён — ничего не потеряно. Повторите сохранение; если файл не грузится — уберите его («✕ убрать» под зоной файла) и сохраните счёт без скана, но учтите: приложить скан к уже сохранённому счёту в портале нельзя, и при отправке на оплату скан в платёжный портал не уйдёт.';
+
     // ══ К-92 (фаза 2, утв. владельцем): инлайн-форма «Провести приёмку» ══
     // Акт входного контроля Ф.3–Д.1 (один № акта на все отмеченные позиции) + опц. приход
     // принятых позиций категории «Металл» на склад. Позиции — те же данные, что и в секции
@@ -6542,8 +6569,16 @@
       // пишутся вложением в поле «Сканы» каждой созданной строки акта ВК (см. acc-save ниже).
       const drop=document.getElementById('acc-drop'), fileEl=document.getElementById('acc-file'), dropStatus=document.getElementById('acc-drop-status'), ocrListEl=document.getElementById('acc-ocr-list');
       let pickedFiles=[], lastScanTypes=[];
+      // K-99: «✕ убрать» — снять выбранные файлы. Без этого у человека не было способа
+      // отказаться от неотдающегося скана иначе как закрыв форму (и потеряв ввод) — а именно
+      // это предлагает подсказка при отказе загрузки (SCAN_HINT_ACC).
       const showPicked=()=>{
-        dropStatus.textContent=pickedFiles.length?('Файл(ы): '+pickedFiles.map(f=>f.name).join(', ')):'';
+        if(!pickedFiles.length){ dropStatus.textContent=''; return; }
+        dropStatus.innerHTML='Файл(ы): '+esc(pickedFiles.map(f=>f.name).join(', '))
+          +' · <a class="c-blue" id="acc-drop-clear" style="cursor:pointer" title="Снять выбранные файлы (приёмку можно провести без скана)">✕ убрать</a>';
+        const cl=document.getElementById('acc-drop-clear');
+        if(cl)cl.onclick=(e)=>{ e.stopPropagation(); pickedFiles=[]; lastScanTypes=[];
+          try{fileEl.value='';}catch(err){} if(ocrListEl)ocrListEl.innerHTML=''; showPicked(); };
       };
       drop.onclick=()=>fileEl.click();
       fileEl.onchange=()=>{ if(fileEl.files&&fileEl.files.length){pickedFiles=[...fileEl.files];showPicked();runAcceptOcr();} };
@@ -6659,11 +6694,10 @@
           const scans=[];
           if(pickedFiles.length){
             btn.textContent='Загрузка скана…';
+            // K-99: неудача загрузки ПРЕРЫВАЕТ проведение (раньше — console.warn и приёмка
+            // проводилась без основания). Акт ещё не создан — прерывание ничего не теряет.
             for(const f of pickedFiles){
-              const fd=new FormData(); fd.append('file',f,f.name);
-              const ur=await fetch('/api/procurement/znz/accept-upload',{method:'POST',body:fd});
-              const uj=await ur.json().catch(()=>({}));
-              if(ur.ok&&uj.scan)scans.push(...uj.scan); else console.warn('Скан не загружен:',uj.error||ur.status);
+              scans.push(...await uploadScanOrFail('/api/procurement/znz/accept-upload',f,SCAN_HINT_ACC));
             }
             btn.textContent='Проведение…';
           }
@@ -6942,7 +6976,14 @@
         if(!scanUrl){ try{scanUrl=URL.createObjectURL(scanFile);}catch(_){scanUrl=null;} }
         dropStatus.innerHTML='Файл: '+esc(scanFile.name)
           +(scanUrl?` · <a class="c-blue" href="${scanUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Открыть выбранный файл в новой вкладке">👁 открыть ↗</a>`:'')
+          +' · <a class="c-blue" id="iv-drop-clear" style="cursor:pointer" title="Снять выбранный файл (счёт можно сохранить без скана)">✕ убрать</a>'
           +(suffix?' · '+suffix:'');
+        // K-99: способ отказаться от неотдающегося скана, не закрывая форму и не теряя ввод —
+        // ровно то, что предлагает подсказка при отказе загрузки (SCAN_HINT_INV).
+        const cl=document.getElementById('iv-drop-clear');
+        if(cl)cl.onclick=(e)=>{ e.stopPropagation();
+          if(scanUrl){try{URL.revokeObjectURL(scanUrl);}catch(_){} scanUrl=null;}
+          scanFile=null; try{fileEl.value='';}catch(err){} dropStatus.textContent=''; };
       };
       const runOcr=async(file)=>{
         if(scanUrl){try{URL.revokeObjectURL(scanUrl);}catch(_){} scanUrl=null;}
@@ -6992,13 +7033,10 @@
         btn.disabled=true; otherBtn.disabled=true; btn.textContent='Сохранение…';
         try{
           // опциональная загрузка скан-файла (drag-and-drop/клик) → attachment-объект
+          // K-99: неудача загрузки ПРЕРЫВАЕТ сохранение (раньше — console.warn и счёт
+          // сохранялся без скана). Счёт ещё не создан — прерывание ничего не теряет.
           let scan=null;
-          if(scanFile){
-            const fd=new FormData(); fd.append('file',scanFile);
-            const ur=await fetch('/api/procurement/invoices/upload',{method:'POST',body:fd});
-            const uj=await ur.json().catch(()=>({}));
-            if(ur.ok&&uj.scan)scan=uj.scan; else console.warn('Скан не загружен:',uj.error||ur.status);
-          }
+          if(scanFile)scan=await uploadScanOrFail('/api/procurement/invoices/upload',scanFile,SCAN_HINT_INV);
           const amount=v('iv-amt'), date=v('iv-date'), supplier=v('iv-sup'), note=v('iv-note'), inn=v('iv-inn');
           const body={ znzId:r.id, invoiceNo:no, supplier, inn, amount, vatRate:v('iv-vatr'),
             vatAmount:v('iv-vata'), date, payStatus:'Черновик', note, itemIds:collectItemIds() };

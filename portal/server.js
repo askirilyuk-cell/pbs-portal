@@ -1990,7 +1990,8 @@ async function buildProcurementLive() {
     ncListSoft('znz_items'),   // K-86 этап 3: позиции ЗнЗ (degrade-safe — [] до миграции)
     ncListSoft('incoming_control'), // быстрое улучшение 2: акты ВК — для бейджа «приёмка X/Y» (degrade-safe — [])
   ]);
-  const numOrNull = (v) => (v != null && v !== '') ? Number(v) : null;
+  // D-8: как invNumOrNull — нечисловое значение колонки это «значения нет», а не NaN.
+  const numOrNull = (v) => { if (v == null || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
   const invByZnz = invoicesSumByZnz(pinv);   // znzId → { sum, count }
   const itemsByZnz = itemsCountByZnz(pitems); // znzId → число позиций
   const acceptByZnz = znzAcceptProgressMap(preq, pitems, pinc); // znzId → { ordered, accepted } (быстрое улучшение 2)
@@ -2018,7 +2019,7 @@ async function buildProcurementLive() {
     // D-1 (migrate-048): условия платежа для оплат «на всю ЗнЗ» (без счёта);
     // FORWARD-TOLERANT — до APPLY миграции колонок нет → ''/null
     payType: r['Тип оплаты'] || '', expectedPayDate: r['Ожидаемая дата оплаты'] || '',
-    avansPercent: numOrNull(r['Процент аванса']),
+    avansPercent: numOrNull(r['Процент аванса']), portalPayDate: r['Срок оплаты (портал)'] || '',
     // история изменений заявки (переименования и т.п.) — read-only список в карточке
     history: znzHistoryParse(r['История изменений']),
     // «Проверяющий» (правка владельца 22.07, замена согласования) — degrade-safe: колонок может не быть до миграции
@@ -2556,7 +2557,10 @@ async function znzReceived(body, session) {
 // миграции». Аддитивно: реестр/карта/статусы ЗнЗ не затрагиваются.
 const INVOICE_PAY_STATUSES = ['Черновик', 'На согласовании', 'Ожидает оплаты', 'Оплачено', 'Отклонено'];
 const INVOICE_VAT_RATES = ['22%', '20%', '10%', '0%', 'Без НДС']; // K-83: дефолт 22%, если OCR не распознал ставку
-const invNumOrNull = (v) => (v != null && v !== '') ? Number(v) : null;
+// D-8: без isFinite «30 %» из текстовой колонки превращалось в NaN. До UI такой NaN не
+// доезжает (JSON.stringify пишет null — см. portal/test/pay-terms.e2e.mjs), но полагаться
+// на это незачем: мусор в колонке — это «значения нет», а не «значение NaN».
+const invNumOrNull = (v) => { if (v == null || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 // разбор поля «Позиции счёта (Ids)» (LongText JSON-массив id позиций ЗнЗ) в число[]; degrade-safe
 function invoiceItemIdsParse(v) {
   if (v == null || v === '') return [];
@@ -2586,8 +2590,11 @@ function invoiceShape(r) {
     // D-1 (migrate-048): условия платежа поставщику — то, что ушло в платёжный портал.
     // FORWARD-TOLERANT: до APPLY миграции и у старых счетов колонок нет → ''/null,
     // клиент такие поля просто не рисует (никаких «undefined» и пустых подписей).
+    // portalPayDate заполнен ТОЛЬКО при расхождении нашего срока с тем, что сообщает
+    // портал — клиент показывает его отдельной пометкой, чтобы расхождение было видно
+    // в карточке, а не только в тосте, который через пару секунд исчезнет.
     payType: r['Тип оплаты'] || '', expectedPayDate: r['Ожидаемая дата оплаты'] || '',
-    avansPercent: invNumOrNull(r['Процент аванса']),
+    avansPercent: invNumOrNull(r['Процент аванса']), portalPayDate: r['Срок оплаты (портал)'] || '',
   };
 }
 // проверить, что таблица «Счета-К» существует (для дружелюбной ошибки записи)
@@ -3235,80 +3242,229 @@ async function resolveInitiatorEmail(session) {
 // портал и НЕ сохранялись у нас — срок платежа жил только на стороне Смирнова, и
 // расходную часть денежного календаря (K-96) построить было не из чего. Пишем в
 // «Счета-К»/«Заявки ЗнЗ» ровно то, что реально ушло в payload (см. createPayment).
+//
+// ПРАВКА ПО FAIL QA (28.07). Первая редакция доверяла внешнему полю БЕЗУСЛОВНО:
+// дата из ответа платёжного портала писалась в наши колонки без сверки с тем, что
+// уже лежит, и без всякой валидации. Отсюда сразу восемь симптомов — от затирания
+// срока, поправленного человеком, до 422, уносившего вместе с датой ещё и тип с
+// процентом. Здесь чинится КОРЕНЬ, а не симптомы, тремя правилами:
+//
+//   1. «Ожидаемая дата оплаты» — НАША колонка. В неё пишется только то, что ушло
+//      наружу (payload). Ответ портала не пишет в неё НИКОГДА, кроме одного явного
+//      случая: тип оплаты у нас «Постоплата», а даты нет вовсе (бэкофилл старых
+//      счетов). Дата портала, если она расходится с нашей, ложится РЯДОМ —
+//      в «Срок оплаты (портал)», и человек видит расхождение, а не теряет свою правку.
+//   2. Любая дата — и из тела запроса, и из ответа портала — проходит ОДИН и тот же
+//      шлюз payDateCheck: формат, реальный календарь, разумные границы.
+//   3. Поля пишутся так, чтобы одно негодное значение не уносило остальные, а схема
+//      сверяется целиком (тип + словарь SingleSelect), а не «есть колонка/нет колонки».
+//
 const PAY_TYPE_RU = { AVANS: 'Предоплата', POSTOPLATA: 'Постоплата' };
-const PAY_TERM_COLS = ['Тип оплаты', 'Ожидаемая дата оплаты', 'Процент аванса'];
+const PAY_COL_DATE = 'Ожидаемая дата оплаты';       // НАШ срок: только то, что ушло наружу
+const PAY_COL_PORTAL_DATE = 'Срок оплаты (портал)'; // что о сроке говорит портал (при расхождении)
+const PAY_COL_TYPE = 'Тип оплаты';
+const PAY_COL_AVANS = 'Процент аванса';
+const PAY_TERM_COLS = [PAY_COL_TYPE, PAY_COL_DATE, PAY_COL_AVANS, PAY_COL_PORTAL_DATE];
 
-// Какие из колонок условий платежа реально существуют в таблице (null — meta-API
-// недоступен, не гадаем). Живой запрос без кеша: после APPLY migrate-048 портал
-// подхватывает колонки сам, перезапуск не нужен.
-async function payTermColsPresent(key) {
+// Разумные границы срока платежа поставщику, в годах от текущего.
+// Зачем вообще границы: «9999-12-31» и «1900-01-01» — календарно корректные даты,
+// но в расходном календаре (K-96) это не срок платежа, а порча данных. Окно
+// намеренно широкое и привязано к сегодняшнему дню, а не к константе-году.
+const PAY_DATE_PAST_YEARS = 5;
+const PAY_DATE_FUTURE_YEARS = 10;
+
+// ЕДИНСТВЕННЫЙ шлюз для любой даты платежа. Возвращает { date } либо { error }.
+// Пустой вход — это НЕ ошибка: { date: '' } (поле просто не задано).
+//   • формат строго ГГГГ-ММ-ДД (допускается хвост ISO-времени — так NocoDB отдаёт Date);
+//   • календарь настоящий: 2026-02-29 не существует (2026 не високосный) и не пройдёт;
+//   • границы см. выше.
+// ПОЧЕМУ НЕ ПАРСИМ «15.08.2026». Контракта платёжного портала в репозитории нет
+// (docs/INTEGRATION_ISM.md отсутствует), проверить его формат нечем. «05.08.2026»
+// читается и как 5 августа, и как 8 мая — угадав неверно, мы молча испортим срок
+// в денежном календаре. Поэтому чужой формат отвергается ГРОМКО, с показом
+// исходного значения, а не переводится догадкой.
+function payDateCheck(v) {
+  const raw = String(v ?? '').trim();
+  if (!raw) return { date: '' };
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/.exec(raw);
+  if (!m) return { error: `«${raw}» — не дата в формате ГГГГ-ММ-ДД` };
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d)
+    return { error: `даты ${m[1]}-${m[2]}-${m[3]} нет в календаре` };
+  const nowY = new Date().getUTCFullYear();
+  const lo = nowY - PAY_DATE_PAST_YEARS, hi = nowY + PAY_DATE_FUTURE_YEARS;
+  if (y < lo || y > hi) return { error: `дата ${m[1]}-${m[2]}-${m[3]} вне разумных границ (${lo}–${hi})` };
+  return { date: `${m[1]}-${m[2]}-${m[3]}` };
+}
+// Нормализовать дату, УЖЕ лежащую у нас в базе (NocoDB Date отдаёт «ГГГГ-ММ-ДД»
+// либо ISO-время). Мусор в колонке приравниваем к «значения нет»: сравнивать
+// с ним бессмысленно, а чинить чужую порчу опросом статуса — не наше дело.
+const payDateStored = (v) => payDateCheck(v).date || '';
+
+// Схема колонок условий платежа: title → { uidt, options }. null — meta-API
+// недоступен (гадать нельзя, см. savePayTerms). Живой запрос без кеша: после
+// APPLY migrate-048 портал подхватывает колонки сам, перезапуск не нужен.
+// Возвращаем ИМЕННО схему, а не список имён: одного факта «колонка есть» мало —
+// SingleSelect с чужим словарём отвергнет запись 422-м (см. D-4).
+async function payTermCols(key) {
   try {
     const meta = await ncTableMeta(key);
-    const have = new Set((meta.columns || []).map((c) => c.title));
-    return PAY_TERM_COLS.filter((t) => have.has(t));
-  } catch { return null; }
-}
-// Патч колонок условий платежа. terms — то, что ушло в payload: { paymentType (AVANS|
-// POSTOPLATA), expectedPaymentDate, avansPercent }. payment — ответ портала; по контракту
-// (§2/§3 INTEGRATION_ISM) он возвращает expectedPaymentDate, поэтому дату берём ИЗ ОТВЕТА,
-// а отправленное значение — только фолбэк: храним то, что реально стоит у Смирнова.
-// Взаимоисключающие поля гасим явным null — при повторной отправке с другим типом
-// оплаты (постоплата→предоплата) в счёте не должно остаться протухшей даты/процента.
-// Без terms (опрос статуса) — только бэкофилл даты, если портал её вернул: тип и процент
-// в ответе не приходят, и затирать их опросом нельзя.
-function payTermsPatch(terms, payment) {
-  const echoDate = String((payment && payment.expectedPaymentDate) || '').slice(0, 10);
-  if (!terms) return echoDate ? { 'Ожидаемая дата оплаты': echoDate } : {};
-  const type = String(terms.paymentType || '').toUpperCase();
-  const patch = { 'Тип оплаты': PAY_TYPE_RU[type] || null };
-  if (type === 'AVANS') {
-    const ap = Number(terms.avansPercent);
-    patch['Процент аванса'] = Number.isFinite(ap) ? ap : null;
-    patch['Ожидаемая дата оплаты'] = echoDate || null; // предоплата: даты нет (если портал её не вернул)
-  } else {
-    patch['Ожидаемая дата оплаты'] = echoDate || String(terms.expectedPaymentDate || '').slice(0, 10) || null;
-    patch['Процент аванса'] = null;
+    const m = new Map();
+    for (const c of (meta.columns || [])) {
+      if (!PAY_TERM_COLS.includes(c.title)) continue;
+      const opts = ((c.colOptions && c.colOptions.options) || []).map((o) => o.title).filter(Boolean);
+      m.set(c.title, { uidt: c.uidt, options: opts.length ? opts : null });
+    }
+    return m;
+  } catch (e) {
+    console.warn(`D-1: схема таблицы «${key}» недоступна (meta-API): ${e.message}`);
+    return null;
   }
-  return patch;
 }
+
+// Что и почему записать в колонки условий платежа.
+//   current — ТЕКУЩАЯ строка счёта/заявки (то, что уже лежит у нас);
+//   terms   — то, что ушло в payload: { paymentType, expectedPaymentDate, avansPercent };
+//             null/undefined = это ОПРОС статуса, а не отправка;
+//   payment — ответ платёжного портала.
+// Возвращает { patch, warns } — warns обязаны дойти до пользователя, молчать нельзя.
+function payTermsPlan(current, terms, payment) {
+  const cur = current || {};
+  const warns = [];
+  const patch = {};
+  const echo = payDateCheck(payment && payment.expectedPaymentDate);
+  if (echo.error) warns.push(`срок из ответа платёжного портала не принят: ${echo.error}`);
+
+  // «Срок оплаты (портал)» ставим только когда он РАСХОДИТСЯ с нашим сроком —
+  // и только если изменился с прошлого опроса, иначе массовый «⟳ Статусы оплат»
+  // будет каждый раз повторять одно и то же предупреждение ни о чём.
+  const portalWas = payDateStored(cur[PAY_COL_PORTAL_DATE]);
+  const noteDivergence = (ourDate, why) => {
+    if (echo.date && echo.date !== ourDate) {
+      if (echo.date !== portalWas) {
+        patch[PAY_COL_PORTAL_DATE] = echo.date;
+        warns.push(`${why} (портал сообщает ${echo.date}${ourDate ? `, у нас ${ourDate}` : ''}) — наш срок оставлен как есть`);
+      }
+    } else if (portalWas && (!echo.date || echo.date === ourDate)) {
+      patch[PAY_COL_PORTAL_DATE] = null; // расхождение исчезло — снимаем отметку
+    }
+  };
+
+  if (terms) {
+    // ── ОТПРАВКА. Пишем ровно то, что ушло наружу (критерий 1). Взаимоисключающие
+    // поля гасим явным null: при повторной отправке с другим типом оплаты в счёте
+    // не должно остаться протухшей даты/процента.
+    const type = String(terms.paymentType || '').toUpperCase();
+    patch[PAY_COL_TYPE] = PAY_TYPE_RU[type] || null;
+    if (type === 'AVANS') {
+      const ap = Number(terms.avansPercent);
+      patch[PAY_COL_AVANS] = Number.isFinite(ap) ? ap : null;
+      // Критерий 2: у предоплаты срока НЕТ. Что бы ни вернул портал — колонка пуста.
+      patch[PAY_COL_DATE] = null;
+      noteDivergence('', 'по предоплате срок оплаты у нас не хранится');
+    } else {
+      // Дата уже провалидирована в createPayment, но шлюз проходим ещё раз:
+      // savePayTerms обязан быть верным сам по себе, а не «потому что выше проверили».
+      const sent = payDateCheck(terms.expectedPaymentDate);
+      if (sent.error) warns.push(`отправленный срок не сохранён: ${sent.error}`);
+      patch[PAY_COL_DATE] = sent.date || null;
+      patch[PAY_COL_AVANS] = null;
+      noteDivergence(sent.date || '', 'портал вернул другой срок оплаты');
+    }
+    return { patch, warns };
+  }
+
+  // ── ОПРОС СТАТУСА. Тип и процент в ответе не приходят — их не трогаем НИКОГДА.
+  // Нашу дату опрос тоже не трогает: единственное исключение — законный бэкофилл.
+  const storedType = String(cur[PAY_COL_TYPE] || '').trim();
+  const storedDate = payDateStored(cur[PAY_COL_DATE]);
+  if (storedType === PAY_TYPE_RU.AVANS) {
+    // Предоплата: срока быть не должно ни при каком ответе портала (критерий 2).
+    noteDivergence('', 'по предоплате срок оплаты у нас не хранится');
+  } else if (storedDate) {
+    // Срок у нас есть — возможно, человек перенёс его с поставщиком. Ответ портала
+    // его не заменяет НИКОГДА (критерий 7), расхождение уходит в отдельную колонку.
+    noteDivergence(storedDate, 'портал сообщает другой срок оплаты');
+  } else if (storedType === PAY_TYPE_RU.POSTOPLATA && echo.date) {
+    // Пусто у нас + известно, что это постоплата → законный бэкофилл старого счёта.
+    patch[PAY_COL_DATE] = echo.date;
+  } else if (echo.date) {
+    // Пусто у нас и тип оплаты неизвестен. Записав дату, мы получили бы срок без
+    // типа — календарь не отличит аванс от постоплаты (D-7). Не гадаем, но и не молчим.
+    warns.push(`срок из платёжного портала (${echo.date}) не сохранён: у записи не заполнен «Тип оплаты» — срок без типа денежному календарю не годится`);
+    noteDivergence('', 'срок известен только платёжному порталу');
+  }
+  return { patch, warns };
+}
+
 // Записать условия платежа в таблицу key, запись rowId. НИКОГДА не бросает: платёж
 // во внешнем портале уже создан, и потеря записи у нас не должна его «отменять»
 // (тот же degrade-safe контур, что у скана счёта, K-83). Но и молчать нельзя —
 // возвращаем текст предупреждения, он уходит в ответ API и виден пользователю.
-async function savePayTerms(key, rowId, terms, payment) {
-  const patch = payTermsPatch(terms, payment);
+// current — текущая строка (см. payTermsPlan); передаётся вызывающим, лишнего
+// чтения таблицы не делаем.
+async function savePayTerms(key, rowId, current, terms, payment) {
+  const { patch, warns } = payTermsPlan(current, terms, payment);
+  const say = (extra) => {
+    const all = extra ? [...warns, extra] : warns;
+    if (all.length) console.warn(`D-1: ${all.join('; ')} [${key} #${rowId}]`);
+    return all.join('; ');
+  };
   const keys = Object.keys(patch);
-  if (!keys.length) return '';
-  const present = await payTermColsPresent(key);
-  if (present && !present.length) {
-    // Колонок нет вовсе — миграция 048 не применена. Молча слать бесполезно:
-    // NocoDB неизвестные поля в PATCH просто игнорирует, и потеря была бы тихой.
-    const msg = 'условия платежа (срок/тип/аванс) НЕ сохранены: нет колонок migrate-048 — примените миграцию';
-    console.warn(`D-1: ${msg} [${key} #${rowId}]`);
-    return msg;
+  if (!keys.length) return say('');
+
+  const cols = await payTermCols(key);
+  if (cols === null) {
+    // meta-API недоступен. Слепая запись здесь ХУЖЕ отказа: неизвестные поля NocoDB
+    // в PATCH молча игнорирует, и потеря была бы тихой — ровно та дыра, которую
+    // сверка схемы и должна была закрыть. Не пишем и говорим об этом вслух.
+    return say('условия платежа (срок/тип/аванс) НЕ сохранены: схема таблицы недоступна (meta-API), запись вслепую пропала бы молча — повторите позже');
   }
-  const send = present ? Object.fromEntries(keys.filter((k) => present.includes(k)).map((k) => [k, patch[k]])) : patch;
-  const skipped = keys.filter((k) => !(k in send));
+  if (!PAY_TERM_COLS.some((t) => cols.has(t))) {
+    return say('условия платежа (срок/тип/аванс) НЕ сохранены: нет колонок migrate-048 — примените миграцию');
+  }
+
+  // Отсеиваем то, что писать нельзя: нет колонки, либо значение вне словаря
+  // SingleSelect (иначе 422 унёс бы с собой и годные поля).
+  const send = {}; const skipped = [];
+  for (const k of keys) {
+    const col = cols.get(k);
+    if (!col) { skipped.push(k); continue; }
+    const v = patch[k];
+    if (v != null && col.uidt === 'SingleSelect' && col.options && !col.options.includes(String(v))) {
+      warns.push(`«${k}»: значение «${v}» отсутствует в словаре колонки (${col.options.join('|')}) — не сохранено, поправьте словарь в NocoDB`);
+      continue;
+    }
+    send[k] = v;
+  }
+  if (skipped.length) warns.push(`не сохранено (нет колонок migrate-048): ${skipped.join(', ')}`);
+  if (!Object.keys(send).length) return say('');
+
+  // Одним PATCH-ом — быстрый путь. Если он упал, ДОБИВАЕМ ПО ОДНОМУ ПОЛЮ: негодным
+  // может оказаться одно значение, а прежняя редакция теряла из-за него все три
+  // (критерий 8). Повторная запись тех же значений идемпотентна, дублей не будет.
   try {
-    if (Object.keys(send).length) await ncUpdate(key, rowId, send);
+    await ncUpdate(key, rowId, send);
+    return say('');
   } catch (e) {
-    const msg = `условия платежа (срок/тип/аванс) НЕ сохранены: ${e.message}`;
-    console.warn(`D-1: ${msg} [${key} #${rowId}]`);
-    return msg;
+    const failed = [];
+    for (const [k, v] of Object.entries(send)) {
+      try { await ncUpdate(key, rowId, { [k]: v }); }
+      catch (e2) { failed.push(`«${k}» (${e2.message})`); }
+    }
+    if (failed.length) return say(`не сохранено: ${failed.join(', ')}`);
+    return say('');
   }
-  if (skipped.length) {
-    const msg = `частично не сохранено (нет колонок migrate-048): ${skipped.join(', ')}`;
-    console.warn(`D-1: ${msg} [${key} #${rowId}]`);
-    return msg;
-  }
-  return '';
 }
 
 // Сохранить статус оплаты из ответа портала в запись ЗнЗ (поля migrate-046). Best-effort/degrade-safe.
 // Используется только для СТАРЫХ оплат «на всю ЗнЗ» (без invoiceId) — обратная совместимость.
 // terms (D-1, опц.) — условия платежа из payload; отдельным PATCH-ом, чтобы отказ по новым
-// колонкам не утащил за собой сохранение статуса. Возвращает текст предупреждения или ''.
-async function savePaymentToZnz(znzId, payment, terms) {
+// колонкам не утащил за собой сохранение статуса. current (D-1) — текущая строка заявки:
+// без неё нельзя понять, что уже лежит, и ответ портала затирал бы правку человека.
+// Возвращает текст предупреждения или ''.
+async function savePaymentToZnz(znzId, payment, terms, current) {
   if (!payment) return '';
   const patch = {};
   if (payment.id != null) patch['Оплата Id'] = String(payment.id);
@@ -3320,7 +3476,7 @@ async function savePaymentToZnz(znzId, payment, terms) {
     try { await ncUpdate('procurement_requests', znzId, patch); }
     catch (e) { console.warn('K-83: статус оплаты не сохранён в ЗнЗ (колонок может не быть до migrate-046):', e.message); }
   }
-  return savePayTerms('procurement_requests', znzId, terms, payment);
+  return savePayTerms('procurement_requests', znzId, current, terms, payment);
 }
 
 // K-83 этап 2: маппинг статуса payment-portal (PAID/REJECTED/APPROVED/…) в русский статус
@@ -3346,7 +3502,9 @@ function payStatusToInvoiceStatus(status) {
 // колонок ещё нет или NocoDB отверг значение, статус оплаты обязан сохраниться как раньше
 // (регресса быть не должно). Возвращает текст предупреждения или '' — вызывающий обязан
 // довести его до пользователя, но НЕ обязан откатывать платёж: он уже создан снаружи.
-async function savePaymentToInvoice(invoiceId, payment, terms) {
+// current (D-1) — текущая строка счёта. Обязательна и при опросе статуса: без неё
+// не с чем сверять ответ портала, и он затирал бы срок, поправленный человеком.
+async function savePaymentToInvoice(invoiceId, payment, terms, current) {
   if (!payment) return '';
   const patch = {
     'Статус оплаты': payStatusToInvoiceStatus(payment.status),
@@ -3360,7 +3518,7 @@ async function savePaymentToInvoice(invoiceId, payment, terms) {
     warn = `статус оплаты не сохранён в счёте: ${e.message}`;
     console.warn('K-83: статус оплаты не сохранён в счёте (колонок «Оплата …» может ещё не быть):', e.message);
   }
-  const termWarn = await savePayTerms('invoices', invoiceId, terms, payment);
+  const termWarn = await savePayTerms('invoices', invoiceId, current, terms, payment);
   return [warn, termWarn].filter(Boolean).join('; ');
 }
 
@@ -3461,18 +3619,32 @@ async function createPayment(body, session) {
     if (!Number.isFinite(ap) || ap < 1 || ap > 100) throw payErr(400, 'Для предоплаты укажите процент аванса (1..100).');
     payload.avansPercent = ap;
   } else { // POSTOPLATA
-    const d = String(body.expectedPaymentDate || '').slice(0, 10);
-    if (!d) throw payErr(400, 'Для постоплаты укажите ожидаемую дату оплаты.');
-    payload.expectedPaymentDate = d;
+    // D-1/D-5: раньше здесь был голый slice(0,10) — «2026-02-29», «9999-12-31» и
+    // «15.08.2026» уходили наружу и ложились к нам. В браузере это прикрывал
+    // <input type="date">, но API открыт и без браузера. Шлюз один на всё (критерий 9).
+    const chk = payDateCheck(body.expectedPaymentDate);
+    if (chk.error) throw payErr(400, `Ожидаемая дата оплаты: ${chk.error}.`);
+    if (!chk.date) throw payErr(400, 'Для постоплаты укажите ожидаемую дату оплаты.');
+    payload.expectedPaymentDate = chk.date;
   }
-  // опциональные поля (invoiceNumber/invoiceDate — дефолт из счёта, если не пришли в body)
-  if (body.supplyDate) payload.supplyDate = String(body.supplyDate).slice(0, 10);
+  // Опциональные даты payload. Введённая человеком негодная дата — ошибка формы (400):
+  // молча её выбросить значит отправить наружу не то, что человек видел на экране.
+  // Дата, ВЫВЕДЕННАЯ из записи счёта, наоборот, из-за порчи в базе не должна ронять
+  // отправку — такое поле просто не уходит, с записью в лог.
+  const bodyDate = (label, v) => { const c = payDateCheck(v); if (c.error) throw payErr(400, `${label}: ${c.error}.`); return c.date; };
+  const sup = bodyDate('Дата поставки', body.supplyDate); if (sup) payload.supplyDate = sup;
+  const contractDate = bodyDate('Дата договора', body.contractDate); if (contractDate) payload.contractDate = contractDate;
   const invNo = String(body.invoiceNumber || '').trim() || (invoice ? String(invoice['№ счёта'] || '').trim() : '');
   if (invNo) payload.invoiceNumber = invNo;
-  const invDate = body.invoiceDate ? String(body.invoiceDate).slice(0, 10) : (invoice && invoice['Дата счёта'] ? String(invoice['Дата счёта']).slice(0, 10) : '');
+  let invDate = '';
+  if (body.invoiceDate) invDate = bodyDate('Дата счёта', body.invoiceDate);
+  else if (invoice && invoice['Дата счёта']) {
+    const c = payDateCheck(invoice['Дата счёта']);
+    if (c.error) console.warn(`D-1: «Дата счёта» в записи #${invoice.Id ?? invoice.id} не распознана (${c.error}) — в payload не пойдёт`);
+    invDate = c.date || '';
+  }
   if (invDate) payload.invoiceDate = invDate;
   const contractNo = String(body.contractNumber || '').trim(); if (contractNo) payload.contractNumber = contractNo;
-  if (body.contractDate) payload.contractDate = String(body.contractDate).slice(0, 10);
   let desc = String(body.description || '').trim();
   if (!desc && invoice) desc = invDate ? `Оплата по счёту ${invNo || externalRef} от ${invDate}` : `Оплата по счёту ${invNo || externalRef}`;
   if (desc) payload.description = desc;
@@ -3486,7 +3658,7 @@ async function createPayment(body, session) {
   let saveWarning = '';
   let fileAttached = false;
   if (invoice) {
-    saveWarning = await savePaymentToInvoice(invoice.Id ?? invoice.id, payment, terms);
+    saveWarning = await savePaymentToInvoice(invoice.Id ?? invoice.id, payment, terms, invoice);
     // K-83 доп.: владелец просит автоматически дублировать скан счёта в платёжный портал
     // (иначе снабженцу приходится прикладывать его там вручную второй раз) — используем
     // уже готовый 3-фазный механизм uploadPaymentFile. Degrade-safe: не получилось —
@@ -3502,7 +3674,7 @@ async function createPayment(body, session) {
       } catch (e) { console.warn('K-83: скан счёта не передан в платёжный портал (приложите вручную):', e.message); }
     }
   } else {
-    saveWarning = await savePaymentToZnz(znzId, payment, terms);
+    saveWarning = await savePaymentToZnz(znzId, payment, terms, znz);
   }
   // D-1: платёж создан снаружи в любом случае — саму отправку не роняем даже при провале
   // записи к нам. Но и не проглатываем: saveWarning уходит в ответ, клиент показывает его
@@ -3537,25 +3709,36 @@ async function refreshPaymentStatus(znzId, invoiceId) {
   const { data } = await ingestCall('GET', `/payments?externalRef=${encodeURIComponent(externalRef)}&externalSource=ISM`);
   const payments = (data && data.payments) || [];
   const payment = payments[0] || null;
+  // D-1: раньше предупреждение savePaymentToInvoice/savePaymentToZnz здесь ВЫБРАСЫВАЛОСЬ
+  // — провал записи при опросе не видел никто. Теперь оно едет в ответ (saveWarning) и
+  // показывается в тосте: сюда же попадает расхождение сроков с платёжным порталом.
+  let saveWarning = '';
   if (payment) {
-    if (invoice) await savePaymentToInvoice(invoice.Id ?? invoice.id, payment);
-    else await savePaymentToZnz(id, payment);
+    if (invoice) saveWarning = await savePaymentToInvoice(invoice.Id ?? invoice.id, payment, null, invoice);
+    else saveWarning = await savePaymentToZnz(id, payment, null, znz);
   }
-  return { ok: true, count: payments.length, payment };
+  return { ok: true, count: payments.length, payment, ...(saveWarning ? { saveWarning } : {}) };
 }
 
 // K-83 доп. (реестр «Заявки ЗнЗ», кнопка «⟳ Статусы оплат»): массовый опрос платёжного
 // портала по ВСЕМ счетам с уже созданной оплатой («Оплата ExternalRef» заполнен) и
 // нефинальным статусом (не «Оплачено»/«Отклонено» — см. INV_PAY_FINAL на клиенте и
 // payStatusToInvoiceStatus выше). Чанками по 4, чтобы не заддосить портал Алексея.
-// Возвращает { checked, updated, errors } — updated = у скольких счетов статус реально сменился.
+// Возвращает { checked, updated, errors, warnings, warningList } — updated = у скольких
+// счетов статус реально сменился.
+// D-1: раньше предупреждения savePaymentToInvoice здесь ВЫБРАСЫВАЛИСЬ — массовый опрос
+// молча трогал сотню счетов, и ответ {checked, updated, errors} об этом не говорил ничего.
+// Теперь каждое предупреждение подписано номером счёта и уезжает в ответ; список режем,
+// чтобы тост не превратился в простыню (полный набор всегда есть в логе сервера).
+const PAY_WARN_LIST_MAX = 10;
 async function refreshAllInvoicePayments() {
   if (!paymentConfigured()) throw payErr(501, 'Интеграция с оплатой не настроена (нет ключа PAYMENT_INGEST_KEY в «Настройках»).');
-  if (!(await invoicesTableReady())) return { ok: true, checked: 0, updated: 0, errors: 0 };
+  if (!(await invoicesTableReady())) return { ok: true, checked: 0, updated: 0, errors: 0, warnings: 0, warningList: [] };
   const rows = await ncListSoft('invoices');
   const pending = rows.filter((r) => String(r['Оплата ExternalRef'] || '').trim()
     && !['Оплачено', 'Отклонено'].includes(String(r['Статус оплаты'] || '').trim()));
   let updated = 0, errors = 0;
+  const warningList = [];
   const CHUNK = 4;
   for (let i = 0; i < pending.length; i += CHUNK) {
     const results = await Promise.allSettled(pending.slice(i, i + CHUNK).map(async (row) => {
@@ -3564,13 +3747,20 @@ async function refreshAllInvoicePayments() {
       const before = String(row['Статус оплаты'] || '').trim();
       const { data } = await ingestCall('GET', `/payments?externalRef=${encodeURIComponent(externalRef)}&externalSource=ISM`);
       const payment = (data && data.payments && data.payments[0]) || null;
-      if (!payment) return false;
-      await savePaymentToInvoice(id, payment);
-      return payStatusToInvoiceStatus(payment.status) !== before;
+      if (!payment) return { changed: false, warn: '' };
+      const warn = await savePaymentToInvoice(id, payment, null, row);
+      return { changed: payStatusToInvoiceStatus(payment.status) !== before, warn, no: String(row['№ счёта'] || '').trim() || `#${id}` };
     }));
-    for (const r of results) { if (r.status === 'fulfilled') { if (r.value) updated++; } else errors++; }
+    for (const r of results) {
+      if (r.status !== 'fulfilled') { errors++; continue; }
+      if (r.value.changed) updated++;
+      if (r.value.warn) warningList.push(`счёт ${r.value.no}: ${r.value.warn}`);
+    }
   }
-  return { ok: true, checked: pending.length, updated, errors };
+  return {
+    ok: true, checked: pending.length, updated, errors,
+    warnings: warningList.length, warningList: warningList.slice(0, PAY_WARN_LIST_MAX),
+  };
 }
 
 // K-83 этап 1b: mime-тип скана счёта по расширению имени файла (§4 контракта).

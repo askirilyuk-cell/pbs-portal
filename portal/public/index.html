@@ -934,6 +934,20 @@
     const SDOT={'s-done':'green','s-work':'blue','s-queue':'gray','s-hold':'amber','s-plan':'navy'};
     const badge=(s)=>{const c=SDOT[SCLASS[s]||'s-queue']||'gray';return `<span class="st c-${c}"><i class="i-${c}"></i>${esc(s||'—')}</span>`;};
     const pbtn=(type,id,label)=>`<a class="pbtn" href="/api/print/${type}/${encodeURIComponent(id)}" target="_blank" rel="noopener">${aico('print',14)} ${esc(label)}</a>`;
+    // deep-links: общая кнопка «скопировать ссылку» для шапок адресуемых карточек (ПЗ, ЗнЗ,
+    // контрагент, чертёж/проект, акт контроля, ЗП). Копируется ПОЛНЫЙ адрес (origin+путь+hash).
+    // navigator.clipboard требует secure context, а портал живёт и на http://nas-pbs:4173 —
+    // поэтому fallback через невидимый textarea + execCommand('copy').
+    const linkBtn=(hash)=>`<button class="tbtn" data-copylink="${esc(hash)}" title="Скопировать ссылку на эту карточку" style="padding:3px 9px;font-size:13px;line-height:1.4">🔗</button>`;
+    function wireCopyLink(root){
+      (root||document).querySelectorAll('[data-copylink]').forEach(b=>b.onclick=(e)=>{
+        e.stopPropagation();
+        const url=location.origin+location.pathname+location.search+b.dataset.copylink;
+        const ok=()=>toast('Ссылка скопирована','ok');
+        const fb=()=>{ try{ const t=document.createElement('textarea'); t.value=url; t.style.cssText='position:fixed;opacity:0'; document.body.appendChild(t); t.select(); const done=document.execCommand('copy'); t.remove(); done?ok():toast('Скопируйте вручную: '+url,'warn'); }catch{ toast('Скопируйте вручную: '+url,'warn'); } };
+        if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(ok,fb); else fb();
+      });
+    }
     const stripHtml=(s)=>String(s??'').replace(/<[^>]*>/g,'').replace(/&[a-z]+;/g,' ').trim();
     // POST/PATCH JSON: postJson(url,body) или postJson(url,'PATCH',body); кидает ошибку при !ok/error
     const postJson=async(url,a,b)=>{ let method='POST',body=a; if(typeof a==='string'){method=a;body=b;} const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; };
@@ -3216,6 +3230,7 @@
       const nb=document.getElementById('dnew'); if(nb)nb.onclick=()=>openNewProject();
       host.querySelectorAll('.dfold[data-g]').forEach(el=>el.onclick=()=>{dProjGrp=el.dataset.g;try{localStorage.setItem('pbs-dproj-grp',dProjGrp);}catch{} dProj(host);});
       const psel=document.getElementById('dproj-sel'); if(psel)psel.onchange=()=>{designSel=psel.value;try{localStorage.setItem('pbs-dproj-sel',designSel);}catch{} dProj(host);};
+      wireCopyLink(host); // 🔗 в шапке карточки проекта
       bindGoKd();
       if(o){ loadDesignFiles(o.decNo); loadProjRoutes(o.decNo); }
     }
@@ -3368,7 +3383,7 @@
       // Шапка → Карточка проекта → ТЗ → Состав КД → Состав ТД → Изменения (если есть) → Производство → Файлы (полоска, низ)
       return `<div class="card pad"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span style="font-size:17px;font-weight:700;color:var(--navy);line-height:1.2;min-width:0">${esc(o.name)}</span>
           <span class="dnochip" title="Децимальный № проекта">ПБС.${esc(o.decNo)}</span><span class="dstchip" title="Стадия проекта (этап ОКР ${cur} из ${total}${D_STEPS[cur-1]?' · '+esc(D_STEPS[cur-1]):''})">эт. ${cur}/${total}</span>
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${btns}</span></div></div>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${btns}${linkBtn('#design/'+encodeURIComponent(o.decNo))}</span></div></div>
         ${dProjCoverHtml(o,kdOf)}
         <div class="card pad"><div class="sec-h" style="margin-bottom:8px">Карточка проекта</div>
           <div class="dgrid2">${kv('Группа / подгруппа',grpLabel)}${kv('Тип продукции',o.productType)}${kv('Семейство / программа',o.family)}${kv('Инициатор',o.initiator)}${kv('Связь с ПЗ / заказом',o.orderLink)}${kv('Дата открытия',fmt(o.opened))}${o.nas?kv('NAS-папка',o.nas):''}</div></div>
@@ -3883,6 +3898,7 @@
         <div class="row" style="margin-bottom:10px;gap:14px;flex-wrap:wrap">
           <span class="dreg-back" data-back-root style="color:var(--blue);cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:5px">← Чертежи</span>
           ${parentDoc?`<span class="dreg-back" data-back-parent title="Вернуться к карточке родителя, из состава которой открыт этот чертёж" style="color:var(--blue);cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:5px">← ${esc(String((parentRec&&parentRec.docNo)||parentDoc).replace('ПБС.',''))}</span>`:''}
+          <span style="margin-left:auto">${linkBtn('#design/'+encodeURIComponent(k.docNo))}</span>
         </div>
         <div class="dcard-wrap">
           <div class="dcard-pdf">${href?`<iframe src="${esc(href)}" title="Чертёж ${esc(k.docNo)}"></iframe>`:`<div class="dcard-empty">Файл не загружен.<br>Загрузите выпущенный PDF через «⬆ Новая версия» справа.</div>`}</div>
@@ -3917,6 +3933,7 @@
             </div>
           </div>
         </div>`;
+      wireCopyLink(host);
       const backRoot=host.querySelector('[data-back-root]'); if(backRoot)backRoot.onclick=()=>{dRegCard='';dRegCardStack=[];dBody();};
       const backParent=host.querySelector('[data-back-parent]'); if(backParent)backParent.onclick=()=>{dRegCard=dRegCardStack.pop();dBody();};
       const pb=host.querySelector('#dc-prod'); if(pb)pb.onclick=()=>dRegToProd(k.docNo,projDecNo);
@@ -4397,7 +4414,7 @@
       const canDel=SALES&&SALES.mode==='live';
       host.innerHTML=`<div class="card pad" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <button class="tbtn" data-act="back" style="display:inline-flex;align-items:center;gap:6px;font-weight:600">← К реестру</button>
-          <span class="code" style="font-size:19px;color:var(--navy);font-weight:700">${esc(z.numZp)}</span>${zpCell(z.status)}
+          <span class="code" style="font-size:19px;color:var(--navy);font-weight:700">${esc(z.numZp)}</span>${zpCell(z.status)}${linkBtn('#sales/'+encodeURIComponent(z.numZp))}
           <div style="display:flex;flex-direction:column;gap:1px;min-width:0;max-width:100%">
             <span style="font-size:12px;color:var(--sub)">${esc(z.customer||'')}</span>
             ${z.name?`<span style="font-size:14px;color:var(--ink);font-weight:600">${esc(z.name)}</span>`:''}
@@ -4408,6 +4425,7 @@
         </div>`:''}`;
       const back=host.querySelector('[data-act="back"]');
       if(back)back.onclick=()=>{ salesOpenZp=null; try{history.replaceState(null,'','#sales');}catch{} renderSales(document.getElementById('view')); };
+      wireCopyLink(host);
       wireReqCard(z,host);
       const db=host.querySelector('[data-act="del"]'); if(db)db.onclick=()=>delSalesReq(z);
     }
@@ -4838,12 +4856,13 @@
       host.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
           <a href="#counterparties" class="c-blue" style="font-size:13px;text-decoration:none">← Контрагенты</a>
           <span style="font-size:17px;font-weight:700;color:var(--navy)">${esc(c.name)}</span>
-          <span style="display:inline-flex;gap:4px">${cpRoleChips(c.roles)}</span>
+          <span style="display:inline-flex;gap:4px">${cpRoleChips(c.roles)}</span>${linkBtn('#counterparties/'+encodeURIComponent(c.id))}
           <span style="margin-left:auto">${cpCheck(c.checkStatus)}</span>
         </div>
         <div style="display:flex;gap:4px;border-bottom:1px solid var(--bd);margin-bottom:var(--gap)" id="cptabbar">${tabBar}</div>
         <div id="cpcbody"></div>`;
       const back=host.querySelector('[href="#counterparties"]'); if(back)back.onclick=(e)=>{e.preventDefault(); try{history.replaceState(null,'','#counterparties');}catch{} renderCounterparties(host);};
+      wireCopyLink(host);
       host.querySelectorAll('#cptabbar button').forEach(b=>b.onclick=()=>{cpCardTab=b.dataset.tab; renderCpCard(host,d);});
       cpcBody(host,d);
     }
@@ -6506,7 +6525,7 @@
       const acceptHost=canAccept?'<div id="znz-accept-host"></div>':'';
       znzFormOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="znz-back" style="font-size:13px;text-decoration:none;cursor:pointer">← Закупки</a>
-          <span class="code" style="font-size:16px;font-family:monospace">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}
+          <span class="code" style="font-size:16px;font-family:monospace">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${acts.join('')}<button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
         </div>
         ${track}
@@ -6514,6 +6533,7 @@
           ${acceptHost}${reqCard}${itemsCard}${actsCard}${midRow}${invCard}${payCard}${histCard}
         </div>`);
       document.getElementById('znz-back').onclick=znzFormBack;
+      wireCopyLink(host);
       wireInnHints(host);   // K-98: подсказка «без ИНН» у поставщика заказа (счёт/оплата без ИНН не свяжутся с 1С)
       const acceptBtn=document.getElementById('znz-accept-btn'); if(acceptBtn)acceptBtn.onclick=()=>openZnzAcceptFormInline(r);
       // K-86 этап 3: секция «Позиции» (многопозиционная заявка) — асинхронная загрузка (degrade-safe)
@@ -11406,7 +11426,7 @@
       const tabs=[['pos','Позиции'],['tasks','Задачи'],['ctl','Контроль'],['hist','История']];
       host.innerHTML=`
         <div class="card pad" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-size:19px;font-weight:700;color:var(--navy)">${esc(o.numPz)}</span>${stCell(o.status)}
+          <span style="font-size:19px;font-weight:700;color:var(--navy)">${esc(o.numPz)}</span>${stCell(o.status)}${linkBtn('#orders/'+encodeURIComponent(o.numPz))}
           <span style="font-size:12.5px;color:var(--sub)">${esc(o.customer||'')}${o.orderType?' · '+esc(o.orderType):''}</span>
           <button class="x" id="od-x" aria-label="Закрыть" title="Закрыть (Esc)" style="margin-left:auto;background:#eef2f6;border:0;width:26px;height:26px;border-radius:var(--radius);cursor:pointer;color:var(--sub);font-size:14px">✕</button>
         </div>
@@ -11418,6 +11438,7 @@
           <a class="pbtn" href="/api/print/pz/${encodeURIComponent(o.numPz)}" target="_blank" rel="noopener">${aico('print',14)} Печать ПЗ (Ф.1–П.2)</a>
         </div>`;
       const xb=host.querySelector('#od-x'); if(xb)xb.onclick=()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);};
+      wireCopyLink(host);
       host.querySelectorAll('#od-tabs button').forEach(b=>b.onclick=()=>{ordTab=b.dataset.tab;odShowDetail(numPz);});
       host.querySelectorAll('[data-mk]').forEach(b=>b.onclick=()=>{location.hash='#routes/'+encodeURIComponent(b.dataset.mk);});
       odTabBody(o);
@@ -13211,22 +13232,23 @@
       if(show('incoming')){
         const arr=(c.incoming||[]).filter(match).filter(x=>!ctlBad||verdictRejected(x.verdict));
         const head=`<th>№ акта</th><th>Материал</th><th>Заказ / ПЗ</th><th>Дата</th><th>Заключение</th><th></th>`;
-        const body=arr.map(x=>`<tr>${chkTd('incoming',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.material||'')}">${esc(x.material||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap">${dCell(x)}</td><td>${vbadge(x.verdict)}</td><td>${pbtn('control',x.num,'Печать')}</td></tr>`).join('');
-        out+=ctlCard('incoming','Ф.3','Входной контроль',false,['140px',null,'150px','120px','176px','96px'],head,body,776,6);
+        const body=arr.map(x=>`<tr>${chkTd('incoming',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.material||'')}">${esc(x.material||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap">${dCell(x)}</td><td>${vbadge(x.verdict)}</td><td class="nowrap">${pbtn('control',x.num,'Печать')} ${linkBtn('#control/'+encodeURIComponent(x.num))}</td></tr>`).join('');
+        out+=ctlCard('incoming','Ф.3','Входной контроль',false,['140px',null,'150px','120px','176px','136px'],head,body,776,6);
       }
       if(show('acceptance')){
         const arr=(c.acceptance||[]).filter(match).filter(x=>!ctlBad||verdictRejected(x.verdict));
         const head=`<th>№ протокола</th><th>Изделие</th><th>Заказ / ПЗ</th><th>Дата</th><th>Заключение</th><th></th>`;
-        const body=arr.map(x=>`<tr>${chkTd('acceptance',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.product||'')}">${esc(x.product||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap">${dCell(x)}</td><td>${vbadge(x.verdict)}</td><td>${pbtn('control',x.num,'Печать')}</td></tr>`).join('');
-        out+=ctlCard('acceptance','Ф.4','Приёмочный контроль',false,['140px',null,'150px','120px','176px','96px'],head,body,776,6);
+        const body=arr.map(x=>`<tr>${chkTd('acceptance',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.product||'')}">${esc(x.product||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap">${dCell(x)}</td><td>${vbadge(x.verdict)}</td><td class="nowrap">${pbtn('control',x.num,'Печать')} ${linkBtn('#control/'+encodeURIComponent(x.num))}</td></tr>`).join('');
+        out+=ctlCard('acceptance','Ф.4','Приёмочный контроль',false,['140px',null,'150px','120px','176px','136px'],head,body,776,6);
       }
       if(show('nonconformity')){
         const arr=(c.nonconformity||[]).filter(match); // Ф.5 — все несоответствия (брак по определению)
         const head=`<th>№ акта НП</th><th>Изделие / материал</th><th>Заказ / ПЗ</th><th>Решение</th><th>Статус</th><th></th>`;
-        const body=arr.map(x=>`<tr>${chkTd('nonconformity',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.product||'')}">${esc(x.product||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap" title="${esc(x.decision||'')}">${esc(x.decision||'—')}</td><td><span class="badge ${/закр|годен|устран|выполн/i.test(x.status||'')?'b-green':'b-amber'}">${esc(x.status||'в работе')}</span></td><td>${pbtn('control',x.num,'Печать')}</td></tr>`).join('');
-        out+=ctlCard('nonconformity','Ф.5','Несоответствия',true,['140px',null,'150px','180px','120px','96px'],head,body,760,6);
+        const body=arr.map(x=>`<tr>${chkTd('nonconformity',x.id)}<td class="code">${esc(x.num)}</td><td class="name" title="${esc(x.product||'')}">${esc(x.product||'—')}</td><td class="nowrap">${pzCell(x)}</td><td class="nowrap" title="${esc(x.decision||'')}">${esc(x.decision||'—')}</td><td><span class="badge ${/закр|годен|устран|выполн/i.test(x.status||'')?'b-green':'b-amber'}">${esc(x.status||'в работе')}</span></td><td class="nowrap">${pbtn('control',x.num,'Печать')} ${linkBtn('#control/'+encodeURIComponent(x.num))}</td></tr>`).join('');
+        out+=ctlCard('nonconformity','Ф.5','Несоответствия',true,['140px',null,'150px','180px','120px','136px'],head,body,760,6);
       }
       wrap.innerHTML=out||'<div class="card pad" style="color:var(--sub)">Нет записей для выбранного фильтра</div>';
+      wireCopyLink(wrap); // 🔗 у каждого акта — ссылка '#control/<№ акта>'
       // ссылка «Заказ / ПЗ» ведёт в реестр РОВНО на тот заказ, что обещает тултип:
       //  роут '#orders/<№ ПЗ>' → renderOrdersView(arg) → ordSel. Прежняя запись в глобальный
       //  sel не влияла ни на что (единственный читатель — удалённый renderOrders), и реестр

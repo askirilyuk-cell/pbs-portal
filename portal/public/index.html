@@ -1519,7 +1519,7 @@
       else if(v==='equipment')renderEquipment(host,arg);
       else if(v==='tools')renderTools(host,arg);
       else if(v==='metal')renderMetal(host,arg);
-      else if(v==='counterparties')renderCounterparties(host);
+      else if(v==='counterparties')renderCounterparties(host,arg);
       else if(v==='settings')renderSettings(host);
       else if(v==='docs')renderDocs(host);
       else if(!DATA){host.innerHTML='';}
@@ -4206,8 +4206,11 @@
         // контрагента нет в справочнике или ИНН уже заполнен → молчим
         if(!c||String(c.inn||'').trim()){ el.innerHTML=''; return; }
         el.innerHTML=`<a class="nw" title="${esc(INN_WHY+' '+INN_OK)}" style="margin-left:8px;font-size:11px;font-weight:600;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:1px 8px;cursor:pointer;text-decoration:none;vertical-align:middle">без ИНН · указать</a>`;
-        el.firstChild.onclick=(e)=>{ e.preventDefault(); closeModal(); location.hash='#counterparties';
-          setTimeout(()=>openCounterpartyCard(document.getElementById('view'),c.id),60); };
+        // карточка контрагента адресуется хешем — переход без прежнего setTimeout-хака;
+        // хеш уже совпадает (мы на этой карточке) → просто перерисовать её
+        el.firstChild.onclick=(e)=>{ e.preventDefault(); closeModal();
+          const h='#counterparties/'+encodeURIComponent(c.id);
+          if(location.hash===h)openCounterpartyCard(document.getElementById('view'),c.id); else location.hash=h; };
       });
     }
     // K-06 состояния для воронки продаж: ЗП раскладывается в бакет по статусу (5 активных + 2 терминала)
@@ -4614,7 +4617,10 @@
       function renderCpLink(){ const el=document.getElementById('z-cplink'); if(!el)return;
         if(!pickedCp){ el.innerHTML=''; return; }
         el.innerHTML=`<a class="c-blue" id="z-gocp" style="font-size:12px;cursor:pointer;text-decoration:none">Открыть карточку контрагента →</a>`;
-        document.getElementById('z-gocp').onclick=()=>{ const id=pickedCp.id; closeModal(); location.hash='#counterparties'; setTimeout(()=>openCounterpartyCard(document.getElementById('view'),id),60); };
+        // карточка контрагента адресуется хешем — переход без прежнего setTimeout-хака
+        document.getElementById('z-gocp').onclick=()=>{ const id=pickedCp.id; closeModal();
+          const h='#counterparties/'+encodeURIComponent(id);
+          if(location.hash===h)openCounterpartyCard(document.getElementById('view'),id); else location.hash=h; };
       }
       // комбобокс заказчика — при выборе подгружаем его контакты в комбобокс контактного лица
       const newcp=document.getElementById('z-newcp');
@@ -4739,7 +4745,10 @@
     const cpRoleChips=(roles)=>((roles||[]).map(r=>`<span style="font-size:10.5px;font-weight:600;border-radius:3px;padding:2px 7px;white-space:nowrap;${CP_ROLE_STYLE[r]||'color:#64748b;background:#f1f5f9'}">${esc(r)}</span>`).join(' '))||'<span class="c-gray">—</span>';
     // K-41: пусто и «Не проведена» означают одно (проверка не пройдена — так же считается метрика unchecked) → единый вид
     const cpCheck=(s)=>{ const v=String(s||'').trim()||'Не проведена'; const col=/Партнёр/i.test(v)?'#7c3aed':/Пройдена|Пройден/i.test(v)?'var(--green)':/Не\s*провед/i.test(v)?'var(--amber)':'var(--ink)'; return `<span class="nw" style="color:${col}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};margin-right:5px"></span>${esc(v)}</span>`; };
-    async function renderCounterparties(host){
+    async function renderCounterparties(host,arg){
+      // deep-link '#counterparties/<id>' → карточка контрагента сразу (openCounterpartyCard
+      // сам ходит в /api/counterparty — реестр CPS для этого не нужен)
+      if(arg){ openCounterpartyCard(host,arg); return; }
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка справочника контрагентов…</div>';
       if(!CPS){ try{CPS=await (await fetch('/api/counterparties')).json();}catch(e){CPS={mode:'mock',warning:String(e.message||e),counterparties:[],metrics:{}};} }
       const all=(CPS&&CPS.counterparties)||[], m=(CPS&&CPS.metrics)||{};
@@ -4788,6 +4797,8 @@
     }
 
     async function openCounterpartyCard(host,id){
+      // deep-link: карточка контрагента адресуется хешем (по образцу '#orders/<№ ПЗ>')
+      try{history.replaceState(null,'','#counterparties/'+encodeURIComponent(id));}catch{}
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка карточки…</div>';
       let d; try{ d=await (await fetch('/api/counterparty?id='+encodeURIComponent(id))).json(); }catch(e){ host.innerHTML='<div class="card pad c-red">Ошибка: '+esc(e.message)+'</div>'; return; }
       if(!d||!d.contractor){ host.innerHTML='<div class="card pad">Карточка недоступна. <a href="#counterparties">← назад</a></div>'; return; }
@@ -4805,7 +4816,7 @@
         </div>
         <div style="display:flex;gap:4px;border-bottom:1px solid var(--bd);margin-bottom:var(--gap)" id="cptabbar">${tabBar}</div>
         <div id="cpcbody"></div>`;
-      const back=host.querySelector('[href="#counterparties"]'); if(back)back.onclick=(e)=>{e.preventDefault(); renderCounterparties(host);};
+      const back=host.querySelector('[href="#counterparties"]'); if(back)back.onclick=(e)=>{e.preventDefault(); try{history.replaceState(null,'','#counterparties');}catch{} renderCounterparties(host);};
       host.querySelectorAll('#cptabbar button').forEach(b=>b.onclick=()=>{cpCardTab=b.dataset.tab; renderCpCard(host,d);});
       cpcBody(host,d);
     }

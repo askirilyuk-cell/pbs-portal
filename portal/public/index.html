@@ -11465,8 +11465,29 @@
         const ctlBlock=orderCtlBlockHtml(o);
         h.innerHTML=`<div class="card pad">${ctlBlock}${orderCtlNoteHtml(o)}</div>`;
       } else {
+        // «История» = лента событий портала (/api/events, концепт №5): время · кто · что (было→стало).
+        // Пока грузится / если событий нет — прежний фолбэк (o.history для legacy-записей).
         const hist=(o.history||[]);
-        h.innerHTML=`<div class="card pad"><div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px">${hist.length?hist.map(x=>`<div style="display:flex;gap:8px"><span style="color:#5b6b7a;white-space:nowrap">${esc(x.date||'')}</span><span>${esc(x.text||'')}</span></div>`).join(''):'<span class="c-gray">Журнал по ПЗ в реестре не ведётся (движение задач — на производственной доске).</span>'}</div></div>`;
+        const legacy=hist.length?hist.map(x=>`<div style="display:flex;gap:8px"><span style="color:#5b6b7a;white-space:nowrap">${esc(x.date||'')}</span><span>${esc(x.text||'')}</span></div>`).join(''):'';
+        h.innerHTML=`<div class="card pad"><div id="od-events" style="display:flex;flex-direction:column;gap:9px;font-size:12.5px"><span class="c-gray">Загрузка событий…</span></div></div>`;
+        const numPz=o.numPz;
+        fetch('/api/events?obj='+encodeURIComponent('ПЗ')+'&num='+encodeURIComponent(numPz)+'&limit=50').then(r=>r.json()).then(d=>{
+          const host=document.getElementById('od-events'); if(!host||ordTab!=='hist'||ordSel!==numPz)return;
+          const evs=(d&&d.events)||[];
+          const evRow=(e)=>{
+            const when=String(e.when||'').replace('T',' ').slice(0,16);
+            const what=e.type==='статус изменён'?`статус: ${e.from||'—'} → ${e.to||'—'}`
+              :e.type==='создан'?`создан${e.to?' («'+e.to+'»)':''}`
+              :e.type==='вердикт'?`вердикт: ${e.to||'—'}`
+              :(e.type||'событие');
+            return `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:#5b6b7a;white-space:nowrap">${esc(when)}</span><span style="white-space:nowrap;font-weight:600">${esc(e.who||'система')}</span><span>${esc(what)}${e.details?` <span class="c-gray">· ${esc(e.details)}</span>`:''}</span></div>`;
+          };
+          host.innerHTML=evs.length?evs.map(evRow).join('')
+            :(legacy||`<span class="c-gray">Событий по ${esc(numPz)} пока нет${d&&d.warning?' ('+esc(d.warning)+')':' (лента наполняется по мере действий: создание, статусы, вердикты)'}.</span>`);
+        }).catch(()=>{
+          const host=document.getElementById('od-events'); if(!host||ordTab!=='hist')return;
+          host.innerHTML=legacy||'<span class="c-gray">Лента событий недоступна.</span>';
+        });
       }
     }
     // ══ МК-мост п.1+2 (утв. владельцем 22.07): инлайн-мастер «Сформировать МК» ══

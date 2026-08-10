@@ -4011,7 +4011,7 @@ async function nextNumber(key, field, prefix, year) {
   return `${prefix}-${year}-${String(max + 1).padStart(3, '0')}`;
 }
 const nextPzNumber = (year) => nextNumber('orders', '№ ПЗ', 'ПЗ', year);
-async function createOrder(body) {
+async function createOrder(body, who) {
   const opt = (field, val, required, def) => {
     let v = (val == null || val === '') ? (def ?? '') : String(val);
     if (!v) { if (required) throw new Error(`Не задано поле «${field}».`); return undefined; }
@@ -4057,6 +4057,8 @@ async function createOrder(body) {
     posCount = posIds.length;
     if (posIds.length) await ncLinkRecords('orders', 'Позиции', orderId, posIds);
   }
+  logEvent({ type: 'создан', obj: 'ПЗ', objNum: numPz, to: orderRow['Статус'], who,
+    details: `Заказчик: ${customer}; позиций: ${posCount}` });
   return { ok: true, numPz, id: orderId, positions: posCount };
 }
 
@@ -8981,7 +8983,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/orders/create' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Создание ПЗ доступно только в LIVE-режиме: задайте токен NocoDB.' });
-      try { const out = await createOrder(await readBody(req)); return sendJson(res, 200, out); }
+      try { const out = await createOrder(await readBody(req), eventWho(req, svc)); return sendJson(res, 200, out); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/sales/dicts') {
@@ -9557,7 +9559,7 @@ const server = http.createServer(async (req, res) => {
           orderType: 'Клиентский',
           basis: `Внешний КД заказчика${rec.docNo ? ' ' + rec.docNo : ''}`,
           positions: [{ posNum: '1.0', name: rec.name || rec.docNo || 'Изделие', drawing: rec.docNo || '', qty, unit: 'шт' }],
-        });
+        }, eventWho(req, svc));
       } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
       rec.producedPz = out.numPz;
       rec.producedOrderId = out.id;

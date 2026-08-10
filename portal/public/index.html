@@ -1513,7 +1513,7 @@
       else if(v==='logistics')renderLogistics(host,arg);
       else if(v==='sales'){ if(!arg){salesOpenZp=null;salesKpZp=null;} renderSales(host,arg); }
       else if(v==='lov')renderLov(host,arg);
-      else if(v==='purchase')renderProcurement(host);
+      else if(v==='purchase')renderProcurement(host,arg);
       else if(v==='catalog')renderCatalog(host,arg);
       else if(v==='warehouse')renderWarehouse(host,arg);
       else if(v==='equipment')renderEquipment(host,arg);
@@ -5847,16 +5847,17 @@
       //  совпадения с № ПЗ не получалось, клик заканчивался alert-ом вместо перехода.
       //  Теперь заказ ищем тем же хелпером, что и журнал контроля (ctlRefHasPz, граница
       //  токена), и синий «код со стрелкой» рисуем ТОЛЬКО когда переход реально будет.
-      //  Строка ЗнЗ перехода не имеет вовсе (карточка заявки не адресуется хешем) — значит
-      //  и вида ссылки у неё быть не должно: остаётся обычный текст с подсказкой.
+      //  Строка ЗнЗ: карточка заявки теперь адресуется хешем ('#purchase/<№ ЗнЗ>') —
+      //  распознанный номер ведёт прямо на карточку в разделе «Закупки» (data-goznz).
       const posPz=(d)=>{ const s=String(d||''); if(typeof DATA==='undefined'||!DATA)return '';
         const o=(DATA.orders||[]).find(o=>ctlRefHasPz(s,o.numPz)); return o?o.numPz:''; };
       const posDocCell=(p)=>{ const d=String(p.childDoc||'').trim();
         if(!d||d==='—')return '<span class="c-gray">—</span>';
         const pz=posPz(d);
         if(pz)return `<span class="code" style="color:var(--blue);cursor:pointer" data-gopz="${esc(pz)}" title="Открыть заказ ${esc(pz)}">${esc(d)} →</span>`;
-        const hint=p.childType==='znz'?'Заявка на закупку (ДП–К) — карточка открывается в разделе «Закупки»'
-                  :(p.childType==='pz'?'Производственный заказ по этому документу в реестре не найден':'');
+        const znz=/ЗнЗ-\d{4}-[0-9A-Za-zА-Яа-яЁё]+/i.exec(d);
+        if(znz)return `<span class="code" style="color:var(--blue);cursor:pointer" data-goznz="${esc(znz[0])}" title="Открыть заявку ${esc(znz[0])} в разделе «Закупки»">${esc(d)} →</span>`;
+        const hint=p.childType==='pz'?'Производственный заказ по этому документу в реестре не найден':'';
         return `<span class="c-gray"${hint?` title="${esc(hint)}"`:''}>${esc(d)}</span>`; };
       const posRows=(z.positions||[]).map(p=>`<tr>
           <td class="nw" style="color:#5b6b7a">${esc(p.n)}</td>
@@ -5894,6 +5895,7 @@
       //  поэтому ветка с alert-ом «задание появится на доске» ушла: объяснение переехало
       //  в подсказку ячейки, а кликабельного вида без перехода больше не остаётся.
       modal.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if(pz&&(DATA.orders||[]).some(o=>o.numPz===pz)){closeModal();location.hash='#orders/'+encodeURIComponent(pz);}});
+      modal.querySelectorAll('[data-goznz]').forEach(e=>e.onclick=()=>{closeModal();location.hash='#purchase/'+encodeURIComponent(e.dataset.goznz);});
       modal.querySelectorAll('[data-gozp]').forEach(e=>e.onclick=()=>{const zp=e.dataset.gozp;const r=((SALES&&SALES.requests)||[]).find(x=>x.numZp===zp);if(r){closeModal();openReqCard(r);}});
     }
 
@@ -5935,9 +5937,17 @@
     const ropLetter=(s)=>(/^([ABC])/.exec(s.category||'')||[])[1]||'';
     const ropColor=(L)=>L==='A'?'green':L==='B'?'amber':L==='C'?'red':'navy';
 
-    async function renderProcurement(host){
+    async function renderProcurement(host,arg){
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка раздела «Закупки»…</div>';
       if(!PROC){ try{PROC=await (await fetch('/api/procurement')).json();}catch(e){PROC={mode:'mock',warning:String(e.message||e),requests:[],orders:[],suppliers:[],evaluations:[]};} }
+      // deep-link '#purchase/<№ ЗнЗ>' → карточка заявки сразу (адресация как у '#orders/<№ ПЗ>');
+      // заявка не нашлась (номер устарел/опечатка) — падаем в реестр, хеш чистим, чтобы не врал
+      if(arg){
+        const dr=(PROC.requests||[]).find(x=>x.numZnz===arg);
+        if(dr){ openZnzCard(dr); return; }
+        toast('Заявка '+arg+' не найдена в реестре ЗнЗ','warn');
+        try{history.replaceState(null,'','#purchase');}catch{}
+      }
       const live=PROC.mode==='live';
       const tag=srcChip(live, live?((PROC.requests||[]).length+' ЗнЗ · '+(PROC.suppliers||[]).length+' пост.'):(PROC.warning||'нет данных'));
       host.innerHTML=`<div class="filters">
@@ -6115,7 +6125,7 @@
       host.innerHTML=html; try{window.scrollTo(0,0);}catch(e){}
       return host;
     }
-    function znzFormBack(){ renderProcurement(document.getElementById('view')); }
+    function znzFormBack(){ try{history.replaceState(null,'','#purchase');}catch{} renderProcurement(document.getElementById('view')); }
     async function openZnzForm(){
       const today=new Date().toISOString().slice(0,10);
       const G='display:grid;grid-template-columns:repeat(12,1fr);gap:14px';
@@ -6343,6 +6353,9 @@
       // правка владельца 22.07: полоса — без этапа «Согласована». Старые заявки в этом
       // статусе показываем в полосе как «Новая» (реальный статус виден отдельно бейджем
       // в шапке карточки — znzCell(r.status) ниже); следующий шаг для них — «Поиск поставщика».
+      // deep-link: карточка ЗнЗ адресуется хешем — открытие фиксирует '#purchase/<№ ЗнЗ>'
+      // (replaceState, без записи в историю — по образцу '#orders/<№ ПЗ>' в renderOrdersView)
+      try{history.replaceState(null,'','#purchase/'+encodeURIComponent(r.numZnz));}catch{}
       const dispStatus=r.status==='Согласована'?'Новая':r.status;
       const ci=ZNZ_STATUSES_UI.indexOf(dispStatus);
       // K-86: право действия — нужно до сборки reqCard (кнопка-карандаш переименования)
@@ -13118,23 +13131,22 @@
       //  НЕ ссылка (просто текст), чтобы курсор-палец не обещал перехода, которого нет.
       //  БОЕВОЙ СЛУЧАЙ (найден после деплоя): у актов Ф.3 в этом поле стоит номер ЗАЯВКИ НА
       //  ЗАКУПКУ «ЗнЗ-ГГГГ-NNN» — входной контроль по смыслу про ПОСТАВКУ, а не про ПЗ.
-      //  Заказа с таким номером нет и быть не может → ячейка остаётся ОБЫЧНЫМ ТЕКСТОМ.
-      //  Перехода на карточку ЗнЗ тоже не делаем: раздел «Закупки» не адресуется хешем —
-      //  роут '#purchase' аргумент не принимает (renderProcurement(host) без arg), карточку
-      //  открывает только openZnzCard изнутри раздела. Изобретать адресацию тут не место.
-      //  Подсказка объясняет КАЖДЫЙ случай своими словами: раньше на любой нераспознанный
+      //  Карточка ЗнЗ теперь адресуется хешем ('#purchase/<№ ЗнЗ>', renderProcurement(host,arg))
+      //  — распознанный номер заявки ведёт на её карточку (data-goznz), как № ПЗ ведёт на заказ.
+      //  Подсказка объясняет оставшиеся случаи своими словами: раньше на любой нераспознанный
       //  текст висело «Заказ … не найден в реестре» — для ЗнЗ это прямая дезинформация.
       const ctlPzOrder=(ref)=>{ const r=String(ref||'').trim(); if(!r)return '';
         const o=(DATA.orders||[]).find(o=>ctlRefHasPz(r,o.numPz)); return o?o.numPz:''; };
       const CTL_ZNZ_RE=/ЗнЗ-\d{4}-[0-9A-Za-zА-Яа-яЁё]+/i;                 // заявка на закупку (ДП–К)
       const CTL_PZ_RE=/ПЗ-\d{4}-[0-9A-Za-zА-Яа-яЁё]+/i;                   // похоже на № ПЗ, но в реестре не нашлось
-      const ctlNoPzHint=(ref)=>{ const z=CTL_ZNZ_RE.exec(ref); if(z)return z[0]+' — заявка на закупку (раздел «Закупки»), а не производственный заказ';
-        const p=CTL_PZ_RE.exec(ref); if(p)return 'Заказ '+p[0]+' не найден в реестре заказов';
+      const ctlNoPzHint=(ref)=>{ const p=CTL_PZ_RE.exec(ref); if(p)return 'Заказ '+p[0]+' не найден в реестре заказов';
         return 'Номер производственного заказа в этой ссылке не распознан'; };
       const pzCell=(x)=>{ const ref=ctlPzRef(x); if(!ref)return '<span class="muted">—</span>';
         const pz=ctlPzOrder(ref);
-        return pz?`<span class="lnk" data-gopz="${esc(pz)}" style="cursor:pointer" title="Открыть заказ ${esc(pz)}">${esc(ref)}</span>`
-                 :`<span title="${esc(ctlNoPzHint(ref))}">${esc(ref)}</span>`; };
+        if(pz)return `<span class="lnk" data-gopz="${esc(pz)}" style="cursor:pointer" title="Открыть заказ ${esc(pz)}">${esc(ref)}</span>`;
+        const z=CTL_ZNZ_RE.exec(ref);
+        if(z)return `<span class="lnk" data-goznz="${esc(z[0])}" style="cursor:pointer" title="Открыть заявку ${esc(z[0])} в разделе «Закупки»">${esc(ref)}</span>`;
+        return `<span title="${esc(ctlNoPzHint(ref))}">${esc(ref)}</span>`; };
       const dCell=(x)=>x.date?esc(fmt(x.date)):'<span class="muted">—</span>';
       //  бейдж показывает САМ вердикт: свёртка к «годен/брак» скрывала и замечания, и пустой вердикт
       const VB_CLS={reject:'b-red',remark:'b-amber',pass:'b-green',none:'b-gray'};
@@ -13178,6 +13190,7 @@
       //  sel не влияла ни на что (единственный читатель — удалённый renderOrders), и реестр
       //  открывался на ранее выбранном заказе, т.е. на ЧУЖОМ.
       wrap.querySelectorAll('[data-gopz]').forEach(e=>e.onclick=()=>{const pz=e.dataset.gopz;if((DATA.orders||[]).some(o=>o.numPz===pz))location.hash='#orders/'+encodeURIComponent(pz);});
+      wrap.querySelectorAll('[data-goznz]').forEach(e=>e.onclick=()=>{location.hash='#purchase/'+encodeURIComponent(e.dataset.goznz);});
       // выбор + удаление актов контроля (Ф.3/Ф.4/Ф.5)
       const CTL_KEY={incoming:'incoming_control',acceptance:'acceptance_control',nonconformity:'nonconformity'};
       const updCtlDel=(form)=>{const b=wrap.querySelector(`[data-ctldel="${form}"]`);if(b){const n=ctlSel[form].size;b.innerHTML=`${aico('trash',13)} Удалить (${n})`;b.disabled=!n;}};

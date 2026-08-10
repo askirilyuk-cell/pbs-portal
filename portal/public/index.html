@@ -11860,7 +11860,9 @@
             // K-99: сервер сообщил, что скан в акт не попал (нет колонки «Сканы») — говорим вслух,
             // а не молча зелёным «Приёмка проведена» (тот же признак, что и в znzAccept).
             const dropTxt=jj.scansDropped>0?' ⚠ СКАН НЕ ПРИЛОЖЕН к акту (нет колонки «Сканы» — миграция не применена): сохраните файл и приложите позже.':'';
-            toast((jj.done?`Приёмка проведена (акт ${jj.aktNo}) — возврат завершён.`:`Приёмка проведена (акт ${jj.aktNo}).`)+dropTxt, dropTxt?'warn':'ok');
+            // K-90: брак в возврате → сервер автосоздаёт черновик Ф.5 (jj.np) либо объясняет, почему нет (jj.npWarning)
+            const npTxt=jj.np?` Брак оформлен: черновик Ф.5 ${jj.np}.`:(jj.npWarning?' ⚠ '+jj.npWarning:'');
+            toast((jj.done?`Приёмка проведена (акт ${jj.aktNo}) — возврат завершён.`:`Приёмка проведена (акт ${jj.aktNo}).`)+npTxt+dropTxt, (dropTxt||jj.npWarning)?'warn':'ok');
             openRouteCard(host,r.id);
           }catch(e){ toast('Ошибка приёмки: '+(e.message||e),'err'); submitBtn.disabled=false; }
         };
@@ -13033,7 +13035,9 @@
         const btn=document.getElementById('ac-save'); btn.disabled=true; btn.textContent='Создание…';
         try{ const r=await fetch('/api/control/acceptance/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
           const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          toast(`Акт приёмки создан: ${j.num} · ${j.verdict}${j.positionStatus?' · позиция → '+j.positionStatus:''}`,'ok');
+          // K-90: «НЕ ГОДЕН» → сервер автосоздаёт черновик Ф.5 (j.np) либо объясняет, почему нет (j.npWarning)
+          const npTxt=j.np?` · создан черновик Ф.5: ${j.np}`:(j.npWarning?` ⚠ ${j.npWarning}`:'');
+          toast(`Акт приёмки создан: ${j.num} · ${j.verdict}${j.positionStatus?' · позиция → '+j.positionStatus:''}${npTxt}`, j.npWarning?'warn':'ok');
           closeModal(); load();
         }catch(e){ err.textContent=e.message; toast('Акт не создан: '+e.message,'err'); btn.disabled=false; btn.textContent='Создать акт приёмки'; }
       };
@@ -13094,7 +13098,9 @@
         const btn=document.getElementById('in-save'); btn.disabled=true; btn.textContent='Проведение…';
         try{ const r=await fetch('/api/control/incoming/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
           const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          toast(`Акт входного контроля создан: ${j.num} · ${j.verdict}`,'ok');
+          // K-90: «НЕ ГОДЕН» → сервер автосоздаёт черновик Ф.5 (j.np) либо объясняет, почему нет (j.npWarning)
+          const npTxt=j.np?` · создан черновик Ф.5: ${j.np}`:(j.npWarning?` ⚠ ${j.npWarning}`:'');
+          toast(`Акт входного контроля создан: ${j.num} · ${j.verdict}${npTxt}`, j.npWarning?'warn':'ok');
           closeModal(); load();
         }catch(e){ err.textContent=e.message; toast('Акт не создан: '+e.message,'err'); btn.disabled=false; btn.textContent='Провести входной контроль'; }
       };

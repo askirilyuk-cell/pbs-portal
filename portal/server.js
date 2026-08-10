@@ -8322,12 +8322,23 @@ function authRedirectUri(req) {
   }
   return `${proto}://${host}/auth/callback`;
 }
+// deep-links: адрес возврата после входа (?next=…) — ТОЛЬКО внутренний путь/фрагмент
+// ('/', '/#orders/ПЗ-2026-006'). Раньше клиент слал голый hash ('#orders/…'), проверка
+// startsWith('/') его отбрасывала — после входа всегда открывался корень. Теперь клиент
+// шлёт '/'+hash, а здесь: не '/'-путь, protocol-relative '//host' или '/\host' (открытый
+// редирект) → '/'. Не-ASCII/пробелы перекодируются percent-кодом: значение уходит в
+// HTTP-заголовок Location, где сырая кириллица роняет writeHead (ERR_INVALID_CHAR).
+function safeNextPath(next) {
+  const s = String(next || '');
+  if (!/^\/($|[^/\\])/.test(s)) return '/';
+  return s.replace(/[^\x21-\x7e]/g, (ch) => encodeURIComponent(ch));
+}
 async function handleAuth(req, res, p, url) {
   const c = cfg();
   if (p === '/auth/login') {
     if (!c.BX_CLIENT_ID) { res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Вход через Bitrix не настроен (нет client_id в «Настройках»).'); return true; }
     const state = crypto.randomBytes(16).toString('hex');
-    const next = url.searchParams.get('next') || '/';
+    const next = safeNextPath(url.searchParams.get('next') || '/');
     const redirect = authRedirectUri(req);
     setCookie(res, 'pbs_oauth', state + '|' + next, { maxAge: 600 });
     const a = new URL(`https://${c.BX_DOMAIN}/oauth/authorize/`);
@@ -8341,7 +8352,11 @@ async function handleAuth(req, res, p, url) {
   if (p === '/auth/callback') {
     const code = url.searchParams.get('code'), state = url.searchParams.get('state');
     const errParam = url.searchParams.get('error');
-    const [savedState, next = '/'] = (parseCookies(req).pbs_oauth || '').split('|');
+    // next может содержать '#…' с любыми символами — state гарантированно без '|', поэтому
+    // отрезаем ровно первый разделитель, а не деструктурируем (иначе '|' в next обрезал бы хвост)
+    const oauthParts = (parseCookies(req).pbs_oauth || '').split('|');
+    const savedState = oauthParts[0];
+    const next = oauthParts.slice(1).join('|') || '/';
     setCookie(res, 'pbs_oauth', '', { maxAge: 0 });
     const fail = (m) => { console.error('[auth] callback FAIL:', m); res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(`<meta charset=utf-8><body style="font:15px 'Segoe UI';padding:40px;color:#1f3a52"><h3>Не удалось войти</h3><p>${m}</p><p><a href="/">← На главную</a></p>`); return true; };
     console.log(`[auth] callback: host=${req.headers.host || '-'} code=${code ? 'есть' : 'НЕТ'} state=${state ? (state === savedState ? 'ok' : 'MISMATCH') : 'НЕТ'} cookie=${savedState ? 'есть' : 'НЕТ'}${errParam ? ' error=' + errParam : ''}`);
@@ -8370,7 +8385,7 @@ async function handleAuth(req, res, p, url) {
       };
       persistSessions();
       setCookie(res, 'pbs_sid', sid, { maxAge: Math.floor(SESSION_TTL / 1000) });
-      res.writeHead(302, { Location: next.startsWith('/') ? next : '/' }); res.end(); return true;
+      res.writeHead(302, { Location: safeNextPath(next) }); res.end(); return true;
     } catch (e) { return fail('Ошибка обмена с Bitrix: ' + String(e.message || e)); }
   }
   if (p === '/auth/me') {
@@ -8401,7 +8416,7 @@ async function handleAuth(req, res, p, url) {
     persistSessions();
     setCookie(res, 'pbs_sid', sid, { maxAge: Math.floor(SESSION_TTL / 1000) });
     console.log('[auth] админ-обход: выдана сессия Администратора');
-    res.writeHead(302, { Location: next.startsWith('/') ? next : '/' }); res.end(); return true;
+    res.writeHead(302, { Location: safeNextPath(next) }); res.end(); return true;
   }
   return false;
 }

@@ -772,6 +772,12 @@
     .rt-cardh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:10px;display:flex;align-items:center;gap:8px}
     .rt-cardh .rt-rt{margin-left:auto;font-size:10.5px;font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b4}
     @media(max-width:900px){.rt-cols{grid-template-columns:1fr}.rt-g3,.rt-g2{grid-template-columns:1fr}}
+
+    /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
+       Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
+    @media (prefers-reduced-motion: reduce){
+      *,*::before,*::after{transition-duration:0ms!important;animation-duration:0ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;}
+    }
   </style>
 </head>
 <body>

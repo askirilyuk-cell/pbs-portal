@@ -2211,7 +2211,7 @@ async function createZnzRequest(body) {
 // TODO K-86 гейт по роли: отдельной роли «снабжение»/«руководитель» в RBAC пока
 // нет — авторизацию перехода (кто согласует/размещает) добавить при уточнении схемы.
 const ZNZ_STATUS_FLOW = ['Новая', 'Согласована', 'Поиск поставщика', 'Размещена', 'В пути', 'Принята', 'Закрыта'];
-async function updateZnzStatus(body) {
+async function updateZnzStatus(body, who) {
   const idRaw = body.id ?? body.Id;
   if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
   const id = Number(idRaw);
@@ -2234,6 +2234,8 @@ async function updateZnzStatus(body) {
   const skipApproval = (from === 'Новая' && target === 'Поиск поставщика') || (from === 'Поиск поставщика' && target === 'Новая');
   if (Math.abs(ti - ci) !== 1 && !skipApproval) throw new Error(`Переход «${from}» → «${target}» не разрешён: только соседний этап.`);
   await ncUpdate('procurement_requests', id, { 'Статус': target });
+  logEvent({ type: 'статус изменён', obj: 'ЗнЗ', objNum: String(row['№ ЗнЗ'] || '').trim() || `#${id}`,
+    from, to: target, who, details: String(row['Наименование'] || '') });
   return { ok: true, id, from, to: target };
 }
 
@@ -9608,7 +9610,7 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 501, { error: 'Смена статуса доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);
       let out;
-      try { out = await updateZnzStatus(body); }
+      try { out = await updateZnzStatus(body, eventWho(req, svc)); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
       return sendJson(res, 200, out);
     }

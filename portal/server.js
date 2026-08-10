@@ -7098,6 +7098,8 @@ async function metalBlankIssue(body) {
     });
     const release = await releaseMkReserveOnConsumption(ctx.mk, it['Код'], totalKg);
     const summary = await metalBlankIssueSummary(ctx);
+    logEvent({ type: 'комментарий', obj: 'МК', objNum: String(ctx.mk || ''), who: author,
+      details: `выдача заготовки: списано ${totalKg} кг со склада (${mv.code}) на ${decLabel}, деталей: ${partsCount}` });
     return {
       ok: true, movementId: mv.movementId, code: mv.code, qtyKg: totalKg,
       balance: mv.balance, reserved: mv.reserved, available: mv.available,
@@ -7145,6 +7147,8 @@ async function metalBlankIssue(body) {
   } catch (e) { console.warn(`МК ${ctx.mk}: журнал расхода из делового остатка не записан:`, e.message); }
   const release = await releaseMkReserveOnConsumption(ctx.mk, null, totalKg);
   const summary = await metalBlankIssueSummary(ctx);
+  logEvent({ type: 'комментарий', obj: 'МК', objNum: String(ctx.mk || ''), who: author,
+    details: `выдача заготовки: списано ${totalKg} кг из делового остатка ${rec['Код']} на ${decLabel}, деталей: ${partsCount}` });
   return { ok: true, code: rec['Код'], qtyKg: totalKg, remnantClosed: rec['Код'], remnant: newRemnant, releasedReserve: release, ...summary };
 }
 

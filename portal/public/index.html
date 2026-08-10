@@ -7,6 +7,66 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='6'%20fill='%231F4E79'/%3E%3Ctext%20x='16'%20y='23'%20font-family='Segoe%20UI,Arial,sans-serif'%20font-size='20'%20font-weight='700'%20fill='%23ffffff'%20text-anchor='middle'%3E%D0%9F%3C/text%3E%3C/svg%3E" />
   <link rel="mask-icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='6'%20fill='%231F4E79'/%3E%3C/svg%3E" color="#1F4E79" />
   <style>
+    /* ══════════════════════════════════════════════════════════════════════
+       Дизайн-канон (10.08.2026): новый код обязан использовать токены и
+       ui-классы; голый hex/px — дефект приёмки. См. Канон агентов.
+       Блок ниже — только база: существующие экраны эти классы не используют.
+       ══════════════════════════════════════════════════════════════════════ */
+    :root{
+      /* Дизайн-канон 10.08 — новые токены; существующие переменные (--sub, --gray4 и пр.) не трогаем */
+      /* семантические цвета (сведены с фактической палитры V1: navy/blue/green/amber/red/page/bd) */
+      --c-brand:#1F4E79;   /* синий бренда (= --navy) */
+      --c-neutral:#4b5563; /* нейтральный статус/текст (= --gray4) */
+      --c-work:#b45309;    /* «в работе» — янтарный (= --amber) */
+      --c-done:#15803d;    /* «готово» — зелёный (= --green) */
+      --c-problem:#b91c1c; /* «проблема/брак» — красный (= --red) */
+      --c-wait:#2E75B6;    /* «ждёт» — синий (= --blue) */
+      --c-bg:#eef2f6;      /* фон страницы (= --page) */
+      --c-border:#e2e8f0;  /* границы (= --bd/--line) */
+      /* радиусы: s — кнопки/бейджи (ERP-тема V1 = 2px), m — карточки, l — крупные панели */
+      --r-s:2px; --r-m:6px; --r-l:12px;
+      /* тени: 1 — карточка (= существующая --shadow), 2 — приподнятый блок, 3 — модаль/логин */
+      --sh-1:0 1px 2px rgba(15,40,70,.06);
+      --sh-2:0 3px 10px rgba(15,40,70,.08);
+      --sh-3:0 8px 28px rgba(15,40,70,.10);
+      /* шкала отступов 4/8/12/16/24/32 */
+      --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+      /* длительности переходов */
+      --t-fast:120ms; --t-norm:200ms;
+    }
+    /* ── базовые ui-классы канона (пока нигде не используются) ── */
+    /* карточка */
+    .ui-card{background:var(--card,#fff);border:1px solid var(--c-border);border-radius:var(--r-s);box-shadow:var(--sh-1);padding:var(--sp-3) var(--sp-4);}
+    /* бейдж статуса: модификаторы к существующему .st (сам .st ниже по файлу — не трогаем);
+       вид сведён с .badge/.b-* (фон-пастель, цветной текст, тонкая рамка, 2px радиус ERP-темы) */
+    .st--neutral,.st--work,.st--done,.st--problem,.st--wait{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:2px 9px;border:1px solid transparent;border-radius:var(--r-s);white-space:nowrap;}
+    .st--neutral{background:#f3f4f6;color:var(--c-neutral);border-color:#e5e7eb;}
+    .st--work{background:#fffbeb;color:var(--c-work);border-color:#fde68a;}
+    .st--done{background:#ecfdf5;color:var(--c-done);border-color:#a7f3d0;}
+    .st--problem{background:#fef2f2;color:var(--c-problem);border-color:#fecaca;}
+    .st--wait{background:#eff6ff;color:var(--c-wait);border-color:#bfdbfe;}
+    /* кнопка: hover только background/transform/opacity, длительность --t-fast */
+    .ui-btn{font:inherit;font-size:13px;font-weight:600;color:var(--c-brand);background:#fff;border:1px solid var(--c-border);border-radius:var(--r-s);padding:var(--sp-2) var(--sp-3);cursor:pointer;transition:background-color var(--t-fast),transform var(--t-fast),opacity var(--t-fast);}
+    .ui-btn:hover{background:#f1f4f8;}
+    .ui-btn:active{transform:scale(.98);}
+    .ui-btn:disabled{opacity:.55;cursor:default;transform:none;}
+    .ui-btn--primary{color:#fff;background:var(--c-brand);border-color:var(--c-brand);}
+    .ui-btn--primary:hover{background:var(--navy-d,#1a3a5c);}
+    .ui-btn--ghost{background:transparent;border-color:transparent;}
+    .ui-btn--ghost:hover{background:var(--blue50,#eff6ff);}
+    /* спиннер (единственный канонический) */
+    .ui-spin{display:inline-block;width:18px;height:18px;border:2px solid var(--c-border);border-top-color:var(--c-brand);border-radius:50%;animation:ui-spin .8s linear infinite;flex:0 0 auto;vertical-align:middle;}
+    @keyframes ui-spin{to{transform:rotate(360deg)}}
+    /* пустое состояние «причина + действие» — вид эталона emptyState() (Документы ИСМ / Карты наладки) */
+    .ui-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--sp-6) var(--sp-4);color:var(--sub,#475569);line-height:1.5;}
+    .ui-empty .ic{opacity:.4;margin-bottom:var(--sp-2);}
+    .ui-empty .why{font-size:13px;}
+    .ui-empty .sub{font-size:11.5px;opacity:.85;margin-top:2px;}
+    .ui-empty .act{margin-top:var(--sp-3);}
+    /* моноширинный для кодов/децимальных номеров */
+    .ui-mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
+    /* ── конец базы Дизайн-канона (reduced-motion — в самом конце style-блока) ── */
+
     /* Стиль V1 «Классическая» по ДП–Л.1.2. Без внешних зависимостей (§10.1.1). */
     :root{
       --navy:#1F4E79; --navy-d:#1a3a5c; --blue:#2E75B6; --blue50:#eff6ff;
@@ -712,6 +772,12 @@
     .rt-cardh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:10px;display:flex;align-items:center;gap:8px}
     .rt-cardh .rt-rt{margin-left:auto;font-size:10.5px;font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b4}
     @media(max-width:900px){.rt-cols{grid-template-columns:1fr}.rt-g3,.rt-g2{grid-template-columns:1fr}}
+
+    /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
+       Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
+    @media (prefers-reduced-motion: reduce){
+      *,*::before,*::after{transition-duration:0ms!important;animation-duration:0ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;}
+    }
   </style>
 </head>
 <body>

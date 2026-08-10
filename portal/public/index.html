@@ -1527,7 +1527,7 @@
       else if(v==='orders')renderOrdersView(host,arg);
       else if(v==='routes')renderRoutesView(host,arg);
       else if(v==='setup')renderSetupView(host,arg);
-      else if(v==='control')renderControlView(host);
+      else if(v==='control')renderControlView(host,arg);
       else renderBoard(host);
       if(RBAC_ON)applyReadonlyBanner(); // K-49 Шаг3: баннер read-only после отрисовки раздела
       toggle(false); // закрыть мобильное меню при переходе
@@ -12957,7 +12957,10 @@
     // Раздел «Контроль качества» — сводка годен/брак + фильтры + столбцы Заказ/ПЗ и Дата (бриф п.3)
     let ctlForm='all', ctlBad=false, ctlQ='', ctlSelMode=false; // K-10 #4: чекбоксы актов по требованию
     let ctlSel={incoming:new Set(),acceptance:new Set(),nonconformity:new Set()};
-    function renderControlView(host){
+    function renderControlView(host,arg){
+      // deep-link '#control/<№ акта>': у актов нет отдельной карточки — «восстановление» это
+      // журнал, отфильтрованный точным поиском по номеру (акт виден сразу, поиск можно снять)
+      if(arg){ ctlQ=arg; ctlForm='all'; }
       ctlSel={incoming:new Set(),acceptance:new Set(),nonconformity:new Set()};
       const c=DATA.controls||{};
       const inc=c.incoming||[], acc=c.acceptance||[], nc=c.nonconformity||[];
@@ -12993,7 +12996,8 @@
         </div>
         <div id="ctl-blocks" style="display:flex;flex-direction:column;gap:var(--gap)"></div>`;
       const q=document.getElementById('ctl-q');
-      if(q)q.oninput=()=>{ctlQ=q.value;ctlDrawBlocks();};
+      // ручная правка поиска снимает deep-link-адрес акта из хеша (иначе адрес врал бы)
+      if(q)q.oninput=()=>{ctlQ=q.value;if(location.hash.startsWith('#control/'))try{history.replaceState(null,'','#control');}catch{} ctlDrawBlocks();};
       host.querySelectorAll('[data-cf]').forEach(b=>b.onclick=()=>{ctlForm=b.dataset.cf;renderControlView(host);});
       host.querySelectorAll('[data-cbad]').forEach(b=>b.onclick=()=>{ctlBad=!ctlBad;renderControlView(host);});
       host.querySelectorAll('[data-cselmode]').forEach(b=>b.onclick=()=>{ctlSelMode=!ctlSelMode;renderControlView(host);});

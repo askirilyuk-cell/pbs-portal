@@ -1508,7 +1508,7 @@
       document.querySelectorAll('nav a[data-view]').forEach(a=>a.classList.toggle('active',a.dataset.view===v));
       const host=document.getElementById('view');
       if(STUBS[v])renderStub(host,v);
-      else if(v==='design')renderDesign(host);
+      else if(v==='design')renderDesign(host,arg);
       else if(v==='prodgroups')renderProdGroups(host);
       else if(v==='logistics')renderLogistics(host,arg);
       else if(v==='sales'){ if(!arg){salesOpenZp=null;salesKpZp=null;} renderSales(host,arg); }
@@ -3117,14 +3117,30 @@
             <div class="pg-sech" style="margin-top:16px">Продажи</div>${sl||'<div style="color:var(--sub);font-size:12px">—</div>'}
           </div>
         </div></div>`;
-      h.querySelectorAll('[data-open]').forEach(e=>e.onclick=()=>{ designSel=e.dataset.open; location.hash='#design'; });
+      h.querySelectorAll('[data-open]').forEach(e=>e.onclick=()=>{ designSel=e.dataset.open; location.hash='#design/'+encodeURIComponent(e.dataset.open); });
       h.querySelectorAll('[data-nav]').forEach(e=>e.onclick=()=>{ location.hash=e.dataset.nav; });
     }
 
-    async function renderDesign(host){
+    async function renderDesign(host,arg){
       dStyles();
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка раздела «Проектирование»…</div>';
       if(!DESIGN){ try{DESIGN=await (await fetch('/api/design')).json();}catch(e){DESIGN={mode:'mock',warning:String(e.message||e),projects:[],kd:[],td:[],ncprog:[],notices:[]};} }
+      // deep-link '#design/<децим.№>': № проекта (УВ0001) → карточка проекта на табе «Проекты»,
+      // № записи КД (ПБС.ПР0001.01) → фуллскрин-карточка чертежа на табе «Чертежи».
+      // Пространства не пересекаются: проекты — короткий код группы+4 цифры, КД — с точками/«ПБС.».
+      if(arg){
+        const dp=((DESIGN&&DESIGN.projects)||[]).find(p=>p.decNo===arg);
+        if(dp){
+          designTab='proj'; designSel=arg; dRegCard='';
+          if(dProjGrp!=='all'&&dProjGrp!==(dp.grp||'—'))dProjGrp=dp.grp||'all'; // проект обязан быть виден в текущей папке
+          try{localStorage.setItem('pbs-dproj-sel',designSel);localStorage.setItem('pbs-dproj-grp',dProjGrp);}catch{}
+        } else if(((DESIGN&&DESIGN.kd)||[]).some(k=>String(k.docNo)===String(arg))){
+          designTab='kd'; dRegCard=arg; dRegCardStack=[];
+        } else {
+          toast('Проект или чертёж «'+arg+'» не найден в разделе «Проектирование»','warn');
+          try{history.replaceState(null,'','#design');}catch{}
+        }
+      }
       const D=DESIGN;
       const tag=srcChip(D.mode==='live', D.mode==='live'?(D.projects.length+' проектов'):(D.warning||'примеры'));
       host.innerHTML=`<div class="filters">
@@ -3141,7 +3157,17 @@
     // K-? v3 этап A: «Чертежи» — новый дефолтный таб (dReg/dRegGrid), замещает легаси dKd() (Дерево/Реестр внутри
     // вкладки «Чертежи (КД)»); dKd() ниже больше не диспетчеризуется отсюда, оставлена нетронутой (kdPrint/xlsx
     // читают её состояние dKdFilt/dKdView/dKdProj — не удаляем, чтобы не терять эти утилиты для будущего переиспользования).
+    // deep-link: хеш раздела отражает открытый объект — карточку чертежа (таб «Чертежи»)
+    // или выбранный проект (таб «Проекты»); прочее — просто '#design'. replaceState —
+    // без записи в историю, по образцу '#orders/<№ ПЗ>' (renderOrdersView).
+    function designSyncHash(){
+      let h='#design';
+      if(designTab==='kd'&&dRegCard)h='#design/'+encodeURIComponent(dRegCard);
+      else if(designTab==='proj'&&designSel)h='#design/'+encodeURIComponent(designSel);
+      try{history.replaceState(null,'',h);}catch{}
+    }
     function dBody(){const h=document.getElementById('dbody');if(!h)return;
+      designSyncHash();
       if(designTab==='kd')dReg(h);else if(designTab==='td')dTd(h);else if(designTab==='chg')dChg(h);else dProj(h);}
     function bindGoKd(){document.querySelectorAll('[data-gokd]').forEach(b=>b.onclick=()=>{designSel=b.dataset.gokd;dKdProj=b.dataset.gokd;dRegProj=b.dataset.gokd;designTab='kd';
       document.querySelectorAll('#dseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='kd'));dBody();});
@@ -3159,6 +3185,7 @@
       // degrade-guard: данные могут не прийти (401/сеть) — не падаем TypeError
       const projs=((DESIGN&&DESIGN.projects)||[]).slice().sort(dSorters[designSort]||dSorters.dec);
       if(!designSel){ try{designSel=localStorage.getItem('pbs-dproj-sel')||'';}catch{} } // восстановить выбор
+      designSyncHash(); // dProj перерисовывается и напрямую (смена проекта/папки/сортировки) — хеш держим свежим
       const sortOpts=[['dec','Децим. №'],['name','Наименование'],['stage','Этап (дальше → выше)'],['opened','Дата открытия (новые)']].map(s=>`<option value="${s[0]}" ${designSort===s[0]?'selected':''}>${s[1]}</option>`).join('');
       // K-92: продуктовые группы (grp) — папки-вкладки СВЕРХУ; порядок ОК·СП·ПВО·РТИ·БМ·ЦХ
       const byG={}; projs.forEach(p=>{const g=p.grp||'—';(byG[g]||(byG[g]=[])).push(p);});

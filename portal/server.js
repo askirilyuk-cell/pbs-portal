@@ -128,6 +128,7 @@ const KEY2TITLE = {
   dict_sources: 'Источники запросов', dict_req_types: 'Типы запросов', dict_product_lines: 'Продуктовые линейки',
   dict_deal_nature: 'Характер сделки', dict_product_groups: 'Продуктовые группы', dict_product_subgroups: 'Продуктовые подгруппы',
   casing_sizes: 'Типоразмеры колонн', // справочник Ø/стенок колонн (GF/FMT/MAGNA) для конструктора обозначения ПЧ
+  events: 'События',                  // лента событий портала (концепт №5, migrate-047); таблицы может ещё не быть до APPLY
 };
 let _tm = null, _tmKey = '';
 async function tableMap() {
@@ -2210,7 +2211,7 @@ async function createZnzRequest(body) {
 // TODO K-86 гейт по роли: отдельной роли «снабжение»/«руководитель» в RBAC пока
 // нет — авторизацию перехода (кто согласует/размещает) добавить при уточнении схемы.
 const ZNZ_STATUS_FLOW = ['Новая', 'Согласована', 'Поиск поставщика', 'Размещена', 'В пути', 'Принята', 'Закрыта'];
-async function updateZnzStatus(body) {
+async function updateZnzStatus(body, who) {
   const idRaw = body.id ?? body.Id;
   if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
   const id = Number(idRaw);
@@ -2233,6 +2234,8 @@ async function updateZnzStatus(body) {
   const skipApproval = (from === 'Новая' && target === 'Поиск поставщика') || (from === 'Поиск поставщика' && target === 'Новая');
   if (Math.abs(ti - ci) !== 1 && !skipApproval) throw new Error(`Переход «${from}» → «${target}» не разрешён: только соседний этап.`);
   await ncUpdate('procurement_requests', id, { 'Статус': target });
+  logEvent({ type: 'статус изменён', obj: 'ЗнЗ', objNum: String(row['№ ЗнЗ'] || '').trim() || `#${id}`,
+    from, to: target, who, details: String(row['Наименование'] || '') });
   return { ok: true, id, from, to: target };
 }
 
@@ -3936,6 +3939,71 @@ const ORDER_OPTS = {
   'Приоритет': ['Высокий', 'Нормальный', 'Низкий'],
   'Тип задачи': ['Производство', 'Обслуживание', 'Ремонт', 'Подготовка оснастки', 'Прочее'],
 };
+// ── Лента событий портала (концепт №5 «Лента событий как хребет», фаза 1) ────
+//  Единый журнал: кто, когда, что и с каким объектом произошло. Пишется в таблицу
+//  «События» (migrate-047) fire-and-forget: logEvent НИКОГДА не бросает и НЕ ждётся
+//  вызывающим кодом — сбой ленты не должен ломать бизнес-операцию. Таблицы может
+//  ещё не быть (до APPLY миграции) → тихий no-op с ОДНОРАЗОВЫМ warn в консоль.
+//  MOCK-режим (нет токена NocoDB): события живут в памяти процесса (MOCK_EVENTS),
+//  чтобы стенд работал без NocoDB. Держать EVENT_TYPES в синхроне с migrate-047.
+const EVENT_TYPES = ['создан', 'статус изменён', 'файл приложен', 'вердикт', 'просрочка', 'комментарий'];
+const MOCK_EVENTS = [ // mock: новые сверху; ограничен MOCK_EVENTS_MAX. Демо-сид — чтобы
+  // вкладка «История» карточки ПЗ и /api/events были видны на стенде без NocoDB
+  // (write-эндпоинты в mock отдают 501, поэтому живых событий тут не появится).
+  { '№ объекта': 'ПЗ-2026-001', 'Тип события': 'статус изменён', 'Объект': 'ПЗ', 'Было': 'Размещён', 'Стало': 'В работе', 'Кто': 'Иванов И. И.', 'Когда': '2026-05-12 09:14:00', 'Детали': 'Задача ПЗ-2026-001/1 (ТОК-1): работа начата' },
+  { '№ объекта': 'ПЗ-2026-001', 'Тип события': 'создан', 'Объект': 'ПЗ', 'Кто': 'Петрова А. С.', 'Когда': '2026-05-10 08:02:00', 'Детали': 'Заказчик: АО «Энергомаш-Турбо»; позиций: 1' },
+];
+const MOCK_EVENTS_MAX = 500;
+let _eventsWarned = false; // одноразовый warn (нет таблицы/сеть) — не заливать лог
+function eventsWarnOnce(e) {
+  if (_eventsWarned) return;
+  _eventsWarned = true;
+  console.warn('Лента событий: запись недоступна (таблицы «События» может не быть до APPLY migrate-047) — события не пишутся:', String((e && e.message) || e));
+}
+// ФИО автора события: сессия портала → X-Actor сервисного агента → пусто (система)
+const eventWho = (req, svc) => (req && req.session && req.session.fio) || (svc && svc.actor) || '';
+// logEvent({type, obj, objNum, from, to, who, details, role}) — мягкий, не бросает, не ждёт.
+function logEvent({ type, obj, objNum, from, to, who, details, role } = {}) {
+  try {
+    const row = {
+      '№ объекта': String(objNum || '').trim(),
+      'Тип события': EVENT_TYPES.includes(type) ? type : 'комментарий',
+      'Объект': String(obj || '').trim(),
+      'Когда': new Date().toISOString().replace('T', ' ').slice(0, 19),
+    };
+    const put = (col, v) => { const s = String(v == null ? '' : v).trim(); if (s) row[col] = s; };
+    put('Было', from); put('Стало', to); put('Кто', who); put('Детали', details); put('Роль-адресат', role);
+    if (!isLive()) { // mock: в память, чтобы /api/events и вкладка «История» работали без NocoDB
+      MOCK_EVENTS.unshift(row);
+      if (MOCK_EVENTS.length > MOCK_EVENTS_MAX) MOCK_EVENTS.length = MOCK_EVENTS_MAX;
+      return;
+    }
+    ncCreateMany('events', [row]).catch(eventsWarnOnce); // fire-and-forget
+  } catch (e) { eventsWarnOnce(e); }
+}
+// нормализованный вид события для API/UI (LIVE-строка NocoDB и mock-строка идентичны по колонкам)
+function eventShape(r) {
+  return {
+    type: r['Тип события'] || '', obj: r['Объект'] || '', num: r['№ объекта'] || '',
+    from: r['Было'] || '', to: r['Стало'] || '', who: r['Кто'] || '',
+    when: r['Когда'] || '', details: r['Детали'] || '', role: r['Роль-адресат'] || '',
+  };
+}
+// последние события (общая лента или по объекту): новые сверху, мягко к отсутствию таблицы
+async function buildEvents({ obj, num, limit }) {
+  const lim = Math.max(1, Math.min(1000, Number(limit) || 100));
+  const flt = (list) => list
+    .filter((r) => (!obj || String(r['Объект'] || '').trim() === obj) && (!num || String(r['№ объекта'] || '').trim() === num));
+  if (!isLive()) return { mode: 'mock', events: flt(MOCK_EVENTS).slice(0, lim).map(eventShape) };
+  try {
+    const rows = await ncList('events');
+    rows.sort((a, b) => String(b['Когда'] || '').localeCompare(String(a['Когда'] || '')) || ((b.Id ?? b.id ?? 0) - (a.Id ?? a.id ?? 0)));
+    return { mode: 'live', events: flt(rows).slice(0, lim).map(eventShape) };
+  } catch (e) { // таблицы ещё нет (до APPLY migrate-047) / сеть — мягко: пусто с warning
+    return { mode: 'live', events: [], warning: 'Лента событий недоступна: ' + String(e.message || e) };
+  }
+}
+
 // следующий номер ПРЕФИКС-ГГГГ-NNN для года (раздельный счётчик; нечисловые серии игнорируются)
 async function nextNumber(key, field, prefix, year) {
   const rows = await ncListSoft(key);
@@ -3945,7 +4013,7 @@ async function nextNumber(key, field, prefix, year) {
   return `${prefix}-${year}-${String(max + 1).padStart(3, '0')}`;
 }
 const nextPzNumber = (year) => nextNumber('orders', '№ ПЗ', 'ПЗ', year);
-async function createOrder(body) {
+async function createOrder(body, who) {
   const opt = (field, val, required, def) => {
     let v = (val == null || val === '') ? (def ?? '') : String(val);
     if (!v) { if (required) throw new Error(`Не задано поле «${field}».`); return undefined; }
@@ -3991,11 +4059,13 @@ async function createOrder(body) {
     posCount = posIds.length;
     if (posIds.length) await ncLinkRecords('orders', 'Позиции', orderId, posIds);
   }
+  logEvent({ type: 'создан', obj: 'ПЗ', objNum: numPz, to: orderRow['Статус'], who,
+    details: `Заказчик: ${customer}; позиций: ${posCount}` });
   return { ok: true, numPz, id: orderId, positions: posCount };
 }
 
 // --- создание запроса продаж ЗП (Ф.1–З.1, этап регистрации 5.1) --------------
-async function createSalesRequest(body) {
+async function createSalesRequest(body, who) {
   const customer = String(body.customer || '').trim();
   if (!customer) throw new Error('Не указан заказчик.');
   const name = String(body.name || '').trim();
@@ -4032,6 +4102,8 @@ async function createSalesRequest(body) {
   // создать на NAS папку запроса + 6 подпапок этапов (если задан путь к записям)
   let folderCreated = false;
   if (cfg().RECORDS) { try { folderCreated = !!createSalesFolderTree(numZp); } catch {} }
+  logEvent({ type: 'создан', obj: 'ЗП', objNum: numZp, to: row['Статус'], who: who || row['Принял запрос'] || '',
+    details: `${customer} · ${name}` });
   return { ok: true, numZp, id: c.Id ?? c.id, folderCreated };
 }
 
@@ -4064,7 +4136,7 @@ async function updateSalesRequest(body, svc) {
 // --- создание заказа продаж ЗКЗ из принятого запроса (Ф.1–З.1 §5.4, D4) --------
 // K-33: ЛОВ не гейт. Остаётся Г3 (согласование КП заказчиком, §5.4).
 // Идемпотентно: если заказ уже связан — ошибка, не дубль.
-async function createOrderFromSalesRequest(body) {
+async function createOrderFromSalesRequest(body, who) {
   const zp = String(body.zp || '').trim();
   if (!zp) throw new Error('Не указан № запроса (ЗП).');
   const requests = await ncListSoft('sales_requests');
@@ -4116,6 +4188,8 @@ async function createOrderFromSalesRequest(body) {
   // связь ЗП→ЗКЗ + продвижение статуса запроса; не роняем создание, если побочные записи не прошли
   try { await ncLinkRecords('sales_requests', 'Заказ (ЗКЗ)', idOfRow(reqRow), [orderId]); } catch (e) { console.warn('ЗКЗ: связь ЗП→заказ не создана:', e.message); }
   try { await ncUpdate('sales_requests', idOfRow(reqRow), { 'Статус': 'Принят (→ЗКЗ)' }); } catch (e) { console.warn('ЗКЗ: статус ЗП не обновлён:', e.message); }
+  logEvent({ type: 'создан', obj: 'ЗКЗ', objNum: numZkz, to: orderRow['Статус'], who,
+    details: `из запроса ${zp} · ${orderRow['Заказчик'] || ''}` });
   return { ok: true, numZkz, id: orderId };
 }
 
@@ -5002,7 +5076,12 @@ async function syncPzStatusForTask(taskId) {
   if (!order) return null;
   const sib = tasks.filter((x) => String(x['№ задачи'] || '').startsWith(numPz));
   const want = derivePzStatus(sib.map((x) => x['Статус']), order['Статус']);
-  if (want && want !== order['Статус']) { await ncUpdate('orders', order.Id ?? order.id, { 'Статус': want }); return want; }
+  if (want && want !== order['Статус']) {
+    await ncUpdate('orders', order.Id ?? order.id, { 'Статус': want });
+    logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: numPz, from: order['Статус'] || '', to: want,
+      who: 'система', details: `авто-агрегация статуса ПЗ по задачам (триггер: ${t['№ задачи'] || 'задача #' + taskId})` });
+    return want;
+  }
   return order['Статус'];
 }
 
@@ -5203,6 +5282,8 @@ async function otkAutoNonconformity({ sourceAkt, stage, product, orderRef, qty, 
     const npId = rec.Id ?? rec.id;
     if (orderId != null) { try { await ncLinkRecords('orders', 'Несоответствия', orderId, [npId]); } catch (e) { console.warn('Ф.5: связь заказ→НП не создана:', e.message); } }
     if (taskId != null) { try { await ncLinkRecords('tasks', 'Несоответствия (по задаче)', taskId, [npId]); } catch (e) { console.warn('Ф.5: связь задача→НП не создана:', e.message); } }
+    logEvent({ type: 'создан', obj: 'Акт', objNum: npNum, who: foundBy,
+      details: `черновик акта несоответствия Ф.5 (авто по ${sourceAkt}, вердикт НЕ ГОДЕН)${orderRef ? ' · ' + orderRef : ''}` });
     return { np: npNum, npId };
   } catch (e) {
     console.warn(`Ф.5: черновик НП по акту ${sourceAkt} не создан:`, e.message);
@@ -5269,6 +5350,8 @@ async function createAcceptance(body) {
     });
     np = auto.np || null; npWarning = auto.npWarning;
   }
+  logEvent({ type: 'вердикт', obj: 'Акт', objNum: num, to: verdict, who: controller,
+    details: `Ф.4 приёмочный контроль: ${product || pz || (positionId ? 'позиция #' + positionId : '')}${pz ? ' · ' + pz : ''}` });
   return {
     ok: true, num, id, verdict, linked, positionStatus, np, npWarning,
     hint: verdict === 'НЕ ГОДЕН'
@@ -5334,6 +5417,8 @@ async function createIncoming(body) {
     });
     np = auto.np || null; npWarning = auto.npWarning;
   }
+  logEvent({ type: 'вердикт', obj: 'Акт', objNum: num, to: verdict, who: controller,
+    details: `Ф.3 входной контроль: ${material}${body.supplier ? ' · поставщик ' + String(body.supplier).trim() : ''}` });
   return {
     ok: true, num, id, verdict, linked, accepted: whAccepted(verdict), np, npWarning,
     hint: verdict === 'НЕ ГОДЕН'
@@ -7013,6 +7098,8 @@ async function metalBlankIssue(body) {
     });
     const release = await releaseMkReserveOnConsumption(ctx.mk, it['Код'], totalKg);
     const summary = await metalBlankIssueSummary(ctx);
+    logEvent({ type: 'комментарий', obj: 'МК', objNum: String(ctx.mk || ''), who: author,
+      details: `выдача заготовки: списано ${totalKg} кг со склада (${mv.code}) на ${decLabel}, деталей: ${partsCount}` });
     return {
       ok: true, movementId: mv.movementId, code: mv.code, qtyKg: totalKg,
       balance: mv.balance, reserved: mv.reserved, available: mv.available,
@@ -7060,6 +7147,8 @@ async function metalBlankIssue(body) {
   } catch (e) { console.warn(`МК ${ctx.mk}: журнал расхода из делового остатка не записан:`, e.message); }
   const release = await releaseMkReserveOnConsumption(ctx.mk, null, totalKg);
   const summary = await metalBlankIssueSummary(ctx);
+  logEvent({ type: 'комментарий', obj: 'МК', objNum: String(ctx.mk || ''), who: author,
+    details: `выдача заготовки: списано ${totalKg} кг из делового остатка ${rec['Код']} на ${decLabel}, деталей: ${partsCount}` });
   return { ok: true, code: rec['Код'], qtyKg: totalKg, remnantClosed: rec['Код'], remnant: newRemnant, releasedReserve: release, ...summary };
 }
 
@@ -8907,9 +8996,15 @@ const server = http.createServer(async (req, res) => {
       try { await ncDeleteMany(key, [id]); return sendJson(res, 200, { ok: true }); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
+    // лента событий (концепт №5): общая или по объекту — ?obj=ПЗ&num=ПЗ-2026-006&limit=50
+    if (p === '/api/events' && req.method === 'GET') {
+      const obj = String(url.searchParams.get('obj') || '').trim();
+      const num = String(url.searchParams.get('num') || '').trim();
+      return sendJson(res, 200, await buildEvents({ obj, num, limit: url.searchParams.get('limit') }));
+    }
     if (p === '/api/orders/create' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Создание ПЗ доступно только в LIVE-режиме: задайте токен NocoDB.' });
-      try { const out = await createOrder(await readBody(req)); return sendJson(res, 200, out); }
+      try { const out = await createOrder(await readBody(req), eventWho(req, svc)); return sendJson(res, 200, out); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/sales/dicts') {
@@ -8935,7 +9030,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const body = await readBody(req);
         if (svc?.actor) { body.acceptedBy = body.acceptedBy || svc.actor; body.owner = body.owner || svc.actor; } // авторство агента → «Принял запрос»/«Ответственный»
-        const out = await createSalesRequest(body); return sendJson(res, 200, out);
+        const out = await createSalesRequest(body, eventWho(req, svc)); return sendJson(res, 200, out);
       }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
@@ -8946,7 +9041,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/sales/order/create' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Создание заказа (ЗКЗ) доступно только в LIVE-режиме: задайте токен NocoDB.' });
-      try { return sendJson(res, 200, await createOrderFromSalesRequest(await readBody(req))); }
+      try { return sendJson(res, 200, await createOrderFromSalesRequest(await readBody(req), eventWho(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // --- конструктор КП (K-05, ДП–З.1 §5.3) --------------------------------
@@ -9485,7 +9580,7 @@ const server = http.createServer(async (req, res) => {
           orderType: 'Клиентский',
           basis: `Внешний КД заказчика${rec.docNo ? ' ' + rec.docNo : ''}`,
           positions: [{ posNum: '1.0', name: rec.name || rec.docNo || 'Изделие', drawing: rec.docNo || '', qty, unit: 'шт' }],
-        });
+        }, eventWho(req, svc));
       } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
       rec.producedPz = out.numPz;
       rec.producedOrderId = out.id;
@@ -9529,7 +9624,7 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 501, { error: 'Смена статуса доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);
       let out;
-      try { out = await updateZnzStatus(body); }
+      try { out = await updateZnzStatus(body, eventWho(req, svc)); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
       return sendJson(res, 200, out);
     }
@@ -10161,10 +10256,21 @@ const server = http.createServer(async (req, res) => {
       const params = Array.isArray(body.params) ? body.params.filter((p) => p && p.pid != null) : [];
       if (!Object.keys(patch).length && !params.length) return sendJson(res, 400, { error: 'Нет полей для изменения.' });
       try {
+        // лента событий: старый статус задачи нужен ДО записи (best-effort, не гейт)
+        let evTask = null;
+        if (patch['Статус']) { try { evTask = (await ncListSoft('tasks')).find((x) => String(x.Id ?? x.id) === String(body.id)) || null; } catch { /* soft */ } }
         if (Object.keys(patch).length) await ncUpdate('tasks', body.id, patch);
         // DEF-04: при смене статуса задачи — идемпотентно пересчитать статус ПЗ (best-effort,
         // не влияет на успех сохранения задачи; на доске статус в любом случае выводится на лету).
-        if (patch['Статус']) { try { await syncPzStatusForTask(body.id); } catch (e) { console.warn('DEF-04: пересчёт статуса ПЗ не удался:', e.message); } }
+        if (patch['Статус']) {
+          const numTask = evTask ? String(evTask['№ задачи'] || '') : '';
+          const fromSt = evTask ? String(evTask['Статус'] || '') : '';
+          if (numTask && fromSt !== patch['Статус']) {
+            logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: numTask.split('/')[0], from: fromSt, to: patch['Статус'],
+              who: eventWho(req, svc), details: `Задача ${numTask}` });
+          }
+          try { await syncPzStatusForTask(body.id); } catch (e) { console.warn('DEF-04: пересчёт статуса ПЗ не удался:', e.message); }
+        }
         // рабочий правит только ФАКТ (норматив/допуск — план, не трогаем); опц. вердикт
         await ncUpdateMany('task_param_values', params.map((p) => {
           const row = { Id: p.pid, 'Факт': p.value == null ? '' : String(p.value) };

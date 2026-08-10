@@ -5070,7 +5070,12 @@ async function syncPzStatusForTask(taskId) {
   if (!order) return null;
   const sib = tasks.filter((x) => String(x['№ задачи'] || '').startsWith(numPz));
   const want = derivePzStatus(sib.map((x) => x['Статус']), order['Статус']);
-  if (want && want !== order['Статус']) { await ncUpdate('orders', order.Id ?? order.id, { 'Статус': want }); return want; }
+  if (want && want !== order['Статус']) {
+    await ncUpdate('orders', order.Id ?? order.id, { 'Статус': want });
+    logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: numPz, from: order['Статус'] || '', to: want,
+      who: 'система', details: `авто-агрегация статуса ПЗ по задачам (триггер: ${t['№ задачи'] || 'задача #' + taskId})` });
+    return want;
+  }
   return order['Статус'];
 }
 
@@ -10235,10 +10240,21 @@ const server = http.createServer(async (req, res) => {
       const params = Array.isArray(body.params) ? body.params.filter((p) => p && p.pid != null) : [];
       if (!Object.keys(patch).length && !params.length) return sendJson(res, 400, { error: 'Нет полей для изменения.' });
       try {
+        // лента событий: старый статус задачи нужен ДО записи (best-effort, не гейт)
+        let evTask = null;
+        if (patch['Статус']) { try { evTask = (await ncListSoft('tasks')).find((x) => String(x.Id ?? x.id) === String(body.id)) || null; } catch { /* soft */ } }
         if (Object.keys(patch).length) await ncUpdate('tasks', body.id, patch);
         // DEF-04: при смене статуса задачи — идемпотентно пересчитать статус ПЗ (best-effort,
         // не влияет на успех сохранения задачи; на доске статус в любом случае выводится на лету).
-        if (patch['Статус']) { try { await syncPzStatusForTask(body.id); } catch (e) { console.warn('DEF-04: пересчёт статуса ПЗ не удался:', e.message); } }
+        if (patch['Статус']) {
+          const numTask = evTask ? String(evTask['№ задачи'] || '') : '';
+          const fromSt = evTask ? String(evTask['Статус'] || '') : '';
+          if (numTask && fromSt !== patch['Статус']) {
+            logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: numTask.split('/')[0], from: fromSt, to: patch['Статус'],
+              who: eventWho(req, svc), details: `Задача ${numTask}` });
+          }
+          try { await syncPzStatusForTask(body.id); } catch (e) { console.warn('DEF-04: пересчёт статуса ПЗ не удался:', e.message); }
+        }
         // рабочий правит только ФАКТ (норматив/допуск — план, не трогаем); опц. вердикт
         await ncUpdateMany('task_param_values', params.map((p) => {
           const row = { Id: p.pid, 'Факт': p.value == null ? '' : String(p.value) };

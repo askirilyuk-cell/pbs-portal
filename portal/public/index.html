@@ -814,6 +814,17 @@
     // заказ уже отгружен/закрыт/отменён — в очереди «К отгрузке» ему не место
     //  («Выполнен» СЮДА НЕ ВХОДИТ: именно он и ждёт отгрузки)
     const orderShipped=(s)=>s===ORDER_ST.SHIPPED||s===ORDER_ST.CLOSED||s===ORDER_ST.CANCELLED;
+    // Рельс потока (идея №3): зеркало сервера PZ_TRANSITIONS ← server.js. Рисуем в
+    //  карточке ПЗ ТОЛЬКО допустимые из текущего статуса кнопки; истина — на сервере
+    //  (/api/orders/status), недопустимый переход он всё равно отобьёт с 400.
+    const PZ_FLOW={'Размещён':['В работе','Отменён'],
+                   'В работе':['Приостановлен','Выполнен','Отменён'],
+                   'Приостановлен':['В работе','Отменён'],
+                   'Выполнен':['Отгружен','В работе'], // «В работе» — возврат при доработке
+                   'Отгружен':['Закрыт'],
+                   'Закрыт':[],'Отменён':[]};
+    // необратимые переходы — перед отправкой спрашиваем инлайн («точно?»), не confirm()
+    const PZ_FLOW_CONFIRM=new Set(['Отменён','Закрыт']);
 
     const SCLASS={"Выполнено":"s-done","В работе":"s-work","В очереди":"s-queue","Приостановлено":"s-hold","Размещён":"s-plan","Отгружен":"s-plan","Закрыт":"s-queue",
                   // формы языка ПЗ — без них у заказа была серая точка «нет данных»
@@ -11427,6 +11438,7 @@
       host.innerHTML=`
         <div class="card pad" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:19px;font-weight:700;color:var(--navy)">${esc(o.numPz)}</span>${stCell(o.status)}${linkBtn('#orders/'+encodeURIComponent(o.numPz))}
+          <span id="od-flow" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap"></span>
           <span style="font-size:12.5px;color:var(--sub)">${esc(o.customer||'')}${o.orderType?' · '+esc(o.orderType):''}</span>
           <button class="x" id="od-x" aria-label="Закрыть" title="Закрыть (Esc)" style="margin-left:auto;background:#eef2f6;border:0;width:26px;height:26px;border-radius:var(--radius);cursor:pointer;color:var(--sub);font-size:14px">✕</button>
         </div>
@@ -11439,9 +11451,45 @@
         </div>`;
       const xb=host.querySelector('#od-x'); if(xb)xb.onclick=()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);};
       wireCopyLink(host);
+      odWireFlow(host,o);
       host.querySelectorAll('#od-tabs button').forEach(b=>b.onclick=()=>{ordTab=b.dataset.tab;odShowDetail(numPz);});
       host.querySelectorAll('[data-mk]').forEach(b=>b.onclick=()=>{location.hash='#routes/'+encodeURIComponent(b.dataset.mk);});
       odTabBody(o);
+    }
+    // Рельс потока (идея №3): кнопки допустимых переходов статуса в шапке карточки ПЗ.
+    //  Показываем ТОЛЬКО разрешённые из текущего статуса (PZ_FLOW — зеркало сервера);
+    //  терминальные («Закрыт»/«Отменён») кнопок не дают. Необратимые переходы —
+    //  инлайн-подтверждение «точно? [Да][Нет]» на месте кнопок, БЕЗ confirm()/модалок.
+    //  Warning'и мягких гейтов из ответа сервера — toast warn; ошибка перехода — toast err.
+    function odWireFlow(host,o){
+      const wrap=host.querySelector('#od-flow'); if(!wrap)return;
+      const render=()=>{
+        const outs=PZ_FLOW[o.status]||[];
+        wrap.innerHTML=outs.map(s=>`<button class="tbtn" data-st-to="${esc(s)}" title="Перевести ПЗ в «${esc(s)}»">→ ${esc(s)}</button>`).join('');
+        wrap.querySelectorAll('[data-st-to]').forEach(b=>b.onclick=()=>{
+          const to=b.dataset.stTo;
+          if(PZ_FLOW_CONFIRM.has(to))confirmPane(to);
+          else doMove(to,[...wrap.querySelectorAll('[data-st-to]')]);
+        });
+      };
+      const confirmPane=(to)=>{
+        wrap.innerHTML=`<span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--red)">Точно перевести в «${esc(to)}»?</span>
+          <button class="tbtn" data-st-yes>Да</button><button class="tbtn" data-st-no>Нет</button>`;
+        const yes=wrap.querySelector('[data-st-yes]'),no=wrap.querySelector('[data-st-no]');
+        yes.onclick=()=>doMove(to,[yes,no]); no.onclick=render;
+      };
+      const doMove=async(to,btns)=>{
+        btns.forEach(b=>b.disabled=true);
+        try{
+          const r=await fetch('/api/orders/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({num:o.numPz,to})});
+          const j=await r.json().catch(()=>({}));
+          if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+          (j.warnings||[]).forEach(w=>toast('⚠ '+w,'warn'));
+          toast(`Статус ${o.numPz}: ${j.from} → ${j.to}`,'ok');
+          await load(); // реестр и карточка перерисуются с новым статусом (ordSel сохранён)
+        }catch(e){ toast('Не удалось сменить статус: '+(e.message||e),'err'); render(); }
+      };
+      render();
     }
     function odTabBody(o){
       const h=document.getElementById('od-body'); if(!h)return;
@@ -11608,7 +11656,8 @@
     // --- создание ПЗ из портала (форма Ф.1–П.2) -------------------------------
     const PZ_ORDER_TYPES=['Клиентский','Внутренний (склад)','ОПИ','Сервис-ремонт'];
     const PZ_PRODUCT_TYPES=['РТИ','Биметалл','Оснастка ОК','ЗИП ПВО','Механообработка','Металлоконструкции'];
-    const PZ_STATUSES=['Размещён','В работе','Приостановлен','Выполнен','Отгружен','Закрыт','Отменён'];
+    // (PZ_STATUSES удалён: список статусов больше не нужен UI — свободного выбора нет,
+    //  допустимые переходы диктует PZ_FLOW — зеркало серверного PZ_TRANSITIONS)
     const PZ_PRIORITIES=['Высокий','Нормальный','Низкий'];
     const PZ_TASK_TYPES=['Производство','Обслуживание','Ремонт','Подготовка оснастки','Прочее'];
     // K-?: создание ПЗ — ИНЛАЙН-панель в #ocreate-panel (без модалки/alert, по стандарту портала; образец — dProdToggle)

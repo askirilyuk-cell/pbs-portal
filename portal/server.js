@@ -7827,16 +7827,25 @@ function parseMultipart(buf, boundary) {
   }
   return { fields, files };
 }
-function serveStatic(res, urlPath) {
+function serveStatic(req, res, urlPath) {
   let rel = urlPath === '/' ? '/index.html' : urlPath;
   let file = path.join(PUBLIC, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(PUBLIC) || !fs.existsSync(file)) { res.writeHead(404); res.end('Not found'); return; }
-  if (fs.statSync(file).isDirectory()) { file = path.join(file, 'index.html'); if (!fs.existsSync(file)) { res.writeHead(404); res.end('Not found'); return; } }
+  let st = fs.statSync(file);
+  if (st.isDirectory()) { file = path.join(file, 'index.html'); if (!fs.existsSync(file)) { res.writeHead(404); res.end('Not found'); return; } st = fs.statSync(file); }
   const ext = path.extname(file);
   // HTML (SPA-оболочка) — всегда свежий: no-cache заставляет браузер ревалидировать,
   // иначе после деплоя показывается старый закэшированный index.html. Прочая статика — на час.
   const cache = /\.html?$/i.test(ext) ? 'no-cache, must-revalidate' : 'public, max-age=3600';
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache });
+  // Слабый ETag по mtime+size: ревалидация даёт 304 вместо полного тела — index.html у нас
+  // монолит на ~1.3 МБ, и до этого КАЖДЫЙ заход (no-cache) гнал его целиком заново.
+  // Cache-Control не меняется: HTML по-прежнему ревалидируется всегда, статика — раз в час.
+  const etag = `W/"${Math.floor(st.mtimeMs).toString(16)}-${st.size.toString(16)}"`;
+  const inm = String(req.headers['if-none-match'] || '');
+  if (inm && inm.split(',').map((s) => s.trim()).includes(etag)) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': cache }); res.end(); return;
+  }
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, ETag: etag });
   const s = fs.createReadStream(file);
   s.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
   s.pipe(res);
@@ -10644,7 +10653,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent('Упаковочный лист ' + (pl.plNo || s.num) + '.html')}`, 'Cache-Control': 'no-store' });
       return res.end(html);
     }
-    return serveStatic(res, p);
+    return serveStatic(req, res, p);
   } catch (e) { sendJson(res, e.status || 500, { error: String(e.message || e) }); }
 });
 

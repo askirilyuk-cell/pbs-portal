@@ -7917,16 +7917,25 @@ function parseMultipart(buf, boundary) {
   }
   return { fields, files };
 }
-function serveStatic(res, urlPath) {
+function serveStatic(req, res, urlPath) {
   let rel = urlPath === '/' ? '/index.html' : urlPath;
   let file = path.join(PUBLIC, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(PUBLIC) || !fs.existsSync(file)) { res.writeHead(404); res.end('Not found'); return; }
-  if (fs.statSync(file).isDirectory()) { file = path.join(file, 'index.html'); if (!fs.existsSync(file)) { res.writeHead(404); res.end('Not found'); return; } }
+  let st = fs.statSync(file);
+  if (st.isDirectory()) { file = path.join(file, 'index.html'); if (!fs.existsSync(file)) { res.writeHead(404); res.end('Not found'); return; } st = fs.statSync(file); }
   const ext = path.extname(file);
   // HTML (SPA-оболочка) — всегда свежий: no-cache заставляет браузер ревалидировать,
   // иначе после деплоя показывается старый закэшированный index.html. Прочая статика — на час.
   const cache = /\.html?$/i.test(ext) ? 'no-cache, must-revalidate' : 'public, max-age=3600';
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache });
+  // Слабый ETag по mtime+size: ревалидация даёт 304 вместо полного тела — index.html у нас
+  // монолит на ~1.3 МБ, и до этого КАЖДЫЙ заход (no-cache) гнал его целиком заново.
+  // Cache-Control не меняется: HTML по-прежнему ревалидируется всегда, статика — раз в час.
+  const etag = `W/"${Math.floor(st.mtimeMs).toString(16)}-${st.size.toString(16)}"`;
+  const inm = String(req.headers['if-none-match'] || '');
+  if (inm && inm.split(',').map((s) => s.trim()).includes(etag)) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': cache }); res.end(); return;
+  }
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, ETag: etag });
   const s = fs.createReadStream(file);
   s.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
   s.pipe(res);
@@ -8412,12 +8421,23 @@ function authRedirectUri(req) {
   }
   return `${proto}://${host}/auth/callback`;
 }
+// deep-links: адрес возврата после входа (?next=…) — ТОЛЬКО внутренний путь/фрагмент
+// ('/', '/#orders/ПЗ-2026-006'). Раньше клиент слал голый hash ('#orders/…'), проверка
+// startsWith('/') его отбрасывала — после входа всегда открывался корень. Теперь клиент
+// шлёт '/'+hash, а здесь: не '/'-путь, protocol-relative '//host' или '/\host' (открытый
+// редирект) → '/'. Не-ASCII/пробелы перекодируются percent-кодом: значение уходит в
+// HTTP-заголовок Location, где сырая кириллица роняет writeHead (ERR_INVALID_CHAR).
+function safeNextPath(next) {
+  const s = String(next || '');
+  if (!/^\/($|[^/\\])/.test(s)) return '/';
+  return s.replace(/[^\x21-\x7e]/g, (ch) => encodeURIComponent(ch));
+}
 async function handleAuth(req, res, p, url) {
   const c = cfg();
   if (p === '/auth/login') {
     if (!c.BX_CLIENT_ID) { res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Вход через Bitrix не настроен (нет client_id в «Настройках»).'); return true; }
     const state = crypto.randomBytes(16).toString('hex');
-    const next = url.searchParams.get('next') || '/';
+    const next = safeNextPath(url.searchParams.get('next') || '/');
     const redirect = authRedirectUri(req);
     setCookie(res, 'pbs_oauth', state + '|' + next, { maxAge: 600 });
     const a = new URL(`https://${c.BX_DOMAIN}/oauth/authorize/`);
@@ -8431,7 +8451,11 @@ async function handleAuth(req, res, p, url) {
   if (p === '/auth/callback') {
     const code = url.searchParams.get('code'), state = url.searchParams.get('state');
     const errParam = url.searchParams.get('error');
-    const [savedState, next = '/'] = (parseCookies(req).pbs_oauth || '').split('|');
+    // next может содержать '#…' с любыми символами — state гарантированно без '|', поэтому
+    // отрезаем ровно первый разделитель, а не деструктурируем (иначе '|' в next обрезал бы хвост)
+    const oauthParts = (parseCookies(req).pbs_oauth || '').split('|');
+    const savedState = oauthParts[0];
+    const next = oauthParts.slice(1).join('|') || '/';
     setCookie(res, 'pbs_oauth', '', { maxAge: 0 });
     const fail = (m) => { console.error('[auth] callback FAIL:', m); res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(`<meta charset=utf-8><body style="font:15px 'Segoe UI';padding:40px;color:#1f3a52"><h3>Не удалось войти</h3><p>${m}</p><p><a href="/">← На главную</a></p>`); return true; };
     console.log(`[auth] callback: host=${req.headers.host || '-'} code=${code ? 'есть' : 'НЕТ'} state=${state ? (state === savedState ? 'ok' : 'MISMATCH') : 'НЕТ'} cookie=${savedState ? 'есть' : 'НЕТ'}${errParam ? ' error=' + errParam : ''}`);
@@ -8460,7 +8484,7 @@ async function handleAuth(req, res, p, url) {
       };
       persistSessions();
       setCookie(res, 'pbs_sid', sid, { maxAge: Math.floor(SESSION_TTL / 1000) });
-      res.writeHead(302, { Location: next.startsWith('/') ? next : '/' }); res.end(); return true;
+      res.writeHead(302, { Location: safeNextPath(next) }); res.end(); return true;
     } catch (e) { return fail('Ошибка обмена с Bitrix: ' + String(e.message || e)); }
   }
   if (p === '/auth/me') {
@@ -8491,7 +8515,7 @@ async function handleAuth(req, res, p, url) {
     persistSessions();
     setCookie(res, 'pbs_sid', sid, { maxAge: Math.floor(SESSION_TTL / 1000) });
     console.log('[auth] админ-обход: выдана сессия Администратора');
-    res.writeHead(302, { Location: next.startsWith('/') ? next : '/' }); res.end(); return true;
+    res.writeHead(302, { Location: safeNextPath(next) }); res.end(); return true;
   }
   return false;
 }
@@ -10719,7 +10743,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent('Упаковочный лист ' + (pl.plNo || s.num) + '.html')}`, 'Cache-Control': 'no-store' });
       return res.end(html);
     }
-    return serveStatic(res, p);
+    return serveStatic(req, res, p);
   } catch (e) { sendJson(res, e.status || 500, { error: String(e.message || e) }); }
 });
 

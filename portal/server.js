@@ -1945,8 +1945,31 @@ async function routeCoopAccept(body, session) {
   coop.returned.push({ ts: new Date().toISOString(), date: dateNow, aktNo, incIds, items: inItems });
   await ncUpdate('operations', opId, { 'Входящие материалы': JSON.stringify(coop) });
 
+  // K-90 (разрыв №5): брак после кооперации («НЕ ГОДЕН» в актах возврата) → ОДИН черновик
+  // Ф.5 на акт приёмки aktNo (несколько бракованных деталей = строки одного акта, не два НП).
+  let np = null, npWarning;
+  const scrapItems = inItems.filter((it) => it.qtyScrap > 0);
+  if (scrapItems.length) {
+    let orderId = null, taskId = null; // заказ через позицию маршрута, задача по операции — best-effort
+    try {
+      const [poss, tasks] = await Promise.all([ncListSoft('positions'), ncListSoft('tasks')]);
+      const pos = poss.find((x) => x.routes_id != null && Number(x.routes_id) === Number(op.routes_id));
+      if (pos && pos.orders_id != null) orderId = Number(pos.orders_id);
+      const task = tasks.find((t) => t.operations_id != null && Number(t.operations_id) === opId);
+      if (task) taskId = task.Id ?? task.id;
+    } catch { /* soft */ }
+    const auto = await otkAutoNonconformity({
+      sourceAkt: `Ф.3 № ${aktNo} (возврат из кооперации по ${/^МК/i.test(mk) ? mk : 'МК-' + (mk || '?')})`,
+      stage: 'Входной контроль',
+      product: scrapItems.map((it) => it.name).join('; '),
+      orderRef: mk, qty: scrapItems.reduce((s, it) => s + it.qtyScrap, 0),
+      foundBy: controller, date: dateNow, orderId, taskId,
+    });
+    np = auto.np || null; npWarning = auto.npWarning;
+  }
+
   const status = mkCoopStatus(coop);
-  return { ok: true, aktNo, incIds, done: status.done, sentTotal: status.sentTotal, closedTotal: status.closedTotal,
+  return { ok: true, aktNo, incIds, np, npWarning, done: status.done, sentTotal: status.sentTotal, closedTotal: status.closedTotal,
     scansDropped: (scans.length && !scansStored) ? scans.length : 0 };
 }
 
@@ -5148,6 +5171,45 @@ async function ncPickExisting(key, row) {
   return out;
 }
 
+// ── K-90, разрыв №5 (ISO 9001 п.10.2): брак не порождал корректирующего действия ──
+// Вердикт «НЕ ГОДЕН» теперь автоматически создаёт ЧЕРНОВИК акта несоответствия Ф.5
+// (nonconformity): № НП-ГГГГ-NNN (nextNumber, канон ВК/ПК/НП-ГГГГ-NNN), дата, изделие/
+// материал, «Заказ № / МК №» из контекста акта, описание-заготовка и best-effort связи
+// с заказом (orders → «Несоответствия») и задачей (tasks → «Несоответствия (по задаче)»).
+// CAPA-поля («Решение», «Корректирующее действие (ДП–У.2)», сроки, проверка) НЕ
+// заполняются — это черновик, их вносит человек в разделе «Несоответствия».
+// Один вызов = один НП: повторный акт с тем же вердиктом порождает СВОЙ НП (новый акт —
+// новое несоответствие), но один акт двух НП не рождает.
+// ОТКАЗОУСТОЙЧИВО: любая ошибка (нет таблицы/колонок до APPLY миграции, сеть, права) →
+// { npWarning } в ответе; создание самого акта Ф.3/Ф.4 НЕ страдает.
+async function otkAutoNonconformity({ sourceAkt, stage, product, orderRef, qty, foundBy, date, orderId, taskId }) {
+  try {
+    const d = (date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const year = Number(d.slice(0, 4)) || new Date().getFullYear();
+    const npNum = await nextNumber('nonconformity', '№ акта НП', 'НП', year);
+    const row = {
+      '№ акта НП': npNum, 'Дата': d,
+      'Описание несоответствия': `Автосоздан по акту ${sourceAkt}: вердикт НЕ ГОДЕН.`,
+    };
+    const put = (col, v) => { const s = (v == null ? '' : String(v)).trim(); if (s) row[col] = s; };
+    put('Этап обнаружения', stage); put('Наименование изделия / материала', product);
+    put('Заказ № / МК №', orderRef); put('Участок / Обнаружил', foundBy); put('Составил', foundBy);
+    if (qty != null && Number.isFinite(Number(qty))) row['Кол-во НП'] = Number(qty);
+    const picked = await ncPickExisting('nonconformity', row);
+    // защита mock-режима: без ключевой колонки не создаём пустых записей
+    if (!picked['№ акта НП']) throw new Error('в таблице «Несоответствия» нет колонки «№ акта НП»');
+    const created = await ncCreateMany('nonconformity', [picked]);
+    const rec = Array.isArray(created) ? created[0] : created;
+    const npId = rec.Id ?? rec.id;
+    if (orderId != null) { try { await ncLinkRecords('orders', 'Несоответствия', orderId, [npId]); } catch (e) { console.warn('Ф.5: связь заказ→НП не создана:', e.message); } }
+    if (taskId != null) { try { await ncLinkRecords('tasks', 'Несоответствия (по задаче)', taskId, [npId]); } catch (e) { console.warn('Ф.5: связь задача→НП не создана:', e.message); } }
+    return { np: npNum, npId };
+  } catch (e) {
+    console.warn(`Ф.5: черновик НП по акту ${sourceAkt} не создан:`, e.message);
+    return { npWarning: `Черновик акта Ф.5 не создан автоматически (${String(e.message || e)}) — оформите вручную в разделе «Несоответствия».` };
+  }
+}
+
 // Ф.4 «Протокол приёмочного контроля» (Ф.4–Д.1) — создание акта приёмки (DEF-02).
 async function createAcceptance(body) {
   const verdict = String(body.verdict || '').trim().toUpperCase();
@@ -5194,9 +5256,25 @@ async function createAcceptance(body) {
     // влияние на статус позиции: ГОДЕН → «Выполнено» (в пределах существующего enum позиции)
     if (verdict === 'ГОДЕН') { try { await ncUpdate('positions', positionId, { 'Статус': 'Выполнено' }); positionStatus = 'Выполнено'; } catch (e) { /* soft */ } }
   }
+  // K-90 (разрыв №5): «НЕ ГОДЕН» → автосоздание черновика акта несоответствия Ф.5.
+  let np = null, npWarning;
+  if (verdict === 'НЕ ГОДЕН') {
+    let orderId = null; // заказ-владелец через позицию (positions.orders_id), best-effort
+    if (positionId) { try { const pos = (await ncListSoft('positions')).find((x) => (x.Id ?? x.id) === positionId); if (pos && pos.orders_id != null) orderId = Number(pos.orders_id); } catch { /* soft */ } }
+    const auto = await otkAutoNonconformity({
+      sourceAkt: `Ф.4 № ${num}`, stage: 'Приёмочный',
+      product: product || pz || (positionId ? `позиция #${positionId}` : ''),
+      orderRef: [pz, String(body.mk || '').trim()].filter(Boolean).join(' / '),
+      qty: rejected != null ? rejected : presented, foundBy: controller, date, orderId,
+    });
+    np = auto.np || null; npWarning = auto.npWarning;
+  }
   return {
-    ok: true, num, id, verdict, linked, positionStatus,
-    hint: verdict === 'НЕ ГОДЕН' ? 'Вердикт «НЕ ГОДЕН» — оформите акт несоответствия Ф.5 (раздел «Несоответствия»).' : undefined,
+    ok: true, num, id, verdict, linked, positionStatus, np, npWarning,
+    hint: verdict === 'НЕ ГОДЕН'
+      ? (np ? `Вердикт «НЕ ГОДЕН» — создан черновик акта несоответствия ${np} (Ф.5, раздел «Несоответствия»): внесите решение и корректирующее действие.`
+        : 'Вердикт «НЕ ГОДЕН» — оформите акт несоответствия Ф.5 (раздел «Несоответствия»).')
+      : undefined,
   };
 }
 
@@ -5246,9 +5324,21 @@ async function createIncoming(body) {
   const orderId = (body.orderId != null && body.orderId !== '') ? Number(body.orderId) : null;
   if (orderId) { try { await ncLinkRecords('orders', 'Входной контроль', orderId, [id]); linked = true; } catch (e) { /* soft */ } }
 
+  // K-90 (разрыв №5): «НЕ ГОДЕН» → автосоздание черновика акта несоответствия Ф.5.
+  let np = null, npWarning;
+  if (verdict === 'НЕ ГОДЕН') {
+    const auto = await otkAutoNonconformity({
+      sourceAkt: `Ф.3 № ${num}`, stage: 'Входной контроль', product: material,
+      orderRef: String(body.contract || body.pz || '').trim(),
+      qty: rejected != null ? rejected : qty, foundBy: controller, date, orderId,
+    });
+    np = auto.np || null; npWarning = auto.npWarning;
+  }
   return {
-    ok: true, num, id, verdict, linked, accepted: whAccepted(verdict),
-    hint: verdict === 'НЕ ГОДЕН' ? 'Материал не допущен (НЕ ГОДЕН) — на склад не приходуется; оформите Ф.5.'
+    ok: true, num, id, verdict, linked, accepted: whAccepted(verdict), np, npWarning,
+    hint: verdict === 'НЕ ГОДЕН'
+      ? (np ? `Материал не допущен (НЕ ГОДЕН) — на склад не приходуется; создан черновик акта несоответствия ${np} (Ф.5, раздел «Несоответствия»).`
+        : 'Материал не допущен (НЕ ГОДЕН) — на склад не приходуется; оформите Ф.5.')
       : 'Годен — можно провести приход на склад (ГЕЙТ 1 §4.1, раздел «Склад»).',
   };
 }

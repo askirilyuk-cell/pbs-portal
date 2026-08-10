@@ -5278,6 +5278,8 @@ async function otkAutoNonconformity({ sourceAkt, stage, product, orderRef, qty, 
     const npId = rec.Id ?? rec.id;
     if (orderId != null) { try { await ncLinkRecords('orders', 'Несоответствия', orderId, [npId]); } catch (e) { console.warn('Ф.5: связь заказ→НП не создана:', e.message); } }
     if (taskId != null) { try { await ncLinkRecords('tasks', 'Несоответствия (по задаче)', taskId, [npId]); } catch (e) { console.warn('Ф.5: связь задача→НП не создана:', e.message); } }
+    logEvent({ type: 'создан', obj: 'Акт', objNum: npNum, who: foundBy,
+      details: `черновик акта несоответствия Ф.5 (авто по ${sourceAkt}, вердикт НЕ ГОДЕН)${orderRef ? ' · ' + orderRef : ''}` });
     return { np: npNum, npId };
   } catch (e) {
     console.warn(`Ф.5: черновик НП по акту ${sourceAkt} не создан:`, e.message);
@@ -5344,6 +5346,8 @@ async function createAcceptance(body) {
     });
     np = auto.np || null; npWarning = auto.npWarning;
   }
+  logEvent({ type: 'вердикт', obj: 'Акт', objNum: num, to: verdict, who: controller,
+    details: `Ф.4 приёмочный контроль: ${product || pz || (positionId ? 'позиция #' + positionId : '')}${pz ? ' · ' + pz : ''}` });
   return {
     ok: true, num, id, verdict, linked, positionStatus, np, npWarning,
     hint: verdict === 'НЕ ГОДЕН'
@@ -5409,6 +5413,8 @@ async function createIncoming(body) {
     });
     np = auto.np || null; npWarning = auto.npWarning;
   }
+  logEvent({ type: 'вердикт', obj: 'Акт', objNum: num, to: verdict, who: controller,
+    details: `Ф.3 входной контроль: ${material}${body.supplier ? ' · поставщик ' + String(body.supplier).trim() : ''}` });
   return {
     ok: true, num, id, verdict, linked, accepted: whAccepted(verdict), np, npWarning,
     hint: verdict === 'НЕ ГОДЕН'

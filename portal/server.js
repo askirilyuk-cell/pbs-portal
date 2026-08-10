@@ -4065,7 +4065,7 @@ async function createOrder(body, who) {
 }
 
 // --- создание запроса продаж ЗП (Ф.1–З.1, этап регистрации 5.1) --------------
-async function createSalesRequest(body) {
+async function createSalesRequest(body, who) {
   const customer = String(body.customer || '').trim();
   if (!customer) throw new Error('Не указан заказчик.');
   const name = String(body.name || '').trim();
@@ -4102,6 +4102,8 @@ async function createSalesRequest(body) {
   // создать на NAS папку запроса + 6 подпапок этапов (если задан путь к записям)
   let folderCreated = false;
   if (cfg().RECORDS) { try { folderCreated = !!createSalesFolderTree(numZp); } catch {} }
+  logEvent({ type: 'создан', obj: 'ЗП', objNum: numZp, to: row['Статус'], who: who || row['Принял запрос'] || '',
+    details: `${customer} · ${name}` });
   return { ok: true, numZp, id: c.Id ?? c.id, folderCreated };
 }
 
@@ -4134,7 +4136,7 @@ async function updateSalesRequest(body, svc) {
 // --- создание заказа продаж ЗКЗ из принятого запроса (Ф.1–З.1 §5.4, D4) --------
 // K-33: ЛОВ не гейт. Остаётся Г3 (согласование КП заказчиком, §5.4).
 // Идемпотентно: если заказ уже связан — ошибка, не дубль.
-async function createOrderFromSalesRequest(body) {
+async function createOrderFromSalesRequest(body, who) {
   const zp = String(body.zp || '').trim();
   if (!zp) throw new Error('Не указан № запроса (ЗП).');
   const requests = await ncListSoft('sales_requests');
@@ -4186,6 +4188,8 @@ async function createOrderFromSalesRequest(body) {
   // связь ЗП→ЗКЗ + продвижение статуса запроса; не роняем создание, если побочные записи не прошли
   try { await ncLinkRecords('sales_requests', 'Заказ (ЗКЗ)', idOfRow(reqRow), [orderId]); } catch (e) { console.warn('ЗКЗ: связь ЗП→заказ не создана:', e.message); }
   try { await ncUpdate('sales_requests', idOfRow(reqRow), { 'Статус': 'Принят (→ЗКЗ)' }); } catch (e) { console.warn('ЗКЗ: статус ЗП не обновлён:', e.message); }
+  logEvent({ type: 'создан', obj: 'ЗКЗ', objNum: numZkz, to: orderRow['Статус'], who,
+    details: `из запроса ${zp} · ${orderRow['Заказчик'] || ''}` });
   return { ok: true, numZkz, id: orderId };
 }
 
@@ -9022,7 +9026,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const body = await readBody(req);
         if (svc?.actor) { body.acceptedBy = body.acceptedBy || svc.actor; body.owner = body.owner || svc.actor; } // авторство агента → «Принял запрос»/«Ответственный»
-        const out = await createSalesRequest(body); return sendJson(res, 200, out);
+        const out = await createSalesRequest(body, eventWho(req, svc)); return sendJson(res, 200, out);
       }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
@@ -9033,7 +9037,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/sales/order/create' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Создание заказа (ЗКЗ) доступно только в LIVE-режиме: задайте токен NocoDB.' });
-      try { return sendJson(res, 200, await createOrderFromSalesRequest(await readBody(req))); }
+      try { return sendJson(res, 200, await createOrderFromSalesRequest(await readBody(req), eventWho(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // --- конструктор КП (K-05, ДП–З.1 §5.3) --------------------------------

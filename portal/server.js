@@ -5063,6 +5063,45 @@ function derivePzStatus(taskStatuses, current) {
   const started = list.some((s) => s === 'В работе' || s === 'Выполнено');
   return started ? 'В работе' : cur;                    // хоть одна пошла → «В работе», иначе стартовый
 }
+
+// ── Идея №3 «рельс потока» (фаза 1, APPROVE владельца): статус ПЗ — не свободный
+//  SingleSelect, а ГРАФ переходов, который контролирует сервер (/api/orders/status).
+//  Модель декларативная: ключ — откуда, список — куда можно. Это граф, не линейка:
+//  есть ветвления («В работе» → пауза/готово/отмена) и возврат («Выполнен» →
+//  «В работе» — доработка после приёмки). «Закрыт» и «Отменён» — терминальные,
+//  выхода из них нет. Авто-агрегация (syncPzStatusForTask) ходит по той же модели.
+//  Значения = ORDER_OPTS['Статус'] — новых статусов НЕ вводим.
+const PZ_TRANSITIONS = {
+  'Размещён':      ['В работе', 'Отменён'],
+  'В работе':      ['Приостановлен', 'Выполнен', 'Отменён'],
+  'Приостановлен': ['В работе', 'Отменён'],
+  'Выполнен':      ['Отгружен', 'В работе'],   // «В работе» — возврат при доработке
+  'Отгружен':      ['Закрыт'],
+  'Закрыт':        [],                          // терминальный
+  'Отменён':       [],                          // терминальный
+};
+const pzCanGo = (from, to) => (PZ_TRANSITIONS[from] || []).includes(to);
+// человекочитаемая ошибка недопустимого перехода — для 400 в /api/orders/status
+function pzTransitionError(from, to) {
+  const outs = PZ_TRANSITIONS[from];
+  if (!outs) return `Неизвестный текущий статус ПЗ: «${from}».`;
+  if (!outs.length) return `Статус «${from}» — конечный, переходы из него запрещены.`;
+  if (outs.length === 1) return `Из «${from}» можно только в «${outs[0]}».`;
+  return `Переход «${from}» → «${to}» не разрешён. Из «${from}» можно в: ${outs.map((s) => `«${s}»`).join(', ')}.`;
+}
+// мягкие гейты перехода: ПРЕДУПРЕЖДЕНИЕ в ответе, НЕ блокировка (жёсткие правила —
+// потом, отдельным решением владельца). tasks/acceptance подаёт вызывающий (live/mock).
+function pzGateWarnings(to, { taskStatuses = [], acceptanceCount = 0 } = {}) {
+  const warnings = [];
+  if (to === 'Выполнен') {
+    const open = taskStatuses.filter((s) => s && s !== 'Выполнено').length;
+    if (open) warnings.push(`Незакрытых задач по ПЗ: ${open} — статус «Выполнен» выставлен, но производство ещё не завершено.`);
+  }
+  if (to === 'Отгружен' && !acceptanceCount) {
+    warnings.push('По ПЗ нет актов приёмки (Ф.4) — отгрузка без приёмочного контроля.');
+  }
+  return warnings;
+}
 // пересчёт и идемпотентная запись статуса ПЗ по задаче (best-effort; вызывается
 // из точки смены статуса задачи). Пишем в БД только при фактическом изменении.
 async function syncPzStatusForTask(taskId) {
@@ -5077,12 +5116,72 @@ async function syncPzStatusForTask(taskId) {
   const sib = tasks.filter((x) => String(x['№ задачи'] || '').startsWith(numPz));
   const want = derivePzStatus(sib.map((x) => x['Статус']), order['Статус']);
   if (want && want !== order['Статус']) {
+    // рельс потока: авто-переход валидируется ТОЙ ЖЕ моделью PZ_TRANSITIONS, что и ручной.
+    //  Единственный легальный «прыжок» — Размещён→Выполнен (все задачи закрыли одним
+    //  пересчётом): это движение вперёд по рельсу через «В работе» за один шаг.
+    //  Недопустимый авто-переход (например, из «Приостановлен» — вторая страховка
+    //  поверх PZ_TERMINAL в derivePzStatus) — НЕ выполняется, только warn в консоль.
+    const cur = order['Статус'] || 'Размещён';
+    if (!pzCanGo(cur, want) && !(cur === 'Размещён' && want === 'Выполнен')) {
+      console.warn(`Рельс потока: авто-переход ПЗ ${numPz} «${cur}» → «${want}» не разрешён моделью PZ_TRANSITIONS — пропущен.`);
+      return cur;
+    }
     await ncUpdate('orders', order.Id ?? order.id, { 'Статус': want });
     logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: numPz, from: order['Статус'] || '', to: want,
       who: 'система', details: `авто-агрегация статуса ПЗ по задачам (триггер: ${t['№ задачи'] || 'задача #' + taskId})` });
     return want;
   }
   return order['Статус'];
+}
+
+// mock-режим рельса потока: ручные смены статуса ПЗ живут в памяти процесса поверх
+// fixtures.json ('№ ПЗ' → статус), чтобы переходы работали на стенде без NocoDB.
+// boardMock() накладывает оверлей при каждой отдаче /api/board.
+const MOCK_PZ_STATUS = new Map();
+
+// ручная смена статуса ПЗ — ЕДИНСТВЕННАЯ легальная точка (идея №3 «рельс потока»).
+//  Валидирует переход по PZ_TRANSITIONS (недопустимый → throw, наверху это 400),
+//  пишет в NocoDB (LIVE) или в MOCK_PZ_STATUS (стенд), кладёт событие в ленту и
+//  возвращает { ok, num, from, to, warnings } — warnings из мягких гейтов.
+async function updateOrderStatus(body, who) {
+  const num = String(body.num || '').trim();
+  if (!num) throw new Error('Не указан № ПЗ (num).');
+  const to = String(body.to || '').trim();
+  if (!to) throw new Error('Не указан целевой статус (to).');
+  if (!ORDER_OPTS['Статус'].includes(to)) throw new Error(`Недопустимый статус: «${to}».`);
+  if (!isLive()) { // стенд: те же правила, состояние — в памяти поверх мок-данных
+    const fx = boardMock();
+    const o = (fx.orders || []).find((x) => String(x.numPz || '') === num);
+    if (!o) throw new Error(`ПЗ ${num} не найдено.`);
+    const from = o.status || 'Размещён'; // boardMock уже наложил MOCK_PZ_STATUS
+    if (to === from) return { ok: true, num, from, to, unchanged: true, warnings: [] };
+    if (!pzCanGo(from, to)) throw new Error(pzTransitionError(from, to));
+    MOCK_PZ_STATUS.set(num, to);
+    const warnings = pzGateWarnings(to, {
+      taskStatuses: (o.tasks || []).map((t) => t.status),
+      acceptanceCount: (((fx.controls || {}).acceptance) || []).filter((r) => String(r.pz || '').includes(num)).length,
+    });
+    logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: num, from, to, who, details: 'ручной перевод по рельсу потока' });
+    return { ok: true, num, from, to, warnings };
+  }
+  const orders = await ncListSoft('orders');
+  const order = orders.find((x) => String(x['№ ПЗ'] || '') === num);
+  if (!order) throw new Error(`ПЗ ${num} не найдено.`);
+  const from = String(order['Статус'] || '').trim() || 'Размещён';
+  if (to === from) return { ok: true, num, from, to, unchanged: true, warnings: [] };
+  if (!pzCanGo(from, to)) throw new Error(pzTransitionError(from, to));
+  await ncUpdate('orders', order.Id ?? order.id, { 'Статус': to });
+  // мягкие гейты — best-effort: сбой чтения задач/актов не должен ронять сам переход
+  let warnings = [];
+  try {
+    const [tasks, acc] = await Promise.all([ncListSoft('tasks'), ncListSoft('acceptance_control')]);
+    warnings = pzGateWarnings(to, {
+      taskStatuses: tasks.filter((t) => String(t['№ задачи'] || '').startsWith(num)).map((t) => t['Статус']),
+      acceptanceCount: acc.filter((r) => String(r['Заказ №'] || '').includes(num)).length,
+    });
+  } catch (e) { console.warn('Рельс потока: гейты не посчитаны:', e.message); }
+  logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: num, from, to, who, details: 'ручной перевод по рельсу потока' });
+  return { ok: true, num, from, to, warnings };
 }
 
 // --- запись задачи с рабочего места: whitelist полей + коэрция типов --------
@@ -5224,6 +5323,8 @@ async function buildBoardLive() {
 function boardMock() {
   const fx = JSON.parse(fs.readFileSync(path.join(__dirname, 'mock', 'fixtures.json'), 'utf8'));
   fx.mode = 'mock'; fx.statuses = STATUSES;
+  // рельс потока на стенде: ручные смены статуса ПЗ (MOCK_PZ_STATUS) поверх fixtures
+  for (const o of fx.orders || []) { const s = MOCK_PZ_STATUS.get(String(o.numPz || '')); if (s) o.status = s; }
   return fx;
 }
 
@@ -9005,6 +9106,12 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/orders/create' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Создание ПЗ доступно только в LIVE-режиме: задайте токен NocoDB.' });
       try { const out = await createOrder(await readBody(req), eventWho(req, svc)); return sendJson(res, 200, out); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    // Идея №3 «рельс потока»: смена статуса ПЗ — ТОЛЬКО через валидируемый переход
+    // (PZ_TRANSITIONS). Работает и на стенде (mock: статусы в памяти) — без 501.
+    if (p === '/api/orders/status' && req.method === 'POST') {
+      try { return sendJson(res, 200, await updateOrderStatus(await readBody(req), eventWho(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/sales/dicts') {

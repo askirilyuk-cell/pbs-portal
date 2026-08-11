@@ -6089,6 +6089,12 @@
     // K-86 гейт перехода (мягкий): отдельной роли снабжения в RBAC пока нет —
     // разрешаем админу и в dev/mock (auth не настроен). TODO: уточнить схему ролей.
     function znzCanAct(){ try{ if(typeof AUTH==='undefined'||!AUTH||!AUTH.auth||AUTH.configured===false)return true; return !!AUTH.isAdmin; }catch(e){ return true; } }
+    // K-102: «Принять в работу» — роли «Снабжение»/«Администратор» (ME.effectiveRoles из /api/me);
+    // auth не настроен (dev/mock) → мягко разрешаем, как znzCanAct. Бэк гейтит независимо.
+    function znzCanTake(){ try{ if(typeof AUTH==='undefined'||!AUTH||!AUTH.auth||AUTH.configured===false)return true;
+      if(AUTH.isAdmin)return true;
+      const rs=(typeof ME!=='undefined'&&ME&&ME.effectiveRoles)||[];
+      return rs.includes('Снабжение')||rs.includes('Администратор'); }catch(e){ return true; } }
     // К-92 (фаза 2): типы документов приёмки — 1:1 с MultiSelect «Документы» таблицы «Входной контроль»
     const ZNZ_ACCEPT_DOCS_UI=['Сертификат качества','Паспорт','Накладная','Иное'];
     // категории закупок, утв. владельцем 22.07 (блок «Категории закупок + приёмка материалов»):
@@ -6240,6 +6246,8 @@
         {key:'cat',label:'Категория',w:128,cls:'nw c-gray',cell:r=>esc(r.category||'—'),sortVal:r=>r.category},
         {key:'sum',label:'Сумма',w:124,align:'right',cls:'nw',cell:r=>{const hasInv=r.invoicesSum!=null;const v=procMoney(hasInv?r.invoicesSum:(r.orderSum??r.budget));if(!v)return '<span class="c-gray">—</span>';return hasInv?`<span title="сумма ${r.invoicesCount} счёт(ов) по заявке">${esc(v)}</span>`:esc(v);},sortVal:r=>r.invoicesSum??r.orderSum??r.budget??0},
         {key:'sup',label:'Поставщик',w:172,cls:'ell c-gray',cell:r=>esc(r.supplier||'—'),sortVal:r=>r.supplier},
+        // K-102: «В работе у» — закупщик, принявший заявку (оверлей znz-assignee, см. карточку)
+        {key:'assignee',label:'В работе',w:132,cls:'ell c-gray',cell:r=>r.assignee&&r.assignee.fio?`<span title="Принята в работу: ${esc(r.assignee.fio)}">⏳ ${esc(r.assignee.fio)}</span>`:'<span class="c-gray">—</span>',sortVal:r=>(r.assignee&&r.assignee.fio)||''},
         // ОПЛАТА: сводка по счетам заявки без захода в карточку (правка Александра 22.07)
         {key:'pay',label:'Оплата',w:168,cls:'nw',cell:r=>{
           if(!r.invoicesCount)return '<span class="c-gray">—</span>';
@@ -6654,9 +6662,13 @@
       const canAccept=canAct&&['Размещена','В пути','Принята'].includes(r.status);
       if(canAccept)acts.push('<button class="tbtn primary" id="znz-accept-btn" style="background:#2e7d32;border-color:#2e7d32">Провести приёмку</button>');
       const acceptHost=canAccept?'<div id="znz-accept-host"></div>':'';
+      // K-102: «Принять в работу» (Снабжение/Админ, LIVE, пока никто не взял) + бейдж «В работе у»
+      const canTake=PROC.mode==='live'&&r.id!=null&&znzCanTake()&&!(r.assignee&&r.assignee.fio);
+      if(canTake)acts.push('<button class="ui-btn ui-btn--primary" id="znz-take">Принять в работу</button>');
+      const takenBadge=(r.assignee&&r.assignee.fio)?`<span class="st--wait" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}">⏳ В работе у: ${esc(r.assignee.fio)}</span>`:'';
       znzFormOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="znz-back" style="font-size:13px;text-decoration:none;cursor:pointer">← Закупки</a>
-          <span class="code" style="font-size:16px;font-family:monospace">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
+          <span class="code" style="font-size:16px;font-family:monospace">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${takenBadge}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${acts.join('')}<a class="pbtn" href="/api/print/znz/${encodeURIComponent(r.numZnz)}" target="_blank" rel="noopener">${aico('print',14)} Печать заявки</a><button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
         </div>
         ${track}
@@ -6712,6 +6724,19 @@
             openZnzCard(upd); // перерисовать карточку с новым наименованием/историей
           }catch(e){ sb.disabled=false; toast('Не удалось переименовать: '+(e.message||e),'err'); }
         };
+      };
+      // K-102: «Принять в работу» закупщиком — оверлей + история + автопост в чат закупок
+      const takeBtn=document.getElementById('znz-take');
+      if(takeBtn)takeBtn.onclick=async()=>{
+        takeBtn.disabled=true; takeBtn.textContent='Принимаю…';
+        try{
+          const out=await postJson('/api/procurement/znz/take',{id:r.id});
+          PROC=null; try{PROC=await (await fetch('/api/procurement')).json();}catch(e){PROC={mode:'mock',requests:[],suppliers:[],orders:[],evaluations:[]};}
+          const upd=(PROC.requests||[]).find(x=>String(x.id)===String(r.id))||{...r,assignee:out.assignee};
+          const nt=out.notified||{};
+          toast('Заявка принята в работу'+(nt.ok?' · автопост в чат закупок отправлен':''),'ok');
+          openZnzCard(upd);
+        }catch(e){ takeBtn.disabled=false; takeBtn.textContent='Принять в работу'; toast('Не удалось принять в работу: '+(e.message||e),'err'); }
       };
       // K-102: источник (ЗКЗ/ПЗ/склад) — карандаш → инлайн-инпут → POST source (без модалок)
       const srcPencil=document.getElementById('znz-src-pencil');

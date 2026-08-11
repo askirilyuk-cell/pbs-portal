@@ -773,6 +773,44 @@
     .rt-cardh .rt-rt{margin-left:auto;font-size:10.5px;font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b4}
     @media(max-width:900px){.rt-cols{grid-template-columns:1fr}.rt-g3,.rt-g2{grid-template-columns:1fr}}
 
+    /* ═══ K-103: hover-плавность существующих экранов (Дизайн-канон 10.08) ═══
+       Только transition + деликатный hover там, где кликабельный элемент его не имел.
+       Свойства строго background-color/transform/opacity, длительность var(--t-fast), ease-out.
+       Вид в покое не меняется. Блок обязан стоять ВЫШЕ prefers-reduced-motion (тот гасит всё !important). */
+    /* 1) Кнопки и кнопкоподобное: плавные фон/нажатие */
+    .btn,.tbtn,.pbtn,.loginscreen .lbtn,.auth-login,.auth-reset,.seg button,.pill,.dchip,.dlink,
+    .lov-vseg,.lov-dseg,.stg-btn,.stg-dtab,.stg-ib,.st-sbtn,.st-back,.st-hd .hbtn,#st-close,.st-reopen,
+    .st-card,.modal .mh .x,.fseg,#cptabbar button,.tl-wstepbtn,.tl-pathcard,.rt-ptype{
+      transition:background-color var(--t-fast) ease-out,transform var(--t-fast) ease-out,opacity var(--t-fast) ease-out;
+    }
+    /* 2) Строки реестров/списков и пункты меню: плавный фон hover/выбора */
+    nav a,tbody tr.orow,table.dt tbody tr:not(.grp),table.dt.erp tbody tr:not(.grp) td,
+    .drow,.list .li,.colmenu label,.tl-facet,.stg-grp,.kc,.rt-file,.tl-res,.rt-ohead,
+    .dtree-row,.dtree-h,.dkt tbody tr,.dkt .dkt-chev,.dcard-child,.dpl-ghead,.extkd-strip{
+      transition:background-color var(--t-fast) ease-out;
+    }
+    /* 3) Деликатный hover там, где его не было (только кликабельное; только фон/opacity, токены) */
+    .seg button:not(.on):hover{background:var(--page);}
+    .pill:not(.on):hover{background:var(--blue50);}
+    .dchip:not(.on):hover{background:var(--page);}
+    .lov-vseg:not(.on):hover,.lov-dseg:not(.on):hover{background:var(--blue50);}
+    .auth-login:hover,.stg-btn.primary:hover{background:var(--navy-d);}
+    .auth-reset:hover,.stg-btn.ghost:hover,.stg-dtab:not(.on):hover,.st-back:hover,.st-hd .hbtn:hover{background:var(--blue50);}
+    .stg-ib:hover,.st-sbtn:not(.on):hover,.st-reopen:hover{background:var(--page);}
+    #st-close:hover:not(:disabled){opacity:.92;}
+    .modal .mh .x:hover{opacity:.8;}
+    .list .li:not(.on):hover,.dtree-row:hover,.rt-ohead:hover{background:var(--blue50);}
+    .dtree-h:hover{background:var(--navy-d);}
+    /* табы карточек (#cptabbar) стилизованы инлайном (background:none) — фон hover только через !important */
+    #cptabbar button:hover{background:var(--blue50)!important;}
+    /* 4) Нажатие: единый active кнопок — scale(.98), как у канонического .ui-btn */
+    .btn:active:not(:disabled),.tbtn:active:not(:disabled),.pbtn:active,.loginscreen .lbtn:active,
+    .auth-login:active,.auth-reset:active,.seg button:active,.pill:active,.dchip:active,
+    .lov-vseg:active,.lov-dseg:active,.stg-btn:active,.stg-dtab:active,.stg-ib:active,
+    .st-sbtn:active,.st-back:active,.st-hd .hbtn:active,#st-close:active:not(:disabled),.st-reopen:active,
+    #cptabbar button:active,.tl-wstepbtn:active,.tl-pathcard:active,.rt-ptype:active{transform:scale(.98);}
+    /* ═══ конец K-103 ═══ */
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){

@@ -3612,8 +3612,12 @@ async function notifyZnzCreated(z) {
   // K-104 (фидбек владельца после живого прогона): срок и источник — прямо в уведомлении
   if (z.duePlan) L.push(`Нужна к: ${fmtDateRu(z.duePlan)}`);
   if (z.sourceRef) L.push(`Источник: ${z.sourceRef}`);
-  // K-104: deep-link на КОНКРЕТНУЮ заявку (кириллица номера — URL-энкод), а не общий #purchase
-  if (portal) L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(z.numZnz)}`);
+  if (portal) {
+    // K-104: deep-link на КОНКРЕТНУЮ заявку (кириллица номера — URL-энкод), а не общий #purchase
+    L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(z.numZnz)}`);
+    // K-102: печатная форма заявки (PDF, /api/print/znz) — рендер на сервере при открытии
+    L.push(`🖨 PDF: ${portal}/api/print/znz/${encodeURIComponent(z.numZnz)}`);
+  }
   await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: L.join('\n') });
   return { ok: true, chat };
 }
@@ -7309,7 +7313,7 @@ async function buildMetalIntake() {
 }
 
 // --- печать через render-*.mjs → Gotenberg ----------------------------------
-const PRINTERS = { pz: 'render-pz.mjs', route: 'render-route.mjs', task: 'render-task.mjs', control: 'render-control.mjs' };
+const PRINTERS = { pz: 'render-pz.mjs', route: 'render-route.mjs', task: 'render-task.mjs', control: 'render-control.mjs', znz: 'render-znz.mjs' };
 function renderPdf(type, id) {
   return new Promise((resolve, reject) => {
     const script = PRINTERS[type];
@@ -8438,7 +8442,7 @@ function rbacApiSection(p) {
   return null;
 }
 // Раздел печатаемого документа: /api/print/{type}/… → раздел (view достаточно).
-const PRINT_SECTION = { pz: 'orders', route: 'routes', task: 'board', control: 'control' };
+const PRINT_SECTION = { pz: 'orders', route: 'routes', task: 'board', control: 'control', znz: 'purchase' };
 // Раздел-владелец записи для /api/records/delete (body.key → раздел; право записи раздела).
 const RECORDS_SECTION = {
   orders: 'orders', positions: 'orders',

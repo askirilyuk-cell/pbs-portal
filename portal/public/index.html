@@ -6641,7 +6641,7 @@
       znzFormOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="znz-back" style="font-size:13px;text-decoration:none;cursor:pointer">← Закупки</a>
           <span class="code" style="font-size:16px;font-family:monospace">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${acts.join('')}<button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${acts.join('')}<a class="pbtn" href="/api/print/znz/${encodeURIComponent(r.numZnz)}" target="_blank" rel="noopener">${aico('print',14)} Печать заявки</a><button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
         </div>
         ${track}
         <div style="display:flex;flex-direction:column;gap:var(--gap)">

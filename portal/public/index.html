@@ -11549,13 +11549,16 @@
         ${riskBlock}
         <div style="display:flex;gap:4px;border-bottom:1px solid var(--bd)" id="od-tabs">${tabs.map(([k,l])=>`<button data-tab="${k}" style="font:inherit;font-size:13px;font-weight:600;padding:8px 13px;border:0;border-bottom:2px solid ${ordTab===k?'var(--navy)':'transparent'};background:none;color:${ordTab===k?'var(--navy)':'#5b6b7a'};cursor:pointer">${l}</button>`).join('')}</div>
         <div id="od-body"></div>
-        <div class="card pad" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        <div id="od-znz-panel"></div>
+        <div class="card pad" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+          <button class="ui-btn" id="od-znz-btn" title="Разместить заявку на закупку под этот заказ (ЗнЗ с источником ${esc(o.numPz)})">📦 Заявка на закупку</button>
           ${routeBtns}
           <a class="pbtn" href="/api/print/pz/${encodeURIComponent(o.numPz)}" target="_blank" rel="noopener">${aico('print',14)} Печать ПЗ (Ф.1–П.2)</a>
         </div>`;
       const xb=host.querySelector('#od-x'); if(xb)xb.onclick=()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);};
       wireCopyLink(host);
       odWireFlow(host,o);
+      const zb=host.querySelector('#od-znz-btn'); if(zb)zb.onclick=()=>odToggleZnzPanel(o);
       host.querySelectorAll('#od-tabs button').forEach(b=>b.onclick=()=>{ordTab=b.dataset.tab;odShowDetail(numPz);});
       host.querySelectorAll('[data-mk]').forEach(b=>b.onclick=()=>{location.hash='#routes/'+encodeURIComponent(b.dataset.mk);});
       odTabBody(o);
@@ -11594,6 +11597,69 @@
         }catch(e){ toast('Не удалось сменить статус: '+(e.message||e),'err'); render(); }
       };
       render();
+    }
+    // K-102: инлайн-панель «Заявка на закупку» из карточки ПЗ (образец — #ocreate-panel /
+    // openCreateOrder: тумблер по повторному клику, без модалок). Создаёт ЗнЗ штатным
+    // createZnzRequest с источником = № ПЗ; после создания — тост с номером + deep-link.
+    function odToggleZnzPanel(o){
+      const panel=document.getElementById('od-znz-panel'); if(!panel)return;
+      if(panel.dataset.open==='1'){ panel.innerHTML=''; panel.dataset.open=''; return; } // повторный клик — закрыть
+      panel.dataset.open='1';
+      const xbtn='style="background:#eef2f6;border:0;width:26px;height:26px;border-radius:var(--radius);cursor:pointer;color:var(--sub);font-size:14px"';
+      if(!DATA||DATA.mode!=='live'){
+        panel.innerHTML=`<div class="card pad" style="border:1px solid var(--red)"><div class="row"><span style="color:var(--red);font-size:13px">Создание ЗнЗ доступно только в LIVE-режиме (нужен токен NocoDB в «Настройках»).</span><span class="spacer"></span><button class="x" title="Закрыть" ${xbtn}>✕</button></div></div>`;
+        panel.querySelector('.x').onclick=()=>odToggleZnzPanel(o);
+        return;
+      }
+      const lbl=(t,req)=>`<div style="font-size:11px;color:#5b6b7a;font-weight:600;margin-bottom:4px">${esc(t)}${req?' <span style="color:var(--red)">*</span>':''}</div>`;
+      const catOptions=['Металл','Сварочные материалы','Резина и пластик','Комплектующие','Инструмент','Оснастка','ИТ/офис','Услуги','Прочее'];
+      const units=['шт','компл.','кг','м','м²','л','упак.','пог.м','набор'];
+      panel.innerHTML=`<div class="card pad" style="border:1px solid var(--blue)">
+          <div class="row" style="margin-bottom:10px"><span class="sec-h">Заявка на закупку под заказ ${esc(o.numPz)}</span><span style="font-size:11.5px;color:var(--sub);margin-left:8px">ЗнЗ · № присвоится автоматически · источник = ${esc(o.numPz)}</span><span class="spacer"></span><button class="x" id="odz-x" title="Закрыть" ${xbtn}>✕</button></div>
+          <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:12px 14px">
+            <div style="grid-column:span 6">${lbl('Наименование',true)}<input id="odz-name" style="${FINP}" placeholder="что закупить (марка / типоразмер / артикул)"></div>
+            <div style="grid-column:span 2">${lbl('Кол-во',true)}<input id="odz-qty" type="number" min="0" step="any" style="${FINP}" placeholder="0"></div>
+            <div style="grid-column:span 2">${lbl('Ед. изм.')}<input id="odz-unit" list="odz-units" style="${FINP}" placeholder="шт" value="шт"><datalist id="odz-units">${units.map(u=>`<option value="${esc(u)}">`).join('')}</datalist></div>
+            <div style="grid-column:span 2">${lbl('Срок поставки')}<input id="odz-due" type="date" style="${FINP}"></div>
+            <div style="grid-column:span 4">${lbl('Категория')}<select id="odz-cat" style="${FINP}">${catOptions.map(c=>`<option${c==='Комплектующие'?' selected':''}>${esc(c)}</option>`).join('')}</select></div>
+            <div style="grid-column:span 8">${lbl('Обоснование')}<input id="odz-rat" style="${FINP}" value="для ${esc(o.numPz)}: "></div>
+          </div>
+          <div id="odz-err" style="margin-top:10px;color:var(--red);font-size:12.5px"></div>
+          <div style="margin-top:var(--sp-3);display:flex;gap:8px;justify-content:flex-end">
+            <button class="ui-btn" id="odz-cancel">Отмена</button>
+            <button class="ui-btn ui-btn--primary" id="odz-save">Создать ЗнЗ</button>
+          </div>
+        </div>`;
+      const close=()=>odToggleZnzPanel(o);
+      panel.querySelector('#odz-x').onclick=close; panel.querySelector('#odz-cancel').onclick=close;
+      const nameInp=panel.querySelector('#odz-name'); try{nameInp.focus();}catch(e){}
+      panel.querySelector('#odz-save').onclick=async()=>{
+        const errEl=panel.querySelector('#odz-err'); errEl.textContent='';
+        const gv=(id)=>{const el=panel.querySelector('#'+id);return el?el.value.trim():'';};
+        const name=gv('odz-name'), qty=gv('odz-qty');
+        if(!name){errEl.textContent='Укажите наименование.';return;}
+        if(!qty||Number(qty)<=0){errEl.textContent='Укажите количество (> 0).';return;}
+        const body={ type:'Плановая (Ф.1–К)', name, qty, unit:gv('odz-unit'), category:gv('odz-cat'),
+          duePlan:gv('odz-due'), rationale:gv('odz-rat'), sourceRef:o.numPz,
+          initiator:(typeof ME!=='undefined'&&ME&&ME.name)||'' };
+        if(!body.initiator){errEl.textContent='Не определён заявитель (нет входа) — войдите в портал.';return;}
+        const btn=panel.querySelector('#odz-save'); btn.disabled=true; btn.textContent='Создание…';
+        try{
+          const j=await postJson('/api/procurement/znz/create',body);
+          PROC=null; // реестр закупок перечитается при заходе в раздел
+          const nt=j.notified||{};
+          toast('Создана заявка '+j.numZnz+(nt.ok?' · уведомление в чат закупок':''),'ok');
+          const link='#purchase/'+encodeURIComponent(j.numZnz);
+          panel.innerHTML=`<div class="card pad" style="border:1px solid var(--green);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="st--done">✓ Создана</span>
+              <span class="ui-mono" style="font-size:14px;color:var(--ink)">${esc(j.numZnz)}</span>
+              <span style="font-size:12.5px;color:var(--sub)">${esc(name)} · ${esc(qty)} ${esc(body.unit||'')}</span>
+              <a class="c-blue" style="font-size:13px;cursor:pointer;text-decoration:none" href="${link}">Открыть заявку →</a>
+              <button class="x" id="odz-done-x" title="Закрыть" style="margin-left:auto;background:#eef2f6;border:0;width:26px;height:26px;border-radius:var(--radius);cursor:pointer;color:var(--sub);font-size:14px">✕</button>
+            </div>`;
+          panel.querySelector('#odz-done-x').onclick=()=>{panel.innerHTML='';panel.dataset.open='';};
+        }catch(e){ errEl.textContent='Не удалось создать: '+(e.message||e); btn.disabled=false; btn.textContent='Создать ЗнЗ'; }
+      };
     }
     function odTabBody(o){
       const h=document.getElementById('od-body'); if(!h)return;

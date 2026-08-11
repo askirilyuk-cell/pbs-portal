@@ -2131,7 +2131,9 @@ async function createZnzRequest(body) {
   const supplier = String(body.supplier || '').trim(); if (supplier) row['Выбранный поставщик'] = supplier;
   const urgency = String(body.urgency || '').trim(); if (urgency) row['Срочность'] = urgency;
   const rationale = String(body.rationale || '').trim(); if (rationale) row['Обоснование'] = rationale;
-  const sourceRef = String(body.sourceRef || '').trim(); if (sourceRef) row['Триггер-источник (ЗКЗ/ПЗ/склад)'] = sourceRef;
+  // K-102/K-104: источник заявки (№ ПЗ/ЗКЗ/склад). Фолбэк orderRef — форма «Привязка к заказу»
+  // всегда слала orderRef, но сервер его молча терял (писался только в примечание).
+  const sourceRef = String(body.sourceRef || body.orderRef || '').trim(); if (sourceRef) row['Триггер-источник (ЗКЗ/ПЗ/склад)'] = sourceRef;
   if (body.duePlan) row['Срок поставки план'] = String(body.duePlan).slice(0, 10);
   // референс/ссылка (напр. atmt.ru) + основание/комментарий → в «Примечание»
   const noteParts = [];
@@ -2185,7 +2187,7 @@ async function createZnzRequest(body) {
 
   // best-effort уведомление в Bitrix-чат (не влияет на успех создания)
   let notified;
-  try { notified = await notifyZnzCreated({ numZnz, type, name, qty, unit, initiator, category, supplier }); }
+  try { notified = await notifyZnzCreated({ numZnz, type, name, qty, unit, initiator, category, supplier, duePlan: row['Срок поставки план'] || '', sourceRef }); }
   catch (e) { console.warn('ЗнЗ уведомление не отправлено:', e.message); notified = { ok: false, error: String(e.message || e) }; }
 
   // best-effort личное уведомление проверяющему (правка владельца 22.07) — сбой
@@ -3588,6 +3590,11 @@ async function uploadPaymentFile(paymentId, buffer, fileName, mimeType) {
 // тихо логируем «webhook not configured» и возвращаем {ok:false, skipped:true} —
 // боевое уведомление включится, как только в «Настройках»/runtime.json появится
 // BITRIX_WEBHOOK (тот же incoming-webhook user 11, что шлёт сообщения в чаты ЗП).
+// дд.мм.гггг из ISO-даты (для сроков в текстах Bitrix-уведомлений); не дата → как есть
+function fmtDateRu(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(s || '');
+}
 async function notifyZnzCreated(z) {
   const c = cfg();
   if (!c.BITRIX) { console.log('ЗнЗ notify: Bitrix webhook not configured — уведомление пропущено'); return { ok: false, skipped: true, reason: 'webhook not configured' }; }
@@ -3602,7 +3609,11 @@ async function notifyZnzCreated(z) {
     `Заявитель: ${z.initiator || '—'}${z.category ? ` · Категория: ${z.category}` : ''}`,
   ];
   if (z.supplier) L.push(`Поставщик: ${z.supplier}`);
-  if (portal) L.push(`📁 Заявка в портале: ${portal}/#purchase`);
+  // K-104 (фидбек владельца после живого прогона): срок и источник — прямо в уведомлении
+  if (z.duePlan) L.push(`Нужна к: ${fmtDateRu(z.duePlan)}`);
+  if (z.sourceRef) L.push(`Источник: ${z.sourceRef}`);
+  // K-104: deep-link на КОНКРЕТНУЮ заявку (кириллица номера — URL-энкод), а не общий #purchase
+  if (portal) L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(z.numZnz)}`);
   await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: L.join('\n') });
   return { ok: true, chat };
 }

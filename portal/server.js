@@ -646,6 +646,25 @@ const EXTKD_DIR = path.join(__dirname, '.data', 'external-kd-files');
 function readExtKd() { try { const a = JSON.parse(fs.readFileSync(EXTKD_FILE, 'utf8')); return Array.isArray(a) ? a : []; } catch { return []; } }
 function writeExtKd(list) { try { fs.mkdirSync(path.dirname(EXTKD_FILE), { recursive: true }); fs.writeFileSync(EXTKD_FILE, JSON.stringify(list, null, 2)); return true; } catch { return false; } }
 function extKdNextId(list) { return (list.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0) || 0) + 1; }
+// ── K-102: привязка ПЗ ↔ чат Bitrix (оверлей, БЕЗ миграции NocoDB) ───────────
+// Файловый map { "<№ ПЗ>": "<NNN>" } (только цифры, без префикса chat) — по образцу
+// external-kd выше. Задаётся вручную в карточке ПЗ; используется для автопоста
+// о новых ЗнЗ, размещённых «под заказ» (sourceRef=№ ПЗ), в чат этого заказа.
+const ORDER_CHATS_FILE = path.join(__dirname, '.data', 'order-chats.json');
+function readOrderChats() { try { const m = JSON.parse(fs.readFileSync(ORDER_CHATS_FILE, 'utf8')); return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {}; } catch { return {}; } }
+function writeOrderChats(map) { try { fs.mkdirSync(path.dirname(ORDER_CHATS_FILE), { recursive: true }); fs.writeFileSync(ORDER_CHATS_FILE, JSON.stringify(map, null, 2)); return true; } catch { return false; } }
+// чат заказа по источнику ЗнЗ: из sourceRef достаём № ПЗ (строка может содержать и прочее) → chatNNN|null
+function orderChatFor(sourceRef) {
+  const m = /ПЗ-\d{4}-\d{3}/.exec(String(sourceRef || ''));
+  if (!m) return null;
+  const chat = String(readOrderChats()[m[0]] || '').trim();
+  return /^\d+$/.test(chat) ? { numPz: m[0], chat } : null;
+}
+// ── K-102: «принята в работу» закупщиком (оверлей, БЕЗ миграции NocoDB) ──────
+// Файловый map { "<№ ЗнЗ>": { fio, when } } — мягкая альтернатива новой колонке схемы.
+const ZNZ_ASSIGNEE_FILE = path.join(__dirname, '.data', 'znz-assignee.json');
+function readZnzAssignees() { try { const m = JSON.parse(fs.readFileSync(ZNZ_ASSIGNEE_FILE, 'utf8')); return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {}; } catch { return {}; } }
+function writeZnzAssignees(map) { try { fs.mkdirSync(path.dirname(ZNZ_ASSIGNEE_FILE), { recursive: true }); fs.writeFileSync(ZNZ_ASSIGNEE_FILE, JSON.stringify(map, null, 2)); return true; } catch { return false; } }
 // ── Раздел «Продуктовые группы» (витрина) ────────────────────────────────────
 // Группы/подгруппы — из справочников dict_product_groups / dict_product_subgroups.
 // Реестр проектов группы — АВТО из «Проекты разработки» по коду группы (поле «Группа»).
@@ -2022,6 +2041,7 @@ async function buildProcurementLive() {
     ncListSoft('incoming_control'), // быстрое улучшение 2: акты ВК — для бейджа «приёмка X/Y» (degrade-safe — [])
   ]);
   const numOrNull = (v) => (v != null && v !== '') ? Number(v) : null;
+  const assignees = readZnzAssignees();      // K-102: «в работе у» (оверлей, № ЗнЗ → {fio, when})
   const invByZnz = invoicesSumByZnz(pinv);   // znzId → { sum, count }
   const itemsByZnz = itemsCountByZnz(pitems); // znzId → число позиций
   const acceptByZnz = znzAcceptProgressMap(preq, pitems, pinc); // znzId → { ordered, accepted } (быстрое улучшение 2)
@@ -2053,6 +2073,8 @@ async function buildProcurementLive() {
     // быстрое улучшение 2 (премортем): «приёмка X/Y» — сумма заказано/принято по позициям заявки
     // (null, если позиций/кол-ва нет — бейдж в реестре просто не показывается)
     acceptOrdered: prog ? prog.ordered : null, acceptAccepted: prog ? prog.accepted : null,
+    // K-102: «принята в работу» закупщиком (оверлей znz-assignee.json) — {fio, when} | null
+    assignee: assignees[String(r['№ ЗнЗ'] || '').trim()] || null,
   }; }).sort((a, b) => String(b.numZnz).localeCompare(String(a.numZnz), 'ru'));
   const orders = pord.map((o) => ({
     numPo: o['№ заказа'] || '', created: o['Дата'] || '', supplier: o['Поставщик'] || '', subject: o['Предмет'] || '',
@@ -2131,7 +2153,9 @@ async function createZnzRequest(body) {
   const supplier = String(body.supplier || '').trim(); if (supplier) row['Выбранный поставщик'] = supplier;
   const urgency = String(body.urgency || '').trim(); if (urgency) row['Срочность'] = urgency;
   const rationale = String(body.rationale || '').trim(); if (rationale) row['Обоснование'] = rationale;
-  const sourceRef = String(body.sourceRef || '').trim(); if (sourceRef) row['Триггер-источник (ЗКЗ/ПЗ/склад)'] = sourceRef;
+  // K-102/K-104: источник заявки (№ ПЗ/ЗКЗ/склад). Фолбэк orderRef — форма «Привязка к заказу»
+  // всегда слала orderRef, но сервер его молча терял (писался только в примечание).
+  const sourceRef = String(body.sourceRef || body.orderRef || '').trim(); if (sourceRef) row['Триггер-источник (ЗКЗ/ПЗ/склад)'] = sourceRef;
   if (body.duePlan) row['Срок поставки план'] = String(body.duePlan).slice(0, 10);
   // референс/ссылка (напр. atmt.ru) + основание/комментарий → в «Примечание»
   const noteParts = [];
@@ -2185,8 +2209,14 @@ async function createZnzRequest(body) {
 
   // best-effort уведомление в Bitrix-чат (не влияет на успех создания)
   let notified;
-  try { notified = await notifyZnzCreated({ numZnz, type, name, qty, unit, initiator, category, supplier }); }
+  try { notified = await notifyZnzCreated({ numZnz, type, name, qty, unit, initiator, category, supplier, duePlan: row['Срок поставки план'] || '', sourceRef }); }
   catch (e) { console.warn('ЗнЗ уведомление не отправлено:', e.message); notified = { ok: false, error: String(e.message || e) }; }
+
+  // K-102: автопост в чат ЗАКАЗА (оверлей .data/order-chats.json), если источник заявки —
+  // ПЗ с привязанным чатом Bitrix. Best-effort: сбой/отсутствие чата не влияет на создание.
+  let orderChatNotified;
+  try { orderChatNotified = await notifyOrderChatZnz({ sourceRef, numZnz, name, qty, unit, duePlan: row['Срок поставки план'] || '' }); }
+  catch (e) { console.warn('ЗнЗ: автопост в чат заказа не отправлен:', e.message); orderChatNotified = { ok: false, error: String(e.message || e) }; }
 
   // best-effort личное уведомление проверяющему (правка владельца 22.07) — сбой
   // отправки НЕ влияет на успех создания заявки.
@@ -2200,7 +2230,7 @@ async function createZnzRequest(body) {
     } catch (e) { console.warn('ЗнЗ: уведомление проверяющему не отправлено:', e.message); reviewerNotified = { ok: false, error: String(e.message || e) }; }
   }
 
-  return { ok: true, numZnz, id, status, type, itemsCreated, notified, reviewerNotified };
+  return { ok: true, numZnz, id, status, type, itemsCreated, notified, reviewerNotified, orderChatNotified };
 }
 
 // --- K-86 смена статуса ЗнЗ по этапам (DEF-30) -------------------------------
@@ -2289,6 +2319,88 @@ async function renameZnzRequest(body, session) {
   history.push({ ts: new Date().toISOString(), user: who, field: 'Наименование', from, to: name });
   await ncUpdate('procurement_requests', id, { 'Наименование': name, 'История изменений': JSON.stringify(history) });
   return { ok: true, name, history };
+}
+
+// --- K-102: правка «Источника» заявки ЗнЗ (поздняя привязка к ПЗ/ЗКЗ/складу) --
+// Эндпойнта правки sourceRef не было (поле писалось только при создании) — добавлен
+// по образцу renameZnzRequest: то же поле «Триггер-источник (ЗКЗ/ПЗ/склад)» + запись
+// в «Историю изменений». Если НОВЫЙ источник — ПЗ с привязанным чатом (оверлей
+// order-chats.json), шлём тот же автопост, что и при создании ЗнЗ под заказ.
+async function setZnzSource(body, session) {
+  const idRaw = body.id ?? body.Id;
+  if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
+  const id = Number(idRaw);
+  if (!Number.isFinite(id)) throw new Error('Некорректный идентификатор заявки.');
+  const sourceRef = String(body.sourceRef || '').trim(); // пусто = снять привязку (разрешено)
+  const rows = await ncListSoft('procurement_requests');
+  const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
+  if (!row) throw new Error('Заявка ЗнЗ не найдена.');
+  const from = String(row['Триггер-источник (ЗКЗ/ПЗ/склад)'] || '').trim();
+  const history = znzHistoryParse(row['История изменений']);
+  if (from === sourceRef) return { ok: true, unchanged: true, sourceRef: from, history };
+  const who = (session && session.fio) || 'неизвестно';
+  history.push({ ts: new Date().toISOString(), user: who, field: 'Источник', from, to: sourceRef });
+  await ncUpdate('procurement_requests', id, { 'Триггер-источник (ЗКЗ/ПЗ/склад)': sourceRef, 'История изменений': JSON.stringify(history) });
+  // автопост в чат заказа (best-effort — сбой не роняет сохранение привязки)
+  let orderChatNotified;
+  try {
+    orderChatNotified = await notifyOrderChatZnz({
+      sourceRef, numZnz: String(row['№ ЗнЗ'] || '').trim() || `#${id}`,
+      name: row['Наименование'] || '', qty: row['Кол-во'], unit: row['Ед.изм.'] || '',
+      duePlan: row['Срок поставки план'] || '',
+    });
+  } catch (e) { console.warn('ЗнЗ: автопост в чат заказа не отправлен:', e.message); orderChatNotified = { ok: false, error: String(e.message || e) }; }
+  return { ok: true, sourceRef, history, orderChatNotified };
+}
+
+// --- K-102: «Принять в работу» закупщиком (Снабжение/Администратор) ----------
+// Фиксирует, КТО из снабжения взял заявку: оверлей znz-assignee.json (№ЗнЗ → {fio, when},
+// схему NocoDB не трогаем) + запись в «Историю изменений» заявки + событие в ленту +
+// best-effort автопост в чат закупок. ФИО — строго из сессии (не из тела запроса).
+async function takeZnzRequest(body, session, roles) {
+  // роль: Снабжение/Администратор. Сессии нет (auth не настроен, dev/mock) — мягко пускаем,
+  // как и остальные действия ЗнЗ (жёсткий гейт включается вместе с RBAC_ENFORCE).
+  if (session) {
+    const rs = Array.isArray(roles) ? roles : [];
+    if (!rs.includes('Снабжение') && !rs.includes('Администратор')) {
+      const e = new Error('«Принять в работу» доступно ролям «Снабжение» и «Администратор».'); e.status = 403; throw e;
+    }
+  }
+  const idRaw = body.id ?? body.Id;
+  if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
+  const id = Number(idRaw);
+  if (!Number.isFinite(id)) throw new Error('Некорректный идентификатор заявки.');
+  const rows = await ncListSoft('procurement_requests');
+  const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
+  if (!row) throw new Error('Заявка ЗнЗ не найдена.');
+  const numZnz = String(row['№ ЗнЗ'] || '').trim() || `#${id}`;
+  const fio = (session && session.fio) || 'неизвестно';
+  const map = readZnzAssignees();
+  const prev = map[numZnz];
+  if (prev && prev.fio) return { ok: true, unchanged: true, assignee: prev };
+  const assignee = { fio, when: new Date().toISOString() };
+  map[numZnz] = assignee;
+  if (!writeZnzAssignees(map)) throw new Error('Не удалось сохранить отметку (оверлей znz-assignee.json).');
+  // история изменений заявки — тот же append-формат, что rename/verify
+  let history = znzHistoryParse(row['История изменений']);
+  history.push({ ts: assignee.when, user: fio, field: 'В работе', from: '', to: `принята в работу: ${fio}` });
+  try { await ncUpdate('procurement_requests', id, { 'История изменений': JSON.stringify(history) }); }
+  catch (e) { console.warn('ЗнЗ: история «принята в работу» не записана:', e.message); history = null; }
+  // событие в ленту портала (мягкое, fire-and-forget)
+  logEvent({ type: 'комментарий', obj: 'ЗнЗ', objNum: numZnz, who: fio,
+    details: `принята в работу (${String(row['Наименование'] || '')})` });
+  // best-effort автопост в чат закупок (тот же ZNZ_CHAT, что notifyZnzCreated)
+  let notified;
+  try {
+    const c = cfg();
+    const chat = String(c.ZNZ_CHAT || '').trim();
+    if (!c.BITRIX || !chat || !/^\d+$/.test(chat)) notified = { ok: false, skipped: true, reason: 'webhook/chat not configured' };
+    else {
+      await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: `⏳ ${numZnz} принята в работу: ${fio}` });
+      notified = { ok: true, chat };
+    }
+  } catch (e) { console.warn('ЗнЗ: автопост «принята в работу» не отправлен:', e.message); notified = { ok: false, error: String(e.message || e) }; }
+  return { ok: true, assignee, history: history || undefined, notified };
 }
 
 // ── К-92: приёмка по заявке ЗнЗ + приход металла на склад (утв. владельцем, фаза 2) ──
@@ -3588,6 +3700,11 @@ async function uploadPaymentFile(paymentId, buffer, fileName, mimeType) {
 // тихо логируем «webhook not configured» и возвращаем {ok:false, skipped:true} —
 // боевое уведомление включится, как только в «Настройках»/runtime.json появится
 // BITRIX_WEBHOOK (тот же incoming-webhook user 11, что шлёт сообщения в чаты ЗП).
+// дд.мм.гггг из ISO-даты (для сроков в текстах Bitrix-уведомлений); не дата → как есть
+function fmtDateRu(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(s || '');
+}
 async function notifyZnzCreated(z) {
   const c = cfg();
   if (!c.BITRIX) { console.log('ЗнЗ notify: Bitrix webhook not configured — уведомление пропущено'); return { ok: false, skipped: true, reason: 'webhook not configured' }; }
@@ -3602,9 +3719,41 @@ async function notifyZnzCreated(z) {
     `Заявитель: ${z.initiator || '—'}${z.category ? ` · Категория: ${z.category}` : ''}`,
   ];
   if (z.supplier) L.push(`Поставщик: ${z.supplier}`);
-  if (portal) L.push(`📁 Заявка в портале: ${portal}/#purchase`);
+  // K-104 (фидбек владельца после живого прогона): срок и источник — прямо в уведомлении
+  if (z.duePlan) L.push(`Нужна к: ${fmtDateRu(z.duePlan)}`);
+  if (z.sourceRef) L.push(`Источник: ${z.sourceRef}`);
+  if (portal) {
+    // K-104: deep-link на КОНКРЕТНУЮ заявку (кириллица номера — URL-энкод), а не общий #purchase
+    L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(z.numZnz)}`);
+    // K-102: печатная форма заявки (PDF, /api/print/znz) — рендер на сервере при открытии
+    L.push(`🖨 PDF: ${portal}/api/print/znz/${encodeURIComponent(z.numZnz)}`);
+  }
   await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: L.join('\n') });
   return { ok: true, chat };
+}
+
+// K-102: автопост о ЗнЗ в чат ЗАКАЗА (ПЗ с привязанным чатом — оверлей order-chats.json).
+// Вызывается при создании ЗнЗ с sourceRef=ПЗ и при поздней привязке источника к заявке.
+// Тот же webhook-механизм (bitrixCall/im.message.add), что и notifyZnzCreated, но
+// DIALOG_ID — чат конкретного заказа. Безопасно заглушено: нет вебхука/чата → skipped.
+async function notifyOrderChatZnz({ sourceRef, numZnz, name, qty, unit, duePlan }) {
+  const c = cfg();
+  if (!c.BITRIX) return { ok: false, skipped: true, reason: 'webhook not configured' };
+  const oc = orderChatFor(sourceRef);
+  if (!oc) return { ok: false, skipped: true, reason: 'order chat not configured' };
+  const portal = String(c.PORTAL_BASE || '').replace(/\/+$/, '');
+  const qtyStr = [qty, unit].filter((x) => x != null && x !== '').join(' ');
+  const L = [
+    `[B]📦 По заказу ${oc.numPz} размещена заявка ${numZnz}[/B]`,
+    `${name || '—'}${qtyStr ? ` · ${qtyStr}` : ''}`,
+  ];
+  if (duePlan) L.push(`Нужна к: ${fmtDateRu(duePlan)}`);
+  if (portal) {
+    L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(numZnz)}`);
+    L.push(`🖨 PDF: ${portal}/api/print/znz/${encodeURIComponent(numZnz)}`);
+  }
+  await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: L.join('\n') });
+  return { ok: true, chat: oc.chat, numPz: oc.numPz };
 }
 
 // --- файлы запроса (папки записей продаж на NAS) ----------------------------
@@ -7298,7 +7447,7 @@ async function buildMetalIntake() {
 }
 
 // --- печать через render-*.mjs → Gotenberg ----------------------------------
-const PRINTERS = { pz: 'render-pz.mjs', route: 'render-route.mjs', task: 'render-task.mjs', control: 'render-control.mjs' };
+const PRINTERS = { pz: 'render-pz.mjs', route: 'render-route.mjs', task: 'render-task.mjs', control: 'render-control.mjs', znz: 'render-znz.mjs' };
 function renderPdf(type, id) {
   return new Promise((resolve, reject) => {
     const script = PRINTERS[type];
@@ -8427,7 +8576,7 @@ function rbacApiSection(p) {
   return null;
 }
 // Раздел печатаемого документа: /api/print/{type}/… → раздел (view достаточно).
-const PRINT_SECTION = { pz: 'orders', route: 'routes', task: 'board', control: 'control' };
+const PRINT_SECTION = { pz: 'orders', route: 'routes', task: 'board', control: 'control', znz: 'purchase' };
 // Раздел-владелец записи для /api/records/delete (body.key → раздел; право записи раздела).
 const RECORDS_SECTION = {
   orders: 'orders', positions: 'orders',
@@ -9114,6 +9263,28 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await updateOrderStatus(await readBody(req), eventWho(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
+    // K-102: привязка ПЗ ↔ чат Bitrix (оверлей .data/order-chats.json, БЕЗ миграции NocoDB).
+    // GET ?num=ПЗ-… → {num, chat}; POST {num, chat} (chat — только цифры, пусто = снять).
+    // Работает и на стенде (файловый стор не зависит от NocoDB).
+    if (p === '/api/orders/chat' && req.method === 'GET') {
+      const num = String(url.searchParams.get('num') || '').trim();
+      if (!/^ПЗ-\d{4}-\d{3}$/.test(num)) return sendJson(res, 400, { error: 'Укажите корректный № ПЗ (ПЗ-ГГГГ-NNN).' });
+      return sendJson(res, 200, { num, chat: String(readOrderChats()[num] || '') });
+    }
+    if (p === '/api/orders/chat' && req.method === 'POST') {
+      const body = await readBody(req);
+      const num = String(body.num || '').trim();
+      if (!/^ПЗ-\d{4}-\d{3}$/.test(num)) return sendJson(res, 400, { error: 'Укажите корректный № ПЗ (ПЗ-ГГГГ-NNN).' });
+      const chat = String(body.chat || '').trim().replace(/^chat/i, ''); // терпим ввод «chat8873»
+      if (chat && !/^\d+$/.test(chat)) return sendJson(res, 400, { error: 'Чат — только цифры (NNN из chatNNN).' });
+      const map = readOrderChats();
+      const prev = String(map[num] || '');
+      if (chat) map[num] = chat; else delete map[num];
+      if (!writeOrderChats(map)) return sendJson(res, 500, { error: 'Не удалось сохранить привязку (оверлей order-chats.json).' });
+      if (prev !== chat) logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: num, who: eventWho(req, svc),
+        details: chat ? `чат заказа: chat${chat}` : 'чат заказа отвязан' });
+      return sendJson(res, 200, { ok: true, num, chat });
+    }
     if (p === '/api/sales/dicts') {
       const read = async (key) => (await ncListSoft(key)).map((r) => ({ v: String(r['Значение'] || '').trim(), o: Number(r['Порядок']) || 0 }))
         .filter((x) => x.v).sort((a, b) => (a.o - b.o) || a.v.localeCompare(b.v, 'ru')).map((x) => x.v);
@@ -9751,6 +9922,24 @@ const server = http.createServer(async (req, res) => {
       let out;
       try { out = await verifyZnzRequest(body, sessionFromReq(req)); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+      return sendJson(res, 200, out);
+    }
+    // K-102: правка «Источника» заявки (поздняя привязка к ПЗ/ЗКЗ/складу) + автопост в чат заказа
+    if (p === '/api/procurement/znz/source' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Правка источника доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
+      const body = await readBody(req);
+      let out;
+      try { out = await setZnzSource(body, sessionFromReq(req)); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+      return sendJson(res, 200, out);
+    }
+    // K-102: «Принять в работу» закупщиком (Снабжение/Администратор) — оверлей + история + автопост
+    if (p === '/api/procurement/znz/take' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: '«Принять в работу» доступно только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
+      const body = await readBody(req);
+      let out;
+      try { out = await takeZnzRequest(body, req.session, req.roles); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
       return sendJson(res, 200, out);
     }
     // К-92: приёмка по заявке ЗнЗ (акт входного контроля Ф.3–Д.1 + опц. приход металла на склад)

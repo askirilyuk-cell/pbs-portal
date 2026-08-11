@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<!--
+  Печатный вид «Заявка на закупку» (ЗнЗ: плановая Ф.1–К / цеховая Ф.4–К). K-102.
+  Стиль — по фирменным формам ИСМ ПБС (образец — pz-template.html, Ф.1–П.2):
+  тёмно-синие плашки разделов, шрифт с засечками, шапка ПБС; тип формы —
+  служебное мелким чипом (дизайн-канон 10.08).
+  Заполняется render-znz.mjs: плейсхолдеры {{...}} и строки позиций {{POSITIONS}}.
+  Рендер в PDF — через Gotenberg (/forms/chromium/convert/html).
+-->
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: A4; margin: 14mm 14mm 16mm 14mm; }
+    * { box-sizing: border-box; }
+    :root { --navy: #1F4E79; --navy2: #2E5E8C; --line: #9aa6b2; --muted: #6b7785; }
+    body { font-family: "Liberation Serif", "DejaVu Serif", "Times New Roman", serif;
+           font-size: 11.5px; color: #16181c; }
+
+    /* шапка */
+    .head { display: flex; align-items: flex-start; justify-content: space-between; }
+    .head .org { font-size: 11px; color: var(--navy); padding-top: 4px; white-space: nowrap; }
+    .head .code { font-size: 10.5px; color: var(--navy); font-style: italic; padding-top: 4px; white-space: nowrap; text-align: right; }
+    h1 { flex: 1; text-align: center; font-size: 19px; color: var(--navy);
+         text-transform: uppercase; letter-spacing: 2px; margin: 0 8px; font-weight: bold; }
+    .subtitle { text-align: center; color: var(--muted); font-size: 10px; font-style: italic;
+                margin: 2px 0 12px; }
+    /* тип формы — служебное мелким чипом (канон) */
+    .chip { display: inline-block; font-size: 9px; font-weight: bold; font-style: normal;
+            color: var(--navy); background: #eef2f6; border: 1px solid var(--line);
+            border-radius: 2px; padding: 1px 6px; letter-spacing: .04em; }
+
+    /* плашка раздела */
+    .sec { background: var(--navy); color: #fff; font-weight: bold; font-size: 12px;
+           padding: 4px 9px; margin: 13px 0 0; }
+    .hint { color: var(--muted); font-size: 9.5px; font-style: italic; margin: 3px 2px 5px; }
+
+    /* таблицы «ключ-значение» */
+    table { width: 100%; border-collapse: collapse; }
+    .kv td { border: 1px solid var(--line); padding: 4px 7px; vertical-align: top; }
+    .kv td.l { background: #eef2f6; font-weight: bold; width: 20%; white-space: nowrap; }
+    .kv td.v { width: 30%; }
+
+    /* таблица позиций */
+    .nom th, .nom td { border: 1px solid var(--line); padding: 4px 6px; }
+    .nom th { background: var(--navy); color: #fff; font-weight: bold; font-size: 10.5px; text-align: center; }
+    .nom td.num, .nom td.qty { text-align: center; }
+    .muted { color: var(--muted); font-style: italic; }
+
+    /* подписи */
+    .sign th, .sign td { border: 1px solid var(--line); padding: 6px 7px; font-size: 10.5px; }
+    .sign th { background: var(--navy); color: #fff; font-weight: bold; text-align: center; }
+    .sign td.role { font-weight: bold; background: #eef2f6; width: 34%; }
+
+    .foot { margin-top: 12px; font-size: 9px; color: var(--muted); border-top: 1px solid #d4dae0; padding-top: 5px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="org">ООО «Петробалт Сервис»</div>
+    <h1>Заявка на закупку</h1>
+    <div class="code"><span class="chip">{{FORM_CODE}}</span><br />№ {{NUM_ZNZ}}</div>
+  </div>
+  <div class="subtitle">Что / сколько / к какому сроку закупить · приложение к ДП–К–1.0</div>
+
+  <div class="sec">1. Общая информация</div>
+  <div class="hint">Кто и когда подал заявку, срочность и требуемый срок поставки.</div>
+  <table class="kv">
+    <tr><td class="l">Номер заявки</td><td class="v"><b>{{NUM_ZNZ}}</b></td><td class="l">Дата подачи</td><td class="v">{{DATE_CREATED}}</td></tr>
+    <tr><td class="l">Тип заявки</td><td class="v">{{TYPE}}</td><td class="l">Статус</td><td class="v">{{STATUS}}</td></tr>
+    <tr><td class="l">Заявитель</td><td class="v">{{INITIATOR}}</td><td class="l">Подразделение</td><td class="v">{{DEPT}}</td></tr>
+    <tr><td class="l">Срочность</td><td class="v">{{URGENCY}}</td><td class="l">Срок поставки (план)</td><td class="v"><b>{{DUE_PLAN}}</b></td></tr>
+  </table>
+
+  <div class="sec">2. Позиции заявки</div>
+  <div class="hint">Перечень закупаемых позиций: что, сколько, в каких единицах, категория закупки.</div>
+  <table class="nom">
+    <thead>
+      <tr><th style="width:26px">№</th><th>Наименование</th><th style="width:64px">Кол-во</th><th style="width:56px">Ед.</th><th style="width:110px">Категория</th><th>Примечание</th></tr>
+    </thead>
+    <tbody>
+      {{POSITIONS}}
+    </tbody>
+  </table>
+
+  <div class="sec">3. Обоснование и источник</div>
+  <div class="hint">Зачем нужна закупка и что её породило (производственный заказ / ЗКЗ / склад).</div>
+  <table class="kv">
+    <tr><td class="l">Обоснование</td><td colspan="3">{{RATIONALE}}</td></tr>
+    <tr><td class="l">Источник (ПЗ/ЗКЗ/склад)</td><td class="v">{{SOURCE_REF}}</td><td class="l">Поставщик (если выбран)</td><td class="v">{{SUPPLIER}}</td></tr>
+  </table>
+
+  <div class="sec">4. Подписи</div>
+  <div class="hint">Заявитель подтверждает потребность; закупщик — принятие заявки в работу.</div>
+  <table class="sign">
+    <tr><th>Роль</th><th>ФИО</th><th>Подпись</th><th>Дата</th></tr>
+    <tr><td class="role">Заявитель</td><td>{{SIGN_INITIATOR}}</td><td></td><td>{{DATE_CREATED}}</td></tr>
+    <tr><td class="role">Принял в работу: снабжение</td><td>{{SIGN_ASSIGNEE}}</td><td></td><td>{{SIGN_ASSIGNEE_DATE}}</td></tr>
+  </table>
+
+  <div class="foot">
+    Связанные: ДП–К–1.0 (закупки), Ф.3–Д.1 (входной контроль) ·
+    Хранение: /06–Записи по процессам/6.4–Закупки/[Год]/{{NUM_ZNZ}}/ ·
+    Сформировано порталом ИСМ ПБС {{GENERATED_AT}}
+  </div>
+</body>
+</html>

@@ -1082,6 +1082,36 @@
     #odetail:has(#od-tabs), #znz-drawer.on, .modal.as-drawer{background:var(--sl-50);}
     #odetail:has(#od-tabs) > .card, #znz-drawer.on .card, .modal.as-drawer .card{background:#fff;}
 
+
+    /* ── K-117: иконки взамен цветных эмодзи. Аудит владельца: в портале было
+       41 разное эмодзи и 247 употреблений — они рисуются шрифтом ОС, поэтому
+       цветные и чужой формы рядом с нашими SVG. Вставляются как <i class=ic-x>
+       БЕЗ КАВЫЧЕК — иначе ломают JS-строки в одинарных кавычках (наступил на это).
+       Цвет наследуется от текста через mask + currentColor. */
+    i[class^="ic-"]{display:inline-block;width:13px;height:13px;vertical-align:-2px;flex:0 0 auto;background-color:currentColor;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-size:contain;mask-size:contain;-webkit-mask-position:center;mask-position:center;}
+    .ic-doc{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M11.5 2.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 17.5h8a1.5 1.5 0 0 0 1.5-1.5V6.5z'/><path d='M11.5 2.5v4h4'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M11.5 2.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 17.5h8a1.5 1.5 0 0 0 1.5-1.5V6.5z'/><path d='M11.5 2.5v4h4'/></svg>");}
+    .ic-eye{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1.8 10S4.7 4.5 10 4.5 18.2 10 18.2 10 15.3 15.5 10 15.5 1.8 10 1.8 10z'/><circle cx='10' cy='10' r='2.4'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1.8 10S4.7 4.5 10 4.5 18.2 10 18.2 10 15.3 15.5 10 15.5 1.8 10 1.8 10z'/><circle cx='10' cy='10' r='2.4'/></svg>");}
+    .ic-link{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M8.5 11.5a3 3 0 0 0 4.3 0l2.4-2.4a3 3 0 0 0-4.3-4.3l-1.2 1.2'/><path d='M11.5 8.5a3 3 0 0 0-4.3 0l-2.4 2.4a3 3 0 0 0 4.3 4.3l1.2-1.2'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M8.5 11.5a3 3 0 0 0 4.3 0l2.4-2.4a3 3 0 0 0-4.3-4.3l-1.2 1.2'/><path d='M11.5 8.5a3 3 0 0 0-4.3 0l-2.4 2.4a3 3 0 0 0 4.3 4.3l1.2-1.2'/></svg>");}
+    .ic-clip{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M15 9.2 9.6 14.6a3.1 3.1 0 0 1-4.4-4.4l5.9-5.9a2.1 2.1 0 0 1 2.9 2.9l-5.9 5.9a1 1 0 0 1-1.5-1.5l5.4-5.4'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M15 9.2 9.6 14.6a3.1 3.1 0 0 1-4.4-4.4l5.9-5.9a2.1 2.1 0 0 1 2.9 2.9l-5.9 5.9a1 1 0 0 1-1.5-1.5l5.4-5.4'/></svg>");}
+    .ic-wrench{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M13.6 3.4a4 4 0 0 0-5.2 5.2L3.5 13.5a1.8 1.8 0 0 0 2.5 2.5l4.9-4.9a4 4 0 0 0 5.2-5.2l-2.3 2.3-2.1-.5-.5-2.1z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M13.6 3.4a4 4 0 0 0-5.2 5.2L3.5 13.5a1.8 1.8 0 0 0 2.5 2.5l4.9-4.9a4 4 0 0 0 5.2-5.2l-2.3 2.3-2.1-.5-.5-2.1z'/></svg>");}
+    .ic-okc{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='10' cy='10' r='7.2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='10' cy='10' r='7.2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");}
+    .ic-board2{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='5.5' y='3.5' width='9' height='13' rx='1.5'/><path d='M8 3.5V2.8h4v.7'/><path d='M7.8 8.5h4.4M7.8 11.5h4.4'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='5.5' y='3.5' width='9' height='13' rx='1.5'/><path d='M8 3.5V2.8h4v.7'/><path d='M7.8 8.5h4.4M7.8 11.5h4.4'/></svg>");}
+    .ic-print{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M6 7.5V3.2h8v4.3'/><rect x='3.5' y='7.5' width='13' height='6' rx='1.5'/><path d='M6 12.5h8v4.3H6z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M6 7.5V3.2h8v4.3'/><rect x='3.5' y='7.5' width='13' height='6' rx='1.5'/><path d='M6 12.5h8v4.3H6z'/></svg>");}
+    .ic-folder{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M2.8 6.2A1.5 1.5 0 0 1 4.3 4.7h3l1.5 1.8h6.9a1.5 1.5 0 0 1 1.5 1.5v6.3a1.5 1.5 0 0 1-1.5 1.5H4.3a1.5 1.5 0 0 1-1.5-1.5z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M2.8 6.2A1.5 1.5 0 0 1 4.3 4.7h3l1.5 1.8h6.9a1.5 1.5 0 0 1 1.5 1.5v6.3a1.5 1.5 0 0 1-1.5 1.5H4.3a1.5 1.5 0 0 1-1.5-1.5z'/></svg>");}
+    .ic-plant{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M2.8 17V9l4.4 2.6V9l4.4 2.6V5h5.6v12z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M2.8 17V9l4.4 2.6V9l4.4 2.6V5h5.6v12z'/></svg>");}
+    .ic-box{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='m10 2.6 6.6 3.4v8L10 17.4 3.4 14V6z'/><path d='M3.4 6 10 9.4 16.6 6M10 9.4v8'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='m10 2.6 6.6 3.4v8L10 17.4 3.4 14V6z'/><path d='M3.4 6 10 9.4 16.6 6M10 9.4v8'/></svg>");}
+    .ic-search{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='8.8' cy='8.8' r='5'/><path d='m12.6 12.6 4 4'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='8.8' cy='8.8' r='5'/><path d='m12.6 12.6 4 4'/></svg>");}
+    .ic-chat{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M16.5 12.2a1.6 1.6 0 0 1-1.6 1.6H6.8L3.5 17V5.2a1.6 1.6 0 0 1 1.6-1.6h9.8a1.6 1.6 0 0 1 1.6 1.6z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M16.5 12.2a1.6 1.6 0 0 1-1.6 1.6H6.8L3.5 17V5.2a1.6 1.6 0 0 1 1.6-1.6h9.8a1.6 1.6 0 0 1 1.6 1.6z'/></svg>");}
+    .ic-trash{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.8 5.5h12.4M8 5.5V4a.9.9 0 0 1 .9-.9h2.2A.9.9 0 0 1 12 4v1.5'/><path d='M5.4 5.5 6 16a1 1 0 0 0 1 .9h6a1 1 0 0 0 1-.9l.6-10.5'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.8 5.5h12.4M8 5.5V4a.9.9 0 0 1 .9-.9h2.2A.9.9 0 0 1 12 4v1.5'/><path d='M5.4 5.5 6 16a1 1 0 0 0 1 .9h6a1 1 0 0 0 1-.9l.6-10.5'/></svg>");}
+    .ic-down{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M10 3.5v9.5'/><path d='m6.2 9.4 3.8 3.8 3.8-3.8'/><path d='M3.8 16.4h12.4'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M10 3.5v9.5'/><path d='m6.2 9.4 3.8 3.8 3.8-3.8'/><path d='M3.8 16.4h12.4'/></svg>");}
+    .ic-up{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M10 16.4V6.9'/><path d='m6.2 10.5 3.8-3.8 3.8 3.8'/><path d='M3.8 3.5h12.4'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M10 16.4V6.9'/><path d='m6.2 10.5 3.8-3.8 3.8 3.8'/><path d='M3.8 3.5h12.4'/></svg>");}
+    .ic-hour{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M6 3h8M6 17h8'/><path d='M13.5 3v3.2L10 10l-3.5-3.8V3M13.5 17v-3.2L10 10l-3.5 3.8V17'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M6 3h8M6 17h8'/><path d='M13.5 3v3.2L10 10l-3.5-3.8V3M13.5 17v-3.2L10 10l-3.5 3.8V17'/></svg>");}
+    .ic-cert{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M11.5 2.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 17.5h8a1.5 1.5 0 0 0 1.5-1.5V6.5z'/><path d='M11.5 2.5v4h4'/><circle cx='10' cy='12.4' r='1.6'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M11.5 2.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 17.5h8a1.5 1.5 0 0 0 1.5-1.5V6.5z'/><path d='M11.5 2.5v4h4'/><circle cx='10' cy='12.4' r='1.6'/></svg>");}
+    .ic-bill{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 2.8h11v14.4l-1.8-1.2-1.8 1.2-1.9-1.2-1.9 1.2-1.8-1.2-1.8 1.2z'/><path d='M7.4 7h5.2M7.4 10h5.2'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 2.8h11v14.4l-1.8-1.2-1.8 1.2-1.9-1.2-1.9 1.2-1.8-1.2-1.8 1.2z'/><path d='M7.4 7h5.2M7.4 10h5.2'/></svg>");}
+    .ic-help{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='10' cy='10' r='7.2'/><path d='M8.2 8.1a1.9 1.9 0 1 1 2.5 1.8c-.5.2-.7.6-.7 1.1v.4'/><path d='M10 14.1h.01'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='10' cy='10' r='7.2'/><path d='M8.2 8.1a1.9 1.9 0 1 1 2.5 1.8c-.5.2-.7.6-.7 1.1v.4'/><path d='M10 14.1h.01'/></svg>");}
+    .ic-menu{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 6h13M3.5 10h13M3.5 14h13'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 6h13M3.5 10h13M3.5 14h13'/></svg>");}
+    .ic-chk{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='3.5' width='13' height='13' rx='2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='3.5' width='13' height='13' rx='2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");}
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){
@@ -1149,7 +1179,7 @@
 
     <main>
       <div class="top">
-        <button id="burger" aria-label="Меню">☰</button>
+        <button id="burger" aria-label="Меню"><i class=ic-menu></i></button>
         <h1 id="h1">Производственная доска</h1>
         <span class="sub" id="today"></span>
         <div class="right"><span id="mbadge" class="mbadge m-mock">…</span>
@@ -1235,7 +1265,7 @@
     };
     function injectIcons(){const sv=(p)=>`<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
       document.querySelectorAll('.i[data-ic]').forEach(el=>{const p=ICONS[el.dataset.ic];if(p)el.innerHTML=sv(p);});}
-    // action-иконки (взамен эмодзи 🖨💬📁📄🗑) — viewBox 20, stroke currentColor, инлайн
+    // action-иконки (взамен эмодзи <i class=ic-print></i><i class=ic-chat></i><i class=ic-folder></i><i class=ic-doc></i><i class=ic-trash></i>) — viewBox 20, stroke currentColor, инлайн
     const AICONS={
       print:'<path d="M6 7V3h8v4M6 14H4v-4h12v4h-2M6 12h8v5H6z"/>',
       chat:'<path d="M4 4h12v9H8l-4 3z"/>',
@@ -1324,7 +1354,7 @@
     // контрагент, чертёж/проект, акт контроля, ЗП). Копируется ПОЛНЫЙ адрес (origin+путь+hash).
     // navigator.clipboard требует secure context, а портал живёт и на http://nas-pbs:4173 —
     // поэтому fallback через невидимый textarea + execCommand('copy').
-    const linkBtn=(hash)=>`<button class="tbtn" data-copylink="${esc(hash)}" title="Скопировать ссылку на эту карточку" style="padding:3px 9px;font-size:13px;line-height:1.4">🔗</button>`;
+    const linkBtn=(hash)=>`<button class="tbtn" data-copylink="${esc(hash)}" title="Скопировать ссылку на эту карточку" style="padding:3px 9px;font-size:13px;line-height:1.4"><i class=ic-link></i></button>`;
     function wireCopyLink(root){
       (root||document).querySelectorAll('[data-copylink]').forEach(b=>b.onclick=(e)=>{
         e.stopPropagation();
@@ -1536,7 +1566,7 @@
       const tbar=(opts.toolbar||[]).map((b,i)=>`<button class="tbtn ${b.cls||''}" data-tb="${i}"${b.disabled?' disabled':''}${b.title?` title="${esc(b.title)}"`:''}${b.disabled?' style="opacity:.5;cursor:not-allowed"':''}>${esc(b.label)}</button>`).join('');
       const colmenu=`<div class="erp-colwrap"><button class="tbtn" data-colbtn>⊞ Колонки ▾</button><div class="colmenu" hidden><div class="h">Показывать столбцы</div>${cols.filter(c=>c.label).map(c=>`<label><input type="checkbox" data-col="${esc(c.key)}" ${H[c.key]?'':'checked'} ${c.fixed?'disabled':''}>${esc(c.label)}</label>`).join('')}</div></div>`;
       const search=opts.search!==false?`<input class="erp-search" type="search" aria-label="Поиск по таблице" placeholder="Поиск…" value="${esc(st.q)}">`:'';
-      const selbtn=DEL?`<button class="tbtn" data-selbtn style="display:inline-flex;align-items:center;gap:5px">☑ Выбрать</button>`:'';
+      const selbtn=DEL?`<button class="tbtn" data-selbtn style="display:inline-flex;align-items:center;gap:5px"><i class=ic-chk></i> Выбрать</button>`:'';
       const delbtn=DEL?`<button class="tbtn" data-delbtn disabled style="color:var(--red);border-color:#fca5a5;display:none;align-items:center;gap:5px">${aico('trash',13)} Удалить (0)</button>`:'';
       // п.2 аудита: подсказку «клик по строке — карточка» рисует сам компонент (одна формулировка на портал)
       const hint=(opts.onRow&&opts.hint!==false)?REG_HINT:'';
@@ -1548,7 +1578,7 @@
       const updDel=()=>{ if(!delEl)return; const n=selected.size; delEl.innerHTML=`${aico('trash',13)} Удалить (${n})`; delEl.disabled=!n; };
       // K-10 #4: тумблер режима выбора — чекбоксы и «Удалить» появляются только по клику «Выбрать»
       if(selEl)selEl.onclick=()=>{ selMode=!selMode; if(!selMode)selected.clear();
-        selEl.classList.toggle('on',selMode); selEl.textContent=selMode?'✕ Готово':'☑ Выбрать';
+        selEl.classList.toggle('on',selMode); selEl.textContent=selMode?'✕ Готово':'<i class=ic-chk></i> Выбрать';
         if(delEl)delEl.style.display=selMode?'inline-flex':'none'; draw(); updDel(); };
       if(delEl)delEl.onclick=async()=>{
         const ids=[...selected]; if(!ids.length)return;
@@ -3616,7 +3646,7 @@
       const nb=document.getElementById('dnew'); if(nb)nb.onclick=()=>openNewProject();
       host.querySelectorAll('.dfold[data-g]').forEach(el=>el.onclick=()=>{dProjGrp=el.dataset.g;try{localStorage.setItem('pbs-dproj-grp',dProjGrp);}catch{} dProj(host);});
       const psel=document.getElementById('dproj-sel'); if(psel)psel.onchange=()=>{designSel=psel.value;try{localStorage.setItem('pbs-dproj-sel',designSel);}catch{} dProj(host);};
-      wireCopyLink(host); // 🔗 в шапке карточки проекта
+      wireCopyLink(host); // <i class=ic-link></i> в шапке карточки проекта
       bindGoKd();
       if(o){ loadDesignFiles(o.decNo); loadProjRoutes(o.decNo); }
     }
@@ -3712,7 +3742,7 @@
     }
     window.dCovOpenDoc=dCovOpenDoc;
     // плитка одного корневого узла дерева (изделие/оснастка): бейдж полноты n/m (kdComplMap — тот же источник,
-    // что даёт бейдж «N/M файлов» в таблице «Чертежи») + [Открыть →] (карточка чертежа) + [⬇ ZIP] (если есть состав)
+    // что даёт бейдж «N/M файлов» в таблице «Чертежи») + [Открыть →] (карточка чертежа) + [<i class=ic-down></i> ZIP] (если есть состав)
     function dProdRootTile(r,complMap){
       const c=complMap[r._key];
       const have=c?c.have:((r.files&&r.files.length)?1:0), tot=c?c.total:1;
@@ -3724,7 +3754,7 @@
         <div class="dprod-tile-no" title="${esc(r.docNo)}">${esc(String(r.docNo||'').replace('ПБС.',''))}</div>
         <div class="dprod-tile-acts">
           <button class="tbtn" style="padding:3px 9px;font-size:11.5px" onclick="dCovOpenDoc('${esc(r.docNo)}')">Открыть →</button>
-          ${asmLike?`<a class="tbtn" style="padding:3px 9px;font-size:11.5px" href="/api/design/kd/zip?doc=${encodeURIComponent(r.docNo)}" title="Скачать комплект сборки ZIP">⬇ ZIP${zipCnt?` (${zipCnt})`:''}</a>`:''}
+          ${asmLike?`<a class="tbtn" style="padding:3px 9px;font-size:11.5px" href="/api/design/kd/zip?doc=${encodeURIComponent(r.docNo)}" title="Скачать комплект сборки ZIP"><i class=ic-down></i> ZIP${zipCnt?` (${zipCnt})`:''}</a>`:''}
         </div>
       </div>`;
     }
@@ -3778,14 +3808,14 @@
           <div id="dkd-upl-panel"></div>
           ${kdOf.length?KD_LEGEND2+dKdComposition(kdOf):'<div style="color:var(--sub);font-size:13px">Документы КД не заведены</div>'}</div>
         <div id="dprod-panel"></div>
-        <div class="card pad" id="dtd-block" data-proj="${esc(o.decNo)}"><div class="row" style="margin-bottom:8px"><span class="sec-h">🔧 Состав ТД</span><span class="spacer"></span><span id="dtd-cnt" style="font-size:12px;color:var(--sub)"></span></div>
+        <div class="card pad" id="dtd-block" data-proj="${esc(o.decNo)}"><div class="row" style="margin-bottom:8px"><span class="sec-h"><i class=ic-wrench></i> Состав ТД</span><span class="spacer"></span><span id="dtd-cnt" style="font-size:12px;color:var(--sub)"></span></div>
           <div id="dtd-body" style="font-size:12.5px;color:var(--sub)">Загрузка маршрутов…</div></div>
         ${dNoticesBlock(o)}
         ${dProdOrdersBlock(o)}
         <div class="extkd-wrap empty" id="dfiles-wrap" style="margin-top:var(--gap)">
           <div class="extkd-strip" id="dfiles-strip" role="button" tabindex="0" aria-expanded="false" title="Развернуть/свернуть файлы проекта (записи 6.7-РТД) — любые файлы, не только чертежи">
             <span class="extkd-chev">▸</span>
-            <span class="extkd-lbl">📁 Файлы проекта</span>
+            <span class="extkd-lbl"><i class=ic-folder></i> Файлы проекта</span>
             <span class="extkd-cnt" id="dfiles-cnt"></span>
           </div>
           <div class="extkd-body pad" id="dfiles-body" hidden>
@@ -3808,18 +3838,18 @@
           <span class="badge b-amber">${esc(x.status)}</span>
         </div>`).join('')}</div>`;
     }
-    // 🏭 Производство: ПЗ из DATA.orders, где хотя бы одна позиция (positions[].drawing) содержит децим.№ проекта; блок скрыт, если ПЗ нет
+    // <i class=ic-plant></i> Производство: ПЗ из DATA.orders, где хотя бы одна позиция (positions[].drawing) содержит децим.№ проекта; блок скрыт, если ПЗ нет
     function dProdOrdersBlock(o){
       const np=decNorm(o.decNo); if(!np)return '';
       const list=((typeof DATA!=='undefined'&&DATA&&DATA.orders)||[]).filter(x=>(x.positions||[]).some(p=>decNorm(p.drawing).indexOf(np)>-1));
       if(!list.length)return '';
       const rows=list.map(x=>{const tot=(x.tasks||[]).length,dn=doneCount(x),pct=tot?Math.round(dn/tot*100):0;
         return `<tr><td class="code"><a href="#orders/${encodeURIComponent(x.numPz)}" style="color:var(--blue);font-weight:600;text-decoration:none">${esc(x.numPz)}</a></td><td>${stCell(x.status)}</td><td class="nowrap"><span class="st"><span class="bar2"><i style="width:${pct}%;${pct===100?'background:var(--green)':''}"></i></span><span class="c-gray">${dn}/${tot}</span></span></td></tr>`;}).join('');
-      return `<div class="card pad"><div class="row" style="margin-bottom:8px"><span class="sec-h">🏭 Производство</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">${list.length} ПЗ</span></div>
+      return `<div class="card pad"><div class="row" style="margin-bottom:8px"><span class="sec-h"><i class=ic-plant></i> Производство</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">${list.length} ПЗ</span></div>
         <div class="tbl-wrap"><table class="dt" style="--tbl-min:420px"><colgroup><col style="width:150px"><col style="width:170px"><col></colgroup>
         <thead><tr><th>№ ПЗ</th><th>Статус</th><th>Готовность</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }
-    // 🔧 Состав ТД: маршрутные карты (МК) проекта — лениво, из кэша ensureRoutesList()/BOARD_RT (K-72).
+    // <i class=ic-wrench></i> Состав ТД: маршрутные карты (МК) проекта — лениво, из кэша ensureRoutesList()/BOARD_RT (K-72).
     // Совпадение designation ↔ проект: без «ПБС.», trim, lower — начинается с децим.№ ИЛИ kdProj(designation)===decNo.
     async function loadProjRoutes(proj){
       const block=document.getElementById('dtd-block'); if(!block||block.dataset.proj!==proj)return;
@@ -3961,7 +3991,7 @@
         if(!picked.length){msg.textContent='Отметьте хотя бы одну позицию.';return;}
         const btn=host.querySelector('#dp-save'); btn.disabled=true; btn.textContent='Создание…';
         try{ const r=await fetch('/api/orders/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orderType:host.querySelector('#dp-type').value,customer:cust,taskType:'Производство',priority:'Нормальный',status:'Размещён',datePlaced:new Date().toISOString().slice(0,10),datePlan:host.querySelector('#dp-plan').value,basis:'Из состава КД проекта ПБС.'+decNo,positions:picked})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          msg.style.color='var(--green)'; msg.innerHTML=`✅ Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||picked.length}. <a href="#orders/${encodeURIComponent(j.numPz||'')}" style="color:var(--blue);font-weight:600">Открыть в Заказах →</a>`;
+          msg.style.color='var(--green)'; msg.innerHTML=`<i class=ic-okc></i> Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||picked.length}. <a href="#orders/${encodeURIComponent(j.numPz||'')}" style="color:var(--blue);font-weight:600">Открыть в Заказах →</a>`;
           btn.textContent='Создано ✓';
         }catch(e){ msg.textContent='Не удалось создать: '+(e.message||e); btn.disabled=false; btn.textContent='Создать ПЗ'; }
       };
@@ -4087,7 +4117,7 @@
       const nmHtml=(asmLike?`<b>${esc(k.name)}</b>${isAsm?` <span style="color:var(--sub);font-size:11px">· сборка</span>`:''}`:esc(k.name))
         +(c?` <span class="dkt-cnt" title="Файлов по составу: загружено/всего позиций сборки">${c.have}/${c.total} файлов</span>`:'');
       const href=kdMainFileHref(k);
-      const pdfCell=href?`<a class="tbtn" href="${href}" target="_blank" rel="noopener" style="padding:3px 9px;font-size:11.5px;text-decoration:none">📄 PDF</a>`:'<span class="dkt-dash">—</span>';
+      const pdfCell=href?`<a class="tbtn" href="${href}" target="_blank" rel="noopener" style="padding:3px 9px;font-size:11.5px;text-decoration:none"><i class=ic-doc></i> PDF</a>`:'<span class="dkt-dash">—</span>';
       const prodBtn=asmLike
         ? `<button class="tbtn primary" data-toprodreg data-doc="${esc(k.docNo)}" data-proj="${esc(projDecNo)}" style="padding:4px 11px;font-size:11.5px">⚙ В производство</button>`
         : `<button class="tbtn" data-toprodreg data-doc="${esc(k.docNo)}" data-proj="${esc(projDecNo)}" title="В производство" style="padding:3px 8px;font-size:12px">⚙</button>`;
@@ -4287,7 +4317,7 @@
           <span style="margin-left:auto">${linkBtn('#design/'+encodeURIComponent(k.docNo))}</span>
         </div>
         <div class="dcard-wrap">
-          <div class="dcard-pdf">${href?`<iframe src="${esc(href)}" title="Чертёж ${esc(k.docNo)}"></iframe>`:`<div class="dcard-empty">Файл не загружен.<br>Загрузите выпущенный PDF через «⬆ Новая версия» справа.</div>`}</div>
+          <div class="dcard-pdf">${href?`<iframe src="${esc(href)}" title="Чертёж ${esc(k.docNo)}"></iframe>`:`<div class="dcard-empty">Файл не загружен.<br>Загрузите выпущенный PDF через «<i class=ic-up></i> Новая версия» справа.</div>`}</div>
           <div>
             <div class="card pad">
               <div class="dcard-title">${esc(k.name)} ${kdBadge(kdDispStatus(k))}</div>
@@ -4299,9 +4329,9 @@
               </div>
               <div class="dcard-acts">
                 <button class="tbtn primary" id="dc-prod">⚙ В производство${asmLike?' (вся сборка)':''}</button>
-                ${href?`<a class="tbtn" href="${esc(href)}&dl=1">⬇ Скачать PDF</a>`:''}
-                ${asmLike?`<a class="tbtn" href="/api/design/kd/zip?doc=${encodeURIComponent(k.docNo)}">⬇ Комплект сборки ZIP${zipCnt?` (${zipCnt})`:''}</a>`:''}
-                ${projDecNo?`<button class="tbtn" id="dc-newver">⬆ Новая версия</button>`:''}
+                ${href?`<a class="tbtn" href="${esc(href)}&dl=1"><i class=ic-down></i> Скачать PDF</a>`:''}
+                ${asmLike?`<a class="tbtn" href="/api/design/kd/zip?doc=${encodeURIComponent(k.docNo)}"><i class=ic-down></i> Комплект сборки ZIP${zipCnt?` (${zipCnt})`:''}</a>`:''}
+                ${projDecNo?`<button class="tbtn" id="dc-newver"><i class=ic-up></i> Новая версия</button>`:''}
               </div>
               <div id="dc-upl"></div>
             </div>
@@ -4354,14 +4384,14 @@
             <span class="v-name" title="${esc(v.name)}">${isCur?'★ ':''}${esc(v.name)}</span>
             ${v.author?`<span class="v-date" title="Автор версии">${esc(v.author)}</span>`:''}
             <span class="v-date">${v.mtime?esc(fmt(v.mtime)):''}</span>
-            <a class="tbtn" style="padding:2px 8px;font-size:11px" href="/api/design/kd/file?rel=${encodeURIComponent(v.rel)}&dl=1">⬇</a>
+            <a class="tbtn" style="padding:2px 8px;font-size:11px" href="/api/design/kd/file?rel=${encodeURIComponent(v.rel)}&dl=1"><i class=ic-down></i></a>
           </div>`;
         let html=''; if(j.current)html+=row(j.current,true);
         (j.archive||[]).forEach(v=>{html+=row(v,false);});
         document.getElementById('dc-versions').innerHTML=html||'<div style="color:var(--sub)">Файлов нет.</div>';
       }catch(e){ const h=document.getElementById('dc-versions'); if(h)h.innerHTML='<div style="color:var(--sub)">Не удалось загрузить версии.</div>'; }
     }
-    // «⬆ Новая версия»: инлайн-виджет как dKdUplToggle, но с полем doc — сервер (см. /api/design/upload)
+    // «<i class=ic-up></i> Новая версия»: инлайн-виджет как dKdUplToggle, но с полем doc — сервер (см. /api/design/upload)
     // автоматически архивирует ПРЕДЫДУЩИЙ release-PDF этого децим.№ в «_архив» (designArchiveOld)
     window.dCardUplToggle=function(docNo,projDecNo){
       const host=document.getElementById('dc-upl'); if(!host)return;
@@ -6519,7 +6549,7 @@
         {key:'sum',label:'Сумма',w:124,align:'right',cls:'nw',cell:r=>{const hasInv=r.invoicesSum!=null;const v=procMoney(hasInv?r.invoicesSum:(r.orderSum??r.budget));if(!v)return '<span class="c-gray">—</span>';return hasInv?`<span title="сумма ${r.invoicesCount} счёт(ов) по заявке">${esc(v)}</span>`:esc(v);},sortVal:r=>r.invoicesSum??r.orderSum??r.budget??0},
         {key:'sup',label:'Поставщик',w:172,cls:'ell c-gray',cell:r=>esc(r.supplier||'—'),sortVal:r=>r.supplier},
         // K-102: «В работе у» — закупщик, принявший заявку (оверлей znz-assignee, см. карточку)
-        {key:'assignee',label:'В работе',w:132,cls:'ell c-gray',cell:r=>r.assignee&&r.assignee.fio?`<span title="Принята в работу: ${esc(r.assignee.fio)}">⏳ ${esc(r.assignee.fio)}</span>`:'<span class="c-gray">—</span>',sortVal:r=>(r.assignee&&r.assignee.fio)||''},
+        {key:'assignee',label:'В работе',w:132,cls:'ell c-gray',cell:r=>r.assignee&&r.assignee.fio?`<span title="Принята в работу: ${esc(r.assignee.fio)}"><i class=ic-hour></i> ${esc(r.assignee.fio)}</span>`:'<span class="c-gray">—</span>',sortVal:r=>(r.assignee&&r.assignee.fio)||''},
         // ОПЛАТА: сводка по счетам заявки без захода в карточку (правка Александра 22.07)
         {key:'pay',label:'Оплата',w:168,cls:'nw',cell:r=>{
           if(!r.invoicesCount)return '<span class="c-gray">—</span>';
@@ -6853,7 +6883,7 @@
       const reviewerBlock=r.reviewer?`<div style="grid-column:1/-1" id="znz-reviewer-block">
           <div style="font-size:11px;color:var(--sl-500)">Проверка</div>
           <div id="znz-reviewer-view" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <div style="font-size:13px;color:var(--ink)">${esc(r.reviewer.name||'—')} · ${r.reviewer.verifiedAt?('✓ Проверено '+esc(fmtDateTimeFull(r.reviewer.verifiedAt))):'⏳ ждёт'}</div>
+            <div style="font-size:13px;color:var(--ink)">${esc(r.reviewer.name||'—')} · ${r.reviewer.verifiedAt?('✓ Проверено '+esc(fmtDateTimeFull(r.reviewer.verifiedAt))):'<i class=ic-hour></i> ждёт'}</div>
             ${canAct&&!r.reviewer.verifiedAt?'<button class="tbtn" id="znz-verify-btn" style="padding:3px 10px;font-size:12px">Отметить «Проверено»</button>':''}
           </div>
         </div>`:'';
@@ -6957,7 +6987,7 @@
       // K-102: «Принять в работу» (Снабжение/Админ, LIVE, пока никто не взял) + бейдж «В работе у»
       const canTake=PROC.mode==='live'&&r.id!=null&&znzCanTake()&&!(r.assignee&&r.assignee.fio);
       if(canTake)acts.push('<button class="ui-btn ui-btn--primary" id="znz-take">Принять в работу</button>');
-      const takenBadge=(r.assignee&&r.assignee.fio)?`<span class="st--wait" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}">⏳ В работе у: ${esc(r.assignee.fio)}</span>`:'';
+      const takenBadge=(r.assignee&&r.assignee.fio)?`<span class="st--wait" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}"><i class=ic-hour></i> В работе у: ${esc(r.assignee.fio)}</span>`:'';
       znzCardOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="znz-back" style="font-size:13px;text-decoration:none;cursor:pointer">← Закупки</a>
           <span class="code" style="font-size:16px;font-family:var(--mono)">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${takenBadge}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
@@ -7303,8 +7333,8 @@
         // fetch без клиентского таймаута (сервер сам ограничивает ожидание async-операции).
         const hasPdf=pickedFiles.some(f=>/\.pdf$/i.test(f.name));
         ocrListEl.innerHTML=hasPdf
-          ?'<span class="c-gray">⏳ Распознаю документы (PDF может занять до 1-2 минут — это несколько документов на одних листах)…</span>'
-          :'<span class="c-gray">⏳ Распознаю документы…</span>';
+          ?'<span class="c-gray"><i class=ic-hour></i> Распознаю документы (PDF может занять до 1-2 минут — это несколько документов на одних листах)…</span>'
+          :'<span class="c-gray"><i class=ic-hour></i> Распознаю документы…</span>';
         let results=[];
         try{
           const fd=new FormData();
@@ -7329,11 +7359,11 @@
         acOcrCheck('Накладная',results.some(x=>x.type==='waybill'));
         acOcrCheck('Сертификат качества',results.some(x=>x.type==='cert'));
         ocrListEl.innerHTML=results.length?results.map(f=>{
-          if(f.type==='waybill'){const fl=f.fields||{};return `<div>📄 ${esc(f.name)} → Накладная № ${esc(fl.number||'—')}${fl.date?' от '+fmt(fl.date):''}</div>`;}
-          if(f.type==='cert'){const fl=f.fields||{};const cv=fl.certNo||fl.heatNo||'—';return `<div>📜 ${esc(f.name)} → Сертификат № ${esc(cv)}${(fl.heatNo&&fl.certNo)?', плавка '+esc(fl.heatNo):''}</div>`;}
-          if(f.type==='invoice'){const fl=f.fields||{};return `<div>🧾 ${esc(f.name)} → Счёт № ${esc(fl.number||'—')}${fl.date?' от '+fmt(fl.date):''}</div>`;}
+          if(f.type==='waybill'){const fl=f.fields||{};return `<div><i class=ic-doc></i> ${esc(f.name)} → Накладная № ${esc(fl.number||'—')}${fl.date?' от '+fmt(fl.date):''}</div>`;}
+          if(f.type==='cert'){const fl=f.fields||{};const cv=fl.certNo||fl.heatNo||'—';return `<div><i class=ic-cert></i> ${esc(f.name)} → Сертификат № ${esc(cv)}${(fl.heatNo&&fl.certNo)?', плавка '+esc(fl.heatNo):''}</div>`;}
+          if(f.type==='invoice'){const fl=f.fields||{};return `<div><i class=ic-bill></i> ${esc(f.name)} → Счёт № ${esc(fl.number||'—')}${fl.date?' от '+fmt(fl.date):''}</div>`;}
           const hint=f.reason&&OCR_REASON_HINT[f.reason]?' ('+OCR_REASON_HINT[f.reason]+')':'';
-          return `<div>❓ ${esc(f.name)} → не распознан${esc(hint)} (прикрепится как есть)</div>`;
+          return `<div><i class=ic-help></i> ${esc(f.name)} → не распознан${esc(hint)} (прикрепится как есть)</div>`;
         }).join(''):'';
       }
 
@@ -7387,11 +7417,11 @@
     function renderZnzAcceptResult(host,r,out){
       const rejCount=(out.accepted||[]).filter(a=>a.verdict==='Брак').length;
       const stockLines=(out.stock||[]).map(s=>s.moved
-          ?`<div>📦 Оприходовано: <b>${esc(s.name)}</b> +${esc(String(s.qty))} кг (остаток ${esc(String(s.balance))} кг)</div>`
+          ?`<div><i class=ic-box></i> Оприходовано: <b>${esc(s.name)}</b> +${esc(String(s.qty))} кг (остаток ${esc(String(s.balance))} кг)</div>`
           :`<div>⚠ ${esc(s.name)}: ${esc(s.reason)}</div>`).join('');
-      // К-97: ссылки «👁 скан» на созданные строки акта (если к приёмке прикладывали файлы)
+      // К-97: ссылки «<i class=ic-eye></i> скан» на созданные строки акта (если к приёмке прикладывали файлы)
       const scanLines=(out.accepted||[]).filter(a=>a.scanCount>0).map(a=>{
-        const links=Array.from({length:a.scanCount},(_,n)=>`<a class="c-blue" href="/api/procurement/incoming/file?id=${encodeURIComponent(a.id)}&n=${n}" target="_blank" rel="noopener">👁 скан${a.scanCount>1?' '+(n+1):''}</a>`).join(' · ');
+        const links=Array.from({length:a.scanCount},(_,n)=>`<a class="c-blue" href="/api/procurement/incoming/file?id=${encodeURIComponent(a.id)}&n=${n}" target="_blank" rel="noopener"><i class=ic-eye></i> скан${a.scanCount>1?' '+(n+1):''}</a>`).join(' · ');
         return `<div style="font-size:12.5px">${esc(a.name)}: ${links}</div>`;
       }).join('');
       // K-99: сервер сообщил, что загруженные файлы в акт НЕ попали (нет колонки «Сканы» до
@@ -7499,7 +7529,7 @@
       if(!inv.length){ listEl.innerHTML='<div class="c-gray" style="font-size:12.5px">Счетов пока нет. Добавьте первый счёт кнопкой «+ Прикрепить счёт».</div>'; }
       else{
         listEl.innerHTML='<div style="display:flex;flex-direction:column;gap:8px">'+inv.map(x=>{
-          const scan=(x.scan&&x.scan[0])?`<a class="c-blue" href="/api/procurement/invoice/file?id=${encodeURIComponent(x.id)}" target="_blank" rel="noopener" title="Открыть прикреплённый счёт" style="font-size:11.5px;white-space:nowrap">👁 счёт ↗</a>`:'';
+          const scan=(x.scan&&x.scan[0])?`<a class="c-blue" href="/api/procurement/invoice/file?id=${encodeURIComponent(x.id)}" target="_blank" rel="noopener" title="Открыть прикреплённый счёт" style="font-size:11.5px;white-space:nowrap"><i class=ic-eye></i> счёт ↗</a>`:'';
           const pill=invPayPill(x.payStatus); // K-83 доп.: всегда read-only бейдж, ручного select больше нет
           const ids=Array.isArray(x.itemIds)?x.itemIds:[];
           const posTxt=items.length?(ids.length?('позиции: '+ids.length+'/'+items.length):'позиции: все'):'';
@@ -7650,12 +7680,12 @@
       // drag-and-drop/клик по зоне → выбор файла → OCR-автозаполнение (degrade-safe: любая ошибка — форма просто без автозаполнения)
       const drop=document.getElementById('iv-drop'), fileEl=document.getElementById('iv-file'), dropStatus=document.getElementById('iv-drop-status');
       let scanFile=null, scanUrl=null, ivOcrRun=0;
-      // имя файла + «👁 открыть» (посмотреть, ЧТО отправляешь, ещё ДО сохранения — просьба владельца 22.07)
+      // имя файла + «<i class=ic-eye></i> открыть» (посмотреть, ЧТО отправляешь, ещё ДО сохранения — просьба владельца 22.07)
       const dropInfo=(suffix)=>{
         if(!scanFile){dropStatus.textContent='';return;}
         if(!scanUrl){ try{scanUrl=URL.createObjectURL(scanFile);}catch(_){scanUrl=null;} }
         dropStatus.innerHTML='Файл: '+esc(scanFile.name)
-          +(scanUrl?` · <a class="c-blue" href="${scanUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Открыть выбранный файл в новой вкладке">👁 открыть ↗</a>`:'')
+          +(scanUrl?` · <a class="c-blue" href="${scanUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Открыть выбранный файл в новой вкладке"><i class=ic-eye></i> открыть ↗</a>`:'')
           +' · <a class="c-blue" id="iv-drop-clear" style="cursor:pointer" title="Снять выбранный файл (счёт можно сохранить без скана)">✕ убрать</a>'
           +(suffix?' · '+suffix:'');
         // K-99: способ отказаться от неотдающегося скана, не закрывая форму и не теряя ввод —
@@ -7854,7 +7884,7 @@
       if(sumEl)sumEl.textContent=acts.length?('· '+acts.length+' шт'):'· пока нет';
       if(!acts.length){ listEl.innerHTML='<div class="c-gray" style="font-size:12.5px">Актов пока нет — появятся после проведения приёмки («Провести приёмку»).</div>'; return; }
       listEl.innerHTML='<div style="display:flex;flex-direction:column;gap:8px">'+acts.map(a=>{
-        const scanLinks=a.scanCount>0?Array.from({length:a.scanCount},(_,n)=>`<a class="c-blue" href="/api/procurement/incoming/file?id=${encodeURIComponent(a.id)}&n=${n}" target="_blank" rel="noopener" style="font-size:11px;white-space:nowrap">👁${a.scanCount>1?' '+(n+1):''}</a>`).join(' '):'';
+        const scanLinks=a.scanCount>0?Array.from({length:a.scanCount},(_,n)=>`<a class="c-blue" href="/api/procurement/incoming/file?id=${encodeURIComponent(a.id)}&n=${n}" target="_blank" rel="noopener" style="font-size:11px;white-space:nowrap"><i class=ic-eye></i>${a.scanCount>1?' '+(n+1):''}</a>`).join(' '):'';
         const addBtn=canAct?`<label class="tbtn" style="padding:3px 9px;font-size:11.5px;cursor:pointer;white-space:nowrap">＋ скан<input type="file" data-act-scan="${a.id}" accept=".pdf,.jpg,.jpeg,.png" style="display:none"></label>`:'';
         return `<div data-act-row="${a.id}" style="border:1px solid var(--line2);border-radius:var(--r-m);padding:8px 11px;background:#fff">
           <div style="display:flex;align-items:center;gap:12px;font-size:12.5px;flex-wrap:wrap">
@@ -7951,7 +7981,7 @@
             <div style="grid-column:span 3">${FLAB('Дата поставки (опц.)')}<input id="pay-supply" type="date" style="${FINP}"></div>
             <div style="grid-column:span 12">${FLAB('Описание (опц.)')}<textarea id="pay-desc" rows="2" style="${FINP};resize:vertical" placeholder="Назначение платежа"></textarea></div>
             <div style="grid-column:span 12">${(prefill&&prefill.invoiceId)
-              ?`<div style="font-size:11.5px;color:#1e7d43;background:#f0faf3;border:1px solid #cde8d6;border-radius:var(--r-m);padding:8px 11px">📎 Скан счёта передастся в платёжный портал автоматически (взят из прикреплённого счёта) — прикладывать второй раз не нужно.</div>`
+              ?`<div style="font-size:11.5px;color:#1e7d43;background:#f0faf3;border:1px solid #cde8d6;border-radius:var(--r-m);padding:8px 11px"><i class=ic-clip></i> Скан счёта передастся в платёжный портал автоматически (взят из прикреплённого счёта) — прикладывать второй раз не нужно.</div>`
               :`${FLAB('Приложить скан счёта (PDF/фото, опц.)')}<input id="pay-file" type="file" accept="application/pdf,image/*" style="${FINP}">`}</div>
           </div>
           <div id="pay-hint" style="margin-top:8px;font-size:11.5px;color:var(--sl-500)">№ договора нужен, если сумма превышает лимит 100 000 ₽/год по контрагенту (иначе портал вернёт ошибку contract_required).</div>
@@ -10003,9 +10033,9 @@
         }
         if(isPdf){
           const call=esc(`event.stopPropagation();event.preventDefault();opFileView(${jsq(url)},${jsq(f)});return false;`);
-          return `<a href="${esc(url)}" onclick="${call}" title="Просмотр: ${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap;cursor:pointer">📄 ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`;
+          return `<a href="${esc(url)}" onclick="${call}" title="Просмотр: ${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap;cursor:pointer"><i class=ic-doc></i> ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`;
         }
-        return `<a href="${esc(url)}" target="_blank" rel="noopener" title="${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap">📎 ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`;
+        return `<a href="${esc(url)}" target="_blank" rel="noopener" title="${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap"><i class=ic-clip></i> ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`;
       }).join(''); }
     async function tcBody(host,kind){
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка ISO-каталога…</div>';
@@ -10158,8 +10188,8 @@
         if(/^(png|jpe?g|gif|webp|svg)$/.test(ext)){ const call=esc(`event.stopPropagation();opFileView(${jsq(url)},${jsq(f)})`);
           return `<span onclick="${call}" title="Просмотр: ${esc(f)}" style="display:inline-block;vertical-align:middle;margin:2px 6px 2px 0;cursor:zoom-in"><img src="${esc(url)}" alt="${esc(f)}" loading="lazy" style="height:34px;width:auto;max-width:60px;object-fit:cover;border:1px solid var(--line2);border-radius:var(--r-s);vertical-align:middle;background:#fff"></span>`; }
         if(ext==='pdf'){ const call=esc(`event.stopPropagation();event.preventDefault();opFileView(${jsq(url)},${jsq(f)});return false;`);
-          return `<a href="${esc(url)}" onclick="${call}" title="Просмотр: ${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap;cursor:pointer">📄 ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`; }
-        return `<a href="${esc(url)}" target="_blank" rel="noopener" title="${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap">📎 ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`;
+          return `<a href="${esc(url)}" onclick="${call}" title="Просмотр: ${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap;cursor:pointer"><i class=ic-doc></i> ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`; }
+        return `<a href="${esc(url)}" target="_blank" rel="noopener" title="${esc(f)}" style="color:var(--navy);text-decoration:none;margin-right:8px;white-space:nowrap"><i class=ic-clip></i> ${esc(f.length>18?f.slice(0,15)+'…':f)}</a>`;
       }).join(''); }
     async function cjBody(host){
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка библиотеки кулачков…</div>';
@@ -10439,7 +10469,7 @@
         body=`<div class="card pad"><div class="tl-cardh">Шаг 1 · Что заводим</div>
             <p class="tl-hint" style="margin:0 0 12px">Выберите тип — модель учёта, поля и журнал подстроятся сами. Раньше приходилось заранее знать, «количественный» это учёт или «инвентарный», и открывать разные формы.</p>
             <div class="tl-pathpick">
-              ${path('cut','🔧','Режущий инструмент','Резцы, свёрла, фрезы, метчики. Учёт по количеству, контроль минимума, каталог ISO державок/пластин.')}
+              ${path('cut','<i class=ic-wrench></i>','Режущий инструмент','Резцы, свёрла, фрезы, метчики. Учёт по количеству, контроль минимума, каталог ISO державок/пластин.')}
               ${path('si','⏱','Мерительный (СИ)','Штангенциркули, микрометры, калибры. Штучный учёт по инв.№, контроль поверки — ведёт к ДП–О.4.')}
               ${path('osn','🗜','Оснастка','Приспособления, пресс-формы, кулачки, оправки. Штучный учёт по инв.№, статус и перемещение по цеху.')}
             </div>
@@ -10749,7 +10779,7 @@
       if(same.length)optsHtml+=`<optgroup label="Та же марка, размер ≥ нормы">${same.map(optOf).join('')}</optgroup>`;
       if(remn.length)optsHtml+=`<optgroup label="Деловые остатки">${remn.map(optOf).join('')}</optgroup>`;
       if(other.length)optsHtml+=`<optgroup label="Другая карточка…">${other.map(optOf).join('')}</optgroup>`;
-      const kdLink=d.kdHref?` · <a class="c-blue" href="${esc(d.kdHref)}" target="_blank" rel="noopener" style="text-decoration:none">📄 Чертёж</a>`:'';
+      const kdLink=d.kdHref?` · <a class="c-blue" href="${esc(d.kdHref)}" target="_blank" rel="noopener" style="text-decoration:none"><i class=ic-doc></i> Чертёж</a>`:'';
       const normLine=(d.normTotalKg!=null)
         ?`Норма на МК ≈ ${mtNum(d.normTotalKg)} кг${d.normKgPerPart!=null?' ('+mtNum(d.normKgPerPart)+' кг/дет)':''} · уже списано ${mtNum(d.issuedKg)} кг · остаток по норме ${mtNum(d.remainingByNormKg)} кг`
         :`Уже списано по этой МК: ${mtNum(d.issuedKg)} кг`;
@@ -11150,8 +11180,8 @@
           <span style="font-size:12.5px;color:var(--sub)">учёт в кг (авторитет) · ≈ мерные единицы по норме пересчёта</span>
           <label style="font-size:12px;color:var(--sub);display:inline-flex;align-items:center;gap:5px;cursor:pointer;margin-left:14px" title="По умолчанию показаны все позиции реестра, включая нулевой остаток. Снимите галочку, чтобы видеть только реально имеющиеся на складе (остаток > 0)"><input type="checkbox" id="mt-showzero"${mtShowZero?' checked':''}> Показать все (вкл. нулевые)</label>
           <span style="margin-left:auto"></span>
-          <button class="tbtn" id="mt-inv" title="Сверка учётных остатков с фактическим наличием на складе">📋 Инвентаризация</button>
-          <button class="tbtn" id="mt-find" title="Что есть на складе под задачу — просмотр, без списаний">🔍 Найти заготовку</button>
+          <button class="tbtn" id="mt-inv" title="Сверка учётных остатков с фактическим наличием на складе"><i class=ic-board2></i> Инвентаризация</button>
+          <button class="tbtn" id="mt-find" title="Что есть на складе под задачу — просмотр, без списаний"><i class=ic-search></i> Найти заготовку</button>
           <button class="tbtn primary" id="mt-move">↹ Операция</button>
           <button class="tbtn green" id="mt-new">+ Позиция</button>
         </div>
@@ -11191,7 +11221,7 @@
     function mtRemPhotoHtml(code,photos,size){
       if(!photos||!photos.length)return '<span class="c-gray">—</span>'; size=size||32;
       return photos.map(f=>{const u='/api/metal/remnant/file?code='+encodeURIComponent(code)+'&rel='+encodeURIComponent(f);
-        if(/\.pdf$/i.test(f))return `<a href="${u}" target="_blank" rel="noopener" class="lit" title="${esc(f)}" style="margin:1px">📄</a>`;
+        if(/\.pdf$/i.test(f))return `<a href="${u}" target="_blank" rel="noopener" class="lit" title="${esc(f)}" style="margin:1px"><i class=ic-doc></i></a>`;
         return `<a href="${u}" target="_blank" rel="noopener" title="${esc(f)} — открыть полный размер" style="display:inline-block;margin:1px"><img src="${u}" alt="${esc(f)}" loading="lazy" style="width:${size}px;height:${size}px;object-fit:cover;border:1px solid #cbd5e1;border-radius:var(--r-s);vertical-align:middle"></a>`;
       }).join('');
     }
@@ -11450,7 +11480,7 @@
     function mtInvBody(host){
       const rows=(MT&&MT.items)||[];
       host.innerHTML=`<div class="card pad" style="background:#eff6ff;border:1px solid #cfe0f5;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <b style="color:var(--navy)">📋 Инвентаризация склада металла</b>
+          <b style="color:var(--navy)"><i class=ic-board2></i> Инвентаризация склада металла</b>
           <span class="c-gray" style="font-size:12.5px">Внесите факт (кг) по проверенным карточкам — пустое поле останется без изменений. При расхождении будет проведено корректирующее движение «Инвентаризация».</span>
         </div>
         <div class="filters" style="margin-top:var(--gap)">
@@ -11516,7 +11546,7 @@
       const rollOpts='<option value="">Любой</option>'+rollTypes.map(r=>`<option${mtFindRoll===r?' selected':''}>${esc(r)}</option>`).join('');
       const gradeOpts='<option value="">Любая</option>'+grades.map(g=>`<option${mtFindGrade===g?' selected':''}>${esc(g)}</option>`).join('');
       host.innerHTML=`<div class="card pad" style="background:#eff6ff;border:1px solid #cfe0f5">
-          <b style="color:var(--navy)">🔍 Найти заготовку на складе</b>
+          <b style="color:var(--navy)"><i class=ic-search></i> Найти заготовку на складе</b>
           <div class="c-gray" style="font-size:12.5px;margin-top:3px">Что уже есть на складе под задачу — просмотр, без списаний.</div>
         </div>
         <div class="filters" style="margin-top:var(--gap);align-items:flex-end">
@@ -11918,7 +11948,7 @@
         <div id="od-znz-panel"></div>
         <div class="card pad" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
           <span id="od-chat" style="margin-right:auto;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)"></span>
-          <button class="ui-btn" id="od-znz-btn" title="Разместить заявку на закупку под этот заказ (ЗнЗ с источником ${esc(o.numPz)})">📦 Заявка на закупку</button>
+          <button class="ui-btn" id="od-znz-btn" title="Разместить заявку на закупку под этот заказ (ЗнЗ с источником ${esc(o.numPz)})"><i class=ic-box></i> Заявка на закупку</button>
           ${routeBtns}
           <a class="pbtn" href="/api/print/pz/${encodeURIComponent(o.numPz)}" target="_blank" rel="noopener">${aico('print',14)} Печать ПЗ (Ф.1–П.2)</a>
         </div>`;
@@ -12205,7 +12235,7 @@
           resHost.innerHTML=(j.created||[]).map(c=>{
             if(c.error)return `<div class="c-red" style="font-size:12.5px">✕ поз. ${esc(c.positionId)}: ${esc(c.error)}</div>`;
             if(c.skipped)return `<div class="c-gray" style="font-size:12.5px">— поз. ${esc(c.positionId)}: ${esc(c.reason||'пропущено')}</div>`;
-            return `<div style="font-size:12.5px">✅ <a href="#routes/${encodeURIComponent(c.mk)}" data-mkgo="${esc(c.mk)}" style="font-family:var(--mono);font-weight:700;text-decoration:none;color:var(--blue)">${esc(c.mk)}</a> — ${c.copied?('операций скопировано: '+esc(String(c.copied))):'пустая — наполни в Маршрутах'}</div>`;
+            return `<div style="font-size:12.5px"><i class=ic-okc></i> <a href="#routes/${encodeURIComponent(c.mk)}" data-mkgo="${esc(c.mk)}" style="font-family:var(--mono);font-weight:700;text-decoration:none;color:var(--blue)">${esc(c.mk)}</a> — ${c.copied?('операций скопировано: '+esc(String(c.copied))):'пустая — наполни в Маршрутах'}</div>`;
           }).join('')||'<div class="c-gray" style="font-size:12.5px">Ничего не создано.</div>';
           resHost.querySelectorAll('[data-mkgo]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); location.hash='#routes/'+encodeURIComponent(a.dataset.mkgo); });
           // локально патчим позиции (без полной перезагрузки — иначе результат в мастере пропадёт);
@@ -12318,7 +12348,7 @@
                 <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
                   <div style="flex:1;min-width:220px">${lbl('Проект')}<select id="ock-proj" style="${ist}"><option value="">— выберите проект —</option>${projects.map(p=>`<option value="${esc(p.decNo)}">ПБС.${esc(p.decNo)}${p.name?' · '+esc(p.name):''}</option>`).join('')}</select></div>
                   <div style="flex:2;min-width:260px">${lbl('Чертёж')}<select id="ock-doc" style="${ist}" disabled><option value="">— сначала выберите проект —</option></select></div>
-                  <button type="button" class="tbtn" id="ock-view" disabled title="Файла нет" style="padding:7px 10px;font-size:14px">👁</button>
+                  <button type="button" class="tbtn" id="ock-view" disabled title="Файла нет" style="padding:7px 10px;font-size:14px"><i class=ic-eye></i></button>
                   <button type="button" class="tbtn primary" id="ock-add" disabled style="padding:7px 14px;font-size:12.5px">Добавить в позиции</button>
                 </div>
               </div>`:''}
@@ -12377,7 +12407,7 @@
         if(!body.customer){errEl.textContent='Укажите заказчика / инициатора.';return;}
         const btn=document.getElementById('o-save'); btn.disabled=true; btn.textContent='Создание…';
         try{ const r=await fetch('/api/orders/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          const msg=document.getElementById('o-msg'); if(msg){ msg.style.color='var(--green)'; msg.innerHTML=`✅ Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||positions.length}`; }
+          const msg=document.getElementById('o-msg'); if(msg){ msg.style.color='var(--green)'; msg.innerHTML=`<i class=ic-okc></i> Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||positions.length}`; }
           btn.textContent='Создано ✓';
           ordSel=j.numPz; try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}
           await load(); // load()→route() перерисует #orders: панель закроется, новый ПЗ будет выбран и открыт в деталях справа — это и есть подтверждение
@@ -12449,7 +12479,7 @@
       const ctl=(c)=>/ОТК/i.test(c||'')?'<span style="font-weight:700;color:var(--amber,#b45309)">ОТК</span>':(c?esc(c):'<span class="c-gray">С</span>');
       const tStat=(tasks)=>{ if(!tasks||!tasks.length)return '<span class="c-gray">— в очереди</span>'; return tasks.map(t=>{const done=/Выполнено/i.test(t.status),work=/работе/i.test(t.status);const sym=done?'✓':work?'⧖':'•';const col=done?'var(--green)':work?'var(--blue)':'#9ca3af';return `<span style="font-family:var(--mono);color:${col}" title="${esc(t.status)}">${esc(t.num)} ${sym}</span>`;}).join('<br>'); };
       // K-81 редизайн Ф.13: колонки карты МК 1:1 с утв. мокапом (№ / Операция / Участок / Оборуд. / Оснастка / Карта наладки / Контроль / Норма).
-      const snCell=(o)=>o.setupCard?`<span class="rt-file" title="Карта наладки ${esc(o.setupCard)}">📄 ${esc(o.setupCard)}</span>`:'<span class="c-gray">—</span>';
+      const snCell=(o)=>o.setupCard?`<span class="rt-file" title="Карта наладки ${esc(o.setupCard)}"><i class=ic-doc></i> ${esc(o.setupCard)}</span>`:'<span class="c-gray">—</span>';
       // K-81 доводка: оснастка на операции — множественная (список в поле «Оснастка», разделитель «; »/перенос)
       const toolList=(s)=>String(s||'').split(/\s*;\s*|\n/).map(x=>x.trim()).filter(Boolean);
       const toolCell=(o)=>{const t=toolList(o.tooling);return t.length?t.map(esc).join('<br>'):'<span class="c-gray">—</span>';};
@@ -12481,7 +12511,7 @@
       const rdySummary=rdyTotal?`<div style="margin-bottom:10px;padding:7px 12px;border-radius:var(--r-m);font-size:12.5px;font-weight:600;${rdyReady===rdyTotal?'background:#ecfdf5;color:#15803d;border:1px solid #a7f3d0':'background:#fffbeb;color:#b45309;border:1px solid #fde68a'}">${rdyReady===rdyTotal?'':'ждёт детали · '}Готовность деталей: ${rdyReady} из ${rdyTotal}</div>`:'';
       const compTable=`<table class="dt" style="font-size:12.5px;width:100%"><thead><tr><th style="width:30px">№</th><th>Компонент</th><th>Источник (МК-КОМ / ПЗ / ЗнЗ)</th><th style="width:80px">Кол-во</th>${compReady.length?'<th style="width:130px">Готовность</th>':''}</tr></thead><tbody>${(d.components||[]).map((c,i)=>`<tr><td class="c-gray">${i+1}</td><td class="ell">${esc(c.name)}</td><td class="nw"><span style="font-family:var(--mono);color:var(--blue)">${esc(c.src||'—')}</span></td><td class="nw">${esc(String(c.qty||''))}</td>${compReady.length?`<td class="nw">${rdyDot((compReady[i]||{}).state||'none')}</td>`:''}</tr>`).join('')||`<tr><td colspan="${compReady.length?5:4}" class="c-gray" style="padding:12px">Компоненты не заведены</td></tr>`}</tbody></table>`;
       // Этап 1 доработки МК: вложения операций — «Программа обработки (ЧПУ)» и «Карта наладки (PDF)»
-      const opFileLink=(mk,n,kind,f)=>{const base=`/api/route/opfile?mk=${encodeURIComponent(mk)}&op=${encodeURIComponent(n)}&kind=${kind}&rel=${encodeURIComponent(f)}`;const ext=(String(f).split('.').pop()||'').toLowerCase();const viewable=ext==='pdf'||/^(png|jpe?g|gif|webp|svg)$/.test(ext);return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0"><a href="${base}" target="_blank" rel="noopener" class="c-blue" style="text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Открыть в новой вкладке">📎 ${esc(f)}</a>${viewable?`<button type="button" class="tbtn" data-opview="${esc(base)}" data-opname="${esc(f)}" style="padding:2px 8px;font-size:11.5px" title="Просмотр в портале">Просмотр</button>`:''}<a href="${base}&dl=1" class="c-gray" style="text-decoration:none" title="Скачать">⤓</a></div>`;};
+      const opFileLink=(mk,n,kind,f)=>{const base=`/api/route/opfile?mk=${encodeURIComponent(mk)}&op=${encodeURIComponent(n)}&kind=${kind}&rel=${encodeURIComponent(f)}`;const ext=(String(f).split('.').pop()||'').toLowerCase();const viewable=ext==='pdf'||/^(png|jpe?g|gif|webp|svg)$/.test(ext);return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0"><a href="${base}" target="_blank" rel="noopener" class="c-blue" style="text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Открыть в новой вкладке"><i class=ic-clip></i> ${esc(f)}</a>${viewable?`<button type="button" class="tbtn" data-opview="${esc(base)}" data-opname="${esc(f)}" style="padding:2px 8px;font-size:11.5px" title="Просмотр в портале">Просмотр</button>`:''}<a href="${base}&dl=1" class="c-gray" style="text-decoration:none" title="Скачать">⤓</a></div>`;};
       const attSlot=(mk,n,kind,label,files)=>`<div style="border:1px solid var(--line2);border-radius:var(--r-m);padding:8px 10px;background:#fff"><div style="font-size:11px;font-weight:600;color:var(--sl-500);margin-bottom:5px">${label}</div>${(files&&files.length)?files.map(f=>opFileLink(mk,n,kind,f)).join(''):'<div class="c-gray" style="font-size:11.5px">файл не прикреплён</div>'}<label class="tbtn" style="margin-top:6px;padding:3px 9px;font-size:11.5px;cursor:pointer;display:inline-block">＋ файл<input type="file" data-att-up="${kind}" data-op="${esc(String(n))}" style="display:none"></label></div>`;
       const opFilesCard=d.mode==='live'?`<div class="card pad" style="margin-top:var(--gap)"><div class="sec-h" style="margin-bottom:4px">Вложения операций</div>
           <div style="font-size:11.5px;color:var(--sub);margin-bottom:10px">Программа обработки (ЧПУ) и карта наладки (PDF) — по каждой операции маршрута. Файлы хранятся в записях портала.</div>
@@ -12936,7 +12966,7 @@
       const needSetup=rtOpNeedsSetup(op)||String(op.setupCardNo||'').trim();
       const setupRow=needSetup?`<div class="rt-setup"><span class="sic">${RT_SVG_SETUP}</span>
           <div style="flex:1;min-width:180px"><div style="font-size:12px;font-weight:600;color:var(--ink)">Карта наладки</div><select class="rt-inp" data-of="setupCardNo" style="margin-top:5px">${rtSetupOptions(op.setupCardNo)}</select></div>
-          ${op.setupCardNo?(sid!=null?`<a class="rt-file" href="#setup/${encodeURIComponent(sid)}">📄 Открыть ${esc(op.setupCardNo)}</a>`:`<span class="rt-file">📄 ${esc(op.setupCardNo)}</span>`):'<span class="rt-hint">не привязана — выберите из справочника</span>'}</div>`:'';
+          ${op.setupCardNo?(sid!=null?`<a class="rt-file" href="#setup/${encodeURIComponent(sid)}"><i class=ic-doc></i> Открыть ${esc(op.setupCardNo)}</a>`:`<span class="rt-file"><i class=ic-doc></i> ${esc(op.setupCardNo)}</span>`):'<span class="rt-hint">не привязана — выберите из справочника</span>'}</div>`:'';
       return `<div class="rt-op${op._open?' open':''}" data-idx="${i}">
         <div class="rt-ohead"><span class="rt-onum">${i+1}</span><div style="min-width:0"><div class="rt-oname">${esc(nm)}</div><div class="rt-osub">${esc(sub)}</div></div>${chip}<span class="rt-oarr">${RT_SVG_ARR}</span></div>
         <div class="rt-obody">
@@ -13003,7 +13033,7 @@
     function rtStep4Html(){
       const rt=rtWiz.route;
       const rows=rtWiz.ops.map((op,i)=>{ const ot=rtOtById(op.opTypeId)||{}; const nm=op.name||ot.name||'Операция'; const sec=ot.section?String(ot.section).split(' · ')[0]:'—';
-        return `<tr><td class="ct c-gray">${i+1}</td><td><b style="color:var(--ink)">${esc(nm)}</b></td><td class="code nw">${esc(sec)}</td><td class="ell c-gray">${esc(op.equipment||'—')}</td><td class="c-gray" style="white-space:normal;line-height:1.5">${(function(){const t=String(op.tooling||'').split(/\s*;\s*|\n/).map(s=>s.trim()).filter(Boolean);return t.length?t.map(esc).join('<br>'):'—';})()}</td><td class="nw">${op.setupCardNo?('📄 '+esc(op.setupCardNo)):'<span class="c-gray">—</span>'}</td><td class="ct">${op.control==='ОТК'?rtChip('ОТК','amber'):op.control==='С'?rtChip('С','gray'):'<span class="c-gray">—</span>'}</td><td class="nw c-gray">${op.norm?esc(String(op.norm)):'—'}</td></tr>`;
+        return `<tr><td class="ct c-gray">${i+1}</td><td><b style="color:var(--ink)">${esc(nm)}</b></td><td class="code nw">${esc(sec)}</td><td class="ell c-gray">${esc(op.equipment||'—')}</td><td class="c-gray" style="white-space:normal;line-height:1.5">${(function(){const t=String(op.tooling||'').split(/\s*;\s*|\n/).map(s=>s.trim()).filter(Boolean);return t.length?t.map(esc).join('<br>'):'—';})()}</td><td class="nw">${op.setupCardNo?('<i class=ic-doc></i> '+esc(op.setupCardNo)):'<span class="c-gray">—</span>'}</td><td class="ct">${op.control==='ОТК'?rtChip('ОТК','amber'):op.control==='С'?rtChip('С','gray'):'<span class="c-gray">—</span>'}</td><td class="nw c-gray">${op.norm?esc(String(op.norm)):'—'}</td></tr>`;
       }).join('')||'<tr><td colspan="8" class="c-gray" style="padding:12px">Операции не заведены.</td></tr>';
       const warnOps=rtWiz.ops.map((op,i)=>({op,i})).filter(x=>rtOpNeedsSetup(x.op)&&!String(x.op.setupCardNo||'').trim());
       const warn=warnOps.length?`<div class="rt-info warn" style="margin-top:12px">${RT_SVG_WARN}<span>${warnOps.length} ${rtPlural(warnOps.length,'замечание','замечания','замечаний')} перед выпуском: оп. ${warnOps.map(x=>x.i+1).join(', ')} — карта наладки не привязана. Можно выпустить с пометкой или вернуться к шагу 3.</span></div>`:`<div class="rt-info" style="margin-top:12px">${RT_SVG_CHECK}<span>Замечаний нет — маршрут готов к выпуску.</span></div>`;
@@ -13324,7 +13354,7 @@
       host.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
           <a href="#setup" class="c-blue" style="font-size:13px;text-decoration:none">← Карты наладки</a>
           <span class="code" style="font-size:16px">${esc(it.no||'')}</span>${setupStatusChip(it.status)}
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${live?`<button class="tbtn" id="st-edit">✎ Редактировать</button><a class="pbtn" href="/api/setup-card.pdf?id=${encodeURIComponent(it.id)}" target="_blank" rel="noopener" title="Печать карты наладки на бланке Ф.15–Д.1">${aico('print',14)} Печать / Выгрузить PDF</a>`:`<button class="tbtn" disabled title="Печать доступна в LIVE-режиме (нужен токен NocoDB)" style="opacity:.55;cursor:not-allowed">🖨 Печать (LIVE)</button>`}</span>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${live?`<button class="tbtn" id="st-edit">✎ Редактировать</button><a class="pbtn" href="/api/setup-card.pdf?id=${encodeURIComponent(it.id)}" target="_blank" rel="noopener" title="Печать карты наладки на бланке Ф.15–Д.1">${aico('print',14)} Печать / Выгрузить PDF</a>`:`<button class="tbtn" disabled title="Печать доступна в LIVE-режиме (нужен токен NocoDB)" style="opacity:.55;cursor:not-allowed"><i class=ic-print></i> Печать (LIVE)</button>`}</span>
         </div>
         <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:var(--gap)">
           <div style="grid-column:1/3"><div style="font-size:11px;color:var(--sl-500)">Наименование</div><div style="color:var(--ink);font-weight:600">${esc(it.name||'—')}</div></div>
@@ -13529,7 +13559,7 @@
       stgHost=host;
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка настроек…</div>';
       if(!STG){ try{STG=await (await fetch('/api/settings')).json();}catch(e){STG={mode:'—'};} }
-      const G=[['conn','Подключение (NocoDB)','🗄'],['integ','Интеграции','🔗'],['dict','Справочники','📋'],['sales','Продажи (§5.3)','💼'],['access','Доступ и безопасность','🔒'],['profile','Профиль','👤']];
+      const G=[['conn','Подключение (NocoDB)','🗄'],['integ','Интеграции','<i class=ic-link></i>'],['dict','Справочники','<i class=ic-board2></i>'],['sales','Продажи (§5.3)','💼'],['access','Доступ и безопасность','🔒'],['profile','Профиль','👤']];
       const grp=(g)=>`<div class="stg-grp ${stgGroup===g[0]?'on':''}" data-g="${g[0]}"><span style="width:18px;text-align:center">${g[2]}</span><span>${g[1]}</span></div>`;
       host.innerHTML=`<div class="filters" style="margin-bottom:var(--gap)"><span style="font-size:15px;font-weight:700;color:var(--ink)">Настройки портала</span><span style="margin-left:auto">${stgModePill()}</span></div>
         <div class="card" style="padding:14px 16px"><div class="stg">
@@ -13688,7 +13718,7 @@
           ${DATA.mode==='live'?`<button class="tbtn green" id="ctl-new-acc" style="padding:8px 14px">+ Акт приёмки (Ф.4)</button><button class="tbtn green" id="ctl-new-inc" style="padding:8px 14px">+ Входной контроль (Ф.3)</button>`:''}
           <div class="tbl-search" style="margin:0"><input id="ctl-q" type="search" placeholder="Поиск по № акта или изделию" value="${esc(ctlQ)}"></div>
           ${forms.map(f=>`<button class="pill ${ctlForm===f[0]?'on':''}" data-cf="${esc(f[0])}">${esc(f[1])}</button>`).join('')}
-          ${DATA.mode==='live'?`<button class="pill ${ctlSelMode?'on':''}" data-cselmode="1">☑ ${ctlSelMode?'Готово':'Выбрать'}</button>`:''}
+          ${DATA.mode==='live'?`<button class="pill ${ctlSelMode?'on':''}" data-cselmode="1"><i class=ic-chk></i> ${ctlSelMode?'Готово':'Выбрать'}</button>`:''}
           <button class="pill ${ctlBad?'on':''}" data-cbad="1" style="margin-left:auto"><span class="dot d-red" style="margin-right:5px"></span>только брак</button>
           ${srcChip(DATA.mode==='live')}
         </div>
@@ -13902,7 +13932,7 @@
         out+=ctlCard('nonconformity','Ф.5','Несоответствия',true,['140px',null,'150px','180px','120px','136px'],head,body,760,6);
       }
       wrap.innerHTML=out||'<div class="card pad" style="color:var(--sub)">Нет записей для выбранного фильтра</div>';
-      wireCopyLink(wrap); // 🔗 у каждого акта — ссылка '#control/<№ акта>'
+      wireCopyLink(wrap); // <i class=ic-link></i> у каждого акта — ссылка '#control/<№ акта>'
       // ссылка «Заказ / ПЗ» ведёт в реестр РОВНО на тот заказ, что обещает тултип:
       //  роут '#orders/<№ ПЗ>' → renderOrdersView(arg) → ordSel. Прежняя запись в глобальный
       //  sel не влияла ни на что (единственный читатель — удалённый renderOrders), и реестр

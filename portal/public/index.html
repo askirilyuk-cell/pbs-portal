@@ -882,6 +882,56 @@
     #cptabbar button:active,.tl-wstepbtn:active,.tl-pathcard:active,.rt-ptype:active{transform:scale(.98);}
     /* ═══ конец K-103 ═══ */
 
+
+    /* ══════════════════════════════════════════════════════════════════════
+       K-109 ОБОЛОЧКА ПО РЕФЕРЕНСУ (18.08.2026, APPROVE Александра).
+       Сайдбар и шапка приведены к виду референс-прототипа. Логотип и акцент —
+       НАШИ (директива владельца: «шапку и сайдбар переноси, только логотип
+       оставь наш»). Блок стоит после ERP-темы и перекрывает её.
+       ══════════════════════════════════════════════════════════════════════ */
+    :root{ --side-bg:#1E293B; --side-deep:#0F172A; --side-fg:#cbd5e1; --side-mut:#94a3b8; }
+    .app{grid-template-columns:256px 1fr;}
+    .side{background:var(--side-bg);border-right:0;}
+
+    /* Брендовая шапка сайдбара: отдельный более тёмный слой, фикс. высота 64px */
+    .brand{height:64px;padding:0 16px;gap:11px;background:var(--side-deep);
+      border-bottom:1px solid rgba(255,255,255,.06);box-sizing:border-box;}
+    .brand img{height:34px;background:#fff;border-radius:var(--r-s);padding:3px;}
+    .brand .t{font-size:13px;font-weight:700;letter-spacing:.01em;color:#fff;}
+    .brand .t small{font-size:10px;font-weight:500;color:var(--side-mut);letter-spacing:.04em;}
+
+    /* Рубрикатор разделов — 10px, капсом, разрядка (приём референса) */
+    nav{padding:10px 8px;gap:1px;}
+    .ngrp{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+      color:#64748b;padding:12px 10px 6px;}
+    .ngrp:hover{color:var(--side-mut);} .ngrp .chev{color:#475569;}
+
+    /* Пункт меню: 12px, полужирный; активный — заливка акцентом и БЕЛАЯ полоса слева */
+    nav a{position:relative;padding:9px 12px;border-radius:var(--r-s);border-left:0;
+      font-size:12px;font-weight:600;color:var(--side-fg);
+      transition:background-color var(--t-fast) var(--ease),color var(--t-fast) var(--ease);}
+    nav a .i{color:#94a3b8;transition:color var(--t-fast) var(--ease);}
+    nav a .i svg{width:16px;height:16px;}
+    nav a:hover{background:#334155;color:#fff;}
+    nav a:hover .i{color:#60a5fa;}
+    nav a.active{background:var(--acc);color:#fff;font-weight:700;box-shadow:var(--sh-1);}
+    nav a.active .i{color:#fff;}
+    nav a.active::before{content:'';position:absolute;left:0;top:4px;bottom:4px;width:3px;
+      background:#fff;border-radius:0 var(--r-s) var(--r-s) 0;}
+
+    /* Футер сайдбара — на тёмном слое, моноширинный статус */
+    .side .foot{background:var(--side-deep);border-top:1px solid rgba(255,255,255,.06);
+      padding:11px 16px;font-size:10px;font-family:var(--mono);color:var(--side-mut);}
+    .side .foot b{color:#fff;}
+
+    /* Шапка: белая, 56px, липкая, тонкая тень — как в референсе */
+    .top{height:56px;padding:0 20px;background:#fff;color:var(--ink);
+      border-bottom:1px solid var(--sl-200);box-shadow:var(--sh-1);gap:14px;}
+    .top h1{font-size:14px;font-weight:700;letter-spacing:-.01em;color:var(--sl-900);}
+    .top .sub{font-size:10px;font-family:var(--mono);color:var(--sl-500);}
+    .top .right{gap:10px;font-size:12px;}
+    #burger{background:var(--sl-100);color:var(--acc);border-radius:var(--r-s);}
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){

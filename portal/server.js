@@ -45,6 +45,18 @@ function cfg() {
     ZNZ_CHAT: String(runtime.BITRIX_ZNZ_CHAT ?? process.env.BITRIX_ZNZ_CHAT ?? '8873'), // чат «Портал ИСМ — Цеховые заявки» → анонс новых ЗнЗ (пусто = не слать)
     PORTAL_BASE: (runtime.PORTAL_BASE || process.env.PORTAL_BASE || 'http://192.168.1.10:4173').replace(/\/+$/, ''), // внешний адрес портала для ссылок в чате
     RECORDS: runtime.RECORDS_ROOT || process.env.RECORDS_ROOT || '',
+    // --- запись записей ИСМ через FileStation API (DSM), см. блок fsApi* ниже ---
+    // Прямая запись в ФС из контейнера НЕ видна Synology Drive: папка есть на NAS,
+    // но на клиентах не появляется никогда (доказано экспериментом 18.08.2026 —
+    // rename под скрытым .tmp, rename под видимым и прямой mkdir не сработали ни разу).
+    // Через FileStation API те же папки и файлы уезжают на клиенты за ~15 секунд.
+    // Пусто = фолбэк на прямую запись в ФС (прежнее поведение, ничего не ломается).
+    FS_URL: (runtime.FS_URL || process.env.FS_URL || 'http://192.168.1.10:5000').replace(/\/+$/, ''),
+    FS_USER: runtime.FS_USER || process.env.FS_USER || '',
+    FS_PASS: runtime.FS_PASS || process.env.FS_PASS || '',
+    // Путь общей папки записей в терминах FileStation (share-relative, с ведущим «/»).
+    // Локально в контейнере это RECORDS (обычно /records) — сопоставление одно к одному.
+    FS_RECORDS_PATH: (runtime.FS_RECORDS_PATH || process.env.FS_RECORDS_PATH || '/06-Записи-ПБС').replace(/\/+$/, ''),
     DOCS_ROOT: runtime.DOCS_ROOT || process.env.DOCS_ROOT || runtime.RECORDS_ROOT || process.env.RECORDS_ROOT || '',
     // релиз-контур РКД (ДП–Д.1.2 §8.2): записи актуальных чертежей = <RECORDS>/6.7-РТД.
     // По умолчанию выводим из RECORDS, чтобы не править compose (папка уже примонтирована в /records).
@@ -3791,6 +3803,119 @@ function chownSalesDir(dir) {
   try { fs.chownSync(dir, uid, gid); }
   catch (e) { console.error(`[${new Date().toISOString()}] chown ЗП-папки не удался (${dir} → ${src}): ${(e && e.message) || e}`); }
 }
+// ============================================================================
+//  FileStation API (DSM) — запись папок и файлов записей ИСМ.
+//
+//  ЗАЧЕМ. Портал крутится в докере и писал папки/файлы напрямую в ФС через
+//  bind-mount. Synology Drive такие изменения НЕ регистрирует: на NAS всё есть,
+//  на клиентах не появляется никогда. Проверено 18.08.2026 контрольным
+//  экспериментом — три папки из контейнера тремя способами (скрытый .tmp→rename
+//  = патч _atomicMkTree, видимый tmp→rename, прямой mkdir) не подтянулись ни
+//  одна; тот же rename с хоста работает за секунды. Через FileStation API
+//  папка с шестью этапами и файлом уехала на клиент за ~15 секунд.
+//  Побочно снимается и проблема NFD-имён («й» = «и»+U+0306): DSM принимает имя
+//  как обычную строку формы, файл доходит вниз.
+//
+//  КАК. Читаем по-прежнему с ФС (это работает и дёшево), а ПИШЕМ через API.
+//  Существование файлов/папок и дедуп « (N) » считаем локально по ФС, а наружу
+//  отдаём уже готовое имя. Сессия sid кэшируется и переполучается по 119/106.
+//
+//  ФОЛБЭК. Нет кредов или API не ответил → пишем как раньше, прямо в ФС.
+//  Ничего не ломается, портал остаётся работоспособным; в лог идёт warning.
+// ============================================================================
+let _fsSid = null, _fsSidAt = 0;
+const FS_SID_TTL_MS = 20 * 60 * 1000; // переполучаем раз в 20 мин, не дожидаясь протухания
+
+function fsEnabled() { const c = cfg(); return !!(c.FS_URL && c.FS_USER && c.FS_PASS); }
+
+// локальный абсолютный путь (под RECORDS) → путь в терминах FileStation
+function fsSharePath(absPath) {
+  const c = cfg();
+  if (!c.RECORDS) return null;
+  const root = path.resolve(c.RECORDS), t = path.resolve(absPath);
+  if (t !== root && !t.startsWith(root + path.sep)) return null; // за пределы записей не выходим
+  const rel = path.relative(root, t).split(path.sep).filter(Boolean).join('/');
+  return rel ? `${c.FS_RECORDS_PATH}/${rel}` : c.FS_RECORDS_PATH;
+}
+
+async function fsLogin(force) {
+  if (!force && _fsSid && Date.now() - _fsSidAt < FS_SID_TTL_MS) return _fsSid;
+  const c = cfg();
+  const u = new URL(c.FS_URL + '/webapi/entry.cgi');
+  u.search = new URLSearchParams({
+    api: 'SYNO.API.Auth', version: '3', method: 'login',
+    account: c.FS_USER, passwd: c.FS_PASS, session: 'FileStation', format: 'sid',
+  }).toString();
+  const r = await fetch(u, { signal: AbortSignal.timeout(15000) });
+  const j = await r.json();
+  if (!j || !j.success || !j.data || !j.data.sid) {
+    const code = j && j.error && j.error.code;
+    throw new Error(`FileStation: вход не удался (code ${code ?? '?'})`);
+  }
+  _fsSid = j.data.sid; _fsSidAt = Date.now();
+  return _fsSid;
+}
+
+// GET-вызов API с одной автоматической переавторизацией при протухшей сессии
+async function fsCall(params, retry) {
+  const c = cfg();
+  const sid = await fsLogin(false);
+  const u = new URL(c.FS_URL + '/webapi/entry.cgi');
+  u.search = new URLSearchParams({ ...params, _sid: sid }).toString();
+  const r = await fetch(u, { signal: AbortSignal.timeout(30000) });
+  const j = await r.json();
+  if (j && !j.success && j.error && (j.error.code === 119 || j.error.code === 106 || j.error.code === 105) && !retry) {
+    await fsLogin(true); return fsCall(params, true);
+  }
+  if (!j || !j.success) throw new Error(`FileStation ${params.api}: code ${(j && j.error && j.error.code) ?? '?'}`);
+  return j.data;
+}
+
+// создать папку(и) в родителе. names — массив имён. Существующие DSM не трогает.
+async function fsCreateFolder(parentAbs, names) {
+  const parent = fsSharePath(parentAbs);
+  if (!parent) throw new Error('FileStation: путь вне записей ИСМ');
+  const list = (Array.isArray(names) ? names : [names]).filter(Boolean);
+  if (!list.length) return;
+  await fsCall({
+    api: 'SYNO.FileStation.CreateFolder', version: '2', method: 'create',
+    folder_path: JSON.stringify(list.map(() => parent)),
+    name: JSON.stringify(list),
+    force_parent: 'true',
+  });
+}
+
+// загрузить файл в папку под точным именем (дедуп имени считает вызывающий)
+async function fsUploadFile(dirAbs, filename, data) {
+  const dir = fsSharePath(dirAbs);
+  if (!dir) throw new Error('FileStation: путь вне записей ИСМ');
+  const c = cfg();
+  const sid = await fsLogin(false);
+  const send = async (theSid) => {
+    const fd = new FormData();
+    fd.append('api', 'SYNO.FileStation.Upload');
+    fd.append('version', '2');
+    fd.append('method', 'upload');
+    fd.append('path', dir);
+    fd.append('create_parents', 'true');
+    fd.append('overwrite', 'false');
+    fd.append('file', new Blob([data]), filename);
+    const u = new URL(c.FS_URL + '/webapi/entry.cgi');
+    u.search = new URLSearchParams({ api: 'SYNO.FileStation.Upload', version: '2', method: 'upload', _sid: theSid }).toString();
+    const r = await fetch(u, { method: 'POST', body: fd, signal: AbortSignal.timeout(120000) });
+    return r.json();
+  };
+  let j = await send(sid);
+  if (j && !j.success && j.error && (j.error.code === 119 || j.error.code === 106 || j.error.code === 105)) {
+    j = await send(await fsLogin(true));
+  }
+  if (!j || !j.success) throw new Error(`FileStation Upload: code ${(j && j.error && j.error.code) ?? '?'}`);
+}
+
+function fsWarn(what, e) {
+  console.error(`[${new Date().toISOString()}] FileStation ${what} не удалось (${(e && e.message) || e}) → пишу напрямую в ФС; папка может не уехать на клиенты Synology Drive`);
+}
+
 // папка запроса с СОЗДАНИЕМ, если ещё нет (для приложения файлов к свежему ЗП)
 function _atomicMkTree(dest, subdirs) {
   // PATCH 2026-07-13: собрать дерево под скрытым .tmp и переименовать в финальное имя →
@@ -3808,7 +3933,7 @@ function _atomicMkTree(dest, subdirs) {
     return false;
   }
 }
-function ensureSalesFolder(zp) {
+async function ensureSalesFolder(zp) {
   const root = cfg().RECORDS; if (!root) return null;
   const m = /^ЗП-(\d{4})-\d{3}$/.exec(String(zp || '')); if (!m) return null;
   const yearDir = path.join(root, '6.1-Продажи', m[1]);
@@ -3816,11 +3941,16 @@ function ensureSalesFolder(zp) {
   let dirs = []; try { dirs = fs.readdirSync(yearDir); } catch {}
   const d = dirs.find((x) => x === zp || x.startsWith(zp + ' '));
   const folder = d ? path.join(yearDir, d) : path.join(yearDir, zp);
-  if (!fs.existsSync(folder)) { if (!_atomicMkTree(folder, [])) return null; }
+  if (!fs.existsSync(folder)) {
+    if (fsEnabled() && fsSharePath(folder)) {
+      try { await fsCreateFolder(yearDir, [zp]); return folder; } catch (e) { fsWarn('создание папки ' + zp, e); }
+    }
+    if (!_atomicMkTree(folder, [])) return null;
+  }
   return folder;
 }
 // создать папку запроса + все 6 подпапок этапов (при регистрации ЗП). Возвращает folder|null.
-function createSalesFolderTree(zp) {
+async function createSalesFolderTree(zp) {
   const root = cfg().RECORDS; if (!root) return null;
   const m = /^ЗП-(\d{4})-\d{3}$/.exec(String(zp || '')); if (!m) return null;
   const yearDir = path.join(root, '6.1-Продажи', m[1]);
@@ -3833,12 +3963,23 @@ function createSalesFolderTree(zp) {
     return folder;
   }
   const folder = path.join(yearDir, zp);
+  if (fsEnabled() && fsSharePath(folder)) {
+    try {
+      await fsCreateFolder(yearDir, [zp]);          // сама папка ЗП
+      await fsCreateFolder(folder, SALES_STAGES);   // и шесть этапов внутри
+      return folder;
+    } catch (e) { fsWarn('создание дерева ' + zp, e); }
+  }
   if (!_atomicMkTree(folder, SALES_STAGES)) return null;
   return folder;
 }
 // запись файла в dir с очисткой имени, защитой от выхода за folder и дедупом « (N)». Возвращает rel|null.
-function saveFileUnique(folder, dir, rawName, data) {
-  let base = String(rawName).replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim();
+async function saveFileUnique(folder, dir, rawName, data) {
+  // NFC: macOS отдаёт имена в форме Unicode NFD («й» = «и» + U+0306). На ext4
+  // нормализации нет, имя ложилось байт-в-байт, и Drive Client на Mac потом не
+  // сопоставлял файл — он оставался только на NAS. Доказано на ЗП-2026-041:
+  // из 45 файлов вниз не пришли ровно 4, и ровно те, чьи имена были в NFD.
+  let base = String(rawName).normalize('NFC').replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim();
   if (!base) return null;
   let dest = path.join(dir, base);
   if (!dest.startsWith(folder + path.sep)) return null;
@@ -3847,6 +3988,14 @@ function saveFileUnique(folder, dir, rawName, data) {
     const ext = path.extname(base), stem = base.slice(0, base.length - ext.length); let n = 2;
     while (fs.existsSync(path.join(dir, `${stem} (${n})${ext}`))) n++;
     dest = path.join(dir, `${stem} (${n})${ext}`);
+  }
+  // Пишем через FileStation API — иначе файл не уедет на клиенты Synology Drive.
+  // Имя уже финальное (дедуп посчитан выше по ФС), поэтому overwrite не нужен.
+  if (fsEnabled() && fsSharePath(dir)) {
+    try {
+      await fsUploadFile(dir, path.basename(dest), data);
+      return path.relative(folder, dest).split(path.sep).join('/');
+    } catch (e) { fsWarn('загрузка файла ' + path.basename(dest), e); }
   }
   try { fs.writeFileSync(dest, data); return path.relative(folder, dest).split(path.sep).join('/'); } catch { return null; }
 }
@@ -4250,7 +4399,7 @@ async function createSalesRequest(body, who) {
   const c = Array.isArray(created) ? created[0] : created;
   // создать на NAS папку запроса + 6 подпапок этапов (если задан путь к записям)
   let folderCreated = false;
-  if (cfg().RECORDS) { try { folderCreated = !!createSalesFolderTree(numZp); } catch {} }
+  if (cfg().RECORDS) { try { folderCreated = !!(await createSalesFolderTree(numZp)); } catch {} }
   logEvent({ type: 'создан', obj: 'ЗП', objNum: numZp, to: row['Статус'], who: who || row['Принял запрос'] || '',
     details: `${customer} · ${name}` });
   return { ok: true, numZp, id: c.Id ?? c.id, folderCreated };
@@ -9723,7 +9872,7 @@ const server = http.createServer(async (req, res) => {
       const saved = [], skipped = [];
       for (const f of files) {
         if (!DESIGN_UPLOAD_EXT.test(String(f.filename))) { skipped.push(String(f.filename)); continue; }
-        const rel = saveFileUnique(folder, stageDir, path.basename(String(f.filename)), f.data);
+        const rel = await saveFileUnique(folder, stageDir, path.basename(String(f.filename)), f.data);
         if (!rel) { skipped.push(String(f.filename)); continue; }
         const savedName = path.basename(rel);
         const stem = savedName.replace(/\.[^.]+$/, '');
@@ -9816,7 +9965,7 @@ const server = http.createServer(async (req, res) => {
       const saved = [];
       for (const f of files) {
         if (!/\.pdf$/i.test(String(f.filename))) continue;
-        const rel = saveFileUnique(EXTKD_DIR, dir, path.basename(String(f.filename)), f.data);
+        const rel = await saveFileUnique(EXTKD_DIR, dir, path.basename(String(f.filename)), f.data);
         if (rel) saved.push({ name: path.basename(rel), size: f.data.length });
       }
       const rec = { id, external: true, docNo: String(fields.docNo || '').trim(), name, customer,
@@ -10292,7 +10441,7 @@ const server = http.createServer(async (req, res) => {
       const saved = [], skipped = [];
       for (const f of files) {
         if (!extRe.test(String(f.filename))) { skipped.push(String(f.filename)); continue; }
-        const rel = saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
+        const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(String(f.filename));
       }
       return sendJson(res, 200, { ok: true, mk, op, kind, saved, skipped, files: mkOpFiles(mk, op, kind) });
@@ -10343,7 +10492,7 @@ const server = http.createServer(async (req, res) => {
       const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim());
       const zp = String(fields.zp || '').trim(), stage = String(fields.stage || '').trim();
       if (!files.length) return sendJson(res, 400, { error: 'Файлы не переданы.' });
-      const folder = ensureSalesFolder(zp);
+      const folder = await ensureSalesFolder(zp);
       if (!folder) return sendJson(res, 400, { error: `Не удалось определить/создать папку запроса ${zp || '(пусто)'}.` });
       const stageDir = (stage && SALES_STAGES.includes(stage)) ? path.join(folder, stage) : folder;
       if (stageDir !== folder && !stageDir.startsWith(folder + path.sep)) return sendJson(res, 400, { error: 'Недопустимый этап.' });
@@ -10361,14 +10510,14 @@ const server = http.createServer(async (req, res) => {
               const segs = en.path.split('/').map((s) => s.replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim()).filter((s) => s && s !== '..');
               if (!segs.length) { skipped.push(en.path); continue; }
               const dir = path.join(stageDir, zipBase, ...segs.slice(0, -1));
-              const rel = saveFileUnique(folder, dir, segs[segs.length - 1], en.data);
+              const rel = await saveFileUnique(folder, dir, segs[segs.length - 1], en.data);
               rel ? (saved.push(rel), unzipped++) : skipped.push(en.path);
             }
             continue; // .zip не сохраняем как файл
           }
           // не распознали как ZIP → сохраним архив как есть (ниже)
         }
-        const rel = saveFileUnique(folder, stageDir, path.basename(String(f.filename)), f.data);
+        const rel = await saveFileUnique(folder, stageDir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(f.filename);
       }
       return sendJson(res, 200, { ok: true, saved, skipped, unzipped, files: walkSalesFiles(folder), folder: path.basename(folder) });
@@ -10863,7 +11012,7 @@ const server = http.createServer(async (req, res) => {
       const saved = [], skipped = [];
       for (const f of files) {
         if (!METAL_PHOTO_EXT.test(String(f.filename))) { skipped.push(String(f.filename)); continue; }
-        const rel = saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
+        const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(String(f.filename));
       }
       const photos = metalRemnantPhotos(code);
@@ -10979,7 +11128,7 @@ const server = http.createServer(async (req, res) => {
       const saved = [], skipped = [];
       for (const f of files) {
         if (!TC_FILE_EXT.test(String(f.filename))) { skipped.push(String(f.filename)); continue; }
-        const rel = saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
+        const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(String(f.filename));
       }
       return sendJson(res, 200, { ok: true, setNo, saved, skipped, files: cjFiles(setNo) });
@@ -11036,7 +11185,7 @@ const server = http.createServer(async (req, res) => {
       const saved = [], skipped = [];
       for (const f of files) {
         if (!TC_FILE_EXT.test(String(f.filename))) { skipped.push(String(f.filename)); continue; }
-        const rel = saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
+        const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(String(f.filename));
       }
       return sendJson(res, 200, { ok: true, kind, iso, saved, skipped, files: tcFiles(kind, iso) });

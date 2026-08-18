@@ -1031,7 +1031,25 @@
       background:rgba(15,23,42,.32);animation:ui-fade-in var(--t-norm) var(--ease) both;}
     /* внутри дровера карточки не дублируют рамку — панель уже поверхность */
     #odetail:has(#od-tabs) > .card{border-left:0;border-right:0;box-shadow:none;}
+    /* Позиции в узкой панели: шесть элементов в строку не влезают — наименование
+       занимает свою строку, мета (чертёж, кол-во, статус, МК) переносится под ним. */
+    #odetail:has(#od-tabs) .nrow{flex-wrap:wrap;gap:6px 12px;padding:10px 0;}
+    #odetail:has(#od-tabs) .nrow .sp{flex:1 1 100%;font-weight:600;color:var(--sl-800);}
+    #odetail:has(#od-tabs) .nrow > b{flex:0 0 auto;font-family:var(--mono);}
+    #odetail:has(#od-tabs) .nrow > span[style*="margin-left:auto"]{margin-left:auto;}
+    #odetail:has(#od-tabs) .tcard .nm{flex:1 1 100%;}
     @media (max-width:760px){ #odetail:has(#od-tabs){max-width:100%;} }
+
+
+    /* ── K-113: тосты в виде референса — левая цветная полоса 4px и появление
+       снизу. Автозакрытие у нас уже было (3.5с / 6с ошибка / 8с предупреждение);
+       в референсе его НЕТ вовсе, тосты копятся до ручного закрытия — не копируем. */
+    .pbs-toast{border-left-width:4px!important;border-radius:var(--r-s)!important;
+      animation:ui-slide-up var(--t-norm) var(--ease) both;}
+    .pbs-toast--ok{border-left-color:var(--em-500)!important;}
+    .pbs-toast--err{border-left-color:var(--ro-500)!important;}
+    .pbs-toast--warn{border-left-color:var(--am-500)!important;}
+    .pbs-toast--info{border-left-color:var(--sk-600)!important;}
 
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
@@ -4634,6 +4652,7 @@
         bd=kind==='err'?'#fecaca':(kind==='ok'?'#c4ead2':(kind==='warn'?'#fcd9a8':'#cfe0f5')),
         fg=kind==='err'?'#b91c1c':(kind==='ok'?'#15803d':(kind==='warn'?'#9a5b06':'#1e40af'));
       t.style.cssText=`background:${bg};border:1px solid ${bd};color:${fg};border-radius:var(--r-s);padding:10px 13px;font-size:13px;line-height:1.35;box-shadow:0 4px 14px rgba(15,23,42,.12);cursor:pointer`;
+      t.className='pbs-toast pbs-toast--'+(kind||'info'); // K-113: вид — из CSS, а не инлайном
       t.textContent=msg; t.onclick=()=>t.remove(); host.appendChild(t);
       setTimeout(()=>{t.style.transition='opacity .3s';t.style.opacity='0';setTimeout(()=>t.remove(),300);},kind==='err'?6000:(kind==='warn'?8000:3500));
     }

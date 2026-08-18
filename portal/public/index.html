@@ -1077,10 +1077,13 @@
     .modal.as-drawer .mh{border-radius:0;}
 
 
-    /* K-116: тело дровера — светлая подложка, белые карточки на ней читаются
-       (в референсе так же: страница светлая, карточки белые). */
-    #odetail:has(#od-tabs), #znz-drawer.on, .modal.as-drawer{background:var(--sl-50);}
-    #odetail:has(#od-tabs) > .card, #znz-drawer.on .card, .modal.as-drawer .card{background:#fff;}
+    /* K-116 (правка 18.08 по замечанию владельца «фон дровера верни белый»):
+       тело дровера БЕЛОЕ. Пробовал светлую подложку --sl-50, чтобы белые карточки
+       отделялись — владельцу не подошло. Возвращаем белый, а карточки внутри
+       разделяем не заливкой, а более заметной рамкой и убранной тенью. */
+    #odetail:has(#od-tabs), #znz-drawer.on, .modal.as-drawer{background:#fff;}
+    #odetail:has(#od-tabs) > .card, #znz-drawer.on .card, .modal.as-drawer .card{
+      background:#fff;border:1px solid var(--sl-200);box-shadow:none;}
 
 
     /* ── K-117: иконки взамен цветных эмодзи. Аудит владельца: в портале было

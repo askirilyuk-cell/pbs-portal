@@ -1112,6 +1112,17 @@
     .ic-menu{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 6h13M3.5 10h13M3.5 14h13'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 6h13M3.5 10h13M3.5 14h13'/></svg>");}
     .ic-chk{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='3.5' width='13' height='13' rx='2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='3.5' width='13' height='13' rx='2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");}
 
+
+    /* K-118: вкладки карточки ЗнЗ — вид как у вкладок карточки ПЗ (единый паттерн) */
+    .ztabs{display:flex;gap:2px;border-bottom:1px solid var(--sl-200);margin-bottom:var(--gap);
+      background:transparent;overflow-x:auto;}
+    .ztabs button{font:inherit;font-size:12.5px;font-weight:600;color:var(--sl-500);
+      background:transparent;border:0;border-bottom:2px solid transparent;
+      padding:9px 13px;cursor:pointer;white-space:nowrap;
+      transition:color var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease);}
+    .ztabs button:hover{color:var(--sl-800);}
+    .ztabs button.on{color:var(--acc);border-bottom-color:var(--acc);font-weight:700;}
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){
@@ -6994,9 +7005,28 @@
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${acts.join('')}<a class="pbtn" href="/api/print/znz/${encodeURIComponent(r.numZnz)}" target="_blank" rel="noopener">${aico('print',14)} Печать заявки</a><button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
         </div>
         ${track}
+        <div class="ztabs" id="znz-tabs">
+          <button data-zt="items" class="on">Позиции и приёмка</button>
+          <button data-zt="qc">Входной контроль</button>
+          <button data-zt="inv">Счета и OCR</button>
+          <button data-zt="hist">История приёмки</button>
+        </div>
         <div style="display:flex;flex-direction:column;gap:var(--gap)">
-          ${acceptHost}${reqCard}${itemsCard}${actsCard}${midRow}${invCard}${payCard}${histCard}
+          <div class="ztab-p" data-zp="items">${acceptHost}${reqCard}${midRow}${itemsCard}</div>
+          <div class="ztab-p" data-zp="qc" hidden>${actsCard}</div>
+          <div class="ztab-p" data-zp="inv" hidden>${invCard}${payCard}</div>
+          <div class="ztab-p" data-zp="hist" hidden>${histCard||'<div class="card pad"><div class="ui-empty"><div class="why">Истории пока нет</div><div class="sub">Записи появятся после первых действий с заявкой.</div></div></div>'}</div>
         </div>`);
+      // K-118: вкладки карточки ЗнЗ по референсу («Позиции и приёмка / Входной контроль /
+      // Счета и OCR / История приёмки»). Секции те же, просто разложены по вкладкам —
+      // раньше все семь шли стопкой и карточка была длинной простынёй.
+      (function wireZnzTabs(){
+        const bar=document.getElementById('znz-tabs'); if(!bar)return;
+        bar.querySelectorAll('button[data-zt]').forEach(b=>b.onclick=()=>{
+          bar.querySelectorAll('button[data-zt]').forEach(x=>x.classList.toggle('on',x===b));
+          document.querySelectorAll('.ztab-p').forEach(pnl=>{ pnl.hidden = pnl.dataset.zp!==b.dataset.zt; });
+        });
+      })();
       document.getElementById('znz-back').onclick=znzFormBack;
       wireCopyLink(host);
       wireInnHints(host);   // K-98: подсказка «без ИНН» у поставщика заказа (счёт/оплата без ИНН не свяжутся с 1С)

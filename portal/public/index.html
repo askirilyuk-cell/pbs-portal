@@ -1051,6 +1051,20 @@
     .pbs-toast--warn{border-left-color:var(--am-500)!important;}
     .pbs-toast--info{border-left-color:var(--sk-600)!important;}
 
+
+    /* ── K-114: дровер карточки ЗнЗ (канон п.4). Отдельный контейнер, потому что
+       карточка раньше подменяла весь #view. Геометрия — как у эталона #odetail. */
+    #znz-drawer{display:none;}
+    #znz-drawer.on{display:block;position:fixed;inset-block:0;right:0;z-index:80;
+      width:100%;max-width:720px;box-sizing:border-box;
+      background:var(--card,#fff);border-left:1px solid var(--sl-300);
+      box-shadow:-8px 0 28px rgba(15,23,42,.16);
+      padding:16px 18px;overflow-y:auto;overscroll-behavior:contain;
+      animation:ui-slide-right var(--t-norm) var(--ease) both;}
+    #znz-drawer.on::before{content:'';position:fixed;inset:0;z-index:-1;
+      background:rgba(15,23,42,.32);animation:ui-fade-in var(--t-norm) var(--ease) both;}
+    @media (max-width:860px){ #znz-drawer.on{max-width:100%;} }
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){
@@ -6546,7 +6560,27 @@
       host.innerHTML=html; try{window.scrollTo(0,0);}catch(e){}
       return host;
     }
-    function znzFormBack(){ try{history.replaceState(null,'','#purchase');}catch{} renderProcurement(document.getElementById('view')); }
+    // K-114: КАРТОЧКА ЗнЗ — правый дровер (канон п.4, решение владельца 18.08).
+    // Раньше карточка подменяла весь #view (полноэкран). Теперь список остаётся
+    // на экране, карточка приезжает справа. ФОРМА создания заявки по-прежнему
+    // полноэкранная (znzFormOpen): 12-колоночный грид в панель 680px не влезает.
+    function znzCardHost(){
+      let d=document.getElementById('znz-drawer');
+      if(!d){ d=document.createElement('div'); d.id='znz-drawer'; document.body.appendChild(d); }
+      return d;
+    }
+    function znzCardOpen(html){
+      const v=document.getElementById('view');
+      // если на экране не список закупок (пришли по deep-link) — сначала отрисуем его
+      if(v && !v.querySelector('[data-znz]')) { try{ renderProcurement(v); }catch(e){} }
+      const d=znzCardHost(); d.innerHTML=html; d.classList.add('on');
+      return d;
+    }
+    function znzCardClose(){
+      const d=document.getElementById('znz-drawer');
+      if(d){ d.classList.remove('on'); d.innerHTML=''; }
+    }
+    function znzFormBack(){ znzCardClose(); try{history.replaceState(null,'','#purchase');}catch{} renderProcurement(document.getElementById('view')); }
     async function openZnzForm(){
       const today=new Date().toISOString().slice(0,10);
       const G='display:grid;grid-template-columns:repeat(12,1fr);gap:14px';
@@ -6907,7 +6941,7 @@
       const canTake=PROC.mode==='live'&&r.id!=null&&znzCanTake()&&!(r.assignee&&r.assignee.fio);
       if(canTake)acts.push('<button class="ui-btn ui-btn--primary" id="znz-take">Принять в работу</button>');
       const takenBadge=(r.assignee&&r.assignee.fio)?`<span class="st--wait" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}">⏳ В работе у: ${esc(r.assignee.fio)}</span>`:'';
-      znzFormOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
+      znzCardOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="znz-back" style="font-size:13px;text-decoration:none;cursor:pointer">← Закупки</a>
           <span class="code" style="font-size:16px;font-family:var(--mono)">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${takenBadge}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${acts.join('')}<a class="pbtn" href="/api/print/znz/${encodeURIComponent(r.numZnz)}" target="_blank" rel="noopener">${aico('print',14)} Печать заявки</a><button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
@@ -13937,13 +13971,16 @@
      считаем это его недоделкой, а не задумкой. */
   (function(){
     const od=()=>document.getElementById('odetail');
-    const open=()=>!!document.getElementById('od-tabs');
-    const close=()=>{const x=document.getElementById('od-x'); if(x) x.click();};
+    const zd=()=>{const d=document.getElementById('znz-drawer');return d&&d.classList.contains('on')?d:null;};
+    const open=()=>!!document.getElementById('od-tabs')||!!zd();
+    const close=()=>{ if(zd()){ if(typeof znzFormBack==='function') znzFormBack(); return; }
+      const x=document.getElementById('od-x'); if(x) x.click(); };
     document.addEventListener('mousedown',(ev)=>{
       if(!open())return;
-      const e=od();
-      if(e.contains(ev.target))return;          // клик внутри панели — не трогаем
+      const e=zd()||od();
+      if(e&&e.contains(ev.target))return;       // клик внутри панели — не трогаем
       if(ev.target.closest('#ogrid'))return;    // клик по строке списка = выбор другой карточки
+      if(ev.target.closest('[data-znz]'))return;// то же для списка заявок
       close();
     },true);
     document.addEventListener('keydown',(ev)=>{ if(ev.key==='Escape'&&open()) close(); });

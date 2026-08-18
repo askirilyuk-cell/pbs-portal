@@ -994,6 +994,45 @@
     .fld input:focus,.fld select:focus,.fld textarea:focus,.tbl-search input:focus{
       background:#fff;box-shadow:0 0 0 1px var(--acc);}
 
+
+    /* ── K-111: воронка продаж в виде референса ──────────────────────────────
+       Механика у нас уже та же (клик по сегменту → фильтр реестра), отличался
+       только вид. Порядок в разметке «число → подпись» переставлен через order,
+       чтобы не трогать JS: подпись капсом сверху, крупное моно-число, подсказка. */
+    .funnel{gap:8px;}
+    .fseg{display:flex;flex-direction:column;min-width:150px;padding:11px 13px;
+      border:1px solid var(--sl-200);border-radius:var(--r-m);background:#fff;
+      transition:box-shadow var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease),transform var(--t-fast) var(--ease);}
+    .fseg:hover{box-shadow:var(--sh-1);}
+    .fseg .fl{order:1;margin:0 0 2px;font-size:10px;font-weight:700;letter-spacing:.07em;
+      text-transform:uppercase;color:var(--sl-400);gap:6px;}
+    .fseg .fl i{width:6px;height:6px;}
+    .fseg .fn{order:2;font-family:var(--mono);font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.05;}
+    .fseg::after{order:3;content:'Нажмите для фильтра';margin-top:3px;
+      font-size:10px;color:var(--sl-400);}
+    .fseg.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc),var(--sh-1);transform:scale(1.015);}
+    .fseg.on::after{content:'✓ Фильтр активен';color:var(--acc);font-weight:600;}
+
+
+    /* ── K-112: карточка заказа как выезжающая панель справа ────────────────
+       Концепция референса, которую владелец назвал «супер»: список слева
+       остаётся живым, карточка приезжает справа. У нас карточка уже с
+       вкладками, но раскрывалась ПОД списком — теперь она дровер.
+       Пусто → элемента как бы нет (:empty), поэтому CSS сам знает, открыт ли он. */
+    #odetail:has(#od-tabs){
+      position:fixed;inset-block:0;right:0;z-index:80;
+      width:100%;max-width:680px;box-sizing:border-box;
+      background:var(--card,#fff);border-left:1px solid var(--sl-300);
+      box-shadow:-8px 0 28px rgba(15,23,42,.16);
+      padding:14px 16px;gap:12px;overflow-y:auto;overscroll-behavior:contain;
+      animation:ui-slide-right var(--t-norm) var(--ease) both;}
+    /* затемнение под панелью: собственный слой, ниже неё */
+    #odetail:has(#od-tabs)::before{content:'';position:fixed;inset:0;z-index:-1;
+      background:rgba(15,23,42,.32);animation:ui-fade-in var(--t-norm) var(--ease) both;}
+    /* внутри дровера карточки не дублируют рамку — панель уже поверхность */
+    #odetail:has(#od-tabs) > .card{border-left:0;border-right:0;box-shadow:none;}
+    @media (max-width:760px){ #odetail:has(#od-tabs){max-width:100%;} }
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){
@@ -13873,6 +13912,24 @@
     })();
     window.addEventListener('afterprint',()=>document.body.classList.remove('printing'));
     load().catch(e=>{document.getElementById('view').innerHTML='<div class="warn">Ошибка загрузки: '+esc(e.message)+'</div>';});
-  </script>
+  
+  /* K-112: дровер заказа — закрытие по клику мимо панели и по Esc.
+     В референсе ни того, ни другого нет (панель закрывается только крестиком) —
+     считаем это его недоделкой, а не задумкой. */
+  (function(){
+    const od=()=>document.getElementById('odetail');
+    const open=()=>!!document.getElementById('od-tabs');
+    const close=()=>{const x=document.getElementById('od-x'); if(x) x.click();};
+    document.addEventListener('mousedown',(ev)=>{
+      if(!open())return;
+      const e=od();
+      if(e.contains(ev.target))return;          // клик внутри панели — не трогаем
+      if(ev.target.closest('#ogrid'))return;    // клик по строке списка = выбор другой карточки
+      close();
+    },true);
+    document.addEventListener('keydown',(ev)=>{ if(ev.key==='Escape'&&open()) close(); });
+  })();
+
+</script>
 </body>
 </html>

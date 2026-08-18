@@ -11748,7 +11748,17 @@
       const render=(chat)=>{
         if(!wrap.isConnected)return;
         wrap.innerHTML=`Чат заказа: ${chat?`<b class="ui-mono" style="color:var(--ink)">chat${esc(chat)}</b>`:'<span class="c-gray">—</span>'}
-          <button class="ui-btn ui-btn--ghost" id="od-chat-edit" title="${chat?'Изменить чат заказа':'Привязать чат Bitrix к заказу — туда постятся заявки на закупку под этот ПЗ'}" style="padding:1px 7px;font-size:12px">${chat?'✎':'задать'}</button>`;
+          <button class="ui-btn ui-btn--ghost" id="od-chat-edit" title="${chat?'Изменить чат заказа':'Привязать УЖЕ СУЩЕСТВУЮЩИЙ чат Bitrix к заказу'}" style="padding:1px 7px;font-size:12px">${chat?'✎':'задать'}</button>${chat?'':`
+          <button class="ui-btn ui-btn--primary" id="od-chat-new" title="Создать рабочий чат заказа в Bitrix: название по конвенции, карточка заказа и ссылка на бланк Ф.1–П.2 первым сообщением" style="padding:1px 9px;font-size:12px">＋ создать чат</button>`}`;
+        const nb=wrap.querySelector('#od-chat-new');
+        if(nb) nb.onclick=async()=>{
+          nb.disabled=true; nb.textContent='создаю…';
+          try{
+            const j=await postJson('/api/orders/chat/create',{num:numPz});
+            toast(j.already?('Чат уже был привязан: chat'+j.chat):('Чат заказа создан: chat'+j.chat),'ok');
+            render(String(j.chat||''));
+          }catch(e){ nb.disabled=false; nb.textContent='＋ создать чат'; toast('Не удалось создать чат: '+(e.message||e),'err'); }
+        };
         wrap.querySelector('#od-chat-edit').onclick=()=>{
           wrap.innerHTML=`Чат заказа: <input id="od-chat-inp" style="font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid var(--c-border);border-radius:var(--r-s);width:96px" placeholder="NNN" value="${esc(chat||'')}" title="Номер чата Bitrix (NNN из chatNNN); пусто — отвязать">
             <button class="ui-btn ui-btn--primary" id="od-chat-save" style="padding:4px 10px;font-size:12px">ОК</button>

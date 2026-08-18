@@ -51,6 +51,9 @@ function cfg() {
     // rename под скрытым .tmp, rename под видимым и прямой mkdir не сработали ни разу).
     // Через FileStation API те же папки и файлы уезжают на клиенты за ~15 секунд.
     // Пусто = фолбэк на прямую запись в ФС (прежнее поведение, ничего не ломается).
+    // K-108: участники рабочего чата заказа по умолчанию (id Bitrix через запятую).
+    // Пусто = чат создаётся только с автором вебхука; состав правится в самом чате.
+    ORDER_CHAT_USERS: String(runtime.ORDER_CHAT_USERS || process.env.ORDER_CHAT_USERS || ''),
     FS_URL: (runtime.FS_URL || process.env.FS_URL || 'http://192.168.1.10:5000').replace(/\/+$/, ''),
     FS_USER: runtime.FS_USER || process.env.FS_USER || '',
     FS_PASS: runtime.FS_PASS || process.env.FS_PASS || '',
@@ -666,6 +669,10 @@ const ORDER_CHATS_FILE = path.join(__dirname, '.data', 'order-chats.json');
 function readOrderChats() { try { const m = JSON.parse(fs.readFileSync(ORDER_CHATS_FILE, 'utf8')); return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {}; } catch { return {}; } }
 function writeOrderChats(map) { try { fs.mkdirSync(path.dirname(ORDER_CHATS_FILE), { recursive: true }); fs.writeFileSync(ORDER_CHATS_FILE, JSON.stringify(map, null, 2)); return true; } catch { return false; } }
 // чат заказа по источнику ЗнЗ: из sourceRef достаём № ПЗ (строка может содержать и прочее) → chatNNN|null
+// K-108: состав участников чата заказа по умолчанию (id Bitrix из рантайма)
+function orderChatDefaultUsers() {
+  return String(cfg().ORDER_CHAT_USERS || '').split(/[,\s;]+/).map((x) => Number(x)).filter(Boolean);
+}
 function orderChatFor(sourceRef) {
   const m = /ПЗ-\d{4}-\d{3}/.exec(String(sourceRef || ''));
   if (!m) return null;
@@ -4359,7 +4366,81 @@ async function createOrder(body, who) {
   }
   logEvent({ type: 'создан', obj: 'ПЗ', objNum: numPz, to: orderRow['Статус'], who,
     details: `Заказчик: ${customer}; позиций: ${posCount}` });
-  return { ok: true, numPz, id: orderId, positions: posCount };
+  // K-108: рабочий чат заказа в Bitrix — штатно, а не руками. Сбой чата НЕ роняет
+  // создание ПЗ (тот же принцип, что у ЗнЗ: заказ важнее уведомления).
+  let chatCreated = null;
+  try { chatCreated = await createOrderChat({ num: numPz, participants: body.chatUsers, who }); }
+  catch (e) { console.warn('ПЗ: чат заказа не создан:', e.message); chatCreated = { ok: false, error: String(e.message || e) }; }
+  return { ok: true, numPz, id: orderId, positions: posCount, chatCreated };
+}
+
+// ── K-108: рабочий чат производственного заказа в Bitrix ─────────────────────
+// Раньше чаты под ПЗ заводили руками в Битриксе, а портал умел только привязать
+// готовый (K-102, оверлей order-chats.json). Название — по конвенции, сложившейся
+// на живых заказах ПЗ-2026-006/007:
+//   «ПЗ-NNNN · Заказчик — Продукт, N ед (ЗП-NNNN)»
+function buildOrderChatTitle(row, positions) {
+  const num = String(row['№ ПЗ'] || '').trim();
+  const customer = String(row['Заказчик / Инициатор'] || '').trim().replace(/\s*\(.*$/, '').trim();
+  const zp = String(row['№ ЗП'] || '').trim();
+  const p0 = positions[0] || {};
+  // из длинного наименования берём начало до первой запятой — оно опознаёт изделие
+  const prod = String(p0['Наименование / обозначение'] || '').trim().split(',')[0].slice(0, 40);
+  const qty = positions.reduce((s, x) => s + (Number(x['Кол-во']) || 0), 0);
+  const unit = String(p0['Ед.'] || 'шт').trim();
+  const parts = [num];
+  if (customer) parts.push(`· ${customer}`);
+  if (prod) parts.push(`— ${prod}`);
+  if (qty) parts.push(`, ${qty} ${unit}`);
+  if (zp) parts.push(` (${zp})`);
+  return parts.join('').replace(/\s+/g, ' ').slice(0, 100);
+}
+
+function buildOrderChatMessage(row, positions) {
+  const num = String(row['№ ПЗ'] || '').trim();
+  const portal = cfg().PORTAL_BASE;
+  const L = [`[B]${num} размещён[/B]`, ''];
+  for (const p of positions) {
+    const name = String(p['Наименование / обозначение'] || '').trim();
+    const dwg = String(p['Чертёж / ТУ'] || '').trim();
+    const qty = String(p['Кол-во'] || '').trim(), unit = String(p['Ед.'] || 'шт').trim();
+    const due = String(p['Срок готовности'] || '').trim();
+    L.push(name);
+    const meta = [dwg && `Чертёж: ${dwg}`, qty && `[B]${qty} ${unit}[/B]`, due && `срок готовности [B]${due}[/B]`].filter(Boolean);
+    if (meta.length) L.push(meta.join(' · '));
+    L.push('');
+  }
+  const basis = String(row['Договор / основание'] || '').trim();
+  if (basis) L.push(basis, '');
+  const prio = String(row['Приоритет'] || '').trim();
+  if (prio) L.push(`Приоритет: ${prio}`);
+  L.push('');
+  L.push(`🖨 Бланк заказа (Ф.1–П.2): ${portal}/api/print/pz/${encodeURIComponent(num)}`);
+  L.push(`📁 Карточка в портале: ${portal}/#orders/${encodeURIComponent(num)}`);
+  return L.join('\n');
+}
+
+// Создаёт чат, привязывает его к ПЗ и постит карточку заказа со ссылкой на бланк.
+// participants — массив id Bitrix; если не задан, берём ORDER_CHAT_USERS из рантайма.
+async function createOrderChat({ num, participants, who }) {
+  if (!/^ПЗ-\d{4}-\d{3}$/.test(String(num || ''))) throw new Error('Некорректный № ПЗ.');
+  if (!cfg().BITRIX) throw new Error('Не задан входящий вебхук Bitrix24 (страница «Настройки»).');
+  const existing = String(readOrderChats()[num] || '');
+  if (existing) return { ok: true, already: true, chat: existing };
+  const [orders, positions] = await Promise.all([ncListSoft('orders'), ncListSoft('positions')]);
+  const row = orders.find((r) => String(r['№ ПЗ'] || '').trim() === num);
+  if (!row) throw new Error(`Заказ ${num} не найден.`);
+  const pos = positions.filter((x) => String(x['Позиция'] || '').startsWith(num + ' '))
+    .sort((a, b) => String(a['№ позиции'] || '').localeCompare(String(b['№ позиции'] || ''), 'ru'));
+  const users = (Array.isArray(participants) && participants.length ? participants : orderChatDefaultUsers())
+    .map((x) => Number(x)).filter(Boolean);
+  const title = buildOrderChatTitle(row, pos);
+  const chatId = await bitrixCall('im.chat.add', { TYPE: 'CHAT', TITLE: title, DESCRIPTION: '', USERS: users });
+  const map = readOrderChats(); map[num] = String(chatId); writeOrderChats(map);
+  try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: buildOrderChatMessage(row, pos) }); }
+  catch (e) { /* чат создан и привязан; сообщение не критично */ }
+  logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: num, who, details: `создан чат заказа: chat${chatId}` });
+  return { ok: true, chat: String(chatId), title, users };
 }
 
 // --- создание запроса продаж ЗП (Ф.1–З.1, этап регистрации 5.1) --------------
@@ -9415,6 +9496,13 @@ const server = http.createServer(async (req, res) => {
     // K-102: привязка ПЗ ↔ чат Bitrix (оверлей .data/order-chats.json, БЕЗ миграции NocoDB).
     // GET ?num=ПЗ-… → {num, chat}; POST {num, chat} (chat — только цифры, пусто = снять).
     // Работает и на стенде (файловый стор не зависит от NocoDB).
+    // K-108: СОЗДАТЬ чат заказа (а не привязать готовый). Для заказов, у которых
+    // чата ещё нет — в т.ч. заведённых до этой правки.
+    if (p === '/api/orders/chat/create' && req.method === 'POST') {
+      const body = await readBody(req);
+      try { return sendJson(res, 200, await createOrderChat({ num: String(body.num || '').trim(), participants: body.participants, who: eventWho(req, svc) })); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/orders/chat' && req.method === 'GET') {
       const num = String(url.searchParams.get('num') || '').trim();
       if (!/^ПЗ-\d{4}-\d{3}$/.test(num)) return sendJson(res, 400, { error: 'Укажите корректный № ПЗ (ПЗ-ГГГГ-NNN).' });

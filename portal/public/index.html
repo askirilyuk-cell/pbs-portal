@@ -932,6 +932,68 @@
     .top .right{gap:10px;font-size:12px;}
     #burger{background:var(--sl-100);color:var(--acc);border-radius:var(--r-s);}
 
+
+    /* ══════════════════════════════════════════════════════════════════════
+       K-110 ЭКРАНЫ ПО РЕФЕРЕНСУ (18.08.2026). Плитки KPI, карточки, плотные
+       таблицы и канбан приведены к виду референс-прототипа. Только CSS поверх
+       существующей разметки — JS и структура не тронуты, слой снимается целиком.
+       ══════════════════════════════════════════════════════════════════════ */
+
+    /* Карточка-поверхность: мягкий радиус, одна тонкая тень, светлая рамка */
+    .card{border:1px solid var(--sl-200);border-radius:var(--r-m);box-shadow:var(--sh-1);}
+
+    /* KPI: без цветной шапки-полоски; подпись 10px капсом, число крупным моно,
+       подстрочник мелким. Именно эта иерархия и читается как «дорого». */
+    .kpi{border:1px solid var(--sl-200);border-top:1px solid var(--sl-200);
+      border-radius:var(--r-m);box-shadow:var(--sh-1);padding:14px 16px;}
+    .kpi .kl{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--sl-400);}
+    .kpi .kn{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-.02em;
+      color:var(--sl-900);margin:4px 0 2px;}
+    .kpi .ks{font-size:11px;color:var(--sl-500);}
+
+    /* Плотная таблица: шапка на светло-серой заливке, 10px капсом с разрядкой,
+       разделители ТОЛЬКО горизонтальные, вся строка кликабельна и подсвечивается */
+    table.dt.erp{font-size:12px;}
+    table.dt thead tr,table.dt th{background:var(--sl-50);}
+    table.dt th{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--sl-500);
+      border-bottom:1px solid var(--sl-200);padding:9px 10px;}
+    /* отступы 10px, а не 16 как в референсе: у нас колонок больше, и канон требует
+       «правило 1440» — без горизонтального скролла на 1440px (проверено: на 14px
+       обрезалась колонка «Срок») */
+    table.dt.erp td{padding:10px 10px;border-bottom:1px solid var(--sl-100);}
+    table.dt.erp tbody tr:nth-child(even):not(.grp){background:transparent;}
+    table.dt.erp tbody tr:hover:not(.grp) td{background:var(--sl-50);}
+    td.code{font-family:var(--mono);font-weight:700;color:var(--acc);}
+
+    /* Канбан: колонка на светлой подложке с рамкой, заголовок с чипом-счётчиком */
+    .kcol{background:rgba(241,245,249,.7);border:1px solid var(--sl-200);
+      border-radius:var(--r-m);padding:10px;gap:9px;}
+    .kh{font-size:11px;font-weight:700;letter-spacing:-.01em;color:var(--sl-800);
+      padding-bottom:8px;border-bottom:1px solid var(--sl-200);margin-bottom:2px;}
+
+    /* Карточка заказа: без цветной полосы слева, мягкий радиус, тень на ховере */
+    .kc{border:1px solid var(--sl-200);border-left:1px solid var(--sl-200);
+      border-radius:var(--r-m);padding:12px;box-shadow:var(--sh-1);
+      transition:box-shadow var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease);}
+    .kc:hover{box-shadow:var(--sh-2);border-color:var(--bl-200,#bfdbfe);}
+    .kc .pz{font-size:12px;color:var(--acc);}
+    .kc .cu{font-size:12px;color:var(--sl-700);margin-top:4px;}
+
+    /* Бейджи-пилюли: полностью круглые, 9px капсом — как в референсе */
+    .badge,.pill,.st--neutral,.st--work,.st--done,.st--problem,.st--wait{
+      border-radius:var(--r-full);font-size:9px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.04em;padding:3px 9px;}
+
+    /* Прогресс-бар: полностью круглый трек, заливка без уголков */
+    .prog,.bar,.pbar{border-radius:var(--r-full);overflow:hidden;background:var(--sl-100);}
+    .prog>*,.bar>*,.pbar>*{border-radius:var(--r-full);}
+
+    /* Инпуты и селекты: серая заливка, на фокусе белеют с кольцом акцента */
+    .fld input,.fld select,.fld textarea,.tbl-search input{
+      background:var(--sl-50);border:1px solid var(--sl-200);border-radius:var(--r-s);}
+    .fld input:focus,.fld select:focus,.fld textarea:focus,.tbl-search input:focus{
+      background:#fff;box-shadow:0 0 0 1px var(--acc);}
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){

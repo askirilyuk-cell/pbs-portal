@@ -8,6 +8,74 @@
   <link rel="mask-icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='6'%20fill='%231F4E79'/%3E%3C/svg%3E" color="#1F4E79" />
   <style>
     /* ══════════════════════════════════════════════════════════════════════
+       K-107 ФУНДАМЕНТ ДИЗАЙНА (18.08.2026). Перенос визуального языка из
+       референс-прототипа (см. docs/ТЗ-перенос-визуала-референса-18.08.md).
+       Шрифты — ЛОКАЛЬНЫЕ (assets/fonts/), не Google Fonts: канон §10.1.1
+       «без внешних зависимостей», в цеху интернета может не быть.
+       Только latin/cyrillic subsets, браузер тянет нужное по unicode-range.
+       ══════════════════════════════════════════════════════════════════════ */
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/plexmono-400-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/plexmono-400-latin-ext.woff2) format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/plexmono-400-cyrillic.woff2) format('woff2');unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/plexmono-400-cyrillic-ext.woff2) format('woff2');unicode-range:U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/plexmono-500-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/plexmono-500-latin-ext.woff2) format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/plexmono-500-cyrillic.woff2) format('woff2');unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/plexmono-500-cyrillic-ext.woff2) format('woff2');unicode-range:U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/plexmono-600-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/plexmono-600-latin-ext.woff2) format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/plexmono-600-cyrillic.woff2) format('woff2');unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+    @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/plexmono-600-cyrillic-ext.woff2) format('woff2');unicode-range:U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/inter-400-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/inter-400-cyrillic.woff2) format('woff2');unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/inter-400-cyrillic-ext.woff2) format('woff2');unicode-range:U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/inter-600-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/inter-600-cyrillic.woff2) format('woff2');unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/inter-600-cyrillic-ext.woff2) format('woff2');unicode-range:U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url(assets/fonts/inter-700-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url(assets/fonts/inter-700-cyrillic.woff2) format('woff2');unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+    @font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url(assets/fonts/inter-700-cyrillic-ext.woff2) format('woff2');unicode-range:U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+
+    :root{
+      /* ── K-107: семантическая палитра, 7 хью × 3 ступени ──
+         фон (-50/100) · заливка (-500/600) · текст (-700/800/900).
+         Нейтраль ОДНА — slate (в референсе были две, gray+slate; не повторяем). */
+      --sl-50:#f8fafc; --sl-100:#f1f5f9; --sl-200:#e2e8f0; --sl-300:#cbd5e1;
+      --sl-400:#94a3b8; --sl-500:#64748b; --sl-600:#475569; --sl-700:#334155;
+      --sl-800:#1e293b; --sl-900:#0f172a;
+      --bl-50:#eff6ff; --bl-100:#dbeafe; --bl-600:#2563eb; --bl-800:#1e40af;
+      --em-50:#ecfdf5; --em-100:#d1fae5; --em-500:#10b981; --em-600:#059669; --em-800:#065f46;
+      --ro-50:#fff1f2; --ro-100:#ffe4e6; --ro-500:#f43f5e; --ro-600:#e11d48; --ro-800:#9f1239;
+      --am-50:#fffbeb; --am-100:#fef3c7; --am-500:#f59e0b; --am-700:#b45309; --am-800:#92400e;
+      --sk-50:#f0f9ff; --sk-100:#e0f2fe; --sk-600:#0284c7; --sk-800:#075985;
+      --pu-100:#f3e8ff; --pu-600:#9333ea; --pu-800:#6b21a8;
+      /* акцент — ФИРМЕННЫЙ navy, а не синий референса (директива владельца) */
+      --acc:var(--c-brand); --acc-h:#1a3a5c; --acc-fg:#fff;
+      /* единый easing для всех переходов */
+      --ease:cubic-bezier(.4,0,.2,1);
+      /* типографическая шкала: 12px — база интерфейса, как в референсе */
+      /* единый моноширинный стек: IBM Plex Mono локально, дальше системные фолбэки */
+      --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+      --fs-9:9px; --fs-10:10px; --fs-11:11px; --fs-12:12px; --fs-14:14px; --fs-20:20px; --fs-24:24px;
+    }
+
+    /* Моноширинный на ВСЕХ числах и номерах документов — главный опознавательный
+       приём референса (156 применений). Даёт ~70% узнаваемости за одну строку. */
+    .mono,.ui-mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-feature-settings:"tnum" 1;}
+
+    /* ── K-107: анимации появления. В референсе они ЗАЯВЛЕНЫ, но не работают
+       (плагин tailwindcss-animate не установлен) — пишем свои. Длительности
+       по канону п.8: --t-fast 120ms, --t-norm 200ms, ease-out на появление. */
+    @keyframes ui-fade-in{from{opacity:0}to{opacity:1}}
+    @keyframes ui-slide-right{from{transform:translateX(100%)}to{transform:translateX(0)}}
+    @keyframes ui-zoom-in{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+    @keyframes ui-slide-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .anim-fade{animation:ui-fade-in var(--t-norm) var(--ease) both;}
+    .anim-drawer{animation:ui-slide-right var(--t-norm) var(--ease) both;}
+    .anim-modal{animation:ui-zoom-in 150ms var(--ease) both;}
+    .anim-toast{animation:ui-slide-up var(--t-norm) var(--ease) both;}
+
+    /* ══════════════════════════════════════════════════════════════════════
        Дизайн-канон (10.08.2026): новый код обязан использовать токены и
        ui-классы; голый hex/px — дефект приёмки. См. Канон агентов.
        Блок ниже — только база: существующие экраны эти классы не используют.
@@ -23,8 +91,10 @@
       --c-wait:#2E75B6;    /* «ждёт» — синий (= --blue) */
       --c-bg:#eef2f6;      /* фон страницы (= --page) */
       --c-border:#e2e8f0;  /* границы (= --bd/--line) */
-      /* радиусы: s — кнопки/бейджи (ERP-тема V1 = 2px), m — карточки, l — крупные панели */
-      --r-s:2px; --r-m:6px; --r-l:12px;
+      /* радиусы: s — кнопки/бейджи/чипы/инпуты, m — карточки/панели/модалки, l — крупные панели.
+         K-107 (18.08.2026, решение Александра): 2px/6px жёсткой ERP-темы V1 заменены на 4px/8px
+         «как в референсе» — именно они дают его мягкий вид. Старые значения в легаси. */
+      --r-s:4px; --r-m:8px; --r-l:12px; --r-full:9999px;
       /* тени: 1 — карточка (= существующая --shadow), 2 — приподнятый блок, 3 — модаль/логин */
       --sh-1:0 1px 2px rgba(15,40,70,.06);
       --sh-2:0 3px 10px rgba(15,40,70,.08);
@@ -64,7 +134,7 @@
     .ui-empty .sub{font-size:11.5px;opacity:.85;margin-top:2px;}
     .ui-empty .act{margin-top:var(--sp-3);}
     /* моноширинный для кодов/децимальных номеров */
-    .ui-mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
+    .ui-mono{font-family:var(--mono);}
     /* ── конец базы Дизайн-канона (reduced-motion — в самом конце style-блока) ── */
 
     /* Стиль V1 «Классическая» по ДП–Л.1.2. Без внешних зависимостей (§10.1.1). */
@@ -76,7 +146,8 @@
       /* UX-01: --gray/--gray4/--sub затемнены до AA (≥4.5:1 на белом/светлом фоне; ~7.5:1) без смены палитры */
     }
     *{box-sizing:border-box;}
-    body{margin:0;font-family:'Segoe UI',-apple-system,'Helvetica Neue',Arial,sans-serif;color:var(--ink);background:var(--page);overflow-x:hidden;}
+    /* K-107: Inter — интерфейсный шрифт референса; локальный, с фолбэком на прежний стек */
+    body{margin:0;font-family:'Inter','Segoe UI',-apple-system,'Helvetica Neue',Arial,sans-serif;color:var(--ink);background:var(--page);overflow-x:hidden;}
     a{color:inherit;}
     /* UX-04: единый видимый фокус для клавиатуры. !important — чтобы победить инлайновый outline:0 у combobox/поиска */
     a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible,[role="tab"]:focus-visible{outline:2px solid #1d4ed8!important;outline-offset:2px!important;border-radius:2px;}
@@ -275,12 +346,12 @@
     .side-list .sl .c{font-size:12px;font-weight:700;color:var(--navy);width:92px;flex:0 0 auto;}
     .side-list .sl .n{flex:1;font-size:13px;color:#334155;min-width:0;} .side-list .sl .d{font-size:12px;color:var(--sub);}
     /* ── раздел «Проектирование» (КД-дерево, теги типов) ── */
-    .tg{font-family:monospace;font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;flex:0 0 auto;}
+    .tg{font-family:var(--mono);font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;flex:0 0 auto;}
     .tg.vd{background:#eef6ff;color:var(--navy);} .tg.vp{background:#ecfdf5;color:var(--green);} .tg.vm{background:#f3f4f6;color:#4b5563;} .tg.vo{background:#fffbeb;color:var(--amber);} .tg.vs{background:#f5f3ff;color:var(--violet);}
     .lit{font-size:9px;color:var(--sub);border:1px solid var(--bd);border-radius:4px;padding:0 4px;flex:0 0 auto;}
     .dgrp{background:var(--page);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--navy);padding:7px 12px;}
     .drow{display:flex;align-items:center;gap:7px;padding:7px 11px;border-top:1px solid var(--line2);font-size:12.5px;}
-    .drow .dn{font-family:monospace;color:var(--navy);font-weight:600;flex:0 0 auto;}
+    .drow .dn{font-family:var(--mono);color:var(--navy);font-weight:600;flex:0 0 auto;}
     .drow .dnm{color:#334155;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .drow .dmat{font-size:10.5px;color:var(--gray4);white-space:nowrap;flex:0 0 auto;}
     .drow .dchev{width:16px;flex:0 0 auto;color:var(--gray);font-size:11px;cursor:pointer;text-align:center;user-select:none;}
@@ -511,7 +582,7 @@
     table.dt.erp tbody tr.row-sel:not(.grp) td{background:var(--blue50);}
     table.dt.erp tbody tr.row-sel:not(.grp) td:first-child{box-shadow:inset 3px 0 0 var(--blue);}
     td.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;}
-    td.nw{white-space:nowrap;} td.code{font-family:monospace;font-weight:700;color:var(--navy);white-space:nowrap;}
+    td.nw{white-space:nowrap;} td.code{font-family:var(--mono);font-weight:700;color:var(--navy);white-space:nowrap;}
     .st{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
     .st i{width:7px;height:7px;border-radius:50%;display:inline-block;flex:0 0 auto;}
     .i-blue{background:var(--blue);}.i-amber{background:var(--amber);}.i-red{background:var(--red);}.i-green{background:var(--green);}.i-gray{background:#9ca3af;}.i-navy{background:var(--navy);}
@@ -581,7 +652,7 @@
     .kh .cnt{color:#5b6b7a;font-weight:600;}
     .kc{background:#fff;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:2px;padding:9px 10px;cursor:pointer;}
     .kc:hover{background:#f7faff;}
-    .kc .pz{font-family:monospace;font-weight:700;color:var(--navy);font-size:12.5px;}
+    .kc .pz{font-family:var(--mono);font-weight:700;color:var(--navy);font-size:12.5px;}
     .kc .cu{font-size:12px;color:#334155;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .kempty{border:1px dashed #cfd8e3;border-radius:2px;padding:14px 10px;text-align:center;font-size:11.5px;color:#5b6b7a;}
     table.dt.erp tr.eq-row{cursor:pointer;}
@@ -637,7 +708,7 @@
     .stg-grp{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;font-size:13.5px;color:#334155;border:1px solid transparent;cursor:pointer}
     .stg-grp:hover{background:#f1f5f9} .stg-grp.on{background:#eff6ff;border-color:#cfe0f5;color:var(--navy);font-weight:600}
     .stg-pane{padding-left:22px;min-width:0}
-    .stg-pane code,.stg-card code{font-family:monospace;font-size:11.5px;background:#f3f6fa;padding:1px 5px;border-radius:3px}
+    .stg-pane code,.stg-card code{font-family:var(--mono);font-size:11.5px;background:#f3f6fa;padding:1px 5px;border-radius:3px}
     .stg-pill{font-size:11px;font-weight:600;border-radius:999px;padding:3px 11px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
     .stg-pill.set{color:var(--green);background:#ecfdf5;border:1px solid #a7f3d0}
     .stg-pill.unset{color:var(--amber);background:#fffbeb;border:1px solid #fde68a}
@@ -2061,7 +2132,7 @@
       document.getElementById('mx').onclick=closeModal;
       let masses=[]; try{ const j=await (await fetch('/api/drawing-mass')).json(); masses=j.masses||[]; }catch{}
       const body=document.getElementById('dm-body');
-      const rowsHtml=masses.map(m=>`<tr><td style="padding:4px 6px;border-bottom:1px solid #eef2f6;font-family:monospace">${esc(m.designation)}</td><td style="padding:4px 6px;border-bottom:1px solid #eef2f6;text-align:right"><b>${esc(String(m.mass))}</b> кг</td></tr>`).join('')||'<tr><td colspan="2" style="padding:8px 6px;color:var(--sub)">Реестр пуст. Массы появятся при вводе в упак. листе или добавьте вручную.</td></tr>';
+      const rowsHtml=masses.map(m=>`<tr><td style="padding:4px 6px;border-bottom:1px solid #eef2f6;font-family:var(--mono)">${esc(m.designation)}</td><td style="padding:4px 6px;border-bottom:1px solid #eef2f6;text-align:right"><b>${esc(String(m.mass))}</b> кг</td></tr>`).join('')||'<tr><td colspan="2" style="padding:8px 6px;color:var(--sub)">Реестр пуст. Массы появятся при вводе в упак. листе или добавьте вручную.</td></tr>';
       body.innerHTML=`<div style="max-height:320px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px">
           <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="text-align:left;color:#5b6b7a;font-size:11px"><th style="padding:5px 6px">Чертёж / обозначение</th><th style="padding:5px 6px;text-align:right">Масса теор.</th></tr></thead><tbody>${rowsHtml}</tbody></table>
         </div>
@@ -2637,7 +2708,7 @@
       else viewer=`<iframe src="${fileUrlV}" style="flex:1;border:0;background:#fff" title="Документ"></iframe>`;
       viewer=`<div id="docvw" style="flex:1;display:flex;flex-direction:column;min-height:430px">${viewer}</div>`;
       const kids=docChildren(d.code), parent=p.parent?docFind(p.parent):null;
-      modal.innerHTML=`<div class="mh"><b style="font-family:ui-monospace,monospace">${esc(dispCode(d))}</b><span class="op">${esc(d.name)}</span>${lcBadge(d)}<button class="x" onclick="closeModal()">✕</button></div>
+      modal.innerHTML=`<div class="mh"><b style="font-family:var(--mono)">${esc(dispCode(d))}</b><span class="op">${esc(d.name)}</span>${lcBadge(d)}<button class="x" onclick="closeModal()">✕</button></div>
         <div class="mb" style="padding:14px;gap:14px">
           <div style="display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start">
             <div style="background:#fff;border:1px solid var(--line);border-radius:4px;overflow:hidden;min-height:470px;display:flex;flex-direction:column">
@@ -2809,7 +2880,7 @@
       const today=fmt(new Date().toISOString().slice(0,10));
       const rows=list.map((d,i)=>{const lvl=docLevel(d),lc=lcInfo(d);
         const appr=d.approvedBy||((lc.cls==='proj'||/согласов/i.test(lc.label))?'—':docApprover(lvl));
-        return `<tr><td>${i+1}</td><td style="font-family:ui-monospace,monospace">${esc(dispCode(d))}${d.ver?'–'+esc(d.ver):''}</td><td>${esc(d.name)}</td><td>${esc(d.ver||'')}</td><td>${esc(docPref(d))}</td><td>${lvl}</td><td>${esc(lc.label.toUpperCase())}</td><td>${(d.approvedDate||d.date)?fmt(d.approvedDate||d.date):'—'}</td><td>${esc(appr)}</td></tr>`;}).join('');
+        return `<tr><td>${i+1}</td><td style="font-family:var(--mono)">${esc(dispCode(d))}${d.ver?'–'+esc(d.ver):''}</td><td>${esc(d.name)}</td><td>${esc(d.ver||'')}</td><td>${esc(docPref(d))}</td><td>${lvl}</td><td>${esc(lc.label.toUpperCase())}</td><td>${(d.approvedDate||d.date)?fmt(d.approvedDate||d.date):'—'}</td><td>${esc(appr)}</td></tr>`;}).join('');
       const area=document.getElementById('printArea');
       area.innerHTML=`<div class="print-doc">
         <div style="text-align:center;border-bottom:1px solid #999;padding-bottom:8px;margin-bottom:6px"><div style="font-size:13px;font-weight:700;color:#1F4E79">ООО «Петробалт Сервис»</div><div style="font-size:10px;color:#666">Интегрированная система менеджмента</div></div>
@@ -2997,7 +3068,7 @@
         .dkt tr.dkt-sub .dkt-nm{font-weight:400}
         .dkt tr.dkt-has .dkt-nm{font-weight:600}
         .dkt .dkt-cnt{display:inline-block;margin-left:7px;font-size:10px;font-weight:600;color:var(--sub);background:#eef3f8;border:1px solid #dbe4ee;border-radius:9px;padding:0 6px;line-height:15px;vertical-align:middle}
-        .dkt .dkt-no{font-family:Consolas,monospace;font-size:11.5px;color:var(--gray4);white-space:nowrap}
+        .dkt .dkt-no{font-family:var(--mono);font-size:11.5px;color:var(--gray4);white-space:nowrap}
         .dkt .dkt-et{font-size:10px;color:var(--sub)}
         .dkt .dkt-mat{color:#5b6b7a;font-size:11.5px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .dkt .dkt-lit{font-size:11px;color:var(--sub)}
@@ -3073,11 +3144,11 @@
         .li.dpl .dpl-step.s-mid{background:#fdf3e0;color:#a9700a}
         .li.dpl .dpl-step.s-ok{background:#e6f4ea;color:#1e7d43}
         .li.dpl .dpl-sub{display:flex;align-items:center;gap:9px;margin-top:5px}
-        .li.dpl .dpl-no{font-family:Consolas,monospace;font-size:11px;color:var(--gray4);font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto}
+        .li.dpl .dpl-no{font-family:var(--mono);font-size:11px;color:var(--gray4);font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto}
         .li.dpl .dpl-meta{font-size:11px;color:var(--sub);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .li.dpl .dpl-chat{margin-left:auto;color:var(--blue);font-size:11px;font-weight:600;text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;flex:0 0 auto}
         .drow .dnm{font-weight:500}
-        .drow .dn2{font-family:Consolas,monospace;color:var(--gray4);font-weight:500;font-size:11px;font-variant-numeric:tabular-nums;flex:0 0 auto;white-space:nowrap}
+        .drow .dn2{font-family:var(--mono);color:var(--gray4);font-weight:500;font-size:11px;font-variant-numeric:tabular-nums;flex:0 0 auto;white-space:nowrap}
         .drow .drt{display:flex;align-items:center;gap:7px;flex:0 0 auto}
         .dstat{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--sub);white-space:nowrap;flex:0 0 auto}
         .dstat i{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
@@ -3087,7 +3158,7 @@
         .dleg i{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
         .dtree{border:1px solid var(--line2);border-radius:8px;overflow:hidden}
         .dtree .drow:first-child{border-top:0}
-        .dnochip{font-family:Consolas,monospace;font-size:12px;color:#5b6b7a;background:#eef2f6;border-radius:4px;padding:2px 8px;font-variant-numeric:tabular-nums;flex:0 0 auto}
+        .dnochip{font-family:var(--mono);font-size:12px;color:#5b6b7a;background:#eef2f6;border-radius:4px;padding:2px 8px;font-variant-numeric:tabular-nums;flex:0 0 auto}
         .dgrid2{display:grid;grid-template-columns:1fr 1fr;gap:1px 24px}
         .dstage .dstage-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
         .dstage .dstage-lbl{font-size:13px;color:#334155}
@@ -3102,7 +3173,7 @@
         .dprod-tile:hover{border-color:#2b6cb0}
         .dprod-tile-top{display:flex;align-items:center;gap:6px;margin-bottom:6px}
         .dprod-tile-nm{font-size:13px;font-weight:600;color:var(--navy);line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-        .dprod-tile-no{font-family:Consolas,monospace;font-size:11px;color:var(--gray4);margin-top:3px}
+        .dprod-tile-no{font-family:var(--mono);font-size:11px;color:var(--gray4);margin-top:3px}
         .dprod-tile-acts{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
         @media(max-width:640px){.dprod-tile{flex:1 1 100%;max-width:none}}
       `;
@@ -3189,7 +3260,7 @@
         .pg-tbl{width:100%;border-collapse:collapse}
         .pg-tbl th,.pg-tbl td{text-align:left;padding:6px 8px;font-size:12px;border-bottom:1px solid #eef1f4;vertical-align:top}
         .pg-tbl th{color:var(--sub,#6b7a8d);font-weight:600;font-size:11px;border-bottom:1px solid #d6dde5}
-        .pg-dn{font-family:Consolas,monospace;font-size:11.5px;color:#2b6cb0;cursor:pointer}
+        .pg-dn{font-family:var(--mono);font-size:11.5px;color:#2b6cb0;cursor:pointer}
         .pg-dn:hover{text-decoration:underline}
         .pg-link{color:#2b6cb0;text-decoration:none;display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #f0f3f6;font-size:12.5px;cursor:pointer}
         .pg-link:hover{text-decoration:underline}
@@ -3531,7 +3602,7 @@
       const plural=(n)=>n%10===1&&n%100!==11?'е':(n%10>=2&&n%10<=4&&(n%100<10||n%100>=20)?'я':'й');
       return `<div class="card pad"><div class="row" style="margin-bottom:8px"><span class="sec-h">✏️ Изменения</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">${items.length} извещени${plural(items.length)}</span></div>
         ${items.map(x=>`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line2)">
-          <b style="font-family:Consolas,monospace;color:var(--navy);font-size:12.5px">${esc(x.noticeNo)}</b>
+          <b style="font-family:var(--mono);color:var(--navy);font-size:12.5px">${esc(x.noticeNo)}</b>
           <span style="font-size:11.5px;color:var(--sub)">${fmt(x.date)}</span>
           <span style="font-size:12.5px;flex:1;min-width:180px;color:#334155">${esc(x.docSection)}</span>
           <span class="badge b-amber">${esc(x.status)}</span>
@@ -3662,7 +3733,7 @@
         <td style="padding:4px 6px;text-align:center"><input type="checkbox" data-pchk ${(!onlyDoc||String(k.docNo)===String(onlyDoc))?'checked':''} data-i="${i}"></td>
         <td style="padding:4px 6px">${elemChip(k.elemType)}</td>
         <td style="padding:4px 6px;font-weight:500;color:var(--navy)">${esc(k.name)}</td>
-        <td style="padding:4px 6px;font-family:Consolas,monospace;font-size:11.5px;color:var(--gray4)">${esc(String(k.docNo||'').replace('ПБС.',''))||'—'}</td>
+        <td style="padding:4px 6px;font-family:var(--mono);font-size:11.5px;color:var(--gray4)">${esc(String(k.docNo||'').replace('ПБС.',''))||'—'}</td>
         <td style="padding:4px 6px;text-align:center;font-variant-numeric:tabular-nums">${(k.qty!==''&&k.qty!=null)?esc(String(k.qty)):'1'}</td></tr>`).join('');
       const types=(typeof PZ_ORDER_TYPES!=='undefined'?PZ_ORDER_TYPES:['Производство']);
       host.innerHTML=`<div class="card pad" style="border:1px solid var(--blue);margin-top:var(--gap)">
@@ -4021,7 +4092,7 @@
             <div class="card pad">
               <div class="dcard-title">${esc(k.name)} ${kdBadge(kdDispStatus(k))}</div>
               <div class="detail" style="margin-top:8px">
-                <div class="kv">Децим.№: <b style="font-family:Consolas,monospace">${esc(k.docNo)}</b></div>
+                <div class="kv">Децим.№: <b style="font-family:var(--mono)">${esc(k.docNo)}</b></div>
                 <div class="kv">Проект: <b>${projDecNo?('ПБС.'+esc(projDecNo)+(proj?' · '+esc(proj.name):'')):'—'}</b></div>
                 <div class="kv">Тип: <b>${esc(typeText)}</b></div>
                 <div class="kv">Обновлён: <b>${kdEffUpdated(k)?esc(fmt(kdEffUpdatedStr(k))):'—'}</b></div>
@@ -4044,7 +4115,7 @@
             </div>`:''}
             <div class="card pad dcard-sec" id="dcard-apply">
               <div class="dcard-sec-h">Применяемость</div>
-              ${ancestors.length?ancestors.slice().reverse().map(a=>`<div class="dcard-child" data-doc="${esc(a.docNo)}"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name)}</span><span style="color:var(--sub);font-family:Consolas,monospace;font-size:11px;flex:0 0 auto">${esc(String(a.docNo).replace('ПБС.',''))}</span></div>`).join(''):'<div style="color:var(--sub);font-size:12.5px">Не входит в состав других сборок (по данным проекта).</div>'}
+              ${ancestors.length?ancestors.slice().reverse().map(a=>`<div class="dcard-child" data-doc="${esc(a.docNo)}"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name)}</span><span style="color:var(--sub);font-family:var(--mono);font-size:11px;flex:0 0 auto">${esc(String(a.docNo).replace('ПБС.',''))}</span></div>`).join(''):'<div style="color:var(--sub);font-size:12.5px">Не входит в состав других сборок (по данным проекта).</div>'}
             </div>
           </div>
         </div>`;
@@ -4136,7 +4207,7 @@
       const n=items.length;
       const cards=items.map(r=>`<div class="card pad" style="border-left:3px solid #d97706;margin-bottom:8px">
           <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center">
-            ${extBadge(r)}${r.docNo?`<span style="font-family:monospace;color:var(--navy);font-weight:600">${esc(r.docNo)}</span>`:''}
+            ${extBadge(r)}${r.docNo?`<span style="font-family:var(--mono);color:var(--navy);font-weight:600">${esc(r.docNo)}</span>`:''}
             <span style="font-weight:600">${esc(r.name)}</span>
             ${r.producedPz?`<span class="badge b-navy" title="Размещён в производство">→ ${esc(r.producedPz)}</span>`:''}
             <span style="margin-left:auto">${r.producedPz?`<span style="font-size:12px;color:var(--green);font-weight:600">Размещён · ${esc(r.producedPz)}</span>`:`<button class="tbtn primary" data-toprod="${r.id}" title="Создать производственный заказ (ПЗ) из этого чертежа">▶ Разместить заказ в производство</button>`}</span>
@@ -4295,7 +4366,7 @@
           <td class="code">${esc(d.no||'—')}</td>
           <td class="nowrap">${tdKindChip(d)}</td>
           <td class="name" title="${esc(d.name||'')}">${esc(d.name||'—')}</td>
-          <td class="nowrap" style="color:var(--sub)">${d.desig?`<span style="font-family:monospace">${esc(d.desig)}</span>`:'—'}</td>
+          <td class="nowrap" style="color:var(--sub)">${d.desig?`<span style="font-family:var(--mono)">${esc(d.desig)}</span>`:'—'}</td>
           <td class="nowrap">${tdStatusBadge(d.status)}</td>
           <td class="nowrap">${d.href?`<a href="${d.href}" style="color:var(--blue);font-weight:600;text-decoration:none">Открыть →</a>`:'<span style="color:var(--sub)">—</span>'}</td>
         </tr>`).join('');
@@ -4317,7 +4388,7 @@
     function dChg(host){const items=DESIGN.notices||[];
       host.innerHTML=`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Извещения об изменении КД/ТД (Ф.5–П.1 · ДП–П.1 §7)</div>
         ${items.map(x=>`<div style="border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:9px">
-          <div class="row" style="flex-wrap:wrap"><b style="font-family:monospace;color:var(--navy)">${esc(x.noticeNo)}</b><span style="font-size:13px">${esc(x.docSection)}</span><span class="spacer"></span><span class="badge b-amber">${esc(x.status)}</span></div>
+          <div class="row" style="flex-wrap:wrap"><b style="font-family:var(--mono);color:var(--navy)">${esc(x.noticeNo)}</b><span style="font-size:13px">${esc(x.docSection)}</span><span class="spacer"></span><span class="badge b-amber">${esc(x.status)}</span></div>
           <div style="font-size:13px;margin-top:7px"><b>Изменение:</b> ${esc(x.changeDesc)}</div>
           <div style="font-size:12px;color:var(--sub);margin-top:3px">Причина: ${esc(x.reason)} · Дата: ${fmt(x.date)}</div>
           <div style="font-size:12px;color:var(--amber);margin-top:3px">Влияние: ${esc(x.impact)}</div></div>`).join('')||'<div style="color:var(--sub)">Извещений нет</div>'}
@@ -4940,7 +5011,7 @@
         {key:'inn',label:'ИНН',w:132,cls:'nw c-gray',cell:c=>{
           if(!String(c.inn||'').trim()) return `<span class="nw" style="color:var(--amber);font-weight:600" title="${esc(INN_WHY+' '+INN_OK)}">⚠ не заполнен</span>`;
           const bad=!innFormatOk(c.inn);
-          return `<span style="font-family:monospace${bad?';color:var(--amber)':''}"${bad?` title="${esc(INN_FORMAT_HINT)}"`:''}>${esc(c.inn)}${bad?' ?':''}</span>`;
+          return `<span style="font-family:var(--mono)${bad?';color:var(--amber)':''}"${bad?` title="${esc(INN_FORMAT_HINT)}"`:''}>${esc(c.inn)}${bad?' ?':''}</span>`;
         },sortVal:c=>String(c.inn||'')},
         {key:'roles',label:'Роли',w:184,cls:'nw',cell:c=>cpRoleChips(c.roles),sortVal:c=>(c.roles||[]).join(',')},
         {key:'region',label:'Регион',w:150,cls:'nw c-gray',cell:c=>esc(c.region||'—'),sortVal:c=>c.region},
@@ -4987,7 +5058,7 @@
       const reloadCard=()=>openCounterpartyCard(host,c.id);
       const fld=(k,v)=>v?`<div><div style="font-size:11px;color:#5b6b7a">${esc(k)}</div><div style="font-size:13px;color:#334155">${v}</div></div>`:'';
       const histRows=(kinds)=>{ const hs=(d.history||[]).filter(x=>!kinds||kinds.includes(x.kind)); if(!hs.length)return '<div class="c-gray" style="font-size:12.5px">нет записей</div>';
-        return `<table class="dt" style="font-size:12.5px;width:100%"><thead><tr><th>Документ</th><th>Предмет</th><th>Дата</th><th>Статус</th></tr></thead><tbody>${hs.map(x=>`<tr><td class="nw" style="font-family:monospace;font-weight:600;color:var(--navy)">${esc(x.doc)}</td><td class="ell">${esc(x.subject)}</td><td class="nw c-gray">${x.date?esc(fmt(x.date)):''}</td><td class="nw">${esc(zpLabel(x.status)||'')}</td></tr>`).join('')}</tbody></table>`; };
+        return `<table class="dt" style="font-size:12.5px;width:100%"><thead><tr><th>Документ</th><th>Предмет</th><th>Дата</th><th>Статус</th></tr></thead><tbody>${hs.map(x=>`<tr><td class="nw" style="font-family:var(--mono);font-weight:600;color:var(--navy)">${esc(x.doc)}</td><td class="ell">${esc(x.subject)}</td><td class="nw c-gray">${x.date?esc(fmt(x.date)):''}</td><td class="nw">${esc(zpLabel(x.status)||'')}</td></tr>`).join('')}</tbody></table>`; };
       if(cpCardTab==='overview'){
         h.innerHTML=`<div style="display:grid;grid-template-columns:1fr 300px;gap:var(--gap);align-items:start">
           <div style="display:flex;flex-direction:column;gap:var(--gap)">
@@ -5005,7 +5076,7 @@
               <div style="display:flex;border-top:1px solid var(--bd);padding-top:8px"><span class="c-gray">Первый контакт</span><span style="margin-left:auto">${esc(s.firstContact||'—')}</span></div>
             </div></div>
         </div>`;
-        const mono=(v)=>`<span style="font-family:monospace">${esc(v)}</span>`;
+        const mono=(v)=>`<span style="font-family:var(--mono)">${esc(v)}</span>`;
         // K-98: плашка про ИНН. Пусто → объясняем по-человечески, чем это мешает, и сразу
         // даём вписать (кнопка открывает форму из одного поля — без общего «Изменить»).
         // Заполнен, но не похож на ИНН → мягкая заметка, ничего не блокируем.
@@ -5017,7 +5088,7 @@
             <div style="margin-top:9px"><button class="tbtn" id="cp-inn-add" style="padding:5px 12px;font-size:12px;font-weight:600;color:#92400e;border-color:#fcd34d;background:#fff">Указать ИНН</button></div>
             <div id="cp-inn-form"></div></div>`;
           if(!innFormatOk(c.inn)) return `<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:3px;padding:9px 13px;margin-bottom:12px;font-size:12.5px;color:#7a5b16">
-            Проверьте ИНН <b style="font-family:monospace">${esc(c.inn)}</b>: обычно это 10 цифр у организации или 12 у ИП. Если так и есть — оставьте как есть.
+            Проверьте ИНН <b style="font-family:var(--mono)">${esc(c.inn)}</b>: обычно это 10 цифр у организации или 12 у ИП. Если так и есть — оставьте как есть.
             <button class="tbtn" id="cp-inn-add" style="margin-left:8px;padding:3px 10px;font-size:12px;color:#92400e;border-color:#fcd34d;background:#fff">Исправить</button>
             <div id="cp-inn-form"></div></div>`;
           return '';
@@ -5025,7 +5096,7 @@
         // форма из одного поля «ИНН» прямо в плашке (Александр: «я потом введу через портал»)
         function innQuickForm(){ const wrap=document.getElementById('cp-inn-form'); if(!wrap)return;
           wrap.innerHTML=`<div style="margin-top:9px;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
-              <input id="cp-inn-val" style="${FINP};max-width:190px;font-family:monospace" inputmode="numeric" placeholder="10 или 12 цифр" value="${esc(c.inn||'')}">
+              <input id="cp-inn-val" style="${FINP};max-width:190px;font-family:var(--mono)" inputmode="numeric" placeholder="10 или 12 цифр" value="${esc(c.inn||'')}">
               <button class="tbtn primary" id="cp-inn-save">Сохранить</button><button class="tbtn" id="cp-inn-cancel">Отмена</button>
               <div id="cp-inn-note" style="flex-basis:100%;font-size:12px;color:#7a5b16"></div>
             </div>`;
@@ -5522,7 +5593,7 @@
       const trs=rows.map((p,i)=>{ const c=kpCalcRow(p,d.defProfitPct); if(c.tbd)hasTbd=true; const ob=obozOf(p);
         return `<tr${c.tbd?' style="color:#b45309"':''}><td style="border:1px solid #cbd6e2;padding:6px 7px;text-align:center">${i+1}</td>`
           +`<td style="border:1px solid #cbd6e2;padding:6px 7px;color:#1F4E79;font-weight:600">${esc(grpOf(p))}</td>`
-          +`<td style="border:1px solid #cbd6e2;padding:6px 7px;font-family:Consolas,monospace;font-size:10px;color:#334155;white-space:nowrap">${ob?esc(ob):'—'}</td>`
+          +`<td style="border:1px solid #cbd6e2;padding:6px 7px;font-family:var(--mono);font-size:10px;color:#334155;white-space:nowrap">${ob?esc(ob):'—'}</td>`
           +`<td style="border:1px solid #cbd6e2;padding:6px 7px">${esc(nameClean(p))}</td>`
           +`<td style="border:1px solid #cbd6e2;padding:6px 7px;text-align:center">${money(c.qty)}</td>`
           +`<td style="border:1px solid #cbd6e2;padding:6px 7px;text-align:center">${esc(p.unit||'')}</td>`
@@ -5598,7 +5669,7 @@
         const projOpts=`<option value=""${s.proj?'':' selected'}>— № проекта —</option>`+pchProjects().map(pr=>`<option value="${esc(pr.decNo)}"${pr.decNo===s.proj?' selected':''}>${esc(pr.decNo)}${pr.name?' · '+esc(pr.name):''}</option>`).join('')+`<option value="БП"${s.proj==='БП'?' selected':''}>БП · без проекта</option>`;
         return `<div id="pch-${i}" style="display:none;margin-top:9px;background:#f2f7fc;border:1px solid #cfe0f5;border-radius:3px;padding:11px 13px">
           <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#1d4e89;margin-bottom:3px">Конструктор обозначения ПЧ · РИ.1–Д.1.2–1.0, Приложение Б</div>
-          <div style="font-size:11px;color:#5b6b7a;margin-bottom:9px">Децим.№: <span style="font-family:ui-monospace,Menlo,Consolas,monospace">ПБС.Ø-стенка&nbsp;min-стенка&nbsp;max-ПЧxx-матл.ПЧnnnn.сборка</span> (Ø — канонический номинал, десятич. в коде — точка)</div>
+          <div style="font-size:11px;color:#5b6b7a;margin-bottom:9px">Децим.№: <span style="font-family:var(--mono)">ПБС.Ø-стенка&nbsp;min-стенка&nbsp;max-ПЧxx-матл.ПЧnnnn.сборка</span> (Ø — канонический номинал, десятич. в коде — точка)</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
             <div>${fl('Ø колонны, мм','справочник')}<select data-pchi="${i}" data-pchdia="${i}" style="${fi}">${diaOpts}</select></div>
             <div>${fl('Стенка min, мм','по Ø')}<select data-pchi="${i}" data-pchf="wmin" id="pch-wmin-${i}" style="${fi}"${wDis}>${wminOpts}</select></div>
@@ -5609,7 +5680,7 @@
             <div>${fl('Сборка / деталь','00–99 / 001–999')}<input data-pchi="${i}" data-pchf="asm" value="${esc(s.asm)}" placeholder="00" style="${fi}"></div>
           </div>
           <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
-            <div style="background:#fff;border:1px solid #d8e6f4;border-radius:2px;padding:7px 9px"><div style="font-size:9.5px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Обозначение (децимальный №)</div><div id="pch-code-${i}" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:var(--navy);font-weight:700;word-break:break-all">${esc(a.code)}</div></div>
+            <div style="background:#fff;border:1px solid #d8e6f4;border-radius:2px;padding:7px 9px"><div style="font-size:9.5px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Обозначение (децимальный №)</div><div id="pch-code-${i}" style="font-family:var(--mono);font-size:13px;color:var(--navy);font-weight:700;word-break:break-all">${esc(a.code)}</div></div>
             <div style="background:#fff;border:1px solid #d8e6f4;border-radius:2px;padding:7px 9px"><div style="font-size:9.5px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Наименование</div><div id="pch-name-${i}" style="font-size:13px;color:#1f3a52">${esc(a.name)}</div></div>
           </div>
           <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -6281,7 +6352,7 @@
       const statCell=(s)=>{const t=String(s.status||'');if(/Исключ/i.test(t))return stCellDot('red',t);if(/контрол/i.test(t))return stCellDot('amber',t);if(/Активен/i.test(t))return stCellDot('green',t);return t?stCellDot('gray',t):'<span class="c-gray">—</span>';};
       const cols=[
         {key:'name',label:'Поставщик',cls:'ell',cell:s=>`<span title="${esc(s.name)}" style="font-weight:600;color:var(--ink)">${esc(s.name)}</span>`,sortVal:s=>s.name},
-        {key:'inn',label:'ИНН',w:120,cls:'nw c-gray',cell:s=>s.inn?`<span style="font-family:monospace">${esc(s.inn)}</span>`:'<span class="c-gray">—</span>',sortVal:s=>s.inn},
+        {key:'inn',label:'ИНН',w:120,cls:'nw c-gray',cell:s=>s.inn?`<span style="font-family:var(--mono)">${esc(s.inn)}</span>`:'<span class="c-gray">—</span>',sortVal:s=>s.inn},
         {key:'cat',label:'Категория продукции',w:180,cls:'ell c-gray',cell:s=>esc(s.productCat||'—'),sortVal:s=>s.productCat},
         {key:'score',label:'Балл',w:70,align:'center',cls:'nw',cell:s=>s.score!=null?`<b style="color:var(--ink)">${s.score}</b>`:'<span class="c-gray">—</span>',sortVal:s=>s.score==null?-1:s.score},
         {key:'rop',label:'Категория (оценка)',w:152,cls:'nw',cell:ropBadge,sortVal:s=>ropLetter(s)},
@@ -6570,8 +6641,8 @@
       // если у ПЗ-источника задан чат). Источник — ПЗ → номер кликабелен (переход в карточку ПЗ).
       const srcView=r.sourceRef
         ?(/^ПЗ-\d{4}-\d{3}$/.test(r.sourceRef)
-          ?'<a class="code" style="font-family:monospace;color:var(--blue);cursor:pointer;text-decoration:none" href="#orders/'+encodeURIComponent(r.sourceRef)+'">'+esc(r.sourceRef)+'</a>'
-          :'<span class="code" style="font-family:monospace;color:var(--blue)">'+esc(r.sourceRef)+'</span>')
+          ?'<a class="code" style="font-family:var(--mono);color:var(--blue);cursor:pointer;text-decoration:none" href="#orders/'+encodeURIComponent(r.sourceRef)+'">'+esc(r.sourceRef)+'</a>'
+          :'<span class="code" style="font-family:var(--mono);color:var(--blue)">'+esc(r.sourceRef)+'</span>')
         :'<span class="c-gray">—</span>';
       const sourceBlock=`<div id="znz-src-block">
           <div style="font-size:11px;color:#5b6b7a">Источник (ЗКЗ/ПЗ/склад)</div>
@@ -6668,7 +6739,7 @@
       const takenBadge=(r.assignee&&r.assignee.fio)?`<span class="st--wait" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}">⏳ В работе у: ${esc(r.assignee.fio)}</span>`:'';
       znzFormOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="znz-back" style="font-size:13px;text-decoration:none;cursor:pointer">← Закупки</a>
-          <span class="code" style="font-size:16px;font-family:monospace">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${takenBadge}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
+          <span class="code" style="font-size:16px;font-family:var(--mono)">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${takenBadge}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${acts.join('')}<a class="pbtn" href="/api/print/znz/${encodeURIComponent(r.numZnz)}" target="_blank" rel="noopener">${aico('print',14)} Печать заявки</a><button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
         </div>
         ${track}
@@ -7115,7 +7186,7 @@
       host.innerHTML=`<div class="card pad" style="border:1px solid #2e7d32">
         <div class="sec-h" style="margin-bottom:8px">Приёмка проведена</div>
         <div style="font-size:13px;color:#334155;line-height:1.8">
-          <div>Акт <span class="code" style="font-family:monospace">${esc(out.aktNo)}</span> · принято позиций: <b>${(out.accepted||[]).length}</b>${rejCount?` · брак: ${rejCount}`:''}</div>
+          <div>Акт <span class="code" style="font-family:var(--mono)">${esc(out.aktNo)}</span> · принято позиций: <b>${(out.accepted||[]).length}</b>${rejCount?` · брак: ${rejCount}`:''}</div>
           <div>Статус заявки: ${out.partial?'<span style="color:#b45309">частично принята — есть недопринятые позиции</span>':'<span style="color:#2e7d32">Принята</span>'}</div>
           ${stockLines?`<div style="margin-top:8px">${stockLines}</div>`:''}
           ${scanLines?`<div style="margin-top:8px">${scanLines}</div>`:''}
@@ -7222,10 +7293,10 @@
               :`<button class="tbtn" data-inv-del="${x.id}" title="Удалить счёт" style="padding:3px 7px;font-size:12px;color:var(--red);border-color:#f0c9c9">${aico('trash',13)}</button>`)
             :'';
           // K-83 доп. (обратная связь с платёжным порталом): строка-бейдж с № заявки на оплату
-          const payBadge=x.payExternalRef?`<div style="font-size:11.5px;color:#475569;margin-top:6px;padding-top:6px;border-top:1px dashed #e2e8f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Оплата: № <span class="code" style="font-family:monospace">${esc(x.payId||x.payExternalRef)}</span> · ${invPayPill(x.payStatus)}${x.payUpdatedAt?(' · обновлено '+esc(invPayUpdatedShort(x.payUpdatedAt))):''}</div>`:'';
+          const payBadge=x.payExternalRef?`<div style="font-size:11.5px;color:#475569;margin-top:6px;padding-top:6px;border-top:1px dashed #e2e8f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Оплата: № <span class="code" style="font-family:var(--mono)">${esc(x.payId||x.payExternalRef)}</span> · ${invPayPill(x.payStatus)}${x.payUpdatedAt?(' · обновлено '+esc(invPayUpdatedShort(x.payUpdatedAt))):''}</div>`:'';
           return `<div data-inv-row="${x.id}" style="border:1px solid var(--line2);border-radius:6px;padding:8px 11px;background:#fff">
             <div style="display:flex;align-items:center;gap:12px;font-size:12.5px">
-              <span class="code" style="font-family:monospace;color:var(--navy);white-space:nowrap">${esc(x.invoiceNo||'—')}</span>
+              <span class="code" style="font-family:var(--mono);color:var(--navy);white-space:nowrap">${esc(x.invoiceNo||'—')}</span>
               <span class="ell" title="${esc(x.supplier)}" style="flex:1;color:#334155">${esc(x.supplier||'—')}</span>
               ${posTxt?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(posTxt)}</span>`:''}
               ${x.vatRate?`<span class="c-gray" style="font-size:11px;white-space:nowrap">НДС ${esc(x.vatRate)}</span>`:''}
@@ -7465,7 +7536,7 @@
     function itemRowHtml(x,canAct){
       const acts=(canAct&&!x.legacy)?`<a class="c-blue" data-item-edit="${x.id}" style="font-size:11.5px;cursor:pointer;white-space:nowrap">править</a><a data-item-del="${x.id}" style="font-size:11.5px;cursor:pointer;color:#b91c1c;white-space:nowrap">удалить</a>`:'';
       return `<div style="display:flex;align-items:center;gap:12px;font-size:12.5px;border:1px solid var(--line2);border-radius:6px;padding:8px 11px;background:#fff">
-        <span class="ell" title="${esc(x.name)}" style="flex:1;color:var(--ink);font-weight:600">${esc(x.name||'—')}${x.catalogCode?` <span class="code" style="font-family:monospace;font-weight:400;color:var(--blue);font-size:11px">${esc(x.catalogCode)}</span>`:''}</span>
+        <span class="ell" title="${esc(x.name)}" style="flex:1;color:var(--ink);font-weight:600">${esc(x.name||'—')}${x.catalogCode?` <span class="code" style="font-family:var(--mono);font-weight:400;color:var(--blue);font-size:11px">${esc(x.catalogCode)}</span>`:''}</span>
         ${x.category?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(x.category)}</span>`:''}
         <span style="white-space:nowrap;color:#334155">${x.qty!==''&&x.qty!=null?esc(String(x.qty)):'—'}${x.unit?' '+esc(x.unit):''}</span>
         ${znzAcceptBadge(x.qty,x.accepted)}
@@ -7566,7 +7637,7 @@
         const addBtn=canAct?`<label class="tbtn" style="padding:3px 9px;font-size:11.5px;cursor:pointer;white-space:nowrap">＋ скан<input type="file" data-act-scan="${a.id}" accept=".pdf,.jpg,.jpeg,.png" style="display:none"></label>`:'';
         return `<div data-act-row="${a.id}" style="border:1px solid var(--line2);border-radius:6px;padding:8px 11px;background:#fff">
           <div style="display:flex;align-items:center;gap:12px;font-size:12.5px;flex-wrap:wrap">
-            <span class="code" style="font-family:monospace;color:var(--navy);white-space:nowrap">${esc(a.aktNo||'—')}</span>
+            <span class="code" style="font-family:var(--mono);color:var(--navy);white-space:nowrap">${esc(a.aktNo||'—')}</span>
             <span class="ell" title="${esc(a.material)}" style="flex:1;color:#334155">${esc(a.material||'—')}</span>
             <span class="c-gray" style="white-space:nowrap">${a.qty!==''&&a.qty!=null?esc(String(a.qty)):''}${a.unit?' '+esc(a.unit):''}</span>
             ${stCellDot(verdictTone(a.verdict),a.verdict||'—')}
@@ -7608,7 +7679,7 @@
       if(!has){ listEl.innerHTML='<div class="c-gray" style="font-size:12.5px">Заявка на оплату ещё не создана. Нажмите «Отправить на оплату».</div>'; }
       else{
         listEl.innerHTML=`<div style="display:flex;align-items:center;gap:12px;font-size:12.5px;border:1px solid var(--line2);border-radius:6px;padding:8px 11px;background:#fff">
-            <span class="code" style="font-family:monospace;color:var(--navy);white-space:nowrap">${esc(String(r.paymentId))}</span>
+            <span class="code" style="font-family:var(--mono);color:var(--navy);white-space:nowrap">${esc(String(r.paymentId))}</span>
             <span style="flex:1">${payStatusPill(r.paymentStatus)}</span>
             ${r.paymentAmount!=null?`<span style="font-weight:700;color:var(--ink);white-space:nowrap">${esc(procMoney(r.paymentAmount))}</span>`:''}
             ${r.paymentUpdatedAt?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(String(r.paymentUpdatedAt).slice(0,10))}</span>`:''}
@@ -7757,7 +7828,7 @@
           ${latest.note?`<div style="margin-top:9px;font-size:12px;color:var(--sub);line-height:1.55">${esc(latest.note)}</div>`:''}
           <div style="margin-top:8px;font-size:11.5px;color:var(--sub);display:flex;gap:10px"><span>Шкала: A 75–100 · B 50–74 · C &lt;50</span><span style="margin-left:auto">${latest.assessor?'провёл '+esc(latest.assessor):''}${latest.approver?' · утвердил '+esc(latest.approver):''}</span></div>
         </div>`:`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">Лист оценки поставщика (Ф.3–К)</div><div style="font-size:13px;color:var(--sub)">Детальная разбивка ЛОП по критериям не заведена. Сводный балл РОП: <b style="color:var(--ink)">${s.score??'—'}</b> · категория ${esc(s.category||'—')}.</div></div>`;
-      const histRows=evals.map(e=>`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="font-family:monospace;color:#5b6b7a;white-space:nowrap">${fmt(e.date)}</span><span>${esc(e.type||'Оценка')}</span><span style="margin-left:auto;font-weight:700;color:${DOTC[ropColor((/^([ABC])/.exec(e.category||'')||[])[1])]}">${e.total??''}${e.category?' · '+esc(e.category):''}</span></div>`).join('')||'<div class="c-gray" style="font-size:12.5px">нет записей</div>';
+      const histRows=evals.map(e=>`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="font-family:var(--mono);color:#5b6b7a;white-space:nowrap">${fmt(e.date)}</span><span>${esc(e.type||'Оценка')}</span><span style="margin-left:auto;font-weight:700;color:${DOTC[ropColor((/^([ABC])/.exec(e.category||'')||[])[1])]}">${e.total??''}${e.category?' · '+esc(e.category):''}</span></div>`).join('')||'<div class="c-gray" style="font-size:12.5px">нет записей</div>';
       const delRows=deliveries.map(r=>`<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer" data-znz="${esc(r.numZnz)}"><span class="code" style="color:var(--blue)">${esc(r.numZnz)}</span><span class="ell" title="${esc(r.name)}" style="flex:1;color:#334155">${esc(r.name)}</span><span style="margin-left:auto">${znzCell(r.status)}</span></div>`).join('')||'<div class="c-gray" style="font-size:12.5px">нет поставок</div>';
       viewHost.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="psupback" style="font-size:13px;text-decoration:none;cursor:pointer">← Поставщики</a>
@@ -7768,7 +7839,7 @@
           <div style="display:flex;flex-direction:column;gap:var(--gap)">
             <div class="card pad"><div class="sec-h" style="margin-bottom:10px">Реквизиты (Ф.5–К)</div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 22px">
-                ${fld('ИНН',s.inn?`<span style="font-family:monospace">${esc(s.inn)}</span>`:'')}${fld('Категория продукции',esc(s.productCat))}
+                ${fld('ИНН',s.inn?`<span style="font-family:var(--mono)">${esc(s.inn)}</span>`:'')}${fld('Категория продукции',esc(s.productCat))}
                 ${fld('Контактное лицо',esc(s.contact))}${fld('Тел./Email',esc(s.contacts))}
                 ${fld('Регион',esc(s.region))}${fld('Переоценка',s.reassess?fmt(s.reassess):'')}
                 ${fld('Статус в РОП',esc(s.status))}
@@ -8872,7 +8943,7 @@
     }
     // Блоки 4б: «Документы и инструкции» + «Данные о закупке» (данные из card/it; в mock — пустые)
     function eqDetailExtras(it,card){
-      const P=(lbl,val,mono)=>`<div><div style="font-size:10.5px;color:#5b6b7a">${lbl}</div><div style="font-weight:600;color:${mono?'var(--blue)':'var(--ink)'}${mono?';font-family:monospace':''}">${val||'<span style="color:#5b6b7a;font-weight:400">—</span>'}</div></div>`;
+      const P=(lbl,val,mono)=>`<div><div style="font-size:10.5px;color:#5b6b7a">${lbl}</div><div style="font-weight:600;color:${mono?'var(--blue)':'var(--ink)'}${mono?';font-family:var(--mono)':''}">${val||'<span style="color:#5b6b7a;font-weight:400">—</span>'}</div></div>`;
       const docs=(card&&card.docs)||it.docs||[];
       const dico=(t)=>{const e=String(t||'').toLowerCase();return e.includes('pdf')?'#b91c1c':(e.includes('doc')?'#1d4e89':'#7c3aed');};
       const dsize=(n)=>n?(' · '+(n>1048576?(n/1048576).toFixed(1)+' МБ':Math.round(n/1024)+' КБ')):'';
@@ -9204,7 +9275,7 @@
       let details;
       // K-55: «Где» — склад·ячейка / цех·участок; «Код 1С» — справочный (для списания/выдачи)
       const whereKv=kv('Где',it.whereKind==='shop'?tlChip(it.where,'warn'):esc(it.where||'—'),it.whereKind==='shop'?'':'color:var(--ink)');
-      const code1cKv=kv('Код 1С',esc(it.code1c),'font-family:var(--mono,monospace)');
+      const code1cKv=kv('Код 1С',esc(it.code1c),'font-family:var(--mono)');
       if(inv){ details=`
         ${kv('Наименование',esc(it.name),'color:var(--ink);font-weight:600')}
         ${kv('Вид оснастки',esc(it.rigKind))}
@@ -10732,7 +10803,7 @@
     async function ensureRoutesList(){ if(BOARD_RT===null){ try{ const j=await (await fetch('/api/routes')).json(); BOARD_RT=(j&&j.routes)||[]; }catch{ BOARD_RT=[]; } } return BOARD_RT; }
     // контрол выбора маршрута для позиции (только LIVE и когда у позиции есть id)
     function posRouteSelect(p){
-      if(!p||DATA.mode!=='live'||p.id==null) return p&&p.mk?`<span class="mk-tag" style="font-family:monospace;color:var(--navy);font-size:12px">${esc(p.mk)}</span>`:'';
+      if(!p||DATA.mode!=='live'||p.id==null) return p&&p.mk?`<span class="mk-tag" style="font-family:var(--mono);color:var(--navy);font-size:12px">${esc(p.mk)}</span>`:'';
       const list=BOARD_RT||[];
       const opts=['<option value="">— МК не привязана —</option>'].concat(list.map(r=>`<option value="${r.id}"${String(r.id)===String(p.routeId)?' selected':''}>${esc(r.mk)}${r.name?' · '+esc(r.name):''}</option>`)).join('');
       return `<select class="pos-route" data-pid="${p.id}" title="Маршрутная карта позиции" style="font:inherit;font-size:12px;padding:2px 6px;border:1px solid #cfd8e3;border-radius:6px;background:#fff;max-width:220px">${opts}</select>`;
@@ -11854,7 +11925,7 @@
           ?`<select data-mk-type="${i}" style="font:inherit;font-size:12px;padding:2px 6px;border:1px solid #cfd8e3;border-radius:6px;background:#fff"><option value="КОМ">МК-КОМ</option><option value="СБР">МК-СБР</option></select>`
           :`<span class="badge b-navy">МК-${esc(row.mkType)}</span>${row.elemType?` <span class="c-gray" style="font-size:11px">(${esc(row.elemType)})</span>`:''}`;
         const tmplCell=row.tmpl
-          ?`<label style="font-size:11.5px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" data-mk-copy="${i}" checked>копировать операции из <span style="font-family:monospace;font-weight:700;color:var(--navy)">${esc(row.tmpl.mk)}</span></label>`
+          ?`<label style="font-size:11.5px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" data-mk-copy="${i}" checked>копировать операции из <span style="font-family:var(--mono);font-weight:700;color:var(--navy)">${esc(row.tmpl.mk)}</span></label>`
           :'<span class="c-gray" style="font-size:11.5px">шаблон не найден</span>';
         return `<tr data-mk-row="${i}"><td style="padding:4px 6px;text-align:center"><input type="checkbox" data-mk-chk="${i}" checked></td><td><b>${esc(p.numPos)}</b></td><td>${esc(p.name||'')}</td><td class="c-gray">${esc(p.drawing||'—')}</td><td class="ct">${esc(p.qty??'')} ${esc(p.unit||'')}</td><td>${typeCell}</td><td>${tmplCell}</td></tr>`;
       }).join('')||'<tr><td colspan="7" class="c-gray" style="padding:10px">Позиции не заведены</td></tr>';
@@ -11896,7 +11967,7 @@
           resHost.innerHTML=(j.created||[]).map(c=>{
             if(c.error)return `<div class="c-red" style="font-size:12.5px">✕ поз. ${esc(c.positionId)}: ${esc(c.error)}</div>`;
             if(c.skipped)return `<div class="c-gray" style="font-size:12.5px">— поз. ${esc(c.positionId)}: ${esc(c.reason||'пропущено')}</div>`;
-            return `<div style="font-size:12.5px">✅ <a href="#routes/${encodeURIComponent(c.mk)}" data-mkgo="${esc(c.mk)}" style="font-family:monospace;font-weight:700;text-decoration:none;color:var(--blue)">${esc(c.mk)}</a> — ${c.copied?('операций скопировано: '+esc(String(c.copied))):'пустая — наполни в Маршрутах'}</div>`;
+            return `<div style="font-size:12.5px">✅ <a href="#routes/${encodeURIComponent(c.mk)}" data-mkgo="${esc(c.mk)}" style="font-family:var(--mono);font-weight:700;text-decoration:none;color:var(--blue)">${esc(c.mk)}</a> — ${c.copied?('операций скопировано: '+esc(String(c.copied))):'пустая — наполни в Маршрутах'}</div>`;
           }).join('')||'<div class="c-gray" style="font-size:12.5px">Ничего не создано.</div>';
           resHost.querySelectorAll('[data-mkgo]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); location.hash='#routes/'+encodeURIComponent(a.dataset.mkgo); });
           // локально патчим позиции (без полной перезагрузки — иначе результат в мастере пропадёт);
@@ -12108,7 +12179,7 @@
         {key:'mk',label:'№ МК',w:170,cls:'code',cell:r=>esc(r.mk),sortVal:r=>r.mk},
         {key:'type',label:'Тип',w:74,cls:'nw',cell:r=>rtTypeChip(r.type),sortVal:r=>r.type},
         {key:'name',label:'Изделие / компонент',cls:'ell',cell:r=>`<span title="${esc(r.name)}" style="font-weight:600;color:var(--ink)">${esc(r.name||'—')}</span>`,sortVal:r=>r.name},
-        {key:'desig',label:'Чертёж',w:150,cls:'nw c-gray',cell:r=>r.designation?`<span style="font-family:monospace">${esc(r.designation)}</span>`:'<span class="c-gray">—</span>',sortVal:r=>r.designation},
+        {key:'desig',label:'Чертёж',w:150,cls:'nw c-gray',cell:r=>r.designation?`<span style="font-family:var(--mono)">${esc(r.designation)}</span>`:'<span class="c-gray">—</span>',sortVal:r=>r.designation},
         {key:'prod',label:'Продукция',w:140,cls:'nw c-gray',cell:r=>esc(r.productType||'—'),sortVal:r=>r.productType},
         {key:'ops',label:'Опер.',w:72,align:'center',cls:'nw ct',cell:r=>r.type==='СБР'?'<span class="c-gray">сборка</span>':String(r.opCount||0),sortVal:r=>r.opCount||0},
         {key:'status',label:'Статус',w:180,cls:'nw',cell:r=>rtStatus(r.status)+rtCoopBadge(r),sortVal:r=>r.status},
@@ -12138,7 +12209,7 @@
     function renderRouteCard(host,d){
       const r=d.route, isKom=r.type!=='СБР';
       const ctl=(c)=>/ОТК/i.test(c||'')?'<span style="font-weight:700;color:var(--amber,#b45309)">ОТК</span>':(c?esc(c):'<span class="c-gray">С</span>');
-      const tStat=(tasks)=>{ if(!tasks||!tasks.length)return '<span class="c-gray">— в очереди</span>'; return tasks.map(t=>{const done=/Выполнено/i.test(t.status),work=/работе/i.test(t.status);const sym=done?'✓':work?'⧖':'•';const col=done?'var(--green)':work?'var(--blue)':'#9ca3af';return `<span style="font-family:monospace;color:${col}" title="${esc(t.status)}">${esc(t.num)} ${sym}</span>`;}).join('<br>'); };
+      const tStat=(tasks)=>{ if(!tasks||!tasks.length)return '<span class="c-gray">— в очереди</span>'; return tasks.map(t=>{const done=/Выполнено/i.test(t.status),work=/работе/i.test(t.status);const sym=done?'✓':work?'⧖':'•';const col=done?'var(--green)':work?'var(--blue)':'#9ca3af';return `<span style="font-family:var(--mono);color:${col}" title="${esc(t.status)}">${esc(t.num)} ${sym}</span>`;}).join('<br>'); };
       // K-81 редизайн Ф.13: колонки карты МК 1:1 с утв. мокапом (№ / Операция / Участок / Оборуд. / Оснастка / Карта наладки / Контроль / Норма).
       const snCell=(o)=>o.setupCard?`<span class="rt-file" title="Карта наладки ${esc(o.setupCard)}">📄 ${esc(o.setupCard)}</span>`:'<span class="c-gray">—</span>';
       // K-81 доводка: оснастка на операции — множественная (список в поле «Оснастка», разделитель «; »/перенос)
@@ -12170,7 +12241,7 @@
         return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:${col}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;${dash}"></span>${lab}</span>`; };
       const rdyTotal=compReady.length, rdyReady=compReady.filter(x=>x.state==='ready').length;
       const rdySummary=rdyTotal?`<div style="margin-bottom:10px;padding:7px 12px;border-radius:8px;font-size:12.5px;font-weight:600;${rdyReady===rdyTotal?'background:#ecfdf5;color:#15803d;border:1px solid #a7f3d0':'background:#fffbeb;color:#b45309;border:1px solid #fde68a'}">${rdyReady===rdyTotal?'':'ждёт детали · '}Готовность деталей: ${rdyReady} из ${rdyTotal}</div>`:'';
-      const compTable=`<table class="dt" style="font-size:12.5px;width:100%"><thead><tr><th style="width:30px">№</th><th>Компонент</th><th>Источник (МК-КОМ / ПЗ / ЗнЗ)</th><th style="width:80px">Кол-во</th>${compReady.length?'<th style="width:130px">Готовность</th>':''}</tr></thead><tbody>${(d.components||[]).map((c,i)=>`<tr><td class="c-gray">${i+1}</td><td class="ell">${esc(c.name)}</td><td class="nw"><span style="font-family:monospace;color:var(--blue)">${esc(c.src||'—')}</span></td><td class="nw">${esc(String(c.qty||''))}</td>${compReady.length?`<td class="nw">${rdyDot((compReady[i]||{}).state||'none')}</td>`:''}</tr>`).join('')||`<tr><td colspan="${compReady.length?5:4}" class="c-gray" style="padding:12px">Компоненты не заведены</td></tr>`}</tbody></table>`;
+      const compTable=`<table class="dt" style="font-size:12.5px;width:100%"><thead><tr><th style="width:30px">№</th><th>Компонент</th><th>Источник (МК-КОМ / ПЗ / ЗнЗ)</th><th style="width:80px">Кол-во</th>${compReady.length?'<th style="width:130px">Готовность</th>':''}</tr></thead><tbody>${(d.components||[]).map((c,i)=>`<tr><td class="c-gray">${i+1}</td><td class="ell">${esc(c.name)}</td><td class="nw"><span style="font-family:var(--mono);color:var(--blue)">${esc(c.src||'—')}</span></td><td class="nw">${esc(String(c.qty||''))}</td>${compReady.length?`<td class="nw">${rdyDot((compReady[i]||{}).state||'none')}</td>`:''}</tr>`).join('')||`<tr><td colspan="${compReady.length?5:4}" class="c-gray" style="padding:12px">Компоненты не заведены</td></tr>`}</tbody></table>`;
       // Этап 1 доработки МК: вложения операций — «Программа обработки (ЧПУ)» и «Карта наладки (PDF)»
       const opFileLink=(mk,n,kind,f)=>{const base=`/api/route/opfile?mk=${encodeURIComponent(mk)}&op=${encodeURIComponent(n)}&kind=${kind}&rel=${encodeURIComponent(f)}`;const ext=(String(f).split('.').pop()||'').toLowerCase();const viewable=ext==='pdf'||/^(png|jpe?g|gif|webp|svg)$/.test(ext);return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0"><a href="${base}" target="_blank" rel="noopener" class="c-blue" style="text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Открыть в новой вкладке">📎 ${esc(f)}</a>${viewable?`<button type="button" class="tbtn" data-opview="${esc(base)}" data-opname="${esc(f)}" style="padding:2px 8px;font-size:11.5px" title="Просмотр в портале">Просмотр</button>`:''}<a href="${base}&dl=1" class="c-gray" style="text-decoration:none" title="Скачать">⤓</a></div>`;};
       const attSlot=(mk,n,kind,label,files)=>`<div style="border:1px solid var(--line2);border-radius:6px;padding:8px 10px;background:#fff"><div style="font-size:11px;font-weight:600;color:#5b6b7a;margin-bottom:5px">${label}</div>${(files&&files.length)?files.map(f=>opFileLink(mk,n,kind,f)).join(''):'<div class="c-gray" style="font-size:11.5px">файл не прикреплён</div>'}<label class="tbtn" style="margin-top:6px;padding:3px 9px;font-size:11.5px;cursor:pointer;display:inline-block">＋ файл<input type="file" data-att-up="${kind}" data-op="${esc(String(n))}" style="display:none"></label></div>`;
@@ -12186,14 +12257,14 @@
         </div>
         <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:var(--gap)">
           <div><div style="font-size:11px;color:#5b6b7a">Изделие / компонент</div><div style="color:var(--ink);font-weight:600">${esc(r.name||'—')}</div></div>
-          <div><div style="font-size:11px;color:#5b6b7a">Чертёж / обозначение</div><div style="font-family:monospace">${esc(r.designation||'—')}</div></div>
+          <div><div style="font-size:11px;color:#5b6b7a">Чертёж / обозначение</div><div style="font-family:var(--mono)">${esc(r.designation||'—')}</div></div>
           <div><div style="font-size:11px;color:#5b6b7a">Продукция / линейка</div><div>${esc(r.productType||'—')}</div></div>
           <div><div style="font-size:11px;color:#5b6b7a">Материал</div><div>${esc(r.material||'—')}</div></div>
           ${r.blankText?`<div style="grid-column:1/-1"><div style="font-size:11px;color:#5b6b7a">Заготовка (рекомендация технолога)</div><div style="color:#1e7d43;font-weight:600">${esc(r.blankText)}</div></div>`:''}
         </div>
         ${(r.projectDecNo||(r.kdDrawings&&r.kdDrawings.length))?`<div class="card pad" style="margin-bottom:var(--gap)">
           <div class="sec-h" style="margin-bottom:8px">Чертежи КД (реестр)${r.projectDecNo?` · проект <span class="code" style="color:var(--blue)">ПБС.${esc(r.projectDecNo)}</span>`:''}</div>
-          ${(r.kdDrawings&&r.kdDrawings.length)?`<div style="display:flex;flex-direction:column">${r.kdDrawings.map(d=>`<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;padding:5px 0;border-top:1px solid var(--line2)"><span class="code" style="font-family:monospace">${esc(String(d.doc).replace('ПБС.',''))}</span><span class="ell" style="flex:1;color:var(--ink)">${esc(d.name||'')}</span>${d.vid?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(d.vid)}</span>`:''}<a class="tbtn" href="${d.rel?('/api/design/kd/file?rel='+encodeURIComponent(d.rel)):('/api/design/kd/file?doc='+encodeURIComponent(d.doc))}" target="_blank" rel="noopener" title="Открыть выпущенный PDF из записей 03-КД" style="padding:2px 10px;font-size:12px;text-decoration:none">Просмотр</a></div>`).join('')}</div>`:'<div class="c-gray" style="font-size:12.5px">Чертежи не привязаны — откройте «✎ Редактировать» и выберите из реестра КД.</div>'}
+          ${(r.kdDrawings&&r.kdDrawings.length)?`<div style="display:flex;flex-direction:column">${r.kdDrawings.map(d=>`<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;padding:5px 0;border-top:1px solid var(--line2)"><span class="code" style="font-family:var(--mono)">${esc(String(d.doc).replace('ПБС.',''))}</span><span class="ell" style="flex:1;color:var(--ink)">${esc(d.name||'')}</span>${d.vid?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(d.vid)}</span>`:''}<a class="tbtn" href="${d.rel?('/api/design/kd/file?rel='+encodeURIComponent(d.rel)):('/api/design/kd/file?doc='+encodeURIComponent(d.doc))}" target="_blank" rel="noopener" title="Открыть выпущенный PDF из записей 03-КД" style="padding:2px 10px;font-size:12px;text-decoration:none">Просмотр</a></div>`).join('')}</div>`:'<div class="c-gray" style="font-size:12.5px">Чертежи не привязаны — откройте «✎ Редактировать» и выберите из реестра КД.</div>'}
         </div>`:''}
         ${isKom?`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Маршрут операций</div>${opsTable}<div style="margin-top:9px;font-size:11.5px;color:#64748b"><b>С</b> — самоконтроль · <b style="color:var(--amber,#b45309)">ОТК</b> — контролёр · ✓ выполнено · ⧖ в работе · • в очереди</div></div>`
           :`<div style="display:flex;flex-direction:column;gap:var(--gap)"><div class="card pad"><div class="sec-h" style="margin-bottom:10px">Входящие компоненты</div>${rdySummary}${compTable}<div style="margin-top:9px;font-size:11.5px;color:#64748b">Готовность — по статусу задач подобранного МК-КОМ (индикация; сборку не блокирует).</div></div><div class="card pad"><div class="sec-h" style="margin-bottom:10px">Маршрут сборки</div>${opsTable}</div></div>`}
@@ -12464,14 +12535,14 @@
       const kdRelOf=(k)=>(k.files&&k.files[0])?k.files[0].rel:'';
       const renderKdSel=()=>{ const box=host.querySelector('#rb-kdsel'); if(!box)return;
         if(!rtWiz.kdSel.length){ box.innerHTML='<div class="rt-hint">Чертежи не привязаны.</div>'; return; }
-        box.innerHTML='<div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:5px">Привязано ('+rtWiz.kdSel.length+'):</div>'+rtWiz.kdSel.map(d=>`<span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;background:#eef4fb;border:1px solid #cdd7e3;border-radius:4px;padding:2px 7px;margin:0 5px 5px 0"><span class="code" style="font-family:monospace">${esc(String(d.doc).replace('ПБС.',''))}</span><a href="${kdViewUrl(d)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-weight:600">Просмотр</a><button data-kdrem="${rtEscA(d.doc)}" title="Отвязать" style="border:0;background:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1">✕</button></span>`).join('');
+        box.innerHTML='<div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:5px">Привязано ('+rtWiz.kdSel.length+'):</div>'+rtWiz.kdSel.map(d=>`<span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;background:#eef4fb;border:1px solid #cdd7e3;border-radius:4px;padding:2px 7px;margin:0 5px 5px 0"><span class="code" style="font-family:var(--mono)">${esc(String(d.doc).replace('ПБС.',''))}</span><a href="${kdViewUrl(d)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-weight:600">Просмотр</a><button data-kdrem="${rtEscA(d.doc)}" title="Отвязать" style="border:0;background:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1">✕</button></span>`).join('');
         box.querySelectorAll('[data-kdrem]').forEach(b=>b.onclick=()=>{ rtWiz.kdSel=rtWiz.kdSel.filter(s=>String(s.doc)!==b.dataset.kdrem); renderKdList(); renderKdSel(); });
       };
       const renderKdList=()=>{ const box=host.querySelector('#rb-kdlist'); if(!box)return; const dec=(host.querySelector('#rb-proj')||{}).value||'';
         if(!dec){ box.innerHTML='<div class="rt-hint">Выберите проект ОКР — покажутся его чертежи из реестра КД.</div>'; return; }
         const list=kdByProj(dec);
         if(!list.length){ box.innerHTML='<div class="rt-hint">В реестре КД нет документов для этого проекта.</div>'; return; }
-        box.innerHTML='<div style="max-height:220px;overflow:auto;border:1px solid var(--bd);border-radius:6px">'+list.map(k=>{const rel=kdRelOf(k),has=!!rel,on=rtWiz.kdSel.some(s=>s.doc===k.docNo);return `<label style="display:flex;align-items:center;gap:8px;padding:5px 9px;border-top:1px solid var(--line2);font-size:12.5px"><input type="checkbox" data-kddoc="${rtEscA(k.docNo)}"${on?' checked':''}><span class="code" style="font-family:monospace">${esc(String(k.docNo).replace('ПБС.',''))}</span><span class="ell" style="flex:1">${esc(k.name||'')}</span>${has?`<a class="tbtn" href="/api/design/kd/file?rel=${encodeURIComponent(rel)}" target="_blank" rel="noopener" style="padding:2px 8px;font-size:11.5px;text-decoration:none" onclick="event.stopPropagation()">Просмотр</a>`:'<span class="c-gray" style="font-size:11px">нет PDF</span>'}</label>`;}).join('')+'</div>';
+        box.innerHTML='<div style="max-height:220px;overflow:auto;border:1px solid var(--bd);border-radius:6px">'+list.map(k=>{const rel=kdRelOf(k),has=!!rel,on=rtWiz.kdSel.some(s=>s.doc===k.docNo);return `<label style="display:flex;align-items:center;gap:8px;padding:5px 9px;border-top:1px solid var(--line2);font-size:12.5px"><input type="checkbox" data-kddoc="${rtEscA(k.docNo)}"${on?' checked':''}><span class="code" style="font-family:var(--mono)">${esc(String(k.docNo).replace('ПБС.',''))}</span><span class="ell" style="flex:1">${esc(k.name||'')}</span>${has?`<a class="tbtn" href="/api/design/kd/file?rel=${encodeURIComponent(rel)}" target="_blank" rel="noopener" style="padding:2px 8px;font-size:11.5px;text-decoration:none" onclick="event.stopPropagation()">Просмотр</a>`:'<span class="c-gray" style="font-size:11px">нет PDF</span>'}</label>`;}).join('')+'</div>';
         box.querySelectorAll('[data-kddoc]').forEach(cb=>cb.onchange=()=>{ const k=list.find(x=>x.docNo===cb.dataset.kddoc); if(!k)return; if(cb.checked){ if(!rtWiz.kdSel.some(s=>s.doc===k.docNo))rtWiz.kdSel.push({doc:k.docNo,name:k.name||'',vid:k.kind||'',rel:kdRelOf(k),proj:dec}); } else rtWiz.kdSel=rtWiz.kdSel.filter(s=>s.doc!==k.docNo); renderKdSel(); });
       };
       const proj=host.querySelector('#rb-proj'); if(proj)proj.onchange=()=>{ rtWiz.route.projectDecNo=proj.value; renderKdList(); };
@@ -12703,7 +12774,7 @@
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:14px">
           <div><div class="c-gray" style="font-size:11px">№ МК</div><div class="code" style="font-weight:600">${rtWiz.routeId!=null&&rt.mk?esc(rt.mk):'присвоится при выпуске'}</div></div>
           <div><div class="c-gray" style="font-size:11px">Изделие</div><div style="font-weight:600;color:var(--ink)">${esc(rt.name||'—')}</div></div>
-          <div><div class="c-gray" style="font-size:11px">Чертёж</div><div style="font-family:monospace">${esc(rt.designation||'—')}</div></div>
+          <div><div class="c-gray" style="font-size:11px">Чертёж</div><div style="font-family:var(--mono)">${esc(rt.designation||'—')}</div></div>
           <div><div class="c-gray" style="font-size:11px">Тип · ревизия</div><div style="font-weight:600">${esc(rt.type||'КОМ')}${rt.revision?' · '+esc(rt.revision):''}</div></div>
           ${blankLine?`<div style="grid-column:1/-1"><div class="c-gray" style="font-size:11px">Заготовка</div><div>${esc(blankLine)}</div></div>`:''}
         </div>
@@ -12969,7 +13040,7 @@
       const set=j.chuckSet||null;
       const vals=[j.chuckType,j.chuckSetId,j.jawTypeCard,j.jawClampDia,j.jawLen,j.jawForce,j.workpieceOverhang,j.jawSupport,j.jawRunout,j.jawNote];
       if(!vals.some(v=>v!=null&&v!=='')&&!set)return '';
-      const P=(lbl,val,mono)=>`<div><div style="font-size:10.5px;color:#5b6b7a">${lbl}</div><div style="font-weight:600;color:${mono?'var(--blue)':'var(--ink)'}${mono?';font-family:monospace':''}">${val||'<span style="color:#5b6b7a;font-weight:400">—</span>'}</div></div>`;
+      const P=(lbl,val,mono)=>`<div><div style="font-size:10.5px;color:#5b6b7a">${lbl}</div><div style="font-weight:600;color:${mono?'var(--blue)':'var(--ink)'}${mono?';font-family:var(--mono)':''}">${val||'<span style="color:#5b6b7a;font-weight:400">—</span>'}</div></div>`;
       const setLbl=set?esc((set.setNo||'')+(set.jawType?' · '+set.jawType:'')+(set.condition&&set.condition!=='Годен'?' · '+set.condition:'')):(j.jawSetNo?esc(j.jawSetNo):'');
       return `<div class="card pad" style="margin-top:var(--gap)">
           <div class="row" style="margin-bottom:10px"><span class="sec-h">Зажим заготовки и кулачки</span><span class="spacer"></span><span style="font-size:11.5px;color:var(--sub)">параметры базирования</span></div>
@@ -13007,8 +13078,8 @@
       // таблица деталей только по заполненным слотам (вылет/параметры/примечание)
       const det=filledN?`<table class="dt" style="font-size:12.5px;width:100%;margin-top:12px"><thead><tr><th style="width:56px">Слот</th><th>Державка (ISO)</th><th>Пластина (ISO)</th><th style="width:90px">Вылет</th><th>Параметры</th><th>Примечание</th></tr></thead><tbody>${lines.slice().sort((a,b)=>(a.pos||0)-(b.pos||0)).map(l=>`<tr>
           <td class="nw"><b style="color:var(--ink)">${esc(l.toolPos||('T'+l.pos))}</b></td>
-          <td class="nw">${l.holderIso?`<span class="code" style="font-family:monospace">${esc(l.holderIso)}</span>${l.holderMaker?` <span class="c-gray" style="font-size:11px">${esc(l.holderMaker)}</span>`:''}`:'<span class="c-gray">—</span>'}</td>
-          <td class="nw">${l.insertIso?`<span class="code" style="font-family:monospace">${esc(l.insertIso)}</span>${l.insertGrade?` <span class="c-gray" style="font-size:11px">${esc(l.insertGrade)}</span>`:''}`:'<span class="c-gray">—</span>'}</td>
+          <td class="nw">${l.holderIso?`<span class="code" style="font-family:var(--mono)">${esc(l.holderIso)}</span>${l.holderMaker?` <span class="c-gray" style="font-size:11px">${esc(l.holderMaker)}</span>`:''}`:'<span class="c-gray">—</span>'}</td>
+          <td class="nw">${l.insertIso?`<span class="code" style="font-family:var(--mono)">${esc(l.insertIso)}</span>${l.insertGrade?` <span class="c-gray" style="font-size:11px">${esc(l.insertGrade)}</span>`:''}`:'<span class="c-gray">—</span>'}</td>
           <td class="nw c-gray">${esc(l.overhang||'—')}</td>
           <td class="ell c-gray">${esc(l.params||'—')}</td>
           <td class="ell c-gray">${esc(l.note||'—')}</td></tr>`).join('')}</tbody></table>`:'';

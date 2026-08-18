@@ -1065,6 +1065,23 @@
       background:rgba(15,23,42,.32);animation:ui-fade-in var(--t-norm) var(--ease) both;}
     @media (max-width:860px){ #znz-drawer.on{max-width:100%;} }
 
+
+    /* ── K-115: модалка в режиме дровера. Карточка ПЗ открывалась окном по центру
+       и с доски (.kc[data-pz]), и по Enter в реестре — мимо канона п.4. Класс
+       вешается ТОЛЬКО на неё; модалки-формы остаются окнами по центру. */
+    .modal.as-drawer{top:0;left:auto;right:0;transform:none;
+      width:min(720px,100vw);max-width:720px;max-height:100vh;height:100vh;
+      border-radius:0;border-left:1px solid var(--sl-300);
+      box-shadow:-8px 0 28px rgba(15,23,42,.16);
+      animation:ui-slide-right var(--t-norm) var(--ease) both;}
+    .modal.as-drawer .mh{border-radius:0;}
+
+
+    /* K-116: тело дровера — светлая подложка, белые карточки на ней читаются
+       (в референсе так же: страница светлая, карточки белые). */
+    #odetail:has(#od-tabs), #znz-drawer.on, .modal.as-drawer{background:var(--sl-50);}
+    #odetail:has(#od-tabs) > .card, #znz-drawer.on .card, .modal.as-drawer .card{background:#fff;}
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){
@@ -10816,7 +10833,14 @@
           ${tot?`<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span class="bar2" style="flex:1;width:auto"><i style="width:${pct}%;${pct===100?'background:var(--green)':''}"></i></span><span class="c-gray" style="font-size:11px">${dn}/${tot}</span></div>`:'<div style="font-size:11px;color:var(--sl-500);margin-top:5px">маршрут не заведён</div>'}
           ${nx?`<div style="font-size:11px;color:var(--navy);margin-top:6px">${esc(nx)}</div>`:''}</div>`;};
       host.innerHTML=`<div class="kan" style="margin-top:10px">${cols.map(([c,tone])=>`<div class="kcol"><div class="kh c-${tone}"${colHint[c]?` title="${esc(colHint[c])}"`:''}><i class="i-${tone}" style="width:7px;height:7px;border-radius:50%;display:inline-block"></i>${c} <span class="cnt">${by[c].length}</span></div>${by[c].map(card).join('')||'<div class="kempty">нет заказов</div>'}</div>`).join('')}</div>`;
-      host.querySelectorAll('.kc[data-pz]').forEach(el=>el.onclick=()=>openOrderModal((DATA.orders||[]).find(o=>o.numPz===el.dataset.pz)));
+      host.querySelectorAll('.kc[data-pz]').forEach(el=>el.onclick=()=>{
+        // K-116: одна карточка заказа на весь портал — дровер с вкладками (канон п.4).
+        // Раньше с доски открывалась ОТДЕЛЬНАЯ модалка без вкладок, а из реестра — дровер.
+        try{
+          location.hash='#orders/'+encodeURIComponent(el.dataset.pz);
+          route(); // явный вызов: не полагаемся на событие hashchange (гонка с перерисовкой доски)
+        }catch(e){ openOrderModal((DATA.orders||[]).find(o=>o.numPz===el.dataset.pz)); }
+      });
     }
     // #s3 — доска по оборудованию: загрузка + разворот строки в задачи из МК
     function renderEquipBoard(host){
@@ -11851,7 +11875,7 @@
       host.innerHTML=`<div id="ocreate-panel"></div><div class="split wide md-stack"><div id="ogrid"></div><div class="detail" id="odetail"></div></div>`;
       ordApi=erpGrid(document.getElementById('ogrid'),{key:'orders',cols,rows,rowKey:r=>r.o.numPz,selKey:ordSel,
         onRow:r=>{ordSel=r.o.numPz;try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}odShowDetail(ordSel);},
-        onEnter:r=>openOrderModal(r.o),                       // Enter — карточка целиком (модалка; полноэкранный роут — TODO)
+        onEnter:r=>{ordSel=r.o.numPz;try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}odShowDetail(ordSel);}, // K-116: Enter — тот же дровер с вкладками                       // Enter — карточка целиком (модалка; полноэкранный роут — TODO)
         onEsc:()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);},
         del:DATA.mode==='live'?{key:'orders',idOf:r=>r.o.id,reload:()=>load()}:undefined,
         info:`${srcChip(DATA.mode==='live')}<span>Всего: <b style="color:var(--ink)">${rows.length}</b></span>${lateN?`<span class="c-red">Просрочено: <b>${lateN}</b></span>`:''}${otkN?`<span class="c-amber">Ждут ОТК: <b>${otkN}</b></span>`:''}`,
@@ -12197,7 +12221,7 @@
     async function openOrderModal(o){
       if(!o)return;
       if(DATA.mode==='live')await ensureRoutesList(); // K-72: список МК для выпадающих списков позиций
-      modal.style.width='min(820px,96vw)';
+      modal.style.width=''; modal.classList.add('as-drawer'); // K-115: карточка ПЗ с доски — дровер, не окно по центру
       modal.innerHTML=`<div class="mh"><b>${esc(o.numPz)}</b><span class="op">${esc(o.customer||'')}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div><div class="mb">${orderDetailHtml(o)}</div>`;
       modal.classList.add('open'); mscrim.classList.add('open');
       document.getElementById('mx').onclick=closeModal;
@@ -13910,7 +13934,7 @@
 
     // --- общая модалка портала: шторка, закрытие по клику вне и по Esc --------
     const modal=document.getElementById('modal'), mscrim=document.getElementById('mscrim');
-    function closeModal(){modal.classList.remove('open');mscrim.classList.remove('open');modal.innerHTML='';modal.style.width='';}
+    function closeModal(){modal.classList.remove('as-drawer');modal.classList.remove('open');mscrim.classList.remove('open');modal.innerHTML='';modal.style.width='';}
     mscrim.onclick=closeModal;
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modal.classList.contains('open'))closeModal();});
     // Здесь лежали openTask/saveTask — старая «модалка записи задачи» первой вёрстки.

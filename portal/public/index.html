@@ -5848,9 +5848,11 @@
     const DGRP_SPECS={
       'ЦТ':{
         title:'Конструктор обозначения ЦТ', ri:'РИ.1–Д.1.2–1.0, Приложение Г',
-        base:'Центратор',
-        f1:{key:'od',   label:'Ø колонны, мм', hint:'номинал', ph:'508'},
-        f2:{key:'bore', label:'Ø ствола, мм',  hint:'скважина / долото', ph:'558'},
+        // поля кода по каталогу — сколько нужно группе, столько и рисуется
+        fields:[
+          {key:'f1',label:'Ø колонны, мм',hint:'номинал',ph:'508'},
+          {key:'f2',label:'Ø ствола, мм',hint:'скважина / долото',ph:'558'},
+        ],
         types:[
           {code:'ЦТ10',name:'Центратор пружинный сварной разъёмный'},
           {code:'ЦТ11',name:'Центратор пружинный сварной неразъёмный'},
@@ -5859,37 +5861,64 @@
           {code:'ЦТ30',name:'Центратор цельный'},
           {code:'ЦТ31',name:'Центратор цельный полужёсткий'},
         ],
-        // последнее поле кода — комплектация; в наименование идёт хвостом
+        execLabel:'Комплектация',
         execs:[
           {code:'00',label:'Просто центратор (базовое)',        suffix:''},
           {code:'01',label:'В комплекте с 1 стопорным кольцом', suffix:', с 1 стопорным кольцом'},
           {code:'02',label:'В комплекте с 2 стопорными кольцами',suffix:', с 2 стопорными кольцами'},
         ],
-        // наименование: тип + «, Øколонны (под ствол Øствола)» + хвост комплектации
         name:(t,v,e)=>`${t.name}, Ø${v.f1} (под ствол Ø${v.f2})${e.suffix}`,
         note:'ЦТ00 не используется. Декады: 10–19 пружинные, 20–29 жёсткие, 30–39 цельные, 40+ резерв. Освоен ЦТ10 (проект ЦТ0001) — остальные коды вводятся по согласованию с ДпП.',
+      },
+      'ПР':{
+        title:'Конструктор обозначения ПР', ri:'РИ.1–Д.1.2–1.0, Приложение А',
+        fields:[
+          {key:'f1',label:'Ø колонны, мм',hint:'номинал',ph:'178'},
+          {key:'f2',label:'Стенка min, мм',hint:'',ph:'5.87'},
+          {key:'f3',label:'Стенка max, мм',hint:'',ph:'15.9'},
+        ],
+        types:[
+          {code:'ПР01',name:'Пробка цементировочная обсадной колонны, верхняя, без антивращения'},
+          {code:'ПР02',name:'Пробка цементировочная обсадной колонны, нижняя, без антивращения'},
+          {code:'ПР03',name:'Пробка цементировочная обсадной колонны, верхняя, с антивращением зубчатым'},
+          {code:'ПР04',name:'Пробка цементировочная обсадной колонны, нижняя, с антивращением зубчатым'},
+          {code:'ПР10',name:'Пробка цементировочная обсадной колонны, верхняя, с антивращением MF'},
+          {code:'ПР11',name:'Пробка цементировочная обсадной колонны, нижняя, с антивращением MF'},
+        ],
+        execLabel:'Материал',
+        execs:[
+          {code:'00',label:'NBR (базовое)',suffix:''},
+          {code:'01',label:'HNBR',         suffix:', высокотемпературное исполнение'},
+        ],
+        // наименование: тип + «, Ø диаметр» + хвост материала (только Ø колонны, стенки в имя не идут)
+        name:(t,v,e)=>`${t.name}, Ø${v.f1}${e.suffix}`,
+        note:'ПР00 не используется. Декады 20–29, 30–39 и далее — резерв под новые типы антивращения. MF — monkey fist (шаровое антивращение). Типоразмер — номинал (178; 245; 324); точное значение (177,8 мм) — в паспорте по API 5CT / ГОСТ 632.',
       },
     };
     const dgrpOf=(p)=>DGRP_SPECS[String(p&&p.subCode||'').trim()]||null;
     const dgrpState=(p)=>{ const g=dgrpOf(p); if(!g)return null;
-      if(!p.dgrp)p.dgrp={f1:'',f2:'',type:g.types[0].code,exec:'00',proj:'',asm:'00'};
+      if(!p.dgrp){ p.dgrp={type:g.types[0].code,exec:g.execs[0].code,proj:'',asm:'00'};
+        g.fields.forEach(f=>{p.dgrp[f.key]='';}); }
       return p.dgrp; };
     // сборка: код по каталогу (= маркировка) и полное обозначение с проектом и сборочной единицей
     function dgrpAssemble(p){
       const g=dgrpOf(p), s=dgrpState(p); if(!g||!s)return null;
       const num=(x)=>String(x==null?'':x).replace(',','.').trim();
-      const f1=num(s.f1), f2=num(s.f2);
+      const v={}; let allSet=true;
+      for(const f of g.fields){ v[f.key]=num(s[f.key]); if(!v[f.key])allSet=false; }
       const type=String(s.type||g.types[0].code).trim();
-      const exec=String(s.exec||'00').trim()||'00';
+      const exec=String(s.exec||g.execs[0].code).trim()||g.execs[0].code;
       const proj=String(s.proj||'').trim();
       const asm=String(s.asm||'').trim()||'00';
-      const art=`${f1||'Ø?'}-${f2||'Ø?'}-${type}-${exec}`;      // код по каталогу = маркировка
+      // код по каталогу = маркировка: поля группы по порядку, затем тип и исполнение
+      const art=[...g.fields.map(f=>v[f.key]||'?'),type,exec].join('-');
       let full='', why='';
       if(!proj) why='выберите № проекта';
+      else if(!allSet) why='заполните поля кода';
       else full=`ПБС.${art}.${proj}.${asm}`;
       const t=g.types.find(x=>x.code===type)||g.types[0];
       const e=g.execs.find(x=>x.code===exec)||g.execs[0];
-      const name=(f1&&f2)?g.name(t,{f1,f2},e):`${t.name}${e.suffix}`;
+      const name=allSet?g.name(t,v,e):`${t.name}${e.suffix}`;
       return {art,full,why,name,type:t,exec:e};
     }
 
@@ -6148,14 +6177,13 @@
         const execOpts=g.execs.map(e=>`<option value="${e.code}"${e.code===s.exec?' selected':''}>${e.code} · ${esc(e.label)}</option>`).join('');
         return `<div id="dg-${i}" style="margin-top:9px;background:#f2f7fc;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:11px 13px">
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#1d4e89;margin-bottom:3px">${esc(g.title)} · ${esc(g.ri)}</div>
-          <div style="font-size:11px;color:var(--sl-500);margin-bottom:9px">Код по каталогу: <span style="font-family:var(--mono)">${esc(g.f1.ph)}-${esc(g.f2.ph)}-${esc(g.types[0].code)}-00</span> · Обозначение: <span style="font-family:var(--mono)">ПБС.код.${esc(sub)}nnnn.сборка</span></div>
+          <div style="font-size:11px;color:var(--sl-500);margin-bottom:9px">Код по каталогу: <span style="font-family:var(--mono)">${esc(g.fields.map(f=>f.ph).concat([g.types[0].code,g.execs[0].code]).join('-'))}</span> · Обозначение: <span style="font-family:var(--mono)">ПБС.код.${esc(sub)}nnnn.сборка</span></div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
-            <div>${fl(g.f1.label,g.f1.hint)}<input data-dgi="${i}" data-dgf="f1" value="${esc(s.f1)}" placeholder="${esc(g.f1.ph)}" inputmode="decimal" style="${fi}"></div>
-            <div>${fl(g.f2.label,g.f2.hint)}<input data-dgi="${i}" data-dgf="f2" value="${esc(s.f2)}" placeholder="${esc(g.f2.ph)}" inputmode="decimal" style="${fi}"></div>
+            ${g.fields.map(f=>`<div>${fl(f.label,f.hint)}<input data-dgi="${i}" data-dgf="${f.key}" value="${esc(s[f.key]||'')}" placeholder="${esc(f.ph)}" inputmode="decimal" style="${fi}"></div>`).join('')}
             <div>${fl('Сборочная единица','в сборе 00 / деталь 001')}<input data-dgi="${i}" data-dgf="asm" value="${esc(s.asm)}" placeholder="00" style="${fi}"></div>
-            <div style="grid-column:1/3">${fl('Тип изделия','→ наименование')}<select data-dgi="${i}" data-dgf="type" style="${fi}">${typeOpts}</select></div>
+            <div style="grid-column:span 2">${fl('Тип изделия','→ наименование')}<select data-dgi="${i}" data-dgf="type" style="${fi}">${typeOpts}</select></div>
             <div>${fl('№ проекта','Ф.3–П.1')}<select data-dgi="${i}" data-dgf="proj" style="${fi}">${projOpts}</select></div>
-            <div style="grid-column:1/-1">${fl('Комплектация','последнее поле кода')}<select data-dgi="${i}" data-dgf="exec" style="${fi}">${execOpts}</select></div>
+            <div style="grid-column:1/-1">${fl(g.execLabel||'Исполнение','последнее поле кода')}<select data-dgi="${i}" data-dgf="exec" style="${fi}">${execOpts}</select></div>
           </div>
           <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">

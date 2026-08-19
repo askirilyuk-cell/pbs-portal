@@ -5522,6 +5522,136 @@ const MOCK_PZ_STATUS = new Map();
 //  Валидирует переход по PZ_TRANSITIONS (недопустимый → throw, наверху это 400),
 //  пишет в NocoDB (LIVE) или в MOCK_PZ_STATUS (стенд), кладёт событие в ленту и
 //  возвращает { ok, num, from, to, warnings } — warnings из мягких гейтов.
+// ── K-123: правка и удаление ПЗ после создания (задача владельца 19.08.2026).
+//    Раньше ПЗ был «одноразовым»: создал — и уже никак, ни опечатку поправить, ни удалить.
+//    Ключевая тонкость: проверка `typeof body[k] === 'string'`, а НЕ `if (body[k])`.
+//    В createOrder стоит `if (body.terms)`, из-за чего пустую строку не записать —
+//    поле «Условия» физически нельзя было очистить. Здесь пустая строка проходит и стирает.
+const ORDER_EDIT_FIELDS = [
+  ['orderType', 'Тип заказа', 'opt'], ['productType', 'Тип продукции', 'opt'],
+  ['customer', 'Заказчик / Инициатор', 'str'], ['taskType', 'Тип задачи', 'opt'],
+  ['priority', 'Приоритет', 'opt'], ['datePlaced', 'Дата размещения', 'date'],
+  ['datePlan', 'Плановый срок', 'date'], ['numZp', '№ ЗП', 'str'], ['numZkz', '№ ЗКЗ', 'str'],
+  ['basis', 'Договор / основание', 'str'], ['terms', 'Условия', 'str'],
+];
+// задачи Ф.14 и МК, привязанные к позиции — такую позицию менять нельзя (производство уже пошло)
+function posLockedSet(numPz, tasks) {
+  const locked = new Set();
+  for (const t of tasks) {
+    const num = String(t['№ задачи'] || '');
+    if (!num.startsWith(numPz)) continue;
+    const m = num.slice(numPz.length).match(/^\/([\d.]+)/); // ПЗ-2026-009/1.0-оп10 → «1.0»
+    if (m) locked.add(m[1]);
+  }
+  return locked;
+}
+async function updateOrder(body, who) {
+  const numPz = String(body.numPz || '').trim();
+  if (!numPz) throw new Error('Не указан № ПЗ.');
+  const orders = await ncList('orders');
+  const o = orders.find((r) => String(r['№ ПЗ'] || '').trim() === numPz);
+  if (!o) throw new Error(`Заказ ${numPz} не найден.`);
+  const orderId = o.Id ?? o.id;
+  const stored = String(o['Статус'] || '');
+  if (!['Размещён', 'В работе'].includes(stored)) {
+    throw new Error(`Редактирование недоступно в статусе «${stored}»: только «Размещён» и «В работе».`);
+  }
+  const opt = (field, val) => {
+    const v = String(val == null ? '' : val).trim();
+    if (!v) return '';
+    if (!ORDER_OPTS[field].includes(v)) throw new Error(`Недопустимое значение «${v}» для «${field}».`);
+    return v;
+  };
+  // ── реквизиты ──
+  const patch = {}; const changed = [];
+  for (const [key, col, kind] of ORDER_EDIT_FIELDS) {
+    if (typeof body[key] !== 'string') continue; // поле не прислали — не трогаем
+    let nv = String(body[key]).trim();
+    if (kind === 'opt') nv = opt(col, nv);
+    if (kind === 'date') nv = nv ? nv.slice(0, 10) : '';
+    const ov = String(o[col] == null ? '' : o[col]).trim();
+    if (nv === ov) continue;
+    if (col === 'Заказчик / Инициатор' && !nv) throw new Error('Заказчик / инициатор не может быть пустым.');
+    if (col === 'Тип заказа' && !nv) throw new Error('Тип заказа не может быть пустым.');
+    patch[col] = (kind === 'date' && !nv) ? null : nv; // пустая дата — null, иначе NocoDB ругается
+    changed.push(col);
+  }
+  if (changed.length) await ncUpdateMany('orders', [{ Id: orderId, ...patch }]);
+  // ── позиции ──
+  const posOut = { added: 0, updated: 0, removed: 0, locked: [] };
+  if (Array.isArray(body.positions)) {
+    const allPos = await ncList('positions');
+    const mine = allPos.filter((r) => String(r['Позиция'] || '').startsWith(numPz + ' ·'));
+    const tasks = await ncList('tasks');
+    const locked = posLockedSet(numPz, tasks);
+    const byId = new Map(mine.map((r) => [String(r.Id ?? r.id), r]));
+    const keepIds = new Set();
+    const upd = []; const create = [];
+    for (const [i, p] of body.positions.entries()) {
+      if (!p || !String(p.name || '').trim()) continue;
+      const posNum = String(p.posNum || `${i + 1}.0`).trim();
+      const row = {
+        'Позиция': `${numPz} · поз. ${posNum}`, '№ позиции': posNum,
+        'Наименование / обозначение': String(p.name).trim(),
+        'Чертёж / ТУ': String(p.drawing || '').trim(),
+        'Ед.': String(p.unit || '').trim(),
+        'Кол-во': (p.qty === '' || p.qty == null) ? null : Number(p.qty),
+        'Срок готовности': p.dateReady ? String(p.dateReady).slice(0, 10) : null,
+      };
+      const ex = p.id != null ? byId.get(String(p.id)) : null;
+      if (ex) {
+        keepIds.add(String(ex.Id ?? ex.id));
+        const exNum = String(ex['№ позиции'] || '').trim();
+        if (locked.has(exNum)) { posOut.locked.push(exNum); continue; } // есть задачи Ф.14 — не трогаем
+        upd.push({ Id: ex.Id ?? ex.id, ...row });
+      } else { create.push(row); }
+    }
+    for (const r of mine) { // удаление: чего нет в присланном списке
+      const id = String(r.Id ?? r.id); const pn = String(r['№ позиции'] || '').trim();
+      if (keepIds.has(id)) continue;
+      if (locked.has(pn)) { posOut.locked.push(pn); continue; }
+      posOut.removed++;
+    }
+    const delIds = mine.filter((r) => !keepIds.has(String(r.Id ?? r.id)) && !locked.has(String(r['№ позиции'] || '').trim()))
+      .map((r) => r.Id ?? r.id);
+    if (upd.length) { await ncUpdateMany('positions', upd); posOut.updated = upd.length; }
+    if (delIds.length) await ncDeleteMany('positions', delIds);
+    if (create.length) {
+      const made = await ncCreateMany('positions', create);
+      const ids = (Array.isArray(made) ? made : [made]).map((r) => r.Id ?? r.id).filter((x) => x != null);
+      posOut.added = ids.length;
+      if (ids.length) await ncLinkRecords('orders', 'Позиции', orderId, ids);
+    }
+  }
+  const bits = [];
+  if (changed.length) bits.push('реквизиты: ' + changed.join(', '));
+  if (posOut.added) bits.push(`позиций добавлено: ${posOut.added}`);
+  if (posOut.updated) bits.push(`изменено: ${posOut.updated}`);
+  if (posOut.removed) bits.push(`удалено: ${posOut.removed}`);
+  if (posOut.locked.length) bits.push(`защищены задачами Ф.14: ${[...new Set(posOut.locked)].join(', ')}`);
+  if (bits.length) logEvent({ type: 'реквизиты изменены', obj: 'ПЗ', objNum: numPz, who, details: bits.join('; ') });
+  return { ok: true, numPz, changed, positions: posOut, note: bits.join('; ') || 'изменений нет' };
+}
+// удаление ПЗ — только «Размещён» и только пока не привязаны МК и задачи Ф.14
+async function deleteOrder(body, who) {
+  const numPz = String(body.numPz || '').trim();
+  if (!numPz) throw new Error('Не указан № ПЗ.');
+  const orders = await ncList('orders');
+  const o = orders.find((r) => String(r['№ ПЗ'] || '').trim() === numPz);
+  if (!o) throw new Error(`Заказ ${numPz} не найден.`);
+  const stored = String(o['Статус'] || '');
+  if (stored !== 'Размещён') throw new Error(`Удаление доступно только в статусе «Размещён» (сейчас «${stored}»). Отмените заказ вместо удаления.`);
+  const tasks = await ncList('tasks');
+  const mineTasks = tasks.filter((t) => String(t['№ задачи'] || '').startsWith(numPz));
+  if (mineTasks.length) throw new Error(`По заказу уже созданы задачи Ф.14 (${mineTasks.length} шт) — удаление запрещено. Отмените заказ.`);
+  const allPos = await ncList('positions');
+  const mine = allPos.filter((r) => String(r['Позиция'] || '').startsWith(numPz + ' ·'));
+  const posIds = mine.map((r) => r.Id ?? r.id).filter((x) => x != null);
+  if (posIds.length) await ncDeleteMany('positions', posIds);
+  await ncDeleteMany('orders', [o.Id ?? o.id]);
+  logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who, details: `заказ удалён (позиций: ${posIds.length})` });
+  return { ok: true, numPz, positionsDeleted: posIds.length };
+}
 async function updateOrderStatus(body, who) {
   const num = String(body.num || '').trim();
   if (!num) throw new Error('Не указан № ПЗ (num).');
@@ -5676,6 +5806,7 @@ async function buildBoardLive() {
       return {
         id: p.Id ?? p.id, numPos: p['№ позиции'], name: p['Наименование / обозначение'], drawing: p['Чертёж / ТУ'],
         qty: p['Кол-во'], unit: p['Ед.'], status: p['Статус'],
+        dateReady: p['Срок готовности'] || '', // K-123: форма правки Ф.1–П.2 собирает срок — без него он терялся
         routeId: prid, mk: (routeById.get(prid) || {})['№ МК'] || '',
       };
     });
@@ -5686,6 +5817,11 @@ async function buildBoardLive() {
     return {
       id: o.Id ?? o.id, numPz, customer: o['Заказчик / Инициатор'], orderType: o['Тип заказа'],
       status: derivedStatus, statusStored: o['Статус'], priority: o['Приоритет'], plan: o['Плановый срок'],
+      // K-123: реквизиты Ф.1–П.2, которых не было в выдаче — карточка и форма правки их не видели,
+      //        хотя в печатной форме они есть. Пустые отдаём пустой строкой, а не undefined.
+      numZp: o['№ ЗП'] || '', numZkz: o['№ ЗКЗ'] || '', datePlaced: o['Дата размещения'] || '',
+      productType: o['Тип продукции'] || '', taskType: o['Тип задачи'] || '',
+      basis: o['Договор / основание'] || '', terms: o['Условия'] || '',
       positions: pos, tasks: tk, routes: mks.map((mk) => ({ mk, name: routeByMk.get(mk)?.['Наименование'] || '' })),
     };
   });
@@ -9489,6 +9625,17 @@ const server = http.createServer(async (req, res) => {
     }
     // Идея №3 «рельс потока»: смена статуса ПЗ — ТОЛЬКО через валидируемый переход
     // (PZ_TRANSITIONS). Работает и на стенде (mock: статусы в памяти) — без 501.
+    // K-123: правка реквизитов и позиций ПЗ после создания + удаление (только «Размещён», без МК и задач Ф.14)
+    if (p === '/api/orders/update' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Правка ПЗ доступна только в LIVE-режиме: задайте токен NocoDB.' });
+      try { return sendJson(res, 200, await updateOrder(await readBody(req), eventWho(req, svc))); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/orders/delete' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Удаление ПЗ доступно только в LIVE-режиме: задайте токен NocoDB.' });
+      try { return sendJson(res, 200, await deleteOrder(await readBody(req), eventWho(req, svc))); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/orders/status' && req.method === 'POST') {
       try { return sendJson(res, 200, await updateOrderStatus(await readBody(req), eventWho(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }

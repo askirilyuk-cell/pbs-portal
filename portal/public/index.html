@@ -1115,6 +1115,8 @@
     .ic-menu{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 6h13M3.5 10h13M3.5 14h13'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 6h13M3.5 10h13M3.5 14h13'/></svg>");}
     .ic-chk{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='3.5' width='13' height='13' rx='2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='3.5' width='13' height='13' rx='2'/><path d='m7 10.2 2.1 2.1L13.3 8'/></svg>");}
 
+    .ic-pencil{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M13.6 3.1a1.6 1.6 0 0 1 2.3 2.3L7.4 13.9l-3 .7.7-3z'/><path d='M12.2 4.5l3.3 3.3'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M13.6 3.1a1.6 1.6 0 0 1 2.3 2.3L7.4 13.9l-3 .7.7-3z'/><path d='M12.2 4.5l3.3 3.3'/></svg>");}
+
 
     /* K-118: вкладки карточки ЗнЗ — вид как у вкладок карточки ПЗ (единый паттерн) */
     .ztabs{display:flex;gap:2px;border-bottom:1px solid var(--sl-200);margin-bottom:var(--gap);
@@ -12035,6 +12037,40 @@
       });
       odShowDetail(ordSel);
     }
+    // ── K-123: реквизиты Ф.1–П.2 в карточке + правка/удаление ──────────────────
+    //  Раньше карточка показывала только заказчика и тип: № ЗП/ЗКЗ, дата размещения,
+    //  тип продукции, тип задачи, «Договор / основание» и «Условия» не были видны
+    //  НИГДЕ, кроме печатной формы, — хотя вводятся при создании.
+    let odReqOpen=false;
+    // редактировать можно, пока заказ не ушёл дальше производства
+    const odCanEdit=(o)=>['Размещён','В работе'].includes(String(o.statusStored||o.status||''));
+    // удалять — только не начатый: статус «Размещён», без задач Ф.14 и без МК
+    const odCanDelete=(o)=>String(o.statusStored||o.status||'')==='Размещён'&&!(o.tasks||[]).length&&!(o.routes||[]).length;
+    // длинный текст — свёрнут (замечание владельца: «Условия» на несколько экранов ломают карточку)
+    const odLong=(id,txt)=>{ const t=String(txt||''); if(!t)return '<span class="c-gray">—</span>';
+      const brief=t.length>160?esc(t.slice(0,160))+'…':esc(t);
+      return t.length>160
+        ? `<span data-odfull="${id}" style="cursor:pointer" title="Показать полностью">${brief} <b style="color:var(--navy);white-space:nowrap">показать полностью</b></span>`
+        : brief; };
+    function odReqHtml(o){
+      const kv=(k,v)=>`<div style="display:flex;gap:8px;padding:3px 0"><span style="flex:0 0 168px;color:var(--sl-500)">${esc(k)}</span><span style="min-width:0;color:var(--sl-800)">${v}</span></div>`;
+      const mono=(v)=>v?`<span style="font-family:var(--mono)">${esc(v)}</span>`:'<span class="c-gray">—</span>';
+      const txt=(v)=>v?esc(v):'<span class="c-gray">—</span>';
+      const filled=[o.numZp,o.numZkz,o.productType,o.taskType,o.basis,o.terms].filter(x=>String(x||'').trim()).length;
+      return `<div class="card pad" style="padding-top:9px;padding-bottom:9px">
+        <div data-odreq style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+          <span style="color:var(--sl-500);font-size:11px">${odReqOpen?'▾':'▸'}</span>
+          <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--sl-600)">Реквизиты задания</span>
+          <span style="font-size:11px;color:var(--sl-500)">Ф.1–П.2${filled?` · заполнено полей: ${filled}`:' · только базовые'}</span>
+        </div>
+        ${odReqOpen?`<div style="margin-top:9px;font-size:12px;border-top:1px solid var(--line2);padding-top:9px">
+          ${kv('№ ЗП',mono(o.numZp))}${kv('№ ЗКЗ',mono(o.numZkz))}
+          ${kv('Дата размещения',mono(String(o.datePlaced||'').slice(0,10)))}
+          ${kv('Тип продукции',txt(o.productType))}${kv('Тип задачи',txt(o.taskType))}
+          ${kv('Договор / основание',odLong('basis',o.basis))}
+          ${kv('Условия',odLong('terms',o.terms))}
+        </div>`:''}</div>`;
+    }
     // Панель детали заказа с вкладками Позиции/Задачи/Контроль/История (K-42 C)
     function odShowDetail(numPz){
       const host=document.getElementById('odetail'); if(!host)return;
@@ -12064,20 +12100,51 @@
           <button class="x" id="od-x" aria-label="Закрыть" title="Закрыть (Esc)" style="margin-left:auto;background:var(--sl-100);border:0;width:26px;height:26px;border-radius:var(--radius);cursor:pointer;color:var(--sub);font-size:14px">✕</button>
         </div>
         ${riskBlock}
+        ${odReqHtml(o)}
         <div style="display:flex;gap:4px;border-bottom:1px solid var(--bd)" id="od-tabs">${tabs.map(([k,l])=>`<button data-tab="${k}" style="font:inherit;font-size:12px;font-weight:600;padding:8px 13px;border:0;border-bottom:2px solid ${ordTab===k?'var(--navy)':'transparent'};background:none;color:${ordTab===k?'var(--navy)':'var(--sl-500)'};cursor:pointer">${l}</button>`).join('')}</div>
         <div id="od-body"></div>
         <div id="od-znz-panel"></div>
         <div class="card pad" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
           <span id="od-chat" style="margin-right:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)"></span>
+          ${odCanEdit(o)?`<button class="ui-btn" id="od-edit-btn" title="Правка реквизитов и позиций Ф.1–П.2"><i class=ic-pencil></i> Изменить</button>`:''}
           <button class="ui-btn" id="od-znz-btn" title="Разместить заявку на закупку под этот заказ (ЗнЗ с источником ${esc(o.numPz)})"><i class=ic-box></i> Заявка на закупку</button>
           ${routeBtns}
           <a class="pbtn" href="/api/print/pz/${encodeURIComponent(o.numPz)}" target="_blank" rel="noopener">${aico('print',14)} Печать ПЗ (Ф.1–П.2)</a>
-        </div>`;
+        </div>
+        ${odCanDelete(o)?`<div class="card pad" style="border-left:3px solid var(--red)">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <b class="c-red">Опасная зона</b>
+            <span style="font-size:12px;color:var(--sub)">удаление необратимо · заказ ещё не в производстве</span>
+            <span class="spacer" style="margin-left:auto"></span>
+            <button class="tbtn" id="od-del-btn" style="color:var(--red);border-color:#fecaca">Удалить заказ</button>
+          </div>
+          <div id="od-del-confirm" style="margin-top:9px"></div></div>`:''}`;
       const xb=host.querySelector('#od-x'); if(xb)xb.onclick=()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);};
       wireCopyLink(host);
       odWireFlow(host,o);
       odWireChat(o);   // K-102: «Чат заказа: chatNNN [задать]» (оверлей order-chats.json)
       const zb=host.querySelector('#od-znz-btn'); if(zb)zb.onclick=()=>odToggleZnzPanel(o);
+      const eb=host.querySelector('#od-edit-btn'); if(eb)eb.onclick=()=>{ openCreateOrder(o); const pn=document.getElementById('ocreate-panel'); if(pn)pn.scrollIntoView({behavior:'smooth',block:'start'}); };
+      host.querySelectorAll('[data-odreq]').forEach(el=>el.onclick=()=>{ odReqOpen=!odReqOpen; odShowDetail(o.numPz); });
+      host.querySelectorAll('[data-odfull]').forEach(el=>el.onclick=()=>{ const k=el.dataset.odfull;
+        el.replaceWith(Object.assign(document.createElement('span'),{textContent:String((k==='terms'?o.terms:o.basis)||''),style:'white-space:pre-wrap'})); });
+      const db=host.querySelector('#od-del-btn');
+      if(db)db.onclick=()=>{ const box=host.querySelector('#od-del-confirm'); if(!box)return;
+        if(box.dataset.on==='1'){ box.dataset.on=''; box.innerHTML=''; return; }
+        box.dataset.on='1';
+        box.innerHTML=`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:var(--r-s);padding:10px 12px;font-size:12px">
+          Удалить <b>${esc(o.numPz)}</b> вместе с позициями (${(o.positions||[]).length} шт)? Восстановить нельзя.
+          <div style="margin-top:9px;display:flex;gap:8px"><button class="tbtn" data-odcancel>Отмена</button>
+          <button class="tbtn" data-odyes style="background:var(--red);border-color:var(--red);color:#fff;font-weight:600">Да, удалить</button></div>
+          <div data-oderr style="margin-top:8px;color:var(--red)"></div></div>`;
+        box.querySelector('[data-odcancel]').onclick=()=>{ box.dataset.on=''; box.innerHTML=''; };
+        box.querySelector('[data-odyes]').onclick=async(ev)=>{ const b=ev.currentTarget; b.disabled=true; b.textContent='Удаление…';
+          try{ const r=await fetch('/api/orders/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numPz:o.numPz})});
+            const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+            toast('ok','Заказ '+o.numPz+' удалён','позиций удалено: '+(j.positionsDeleted||0));
+            ordSel=null; try{history.replaceState(null,'','#orders');}catch{} await load();
+          }catch(e){ const er=box.querySelector('[data-oderr]'); if(er)er.textContent=String(e.message||e); b.disabled=false; b.textContent='Да, удалить'; }
+        }; };
       host.querySelectorAll('#od-tabs button').forEach(b=>b.onclick=()=>{ordTab=b.dataset.tab;odShowDetail(numPz);});
       host.querySelectorAll('[data-mk]').forEach(b=>b.onclick=()=>{location.hash='#routes/'+encodeURIComponent(b.dataset.mk);});
       odTabBody(o);
@@ -12390,64 +12457,83 @@
     const PZ_PRIORITIES=['Высокий','Нормальный','Низкий'];
     const PZ_TASK_TYPES=['Производство','Обслуживание','Ремонт','Подготовка оснастки','Прочее'];
     // K-?: создание ПЗ — ИНЛАЙН-панель в #ocreate-panel (без модалки/alert, по стандарту портала; образец — dProdToggle)
-    function openCreateOrder(){
+    // K-123: та же форма Ф.1–П.2 работает и на СОЗДАНИЕ, и на ПРАВКУ.
+    //  ed — заказ из DATA.orders (правка) либо null/undefined (создание). Второй клик по кнопке
+    //  закрывает панель, но при переходе «создание → правка» панель пересобирается, а не схлопывается.
+    function openCreateOrder(ed){
       const panel=document.getElementById('ocreate-panel'); if(!panel)return;
-      if(panel.dataset.open==='1'){ panel.innerHTML=''; panel.dataset.open=''; return; } // повторный клик по кнопке — закрыть
-      panel.dataset.open='1';
+      const wasFor=panel.dataset.edit||'';
+      const nowFor=ed?String(ed.numPz):'';
+      if(panel.dataset.open==='1'&&wasFor===nowFor){ panel.innerHTML=''; panel.dataset.open=''; panel.dataset.edit=''; return; }
+      panel.dataset.open='1'; panel.dataset.edit=nowFor;
       const xbtn='style="background:var(--sl-100);border:0;width:26px;height:26px;border-radius:var(--radius);cursor:pointer;color:var(--sub);font-size:14px"';
       if(!DATA||DATA.mode!=='live'){
         panel.innerHTML=`<div class="card pad" style="border:1px solid var(--red);margin-top:var(--gap)"><div class="row"><span style="color:var(--red);font-size:12px">Создание ПЗ доступно только в LIVE-режиме (нужен токен NocoDB в «Настройках»).</span><span class="spacer"></span><button class="x" title="Закрыть" ${xbtn} onclick="openCreateOrder()">✕</button></div></div>`;
         return;
       }
       const today=new Date().toISOString().slice(0,10);
+      const E=ed||null;                                  // K-123: null — создание, объект — правка
+      const ev=(k,d)=>esc(E&&E[k]!=null&&E[k]!==''?String(E[k]):(d||'')); // значение поля при правке
+      const dOnly=(v)=>String(v||'').slice(0,10);        // NocoDB отдаёт дату строкой — обрезаем до YYYY-MM-DD
       const ist='width:100%;padding:7px 9px;border:1px solid var(--sl-300);border-radius:var(--r-m);font:inherit;font-size:12px;background:#fff';
       const lbl=(t,req)=>`<div style="font-size:11px;color:var(--sl-500);font-weight:600;margin-bottom:4px">${esc(t)}${req?' <span style="color:var(--red)">*</span>':''}</div>`;
-      const optHtml=(arr,def)=>arr.map(o=>`<option${o===def?' selected':''}>${esc(o)}</option>`).join('');
+      const optHtml=(arr,def)=>arr.map(o=>`<option${(def!=null&&def!==''&&o===String(def))?' selected':''}>${esc(o)}</option>`).join('');
       const meName=(typeof ME!=='undefined'&&ME&&ME.name)||'';
-      const posRow=(n)=>`<tr data-prow>
-        <td style="padding:3px"><input data-pf="posNum" value="${n}.0" style="${ist};text-align:center" title="№ позиции"></td>
-        <td style="padding:3px"><input data-pf="name" placeholder="Наименование / обозначение" style="${ist}"></td>
-        <td style="padding:3px"><input data-pf="drawing" placeholder="Чертёж / ТУ" style="${ist}"></td>
-        <td style="padding:3px"><input data-pf="unit" value="шт" style="${ist};text-align:center"></td>
-        <td style="padding:3px"><input data-pf="qty" type="number" step="any" placeholder="кол-во" style="${ist};text-align:right"></td>
-        <td style="padding:3px"><input data-pf="dateReady" type="date" style="${ist}"></td>
-        <td style="padding:3px;text-align:center"><button data-prem title="Удалить строку" style="border:0;background:none;color:var(--red);cursor:pointer;font-size:16px">✕</button></td></tr>`;
+      // K-123: строка позиции знает свой id (правка существующей) и блокируется, если по ней
+      //        уже сгенерированы задачи Ф.14 — производство пошло, менять состав нельзя.
+      const posRow=(n,P)=>{ const p=P||null; const lock=!!(p&&p.mk);
+        const dis=lock?' disabled':'';
+        return `<tr data-prow${p&&p.id!=null?` data-pid="${esc(String(p.id))}"`:''}${lock?' data-plock="1"':''} style="${lock?'background:var(--sl-50)':''}">
+        <td style="padding:3px"><input data-pf="posNum" value="${p?esc(String(p.numPos||n+'.0')):n+'.0'}" style="${ist};text-align:center"${dis} title="№ позиции"></td>
+        <td style="padding:3px"><input data-pf="name" value="${p?esc(String(p.name||'')):''}" placeholder="Наименование / обозначение" style="${ist}"${dis}></td>
+        <td style="padding:3px"><input data-pf="drawing" value="${p?esc(String(p.drawing||'')):''}" placeholder="Чертёж / ТУ" style="${ist}"${dis}></td>
+        <td style="padding:3px"><input data-pf="unit" value="${p?esc(String(p.unit||'шт')):'шт'}" style="${ist};text-align:center"${dis}></td>
+        <td style="padding:3px"><input data-pf="qty" type="number" step="any" value="${p&&p.qty!=null?esc(String(p.qty)):''}" placeholder="кол-во" style="${ist};text-align:right"${dis}></td>
+        <td style="padding:3px"><input data-pf="dateReady" type="date" value="${p?esc(dOnly(p.dateReady)):''}" style="${ist}"${dis}></td>
+        <td style="padding:3px;text-align:center">${lock
+          ?`<span title="Позиция в производстве (${esc(String(p.mk))}) — правка и удаление заблокированы" style="color:var(--sl-400);cursor:help">🔒</span>`
+          :`<button data-prem title="Удалить строку" style="border:0;background:none;color:var(--red);cursor:pointer;font-size:16px">✕</button>`}</td></tr>`; };
       panel.innerHTML=`<div class="card pad" style="border:1px solid var(--blue);margin-top:var(--gap)">
-          <div class="row" style="margin-bottom:10px"><span class="sec-h">Новое производственное задание (ПЗ)</span><span style="font-size:11px;color:var(--sub);margin-left:8px">Ф.1–П.2 · № присвоится автоматически</span><span class="spacer"></span><button class="x" title="Закрыть" ${xbtn} onclick="openCreateOrder()">✕</button></div>
+          <div class="row" style="margin-bottom:10px"><span class="sec-h">${E?'Правка производственного задания':'Новое производственное задание (ПЗ)'}</span><span style="font-size:11px;color:var(--sub);margin-left:8px">${E?('Ф.1–П.2 · '+esc(E.numPz)+' · статус «'+esc(E.statusStored||E.status||'')+'»'):'Ф.1–П.2 · № присвоится автоматически'}</span><span class="spacer"></span><button class="x" title="Закрыть" ${xbtn} data-oclose>✕</button></div>
           <div class="sec-h" style="margin-bottom:10px">Реквизиты задания</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 18px">
-            <div>${lbl('Тип заказа',true)}<select id="o-type" style="${ist}">${optHtml(PZ_ORDER_TYPES)}</select></div>
-            <div>${lbl('Тип продукции')}<select id="o-prod" style="${ist}"><option value="">— не указан —</option>${optHtml(PZ_PRODUCT_TYPES)}</select></div>
-            <div>${lbl('Заказчик / Инициатор',true)}<input id="o-cust" style="${ist}" value="${esc(meName)}" placeholder="ООО «…» или подразделение"></div>
-            <div>${lbl('Тип задачи')}<select id="o-task" style="${ist}">${optHtml(PZ_TASK_TYPES,'Производство')}</select></div>
-            <div>${lbl('Приоритет')}<select id="o-prio" style="${ist}">${optHtml(PZ_PRIORITIES,'Нормальный')}</select></div>
-            <div>${lbl('Дата размещения')}<input id="o-placed" type="date" value="${today}" style="${ist}"></div>
-            <div>${lbl('Плановый срок')}<input id="o-plan" type="date" style="${ist}"></div>
-            <div>${lbl('№ ЗП (необяз.)')}<input id="o-zp" style="${ist}" placeholder="ЗП-2026-…"></div>
-            <div>${lbl('№ ЗКЗ (необяз.)')}<input id="o-zkz" style="${ist}" placeholder="ЗКЗ-2026-…"></div>
-            <div style="grid-column:1/-1">${lbl('Договор / основание')}<textarea id="o-basis" rows="2" style="${ist};resize:vertical"></textarea></div>
-            <div style="grid-column:1/-1">${lbl('Условия')}<textarea id="o-terms" rows="2" style="${ist};resize:vertical"></textarea></div>
+            <div>${lbl('Тип заказа',true)}<select id="o-type" style="${ist}">${optHtml(PZ_ORDER_TYPES,E&&E.orderType)}</select></div>
+            <div>${lbl('Тип продукции')}<select id="o-prod" style="${ist}"><option value=""${E&&E.productType?'':' selected'}>— не указан —</option>${optHtml(PZ_PRODUCT_TYPES,E&&E.productType)}</select></div>
+            <div>${lbl('Заказчик / Инициатор',true)}<input id="o-cust" style="${ist}" value="${E?ev('customer'):esc(meName)}" placeholder="ООО «…» или подразделение"></div>
+            <div>${lbl('Тип задачи')}<select id="o-task" style="${ist}">${optHtml(PZ_TASK_TYPES,(E&&E.taskType)||'Производство')}</select></div>
+            <div>${lbl('Приоритет')}<select id="o-prio" style="${ist}">${optHtml(PZ_PRIORITIES,(E&&E.priority)||'Нормальный')}</select></div>
+            <div>${lbl('Дата размещения')}<input id="o-placed" type="date" value="${E?esc(dOnly(E.datePlaced)):today}" style="${ist}"></div>
+            <div>${lbl('Плановый срок')}<input id="o-plan" type="date" value="${E?esc(dOnly(E.plan)):''}" style="${ist}"></div>
+            <div>${lbl('№ ЗП (необяз.)')}<input id="o-zp" style="${ist}" value="${ev('numZp')}" placeholder="ЗП-2026-…"></div>
+            <div>${lbl('№ ЗКЗ (необяз.)')}<input id="o-zkz" style="${ist}" value="${ev('numZkz')}" placeholder="ЗКЗ-2026-…"></div>
+            <div style="grid-column:1/-1">${lbl('Договор / основание')}<textarea id="o-basis" rows="2" style="${ist};resize:vertical">${ev('basis')}</textarea></div>
+            <div style="grid-column:1/-1">${lbl('Условия')}<textarea id="o-terms" rows="${E?6:2}" style="${ist};resize:vertical">${ev('terms')}</textarea></div>
           </div>
           <div style="margin-top:var(--gap)">
             <div class="row" style="margin-bottom:10px"><span class="sec-h">Позиции (компоненты задания)</span><span class="spacer"></span><span style="font-size:11px;color:var(--sub)">маршрут и задачи привяжешь после создания</span></div>
             <div id="ockd-wrap" style="margin-bottom:10px"></div>
             <div class="tbl-wrap"><table class="dt" style="--tbl-min:660px"><colgroup><col style="width:66px"><col><col style="width:150px"><col style="width:60px"><col style="width:84px"><col style="width:150px"><col style="width:38px"></colgroup>
               <thead><tr><th>№ поз.</th><th>Наименование / обозначение</th><th>Чертёж / ТУ</th><th>Ед.</th><th>Кол-во</th><th>Срок готовности</th><th></th></tr></thead>
-              <tbody id="o-pos">${posRow(1)}</tbody></table></div>
+              <tbody id="o-pos">${E&&(E.positions||[]).length?(E.positions||[]).map((p,i)=>posRow(i+1,p)).join(''):posRow(1)}</tbody></table></div>
             <button id="o-addpos" class="tbtn" style="margin-top:8px">+ Позиция</button>
           </div>
           <div id="o-err" style="margin-top:10px;color:var(--red);font-size:12px"></div>
           <div id="o-msg" style="margin-top:10px;font-size:12px"></div>
           <div style="margin-top:var(--gap);display:flex;gap:8px;justify-content:flex-end">
             <button class="tbtn" id="o-cancel">Отмена</button>
-            <button class="tbtn primary" id="o-save">Создать ПЗ</button>
+            <button class="tbtn primary" id="o-save">${E?'Сохранить изменения':'Создать ПЗ'}</button>
           </div>
         </div>`;
-      document.getElementById('o-cancel').onclick=()=>openCreateOrder(); // тот же тумблер — закрыть панель
+      const oClose=()=>{ panel.innerHTML=''; panel.dataset.open=''; panel.dataset.edit=''; };
+      document.getElementById('o-cancel').onclick=oClose;
+      panel.querySelectorAll('[data-oclose]').forEach(b=>b.onclick=oClose);
       const posBody=document.getElementById('o-pos');
-      const renumber=()=>{[...posBody.querySelectorAll('[data-prow]')].forEach((tr,i)=>{const pn=tr.querySelector('[data-pf="posNum"]'); if(pn&&!pn.dataset.touched)pn.value=(i+1)+'.0';});};
-      const wireRow=(tr)=>{ tr.querySelector('[data-prem]').onclick=()=>{ if(posBody.querySelectorAll('[data-prow]').length>1){tr.remove();renumber();} }; const pn=tr.querySelector('[data-pf="posNum"]'); pn.oninput=()=>pn.dataset.touched='1'; };
-      wireRow(posBody.querySelector('[data-prow]'));
+      // при ПРАВКЕ номера существующих позиций не перебиваем: они уже в задачах, МК и печатной форме
+      const renumber=()=>{[...posBody.querySelectorAll('[data-prow]')].forEach((tr,i)=>{const pn=tr.querySelector('[data-pf="posNum"]'); if(pn&&!pn.dataset.touched&&!tr.dataset.pid)pn.value=(i+1)+'.0';});};
+      const wireRow=(tr)=>{ const rem=tr.querySelector('[data-prem]');
+        if(rem)rem.onclick=()=>{ if(posBody.querySelectorAll('[data-prow]').length>1){tr.remove();renumber();} };
+        const pn=tr.querySelector('[data-pf="posNum"]'); if(pn)pn.oninput=()=>pn.dataset.touched='1'; };
+      posBody.querySelectorAll('[data-prow]').forEach(wireRow);
       document.getElementById('o-addpos').onclick=()=>{ const n=posBody.querySelectorAll('[data-prow]').length+1; const tmp=document.createElement('tbody'); tmp.innerHTML=posRow(n); const tr=tmp.firstElementChild; posBody.appendChild(tr); wireRow(tr); };
       // K-?: вход №2 — «Добавить из чертежа КД» (аналог dProdToggle, но точечно: сборка+состав или одна деталь).
       // Полоска свёрнута по умолчанию (образец extkd-wrap/dfiles-wrap); блок скрыт целиком, если проектов КД нет.
@@ -12523,16 +12609,23 @@
       document.getElementById('o-save').onclick=async()=>{
         const errEl=document.getElementById('o-err'); errEl.textContent='';
         const val=(id)=>document.getElementById(id).value.trim();
-        const positions=[...posBody.querySelectorAll('[data-prow]')].map(tr=>{const g=(f)=>{const el=tr.querySelector(`[data-pf="${f}"]`);return el?el.value.trim():'';};return {posNum:g('posNum'),name:g('name'),drawing:g('drawing'),unit:g('unit'),qty:g('qty'),dateReady:g('dateReady')};}).filter(p=>p.name);
+        const positions=[...posBody.querySelectorAll('[data-prow]')].map(tr=>{const g=(f)=>{const el=tr.querySelector(`[data-pf="${f}"]`);return el?el.value.trim():'';};
+          const o={posNum:g('posNum'),name:g('name'),drawing:g('drawing'),unit:g('unit'),qty:g('qty'),dateReady:g('dateReady')};
+          if(tr.dataset.pid)o.id=tr.dataset.pid; return o;}).filter(p=>p.name);
         const body={ orderType:val('o-type'), productType:document.getElementById('o-prod').value, customer:val('o-cust'), taskType:document.getElementById('o-task').value, priority:document.getElementById('o-prio').value, status:'Размещён' /* создал = разместил (правка Александра 22.07) */, datePlaced:val('o-placed'), datePlan:val('o-plan'), numZp:val('o-zp'), numZkz:val('o-zkz'), basis:val('o-basis'), terms:val('o-terms'), positions };
         if(!body.customer){errEl.textContent='Укажите заказчика / инициатора.';return;}
-        const btn=document.getElementById('o-save'); btn.disabled=true; btn.textContent='Создание…';
-        try{ const r=await fetch('/api/orders/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          const msg=document.getElementById('o-msg'); if(msg){ msg.style.color='var(--green)'; msg.innerHTML=`<i class=ic-okc></i> Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||positions.length}`; }
-          btn.textContent='Создано ✓';
-          ordSel=j.numPz; try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}
-          await load(); // load()→route() перерисует #orders: панель закроется, новый ПЗ будет выбран и открыт в деталях справа — это и есть подтверждение
-        }catch(e){ errEl.textContent='Не удалось создать: '+(e.message||e); btn.disabled=false; btn.textContent='Создать ПЗ'; }
+        const btn=document.getElementById('o-save'); btn.disabled=true; btn.textContent=E?'Сохранение…':'Создание…';
+        // K-123: при правке статус НЕ трогаем (он живёт своим рельсом /api/orders/status) и шлём № ПЗ
+        if(E){ delete body.status; body.numPz=E.numPz; }
+        const url=E?'/api/orders/update':'/api/orders/create';
+        try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+          const msg=document.getElementById('o-msg'); if(msg){ msg.style.color='var(--green)';
+            msg.innerHTML=E?`<i class=ic-okc></i> Сохранено: ${esc(j.note||'изменений нет')}`
+                           :`<i class=ic-okc></i> Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||positions.length}`; }
+          btn.textContent=E?'Сохранено ✓':'Создано ✓';
+          ordSel=E?E.numPz:j.numPz; try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}
+          await load(); // load()→route() перерисует #orders: панель закроется, заказ будет выбран и открыт справа
+        }catch(e){ errEl.textContent=(E?'Не удалось сохранить: ':'Не удалось создать: ')+(e.message||e); btn.disabled=false; btn.textContent=E?'Сохранить изменения':'Создать ПЗ'; }
       };
     }
 

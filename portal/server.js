@@ -488,6 +488,16 @@ async function pchProjectsPayload() {
       .sort((a, b) => a.decNo.localeCompare(b.decNo, 'ru'));
   } catch { return []; }
 }
+// K-127: конструкторы обозначений теперь есть не только у ПЧ (ЦТ, дальше ПР и УВ),
+//  поэтому нужен ОБЩИЙ реестр проектов: код подгруппы + 4 цифры. Клиент фильтрует по префиксу.
+async function designProjectsPayload() {
+  try {
+    const rows = await ncListSoft('design_projects');
+    return rows.map((r) => ({ decNo: String(r['Децимальный номер'] || '').trim(), name: String(r['Наименование изделия'] || '').trim() }))
+      .filter((x) => /^[А-ЯA-Z]{2,4}\d{4}$/.test(x.decNo))
+      .sort((a, b) => a.decNo.localeCompare(b.decNo, 'ru'));
+  } catch { return []; }
+}
 function drawMassSet(designation, mass) {
   const key = drawKey(designation); if (!key) return;
   const m = drawMassRead();
@@ -4795,6 +4805,7 @@ async function buildKp(zp) {
     productGroups, productSubgroups, // реальные продуктовые группы/подгруппы (dict_product_groups/subgroups) для селектора позиции КП
     casingSizes, // справочник типоразмеров колонн (уникальные Ø + union толщин) для конструктора обозначения ПЧ
     pchMaterials: PCH_MATERIALS, pchProjects, // материалы уплотнения ПЧ + реестр проектов Ф.3–П.1 (ПЧnnnn) для выпадашек
+    designProjects: await designProjectsPayload(), // K-127: все проекты Ф.3–П.1 — для конструкторов ЦТ/ПР/УВ
     signer: kpSigner(totals.subtotal, c.KP_SIGN_THRESHOLD), threshold: c.KP_SIGN_THRESHOLD,
     vatRate: c.KP_VAT_RATE, defProfitPct: c.KP_PROFIT_PCT,
     gates: { kp: true, lovOk: lovPositive(reqRow), order: kpOrderGateOpen(kpRes, reqRow['Сумма выигранной части']) }, // K-33: ЛОВ не гейт (kp всегда true); lovOk — справочно; Г3 заказ по КП (DEF-29: частичный — только с суммой)

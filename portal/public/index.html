@@ -5838,6 +5838,61 @@
       if(wmin&&wmax)name+=`, т.с. ${c(wmin)} - ${c(wmax)} мм`;
       if(m)name+=(m.nameSuffix!=null?m.nameSuffix:' '+m.name);
       return {art,kd,kdWhy,name,code:kd||art}; }
+    // ── K-127: УНИВЕРСАЛЬНЫЙ конструктор обозначений по подгруппам (ЦТ, дальше ПР и УВ) ──
+    //  Панель ОДНА, поведение задаётся описанием группы: два числовых поля кода, таблица
+    //  типов, таблица комплектаций и правило сборки наименования. Копировать panel под
+    //  каждую группу нельзя — канон §4 «один паттерн на задачу».
+    //  ПЧ намеренно оставлен на своей панели: он сцеплен с расчётом себестоимости по
+    //  РИ.21 (массы, нормо-часы, пресс-формы) и проверен на 180/180 по перечню ТПП —
+    //  тащить это в общую панель значит рисковать проверенным результатом ради единообразия.
+    const DGRP_SPECS={
+      'ЦТ':{
+        title:'Конструктор обозначения ЦТ', ri:'РИ.1–Д.1.2–1.0, Приложение Г',
+        base:'Центратор',
+        f1:{key:'od',   label:'Ø колонны, мм', hint:'номинал', ph:'508'},
+        f2:{key:'bore', label:'Ø ствола, мм',  hint:'скважина / долото', ph:'558'},
+        types:[
+          {code:'ЦТ10',name:'Центратор пружинный сварной разъёмный'},
+          {code:'ЦТ11',name:'Центратор пружинный сварной неразъёмный'},
+          {code:'ЦТ20',name:'Центратор жёсткий прямой'},
+          {code:'ЦТ21',name:'Центратор жёсткий спиральный'},
+          {code:'ЦТ30',name:'Центратор цельный'},
+          {code:'ЦТ31',name:'Центратор цельный полужёсткий'},
+        ],
+        // последнее поле кода — комплектация; в наименование идёт хвостом
+        execs:[
+          {code:'00',label:'Просто центратор (базовое)',        suffix:''},
+          {code:'01',label:'В комплекте с 1 стопорным кольцом', suffix:', с 1 стопорным кольцом'},
+          {code:'02',label:'В комплекте с 2 стопорными кольцами',suffix:', с 2 стопорными кольцами'},
+        ],
+        // наименование: тип + «, Øколонны (под ствол Øствола)» + хвост комплектации
+        name:(t,v,e)=>`${t.name}, Ø${v.f1} (под ствол Ø${v.f2})${e.suffix}`,
+        note:'ЦТ00 не используется. Декады: 10–19 пружинные, 20–29 жёсткие, 30–39 цельные, 40+ резерв. Освоен ЦТ10 (проект ЦТ0001) — остальные коды вводятся по согласованию с ДпП.',
+      },
+    };
+    const dgrpOf=(p)=>DGRP_SPECS[String(p&&p.subCode||'').trim()]||null;
+    const dgrpState=(p)=>{ const g=dgrpOf(p); if(!g)return null;
+      if(!p.dgrp)p.dgrp={f1:'',f2:'',type:g.types[0].code,exec:'00',proj:'',asm:'00'};
+      return p.dgrp; };
+    // сборка: код по каталогу (= маркировка) и полное обозначение с проектом и сборочной единицей
+    function dgrpAssemble(p){
+      const g=dgrpOf(p), s=dgrpState(p); if(!g||!s)return null;
+      const num=(x)=>String(x==null?'':x).replace(',','.').trim();
+      const f1=num(s.f1), f2=num(s.f2);
+      const type=String(s.type||g.types[0].code).trim();
+      const exec=String(s.exec||'00').trim()||'00';
+      const proj=String(s.proj||'').trim();
+      const asm=String(s.asm||'').trim()||'00';
+      const art=`${f1||'Ø?'}-${f2||'Ø?'}-${type}-${exec}`;      // код по каталогу = маркировка
+      let full='', why='';
+      if(!proj) why='выберите № проекта';
+      else full=`ПБС.${art}.${proj}.${asm}`;
+      const t=g.types.find(x=>x.code===type)||g.types[0];
+      const e=g.execs.find(x=>x.code===exec)||g.execs[0];
+      const name=(f1&&f2)?g.name(t,{f1,f2},e):`${t.name}${e.suffix}`;
+      return {art,full,why,name,type:t,exec:e};
+    }
+
     // ── РАСЧЁТ СЕБЕСТОИМОСТИ И ЦЕНЫ ПЧ — строго по РИ.21–Л.2–1.0 (гибридный метод, §5) ──
     //    Прямые = материалы по нормам расхода + трудозатраты по нормо-часам; далее накладные,
     //    прибыль, доставка, НДС. Формулы — таблицы «Прямые затраты» и «Себестоимость и цена»
@@ -6079,6 +6134,42 @@
           </div>
         </div>`;
       };
+      // K-127: универсальная панель конструктора обозначения (ЦТ, далее ПР и УВ).
+      //  Рисуется по DGRP_SPECS — своего кода под каждую группу нет.
+      const dgrpPanel=(i,p)=>{ const g=dgrpOf(p); if(!g)return '';
+        const s=dgrpState(p), a=dgrpAssemble(p);
+        const fi='font:inherit;font-size:12px;color:#1f3a52;padding:6px 8px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff;width:100%';
+        const fl=(t,h)=>`<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;color:#8496a8;margin-bottom:2px">${esc(t)}${h?` <span style="font-weight:400;text-transform:none;color:#a9b6c4">· ${esc(h)}</span>`:''}</div>`;
+        const sub=String(p.subCode||'').trim();
+        const projs=((kpState&&kpState.d&&kpState.d.designProjects)||[]).filter(x=>x.decNo.startsWith(sub));
+        const projOpts=`<option value=""${s.proj?'':' selected'}>— № проекта —</option>`+
+          projs.map(pr=>`<option value="${esc(pr.decNo)}"${pr.decNo===s.proj?' selected':''}>${esc(pr.decNo)}${pr.name?' · '+esc(pr.name):''}</option>`).join('');
+        const typeOpts=g.types.map(t=>`<option value="${t.code}"${t.code===s.type?' selected':''}>${t.code} · ${esc(t.name)}</option>`).join('');
+        const execOpts=g.execs.map(e=>`<option value="${e.code}"${e.code===s.exec?' selected':''}>${e.code} · ${esc(e.label)}</option>`).join('');
+        return `<div id="dg-${i}" style="margin-top:9px;background:#f2f7fc;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:11px 13px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#1d4e89;margin-bottom:3px">${esc(g.title)} · ${esc(g.ri)}</div>
+          <div style="font-size:11px;color:var(--sl-500);margin-bottom:9px">Код по каталогу: <span style="font-family:var(--mono)">${esc(g.f1.ph)}-${esc(g.f2.ph)}-${esc(g.types[0].code)}-00</span> · Обозначение: <span style="font-family:var(--mono)">ПБС.код.${esc(sub)}nnnn.сборка</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
+            <div>${fl(g.f1.label,g.f1.hint)}<input data-dgi="${i}" data-dgf="f1" value="${esc(s.f1)}" placeholder="${esc(g.f1.ph)}" inputmode="decimal" style="${fi}"></div>
+            <div>${fl(g.f2.label,g.f2.hint)}<input data-dgi="${i}" data-dgf="f2" value="${esc(s.f2)}" placeholder="${esc(g.f2.ph)}" inputmode="decimal" style="${fi}"></div>
+            <div>${fl('Сборочная единица','в сборе 00 / деталь 001')}<input data-dgi="${i}" data-dgf="asm" value="${esc(s.asm)}" placeholder="00" style="${fi}"></div>
+            <div style="grid-column:1/3">${fl('Тип изделия','→ наименование')}<select data-dgi="${i}" data-dgf="type" style="${fi}">${typeOpts}</select></div>
+            <div>${fl('№ проекта','Ф.3–П.1')}<select data-dgi="${i}" data-dgf="proj" style="${fi}">${projOpts}</select></div>
+            <div style="grid-column:1/-1">${fl('Комплектация','последнее поле кода')}<select data-dgi="${i}" data-dgf="exec" style="${fi}">${execOpts}</select></div>
+          </div>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:7px 9px"><div style="font-size:10px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Код по каталогу (маркировка)</div><div id="dg-art-${i}" style="font-family:var(--mono);font-size:12px;color:var(--navy);font-weight:700;word-break:break-all">${esc(a.art)}</div></div>
+              <div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:7px 9px"><div style="font-size:10px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Обозначение (децимальный №)</div><div id="dg-full-${i}" style="font-family:var(--mono);font-size:12px;color:${a.full?'var(--navy)':'var(--sl-400)'};font-weight:700;word-break:break-all">${a.full?esc(a.full):'— '+esc(a.why)}</div></div>
+            </div>
+            <div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:7px 9px"><div style="font-size:10px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Наименование</div><div id="dg-name-${i}" style="font-size:12px;color:#1f3a52">${esc(a.name)}</div></div>
+          </div>
+          <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button type="button" data-dgapply="${i}" style="font:inherit;font-size:12px;font-weight:600;color:#fff;background:var(--navy);border:1px solid var(--navy);border-radius:var(--r-s);padding:7px 13px;cursor:pointer">Подставить наименование</button>
+            <button type="button" data-dgnote="${i}" style="font:inherit;font-size:12px;font-weight:600;color:var(--navy);background:#eef4fb;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:7px 13px;cursor:pointer">Обозначение → примечание</button>
+          </div>
+          ${g.note?`<div style="margin-top:8px;font-size:11px;color:var(--sl-500);line-height:1.5">${esc(g.note)}</div>`:''}
+        </div>`; };
       // ── Панель расчёта себестоимости/цены ПЧ по РИ.21–Л.2 (регуляторы: прибыль + логистика) ──
       const pchCostBanner=(i,p,c)=>{
         const R=pchRates(); const auto=(p.pchAuto!==false);
@@ -6175,7 +6266,9 @@
             <div style="margin-top:11px">${lb('Наименование / обозначение (в бланк)')}<input data-i="${i}" data-f="name" value="${esc(p.name)}" style="${II}"${dis}></div>
           </div>${nav(0,2,'Далее: типоразмер →')}</div>`;
         // step 2
-        const s2body=isPch?pchPanel(i,p).replace('display:none','display:block'):`<div class="card" style="padding:14px 16px;color:var(--sl-500);font-size:12px">Для этой продуктовой группы конструктор децим.№ ПЧ не применяется — укажите наименование/обозначение на шаге 1.</div>`;
+        const s2body=isPch?pchPanel(i,p).replace('display:none','display:block')
+          :(dgrpOf(p)?dgrpPanel(i,p)  // K-127: ЦТ (далее ПР, УВ) — универсальная панель по DGRP_SPECS
+          :`<div class="card" style="padding:14px 16px;color:var(--sl-500);font-size:12px">Для этой продуктовой группы конструктор обозначения пока не заведён — укажите наименование/обозначение на шаге 1.</div>`);
         const s2=`<div style="display:${step===2?'block':'none'}"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sl-500);margin-bottom:10px">Шаг 2 · Типоразмер и обозначение</div>${s2body}${nav(1,3,'Далее: количество и цена →')}</div>`;
         // step 3 — цена
         let s3inner='';
@@ -6272,6 +6365,27 @@
           // тип/материал влияют на себестоимость (цена резины по коду) — пересчитать статьи ПЧ на месте
           if(f==='type'||f==='matl') pchRefreshRow(i); };
           el.addEventListener('input',h); el.addEventListener('change',h); });
+        // K-127: обвязка универсальной панели (ЦТ, далее ПР/УВ) — поля, превью и две кнопки
+        pos.querySelectorAll('[data-dgf]').forEach(el=>{ const h=()=>{
+          const i=+el.dataset.dgi, f=el.dataset.dgf, p=kpState.rows[i];
+          const st=dgrpState(p); if(!st)return; st[f]=el.value;
+          const a=dgrpAssemble(p); if(!a)return;
+          const aE=document.getElementById('dg-art-'+i), fE=document.getElementById('dg-full-'+i), nE=document.getElementById('dg-name-'+i);
+          if(aE)aE.textContent=a.art;
+          if(fE){ fE.textContent=a.full||('— '+a.why); fE.style.color=a.full?'var(--navy)':'var(--sl-400)'; }
+          if(nE)nE.textContent=a.name;
+          p.name=a.name; const nm=document.querySelector('[data-pc="'+i+'"] input[data-f="name"]'); if(nm)nm.value=p.name; };
+          el.addEventListener('input',h); el.addEventListener('change',h); });
+        pos.querySelectorAll('[data-dgapply]').forEach(bt=>bt.onclick=()=>{ const i=+bt.dataset.dgapply,p=kpState.rows[i];
+          const a=dgrpAssemble(p); if(!a)return; p.name=a.name;
+          const nm=document.querySelector('[data-pc="'+i+'"] input[data-f="name"]'); if(nm)nm.value=p.name;
+          toast('Наименование подставлено в позицию','ok'); });
+        pos.querySelectorAll('[data-dgnote]').forEach(bt=>bt.onclick=()=>{ const i=+bt.dataset.dgnote,p=kpState.rows[i];
+          const a=dgrpAssemble(p); if(!a)return;
+          const line=[`Код: ${a.art}`,a.full?`Обозначение: ${a.full}`:''].filter(Boolean).join(' · ');
+          p.note=[String(p.note||'').trim(),line].filter(Boolean).join('\n');
+          const nt=document.querySelector('[data-pc="'+i+'"] [data-f="note"]'); if(nt)nt.value=p.note;
+          toast(a.full?'Обозначение добавлено в примечание':'Код добавлен (проект не выбран)',a.full?'ok':'warn'); });
         // K-126: обе кнопки панели ПЧ были НАРИСОВАНЫ, но никогда не подключены — нажатие
         //  не делало ничего (обработчиков data-pchapply / data-pchnote в коде не существовало).
         pos.querySelectorAll('[data-pchapply]').forEach(bt=>bt.onclick=()=>{ const i=+bt.dataset.pchapply,p=kpState.rows[i];

@@ -1126,6 +1126,47 @@
     .ztabs button:hover{color:var(--sl-800);}
     .ztabs button.on{color:var(--acc);border-bottom-color:var(--acc);font-weight:700;}
 
+
+    /* ── K-119 (решение владельца 18.08): холст страницы заметно светлее.
+       Токен --page НЕ трогаем: он служит подложкой мелких элементов НА БЕЛОМ
+       (шапки групп таблиц, счётчики, hover сегментов) — осветлив его, погасили бы их.
+       Меняем только фон самой страницы, отдельным токеном. */
+    :root{ --page-canvas:var(--sl-50); }
+    body{background:var(--page-canvas);}
+    .loginscreen{background:var(--page-canvas);}
+    /* колонка канбана лежала на .7-прозрачном --sl-100 и на светлом холсте сливалась —
+       делаем заливку плотной, чтобы разделение колонок осталось читаемым */
+    .kcol{background:var(--sl-100);}
+
+
+    /* ── K-120: управляющая панель экрана (референс — повторяющийся приём на КАЖДОМ разделе).
+       Анатомия: слева иконка в квадрате 32×32 + полное НОРМАТИВНОЕ название капсом
+       + чип с кодом формы/процедуры ИСМ (канон §7: код — мелким чипом, не в заголовке)
+       + строка-подзаголовок; справа — слот действий (#scr-act), заполняется разделом.
+       Иконка берётся из ICONS по имени раздела — тот же значок, что в сайдбаре.
+       В референсе квадрат красится в свой хью на раздел; у нас канон §2 запрещает
+       заводить оттенки под раздел — квадрат один, фирменный navy. */
+    .ui-scr{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;
+      background:#fff;border:1px solid var(--sl-200);border-radius:var(--r-m);
+      padding:10px 14px;margin-bottom:var(--gap);box-shadow:var(--shadow);}
+    .ui-scr-l{display:flex;align-items:center;gap:11px;min-width:0;}
+    .ui-scr-ic{width:32px;height:32px;flex:0 0 auto;border-radius:var(--r-s);
+      background:var(--bl-50);border:1px solid var(--sl-200);color:var(--acc);
+      display:flex;align-items:center;justify-content:center;}
+    .ui-scr-ic .i{display:flex;align-items:center;justify-content:center;}
+    .ui-scr-ic svg{width:17px;height:17px;}
+    .ui-scr-tx{min-width:0;}
+    .ui-scr-h{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;}
+    .ui-scr-h b{font-size:var(--fs-12);font-weight:700;color:var(--sl-900);
+      text-transform:uppercase;letter-spacing:-.01em;}
+    .ui-scr-code{font-family:var(--mono);font-size:var(--fs-10);font-weight:600;color:var(--sl-500);
+      background:var(--sl-100);border:1px solid var(--sl-200);border-radius:var(--r-s);
+      padding:1px 6px;white-space:nowrap;}
+    .ui-scr-s{font-size:var(--fs-11);color:var(--sl-500);margin-top:2px;}
+    .ui-scr-a{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;}
+    .ui-scr-a:empty{display:none;}
+    @media(max-width:700px){ .ui-scr-s{display:none;} }
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){
@@ -1202,6 +1243,7 @@
       </div>
       <div class="content">
         <div id="warn"></div>
+        <div id="scrhead"></div>
         <div id="view"></div>
       </div>
     </main>
@@ -1937,6 +1979,51 @@
       {code:'Ф.1–З.1', name:'Реестр запросов и КП', type:'Форма', ver:'1.0', status:'Проект', approvedDate:'', approvedBy:''},
     ];
     let routePrevView=null; // последний отрисованный раздел — для сброса прокрутки при СМЕНЕ раздела
+    // ── K-120: управляющая панель экрана. Полное НОРМАТИВНОЕ название раздела
+    //    (в шапке #h1 остаётся короткое навигационное — так же разведено в референсе),
+    //    код формы/процедуры ИСМ отдельным чипом, подзаголовок — что раздел делает.
+    //    Коды сверены с реестром форм и процедур ПБС; пустой код — чип не выводится.
+    const SCREEN_META={
+      board:{t:'Оперативный контур производства',c:'ДП–Д.1',s:'Заказы в работе, загрузка участков, отклонения от плана'},
+      station:{t:'Рабочее место оператора участка',c:'Ф.14–Д.1',s:'Текущая задача · отметка выработки · приёмка операции'},
+      orders:{t:'Производственные заказы (ПЗ)',c:'Ф.1–Д.1',s:'Спецификация · маршрут изготовления · сроки и статус исполнения'},
+      routes:{t:'Маршрутные карты изготовления',c:'Ф.13–Д.1',s:'Цепочка операций · участки · нормы времени'},
+      setup:{t:'Карты наладки оборудования',c:'Ф.13–Д.1',s:'Инструмент · режимы резания · оснастка под операцию'},
+      control:{t:'Контроль качества продукции',c:'Ф.4–Д.1',s:'Входной, операционный и приёмочный контроль · протоколы и акты'},
+      equipment:{t:'Участки и оборудование',c:'ДП–О.3',s:'Реестр участков и станочного парка · инвентарные номера · обслуживание'},
+      tools:{t:'Инструмент и оснастка',c:'ДП–О.3.1',s:'Выдача и возврат · места хранения · журнал движения'},
+      metal:{t:'Учёт остатков металла',c:'ДП–СХ',s:'Приход · резка и раскрой · остатки по маркам и размерам'},
+      counterparties:{t:'Контрагенты: заказчики и поставщики',c:'ДП–З.1',s:'Реквизиты · контактные лица · договоры и спецификации'},
+      sales:{t:'Управление заказами и отношениями с заказчиком',c:'ДП–З.1',s:'Запросы продаж (ЗП) · оценка выполнимости · КП · заказы клиента'},
+      lov:{t:'Лист оценки выполнимости (ЛОВ)',c:'Ф.2–З.1',s:'Техническая и ресурсная проверка запроса перед выпуском КП'},
+      purchase:{t:'Управление закупками и оценка поставщиков',c:'ДП–К',s:'Заявки на закупку (ЗнЗ) · входной контроль · счета и приёмка'},
+      catalog:{t:'Обозначение и наименование изделий продукции',c:'РИ.1–Д.1.2',s:'Канон-номенклатура · группы и подгруппы · децимальные номера'},
+      warehouse:{t:'Управление складом и запасами',c:'ДП–СХ',s:'Номенклатура склада · журнал движения · выдача в производство'},
+      design:{t:'Проектирование, разработка и актуализация продукции',c:'ДП–П.1',s:'Конструкторская и технологическая документация · ревизии · извещения об изменении'},
+      prodgroups:{t:'Справочники производства: продуктовые группы',c:'Ф.1–П',s:'Группы и подгруппы продукции для обозначения изделий'},
+      logistics:{t:'Заявки на перевозку (ЗПер)',c:'ДП–Д.1',s:'Упаковочные листы · грузовые места · передача перевозчику'},
+      nc:{t:'Управление несоответствиями и корректирующие действия',c:'ДП–У.2',s:'Регистрация НС · анализ коренных причин · CAPA и проверка результативности'},
+      eco:{t:'Экологический менеджмент',c:'ISO 14001',s:'Значимые экологические аспекты · отходы · мониторинг · аварийные ситуации'},
+      ot:{t:'Менеджмент охраны труда',c:'ISO 45001',s:'Опасности и риски · СИЗ и СОУТ · расследование инцидентов'},
+      docs:{t:'Интегрированная система менеджмента (ИСМ / СМК)',c:'Ф.2–Л.1',s:'Реестр действующих процедур, инструкций и форм · ISO 9001 · API Spec Q1'},
+      settings:{t:'Настройки портала',c:'',s:'Параметры разделов · интеграции · доступ и роли'},
+    };
+    function renderScreenHead(v){
+      const host=document.getElementById('scrhead'); if(!host)return;
+      const m=SCREEN_META[v];
+      if(!m){ host.innerHTML=''; return; }
+      host.innerHTML=`<div class="ui-scr">
+        <div class="ui-scr-l">
+          <span class="ui-scr-ic"><span class="i" data-ic="${v}"></span></span>
+          <div class="ui-scr-tx">
+            <div class="ui-scr-h"><b>${esc(m.t)}</b>${m.c?`<span class="ui-scr-code">${esc(m.c)}</span>`:''}</div>
+            <div class="ui-scr-s">${esc(m.s)}</div>
+          </div>
+        </div>
+        <div class="ui-scr-a" id="scr-act"></div>
+      </div>`;
+      injectIcons();
+    }
     function route(){
       const raw=(location.hash||'#board').slice(1);
       const slash=raw.indexOf('/'); let v=slash<0?raw:raw.slice(0,slash); const arg=slash<0?'':decodeURIComponent(raw.slice(slash+1));
@@ -1948,6 +2035,7 @@
         if(target!==v){ location.hash='#'+target; return; }
       }
       document.getElementById('h1').textContent=TITLES[v];
+      renderScreenHead(v); // K-120: управляющая панель экрана
       document.title=TITLES[v]+' · ИСМ ПБС';
       document.querySelectorAll('nav a[data-view]').forEach(a=>a.classList.toggle('active',a.dataset.view===v));
       const host=document.getElementById('view');

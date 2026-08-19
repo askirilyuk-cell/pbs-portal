@@ -4267,6 +4267,29 @@ function eventsWarnOnce(e) {
 }
 // ФИО автора события: сессия портала → X-Actor сервисного агента → пусто (система)
 const eventWho = (req, svc) => (req && req.session && req.session.fio) || (svc && svc.actor) || '';
+// K-124: «Герасимов Артем Сергеевич» → «Герасимов А.С.» для подписи в печатных формах.
+//  Принимает либо три части, либо одну строку «Фамилия Имя [Отчество]».
+function fioInitials(last, first, middle) {
+  if (first == null && middle == null) {
+    const parts = String(last || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '';
+    [last, first, middle] = parts;
+  }
+  const L = String(last || '').trim();
+  if (!L) return '';
+  const i = (x) => { const v = String(x || '').trim(); return v ? v[0].toUpperCase() + '.' : ''; };
+  const ini = i(first) + i(middle);
+  return ini ? `${L} ${ini}` : L;
+}
+// короткая подпись автора действия: приоритет — заранее посчитанные инициалы сессии
+// У сессий, открытых ДО этой правки, fioShort нет — считаем инициалы на лету из «Фамилия Имя»
+// (отчество в старой сессии не сохранено, выйдет «Герасимов А.»; после пере-входа — «Герасимов А.С.»).
+const eventWhoShort = (req, svc) => {
+  const ss = req && req.session;
+  if (ss && ss.fioShort) return ss.fioShort;
+  if (ss && ss.fio) return fioInitials(ss.fio) || ss.fio;
+  return (svc && svc.actor) || '';
+};
 // logEvent({type, obj, objNum, from, to, who, details, role}) — мягкий, не бросает, не ждёт.
 function logEvent({ type, obj, objNum, from, to, who, details, role } = {}) {
   try {
@@ -5652,7 +5675,7 @@ async function deleteOrder(body, who) {
   logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who, details: `заказ удалён (позиций: ${posIds.length})` });
   return { ok: true, numPz, positionsDeleted: posIds.length };
 }
-async function updateOrderStatus(body, who) {
+async function updateOrderStatus(body, who, whoShort) {
   const num = String(body.num || '').trim();
   if (!num) throw new Error('Не указан № ПЗ (num).');
   const to = String(body.to || '').trim();
@@ -5679,7 +5702,17 @@ async function updateOrderStatus(body, who) {
   const from = String(order['Статус'] || '').trim() || 'Размещён';
   if (to === from) return { ok: true, num, from, to, unchanged: true, warnings: [] };
   if (!pzCanGo(from, to)) throw new Error(pzTransitionError(from, to));
-  await ncUpdate('orders', order.Id ?? order.id, { 'Статус': to });
+  // K-124: перевод в «В работе» = факт приёмки заказа производством. Колонки под подпись
+  //  в таблице «Заказы» существовали с самого начала и были ПУСТЫ у всех ПЗ — их никто не писал,
+  //  поэтому в бланке Ф.1–П.2 строка «Принял в работу» всегда печаталась пустой, хотя шаблон
+  //  и рендерер её поддерживают. Заполняем только при первом переходе: повторный возврат
+  //  «Выполнен → В работе» (доработка) исходную подпись не перетирает.
+  const stPatch = { 'Статус': to };
+  if (to === 'В работе' && !String(order['Принял (ДпП)'] || '').trim()) {
+    stPatch['Принял (ДпП)'] = whoShort || who || '';
+    stPatch['Дата принятия'] = new Date().toISOString().slice(0, 10);
+  }
+  await ncUpdate('orders', order.Id ?? order.id, stPatch);
   // мягкие гейты — best-effort: сбой чтения задач/актов не должен ронять сам переход
   let warnings = [];
   try {
@@ -5689,8 +5722,31 @@ async function updateOrderStatus(body, who) {
       acceptanceCount: acc.filter((r) => String(r['Заказ №'] || '').includes(num)).length,
     });
   } catch (e) { console.warn('Рельс потока: гейты не посчитаны:', e.message); }
-  logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: num, from, to, who, details: 'ручной перевод по рельсу потока' });
-  return { ok: true, num, from, to, warnings };
+  logEvent({ type: 'статус изменён', obj: 'ПЗ', objNum: num, from, to, who,
+    details: stPatch['Принял (ДпП)'] ? `принял в работу: ${stPatch['Принял (ДпП)']}` : 'ручной перевод по рельсу потока' });
+  // уведомление в рабочий чат заказа — best-effort: сбой чата не роняет сам перевод статуса
+  notifyOrderChatStatus({ num, from, to, whoShort: stPatch['Принял (ДпП)'] || whoShort || who, date: stPatch['Дата принятия'] })
+    .catch((e) => console.warn('Чат заказа: уведомление о статусе не ушло:', e.message));
+  return { ok: true, num, from, to, warnings, acceptedBy: stPatch['Принял (ДпП)'] || '', acceptedDate: stPatch['Дата принятия'] || '' };
+}
+// K-124: сообщение в рабочий чат заказа о смене статуса. Для «В работе» — с подписью и датой,
+//  чтобы факт приёмки был виден там же, где идёт переписка по заказу.
+async function notifyOrderChatStatus({ num, from, to, whoShort, date }) {
+  const c = cfg();
+  if (!c.BITRIX) return { ok: false, skipped: true, reason: 'webhook not configured' };
+  const oc = orderChatFor(num);
+  if (!oc) return { ok: false, skipped: true, reason: 'order chat not configured' };
+  const portal = String(c.PORTAL_BASE || '').replace(/\/+$/, '');
+  const L = to === 'В работе'
+    ? [`[B]▶ Заказ ${num} принят в работу[/B]`,
+       `Принял: ${whoShort || '—'}${date ? ` · ${fmtDateRu(date)}` : ''}`]
+    : [`[B]Заказ ${num}: ${from} → ${to}[/B]`, whoShort ? `Перевёл: ${whoShort}` : ''];
+  if (portal) {
+    L.push(`📁 Заказ в портале: ${portal}/#orders/${encodeURIComponent(num)}`);
+    L.push(`🖨 Бланк Ф.1–П.2: ${portal}/api/print/pz/${encodeURIComponent(num)}`);
+  }
+  await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: L.filter(Boolean).join('\n') });
+  return { ok: true, chat: oc.chat };
 }
 
 // --- запись задачи с рабочего места: whitelist полей + коэрция типов --------
@@ -9176,10 +9232,13 @@ async function handleAuth(req, res, p, url) {
       console.log(`[auth] login OK: id=${user.ID} ${[user.LAST_NAME, user.NAME].filter(Boolean).join(' ')} depts=[${[].concat(user.UF_DEPARTMENT || []).join(',')}] roles=[${resolveRoles(user).join(',')}]`);
       const sid = crypto.randomBytes(24).toString('hex');
       const fio = [user.LAST_NAME, user.NAME].filter(Boolean).join(' ').trim() || ('Пользователь ' + user.ID);
+      // K-124: подпись в бланках ИСМ — «Фамилия И.О.». Отчество есть только здесь,
+      //        в сессии его раньше не сохраняли, поэтому инициалы было не из чего собрать.
+      const fioShort = fioInitials(user.LAST_NAME, user.NAME, user.SECOND_NAME) || fio;
       const portalRoles = resolvePortalRoles(user); // мультироль портального RBAC
       const portalRole = portalRoles[0] || 'guest'; // первичная (для отображения)
       sessions[sid] = {
-        userId: String(user.ID), fio, position: user.WORK_POSITION || '', email: user.EMAIL || '',
+        userId: String(user.ID), fio, fioShort, position: user.WORK_POSITION || '', email: user.EMAIL || '',
         depts: [].concat(user.UF_DEPARTMENT || []).map(String),
         roles: resolveRoles(user),          // многоролевая модель ЛОВ (не трогаем)
         role: portalRole,                    // K-49: первичная портальная роль
@@ -9637,7 +9696,7 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/orders/status' && req.method === 'POST') {
-      try { return sendJson(res, 200, await updateOrderStatus(await readBody(req), eventWho(req, svc))); }
+      try { return sendJson(res, 200, await updateOrderStatus(await readBody(req), eventWho(req, svc), eventWhoShort(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // K-102: привязка ПЗ ↔ чат Bitrix (оверлей .data/order-chats.json, БЕЗ миграции NocoDB).

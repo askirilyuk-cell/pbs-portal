@@ -5763,8 +5763,37 @@
       {code:'ПЧ03',name:'Пакер чашечного типа, неармированный, без уплотнительного кольца'},
       {code:'ПЧ04',name:'Пакер чашечного типа, специальное исполнение 1'},
     ];
-    // материалы уплотнения ПЧ (фолбэк, если payload без pchMaterials): базовый 00
-    const PCH_MATERIALS_FB=[{code:'00',name:'Смесь резиновая 7-7130П'}];
+    // K-126: материалы уплотнения ПЧ по УТВЕРЖДЁННОМУ перечню наименований и артикулов (ТПП).
+    //  Было ОДНО исполнение с чужим названием («Смесь резиновая 7-7130П») — из-за этого
+    //  конструктор физически не мог собрать 120 позиций из 180. nameSuffix — хвост наименования
+    //  ровно как в перечне: у базового 00 точки перед маркой нет, у 01/02 есть (так в документе).
+    const PCH_MATERIALS_FB=[
+      {code:'00',name:'NBR75 (базовый)',   nameSuffix:' NBR75'},
+      {code:'01',name:'NBR85 (NB85901)',   nameSuffix:'. NBR85'},
+      {code:'02',name:'HNBR80 (HN80120)',  nameSuffix:'. HNBR80'},
+    ];
+    // K-126: утверждённые типоразмеры ПЧ (ПБС.ПЧ0001–ПБС.ПЧ0011, 15 исполнений).
+    //  Нужен для номера ЧЕРТЕЖА: он зависит от того, какой это по счёту диапазон стенки
+    //  у проекта (ri) — из Ø и стенки этого не вывести. Правило проверено на всех 180
+    //  строках перечня: совпадение 180/180.
+    const PCH_CATALOG=[
+      {proj:'ПЧ0001',od:'168.3',wmin:'7.32',wmax:'8.94',ri:0},
+      {proj:'ПЧ0002',od:'114.3',wmin:'6.35',wmax:'7.37',ri:0},
+      {proj:'ПЧ0003',od:'219.1',wmin:'7.72',wmax:'10.16',ri:0},
+      {proj:'ПЧ0003',od:'219.1',wmin:'11.43',wmax:'14.15',ri:1},
+      {proj:'ПЧ0004',od:'101.6',wmin:'5.74',wmax:'6.65',ri:0},
+      {proj:'ПЧ0005',od:'139.7',wmin:'6.98',wmax:'7.72',ri:0},
+      {proj:'ПЧ0006',od:'273.1',wmin:'8.89',wmax:'12.57',ri:0},
+      {proj:'ПЧ0006',od:'273.1',wmin:'12.57',wmax:'13.84',ri:1},
+      {proj:'ПЧ0007',od:'244.5',wmin:'7.92',wmax:'8.94',ri:0},
+      {proj:'ПЧ0007',od:'244.5',wmin:'10.03',wmax:'11.99',ri:1},
+      {proj:'ПЧ0008',od:'177.8',wmin:'9.19',wmax:'10.36',ri:0},
+      {proj:'ПЧ0009',od:'323.9',wmin:'9.50',wmax:'11.00',ri:0},
+      {proj:'ПЧ0009',od:'323.9',wmin:'11.00',wmax:'12.40',ri:1},
+      {proj:'ПЧ0010',od:'339.7',wmin:'9.65',wmax:'13.06',ri:0},
+      {proj:'ПЧ0011',od:'193.7',wmin:'9.52',wmax:'10.92',ri:0},
+    ];
+    const pchCatFind=(proj,wmin,wmax)=>PCH_CATALOG.find(c=>c.proj===proj&&c.wmin===wmin&&c.wmax===wmax)||null;
     const pchNum=(s)=>String(s==null?'':s).replace(',', '.').trim();
     // канонический Ø (номинал API/ГОСТ) в строку с 1 знаком: 168.3→«168.3», 127→«127.0»
     const pchFmtCanon=(n)=>{const x=Number(n);return Number.isFinite(x)?x.toFixed(1):String(n==null?'':n);};
@@ -5781,15 +5810,34 @@
     // best-effort разбор готового кода ПБС.… для префилла (при повторном открытии позиции)
     function pchParse(str){ const m=String(str||'').match(/ПБС\.([\d.,]+)-([\d.,]+)-([\d.,]+)-(ПЧ\d{2})-(\S{2})(?:\.(ПЧ\d{4}|БП))?(?:\.(\d{2,3}))?/);
       if(!m)return null; return {dia:m[1],wmin:m[2],wmax:m[3],type:m[4],matl:m[5],proj:m[6]||'',asm:m[7]||'00'}; }
+    // K-126: по утверждённому перечню АРТИКУЛ и ЧЕРТЁЖ — два РАЗНЫХ номера, а не одна строка.
+    //   артикул (маркировка на детали): 219.1-7.72-10.16-ПЧ00-00   ← БЕЗ префикса ПБС.
+    //   чертёж  (обозначение КД)      : ПБС.ПЧ0003.01[-01|-02]
+    //   NN чертежа = (индекс диапазона стенки)*4 + (номер типа) + 1 → диап.1: 01–04, диап.2: 05–08.
+    //   Прежний код клеил всё в одну строку «ПБС.Ø-стенка-тип-матл.проект.сборка», которая
+    //   не совпадала НИ с артикулом, НИ с чертежом.
     function pchAssemble(p){ const s=pchState(p);
       const dia=pchNum(s.dia),wmin=pchNum(s.wmin),wmax=pchNum(s.wmax);
       const type=String(s.type||'ПЧ00').trim(); const matl=String(s.matl||'00').trim()||'00';
       const proj=String(s.proj||'').trim(); const asm=String(s.asm||'').trim();
-      const catalog=`${dia||'⌀?'}-${wmin||'min?'}-${wmax||'max?'}-${type}-${matl}`;
-      let code=`ПБС.${catalog}`+(proj?`.${proj}`:`.ПЧ____`)+(asm?`.${asm}`:'');
-      const t=PCH_TYPES.find(x=>x.code===type); const diaC=dia?String(dia).replace('.', ','):'';
-      let name=t?t.name:'Пакер чашечного типа'; if(diaC)name+=`, Ø${diaC}`;
-      return {code,name}; }
+      const art=`${dia||'⌀?'}-${wmin||'min?'}-${wmax||'max?'}-${type}-${matl}`;
+      // чертёж выдаём ТОЛЬКО для сочетания, которое есть в утверждённом перечне —
+      // иначе портал сочинил бы номер несуществующей КД
+      const cat=pchCatFind(proj,wmin,wmax);
+      const ti=PCH_TYPES.findIndex(x=>x.code===type);
+      let kd='', kdWhy='';
+      if(!proj||proj==='БП') kdWhy='выберите № проекта';
+      else if(!cat) kdWhy='сочетание Ø/стенки нет в утверждённом перечне';
+      else if(ti<0||ti>3) kdWhy=`тип ${type} в перечне отсутствует`;
+      else { kd=`ПБС.${proj}.${String(cat.ri*4+ti+1).padStart(2,'0')}`+(matl!=='00'?`-${matl}`:'');
+             if(asm&&asm!=='00')kd+=`.${asm}`; }
+      const t=PCH_TYPES.find(x=>x.code===type), m=pchMaterials().find(x=>x.code===matl);
+      const c=(v)=>String(v||'').replace('.',',');
+      let name=t?t.name:'Пакер чашечного типа';
+      if(dia)name+=` для обсадной колонны Ø${c(dia)} мм`;
+      if(wmin&&wmax)name+=`, т.с. ${c(wmin)} - ${c(wmax)} мм`;
+      if(m)name+=(m.nameSuffix!=null?m.nameSuffix:' '+m.name);
+      return {art,kd,kdWhy,name,code:kd||art}; }
     // ── РАСЧЁТ СЕБЕСТОИМОСТИ И ЦЕНЫ ПЧ — строго по РИ.21–Л.2–1.0 (гибридный метод, §5) ──
     //    Прямые = материалы по нормам расхода + трудозатраты по нормо-часам; далее накладные,
     //    прибыль, доставка, НДС. Формулы — таблицы «Прямые затраты» и «Себестоимость и цена»
@@ -6007,7 +6055,7 @@
         const projOpts=`<option value=""${s.proj?'':' selected'}>— № проекта —</option>`+pchProjects().map(pr=>`<option value="${esc(pr.decNo)}"${pr.decNo===s.proj?' selected':''}>${esc(pr.decNo)}${pr.name?' · '+esc(pr.name):''}</option>`).join('')+`<option value="БП"${s.proj==='БП'?' selected':''}>БП · без проекта</option>`;
         return `<div id="pch-${i}" style="display:none;margin-top:9px;background:#f2f7fc;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:11px 13px">
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#1d4e89;margin-bottom:3px">Конструктор обозначения ПЧ · РИ.1–Д.1.2–1.0, Приложение Б</div>
-          <div style="font-size:11px;color:var(--sl-500);margin-bottom:9px">Децим.№: <span style="font-family:var(--mono)">ПБС.Ø-стенка&nbsp;min-стенка&nbsp;max-ПЧxx-матл.ПЧnnnn.сборка</span> (Ø — канонический номинал, десятич. в коде — точка)</div>
+          <div style="font-size:11px;color:var(--sl-500);margin-bottom:9px">Артикул: <span style="font-family:var(--mono)">Ø-стенка&nbsp;min-стенка&nbsp;max-ПЧxx-матл</span> · Чертёж: <span style="font-family:var(--mono)">ПБС.ПЧnnnn.NN[-матл]</span> <span style="color:var(--sl-400)">(по утверждённому перечню ТПП; десятич. в коде — точка)</span></div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
             <div>${fl('Ø колонны, мм','справочник')}<select data-pchi="${i}" data-pchdia="${i}" style="${fi}">${diaOpts}</select></div>
             <div>${fl('Стенка min, мм','по Ø')}<select data-pchi="${i}" data-pchf="wmin" id="pch-wmin-${i}" style="${fi}"${wDis}>${wminOpts}</select></div>
@@ -6018,12 +6066,15 @@
             <div>${fl('Сборка / деталь','00–99 / 001–999')}<input data-pchi="${i}" data-pchf="asm" value="${esc(s.asm)}" placeholder="00" style="${fi}"></div>
           </div>
           <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
-            <div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:7px 9px"><div style="font-size:10px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Обозначение (децимальный №)</div><div id="pch-code-${i}" style="font-family:var(--mono);font-size:12px;color:var(--navy);font-weight:700;word-break:break-all">${esc(a.code)}</div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:7px 9px"><div style="font-size:10px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Артикул (маркировка)</div><div id="pch-art-${i}" style="font-family:var(--mono);font-size:12px;color:var(--navy);font-weight:700;word-break:break-all">${esc(a.art)}</div></div>
+              <div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:7px 9px"><div style="font-size:10px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Чертёж (обозначение КД)</div><div id="pch-kd-${i}" style="font-family:var(--mono);font-size:12px;color:${a.kd?'var(--navy)':'var(--sl-400)'};font-weight:700;word-break:break-all">${a.kd?esc(a.kd):'— '+esc(a.kdWhy||'')}</div></div>
+            </div>
             <div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:7px 9px"><div style="font-size:10px;color:#8496a8;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Наименование</div><div id="pch-name-${i}" style="font-size:12px;color:#1f3a52">${esc(a.name)}</div></div>
           </div>
           <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <button type="button" data-pchapply="${i}" style="font:inherit;font-size:12px;font-weight:600;color:#fff;background:var(--navy);border:1px solid var(--navy);border-radius:var(--r-s);padding:7px 13px;cursor:pointer">Подставить наименование</button>
-            <button type="button" data-pchnote="${i}" style="font:inherit;font-size:12px;font-weight:600;color:var(--navy);background:#eef4fb;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:7px 13px;cursor:pointer">Обозначение → примечание</button>
+            <button type="button" data-pchnote="${i}" style="font:inherit;font-size:12px;font-weight:600;color:var(--navy);background:#eef4fb;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:7px 13px;cursor:pointer">Артикул и чертёж → примечание</button>
             <span style="font-size:11px;color:#7d93ab">Ø/стенки — из справочника «Типоразмеры колонн» (Настройки→Справочники); № проекта — Ф.3–П.1 или «БП»</span>
           </div>
         </div>`;
@@ -6211,12 +6262,28 @@
         // ── Конструктор обозначения ПЧ: тумблер панели + live-превью + подстановка ──
         pos.querySelectorAll('[data-pch]').forEach(bt=>bt.onclick=()=>{ const el=document.getElementById('pch-'+bt.dataset.pch); if(el)el.style.display=(el.style.display==='none'?'block':'none'); });
         pos.querySelectorAll('[data-pchf]').forEach(el=>{ const h=()=>{ const i=+el.dataset.pchi,f=el.dataset.pchf,p=kpState.rows[i]; pchState(p)[f]=el.value; const a=pchAssemble(p);
-          const cE=document.getElementById('pch-code-'+i),nE=document.getElementById('pch-name-'+i); if(cE)cE.textContent=a.code; if(nE)nE.textContent=a.name;
-          // живой децим.№ сразу в НАИМЕНОВАНИЕ (не в примечание) — автоподстановка
-          p.name=a.name+' · '+a.code; const nm=document.querySelector('[data-pc="'+i+'"] input[data-f="name"]'); if(nm)nm.value=p.name;
+          const aE=document.getElementById('pch-art-'+i),kE=document.getElementById('pch-kd-'+i),nE=document.getElementById('pch-name-'+i);
+          if(aE)aE.textContent=a.art;
+          if(kE){ kE.textContent=a.kd||('— '+(a.kdWhy||'')); kE.style.color=a.kd?'var(--navy)':'var(--sl-400)'; }
+          if(nE)nE.textContent=a.name;
+          // K-126: в НАИМЕНОВАНИЕ позиции идёт только наименование по перечню.
+          // Артикул и чертёж — отдельные поля, в имя их больше не подклеиваем.
+          p.name=a.name; const nm=document.querySelector('[data-pc="'+i+'"] input[data-f="name"]'); if(nm)nm.value=p.name;
           // тип/материал влияют на себестоимость (цена резины по коду) — пересчитать статьи ПЧ на месте
           if(f==='type'||f==='matl') pchRefreshRow(i); };
           el.addEventListener('input',h); el.addEventListener('change',h); });
+        // K-126: обе кнопки панели ПЧ были НАРИСОВАНЫ, но никогда не подключены — нажатие
+        //  не делало ничего (обработчиков data-pchapply / data-pchnote в коде не существовало).
+        pos.querySelectorAll('[data-pchapply]').forEach(bt=>bt.onclick=()=>{ const i=+bt.dataset.pchapply,p=kpState.rows[i];
+          const a=pchAssemble(p); p.name=a.name;
+          const nm=document.querySelector('[data-pc="'+i+'"] input[data-f="name"]'); if(nm)nm.value=p.name;
+          toast('Наименование подставлено в позицию','ok'); });
+        pos.querySelectorAll('[data-pchnote]').forEach(bt=>bt.onclick=()=>{ const i=+bt.dataset.pchnote,p=kpState.rows[i];
+          const a=pchAssemble(p);
+          const line=[`Артикул: ${a.art}`,a.kd?`Чертёж: ${a.kd}`:''].filter(Boolean).join(' · ');
+          p.note=[String(p.note||'').trim(),line].filter(Boolean).join('\n');
+          const nt=document.querySelector('[data-pc="'+i+'"] [data-f="note"]'); if(nt)nt.value=p.note;
+          toast(a.kd?'Артикул и чертёж добавлены в примечание':'Артикул добавлен (чертёж не определён)',a.kd?'ok':'warn'); });
         // Ø колонны: при смене — пересобрать списки стенок (фильтр по Ø), сбросить неподходящий выбор, обновить превью
         pos.querySelectorAll('[data-pchdia]').forEach(el=>{ el.addEventListener('change',()=>{
           const i=+el.dataset.pchi,p=kpState.rows[i],s=pchState(p); s.dia=el.value;
@@ -6224,7 +6291,7 @@
           const walls=pchWallList(s.dia),wv=walls.map(String);
           if(!wv.includes(pchNum(s.wmin)))s.wmin=walls.length?String(walls[0]):''; // min по умолчанию — наименьшая стенка
           if(!wv.includes(pchNum(s.wmax)))s.wmax=walls.length?String(walls[0]):''; // max — тоже наименьшая (выбирается вручную)
-          const a=pchAssemble(p); p.name=a.name+' · '+a.code; // живой децим.№ в наименование
+          const a=pchAssemble(p); p.name=a.name; // K-126: имя = наименование по перечню, без кода
           pchRefreshRow(i); }); }); // смена Ø → пересчёт себестоимости по РИ.21 + перерисовка честного блока цены
         // step-навигация мастера + выбор состояния цены (вручную/интерполяцией) при отсутствии норматива
         pos.querySelectorAll('[data-wstep]').forEach(bt=>bt.onclick=()=>{ kpState.step=+bt.dataset.wstep; drawKp(); });

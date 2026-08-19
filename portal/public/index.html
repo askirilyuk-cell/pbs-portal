@@ -12141,7 +12141,7 @@
         box.querySelector('[data-odyes]').onclick=async(ev)=>{ const b=ev.currentTarget; b.disabled=true; b.textContent='Удаление…';
           try{ const r=await fetch('/api/orders/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numPz:o.numPz})});
             const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-            toast('ok','Заказ '+o.numPz+' удалён','позиций удалено: '+(j.positionsDeleted||0));
+            toast('Заказ '+o.numPz+' удалён · позиций: '+(j.positionsDeleted||0),'ok');
             ordSel=null; try{history.replaceState(null,'','#orders');}catch{} await load();
           }catch(e){ const er=box.querySelector('[data-oderr]'); if(er)er.textContent=String(e.message||e); b.disabled=false; b.textContent='Да, удалить'; }
         }; };

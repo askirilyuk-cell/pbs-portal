@@ -3992,19 +3992,26 @@ async function notifyOrderChatZnz({ sourceRef, numZnz, name, qty, unit, duePlan 
   if (!chats.length) return { ok: false, skipped: true, reason: 'order chat not configured' };
   const portal = String(c.PORTAL_BASE || '').replace(/\/+$/, '');
   const qtyStr = [qty, unit].filter((x) => x != null && x !== '').join(' ');
-  const L = [
-    `[B]📦 По заказу ${oc.numPz} размещена заявка ${numZnz}[/B]`,
-    `${name || '—'}${qtyStr ? ` · ${qtyStr}` : ''}`,
-  ];
-  if (duePlan) L.push(`Нужна к: ${fmtDateRu(duePlan)}`);
-  if (portal) {
-    L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(numZnz)}`);
-    L.push(`🖨 PDF: ${portal}/api/print/znz/${encodeURIComponent(numZnz)}`);
-  }
-  // K-134: шлём в чат КАЖДОГО заказа-источника; сбой одного не мешает остальным
+  // K-150: текст собирается ДЛЯ КАЖДОГО чата — в нём стоит номер ИМЕННО того заказа,
+  //  в чат которого он уходит. В K-134 текст остался общим и ссылался на переменную oc
+  //  из удалённого кода — «oc is not defined», и уведомление не уходило вообще никуда.
+  const msgFor = (numPz) => {
+    const L = [
+      `[B]📦 По заказу ${numPz} размещена заявка ${numZnz}[/B]`,
+      `${name || '—'}${qtyStr ? ` · ${qtyStr}` : ''}`,
+    ];
+    if (chats.length > 1) L.push(`Заявка обеспечивает заказы: ${chats.map((x) => x.numPz).join(', ')}`);
+    if (duePlan) L.push(`Нужна к: ${fmtDateRu(duePlan)}`);
+    if (portal) {
+      L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(numZnz)}`);
+      L.push(`🖨 PDF: ${portal}/api/print/znz/${encodeURIComponent(numZnz)}`);
+    }
+    return L.join('\n');
+  };
+  // шлём в чат КАЖДОГО заказа-источника; сбой одного не мешает остальным
   const sent = [];
   for (const oc of chats) {
-    try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: L.join('\n') }); sent.push(oc.numPz); }
+    try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: msgFor(oc.numPz) }); sent.push(oc.numPz); }
     catch (e) { console.warn(`ЗнЗ: уведомление в чат заказа ${oc.numPz} не ушло:`, e.message); }
   }
   return { ok: sent.length > 0, chats: chats.map((x) => x.chat), orders: sent };

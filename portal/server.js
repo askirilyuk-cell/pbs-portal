@@ -2337,6 +2337,39 @@ async function verifyZnzRequest(body, session) {
   await ncUpdate('procurement_requests', id, { 'Проверено': verifiedAt, 'История изменений': JSON.stringify(history) });
   return { ok: true, verifiedAt, history };
 }
+// ── K-132: правка НЕОБХОДИМОЙ ДАТЫ ПОСТАВКИ инициатором ─────────────────────
+//  Раньше «Срок поставки план» задавался только при создании и правке не подлежал:
+//  инициатор ошибся с датой — заявку приходилось заводить заново.
+//  Кто может: инициатор заявки (по ФИО из сессии), Снабжение и Администратор.
+//  Пустая строка допустима — она СНИМАЕТ срок (typeof-проверка, а не if(v)).
+async function setZnzDuePlan(body, session, roles) {
+  const idRaw = body.id ?? body.Id;
+  if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
+  const id = Number(idRaw);
+  if (!Number.isFinite(id)) throw new Error('Некорректный идентификатор заявки.');
+  if (typeof body.duePlan !== 'string') throw new Error('Не передана дата (duePlan).');
+  const due = String(body.duePlan).trim().slice(0, 10);
+  if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new Error('Дата должна быть в формате ГГГГ-ММ-ДД.');
+  const rows = await ncListSoft('procurement_requests');
+  const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
+  if (!row) throw new Error('Заявка ЗнЗ не найдена.');
+  const fio = (session && session.fio) || '';
+  if (session) {
+    const rs = Array.isArray(roles) ? roles : [];
+    const isInitiator = fio && String(row['Инициатор'] || '').trim() === fio;
+    if (!isInitiator && !rs.includes('Снабжение') && !rs.includes('Администратор')) {
+      const e = new Error('Менять срок поставки может инициатор заявки, снабжение или администратор.'); e.status = 403; throw e;
+    }
+  }
+  const from = String(row['Срок поставки план'] || '').slice(0, 10);
+  const history = znzHistoryParse(row['История изменений']);
+  if (from === due) return { ok: true, unchanged: true, duePlan: from, history };
+  history.push({ ts: new Date().toISOString(), user: fio || 'неизвестно', field: 'Срок поставки план', from, to: due });
+  await ncUpdate('procurement_requests', id, { 'Срок поставки план': due || null, 'История изменений': JSON.stringify(history) });
+  logEvent({ type: 'комментарий', obj: 'ЗнЗ', objNum: String(row['№ ЗнЗ'] || ''), who: fio,
+    details: `срок поставки: ${from || '—'} → ${due || '—'}` });
+  return { ok: true, duePlan: due, history };
+}
 async function renameZnzRequest(body, session) {
   const idRaw = body.id ?? body.Id;
   if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
@@ -10412,6 +10445,12 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, out);
     }
     // переименование заявки ЗнЗ + запись в историю изменений (правка владельца 22.07)
+    // K-132: инициатор правит необходимую дату поставки
+    if (p === '/api/procurement/znz/due' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Доступно только в LIVE-режиме: задайте токен NocoDB.' });
+      try { return sendJson(res, 200, await setZnzDuePlan(await readBody(req), req.session, req.roles)); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/procurement/znz/rename' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Переименование доступно только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);

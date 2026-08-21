@@ -6839,8 +6839,16 @@
     }
     function procKanban(body){
       const all=PROC.requests||[];
-      const cols=ZNZ_STATUSES.map(st=>{
-        const items=all.filter(r=>r.status===st), dot=ZNZ_DOT[st]||'gray';
+      // K-132: «В работе» — ВИРТУАЛЬНАЯ колонка. Статус заявки остаётся «Новая» (согласование
+      //  §4 ещё не проходило), но закупщик её уже взял — и висеть в «Новых» она не должна.
+      //  Статус в базе не трогаем: его переводит процесс, а не факт «кто-то открыл».
+      const ZNZ_KAN=['Новая','В работе','Согласована','Поиск поставщика','Размещена','В пути','Принята','Закрыта'];
+      const taken=(r)=>!!(r.assignee&&r.assignee.fio);
+      const inCol=(r,st)=>st==='В работе'?(r.status==='Новая'&&taken(r))
+                        :st==='Новая'?(r.status==='Новая'&&!taken(r))
+                        :r.status===st;
+      const cols=ZNZ_KAN.map(st=>{
+        const items=all.filter(r=>inCol(r,st)), dot=st==='В работе'?'blue':(ZNZ_DOT[st]||'gray');
         const cards=items.map(r=>{const ov=znzOverdue(r), sum=procMoney(r.invoicesSum!=null?r.invoicesSum:(r.orderSum??r.budget));
           const right=r.supplier||r.sourceRef||r.initiatorDept||'';
           return `<div class="kc" data-znz="${esc(r.numZnz)}"${ov?' style="border-left-color:var(--red)"':''}>
@@ -7225,6 +7233,7 @@
           ${fld('Триггер',esc(r.trigger))}${fld('Подразделение-инициатор',esc(r.initiatorDept))}${fld('Инициатор',esc(r.initiator))}
           ${fld('Категория',esc(r.category))}${fld('Ориент. бюджет',r.budget!=null?'<b style="color:var(--ink)">'+esc(procMoney(r.budget))+'</b>':'')}${sourceBlock}
           ${r.stz&&r.stz!=='—'?fld('Режим','<span class="badge b-navy">'+esc(r.stz)+'</span>'):''}${r.urgency?fld('Срочность',/Срочн/i.test(r.urgency)?'<span class="c-amber" style="font-weight:600">'+esc(r.urgency)+'</span>':esc(r.urgency)):''}
+          ${fld('Нужна к (дата поставки)',`<span id="znz-due-view" style="display:inline-flex;align-items:center;gap:7px">${r.duePlan?`<b style="color:var(--ink)">${esc(fmt(r.duePlan))}</b>`:'<span class="c-gray">не задана</span>'}${znzCanAct()?'<a class="c-blue" style="font-size:11px;cursor:pointer" id="znz-due-edit">изменить</a>':''}</span><span id="znz-due-form"></span>`)}
           ${nameBlock}
           ${reviewerBlock}
           ${r.rationale?`<div style="grid-column:1/-1">${fld('Обоснование',esc(r.rationale))}</div>`:''}
@@ -8285,6 +8294,28 @@
         };
       }
       const ab=document.getElementById('znz-pay-add'); if(ab){ ab.textContent=has?'Отправить повторно':'Отправить на оплату'; ab.onclick=()=>openPayFormInline(r,canAct); }
+      // K-132: инициатор правит необходимую дату поставки прямо в карточке.
+      //  Пустое поле = снять срок: на сервере проверка typeof, а не «если непусто».
+      const dueEdit=document.getElementById('znz-due-edit');
+      if(dueEdit)dueEdit.onclick=()=>{
+        const view=document.getElementById('znz-due-view'), box=document.getElementById('znz-due-form');
+        if(!view||!box)return; view.style.display='none';
+        box.innerHTML=`<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <input id="znz-due-inp" type="date" value="${esc(String(r.duePlan||'').slice(0,10))}" style="font:inherit;font-size:12px;padding:5px 7px;border:1px solid var(--sl-300);border-radius:var(--r-s)">
+          <button class="tbtn" id="znz-due-save" style="padding:5px 11px">Сохранить</button>
+          <button class="tbtn" id="znz-due-cancel" style="padding:5px 11px">Отмена</button>
+          <span id="znz-due-err" class="c-red" style="font-size:11px"></span></span>`;
+        document.getElementById('znz-due-cancel').onclick=()=>{ box.innerHTML=''; view.style.display=''; };
+        document.getElementById('znz-due-save').onclick=async(ev)=>{ const b=ev.currentTarget; b.disabled=true; b.textContent='…';
+          const val=document.getElementById('znz-due-inp').value||'';
+          try{ const rs=await fetch('/api/procurement/znz/due',{method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({id:r.id,duePlan:val})});
+            const j=await rs.json().catch(()=>({})); if(!rs.ok||j.error)throw new Error(j.error||('HTTP '+rs.status));
+            toast(val?('Срок поставки: '+fmt(val)):'Срок поставки снят','ok');
+            PROC=await (await fetch('/api/procurement')).json();
+            openZnzCard((PROC.requests||[]).find(x=>String(x.id)===String(r.id))||r);
+          }catch(e){ const er=document.getElementById('znz-due-err'); if(er)er.textContent=String(e.message||e); b.disabled=false; b.textContent='Сохранить'; } };
+      };
       // K-131: привязка оплаты, заведённой в реестре Смирнова напрямую. Сначала показываем,
       //  что нашлось по номеру (сумма/статус), и только по подтверждению записываем —
       //  опечатка в номере иначе привяжет чужой платёж.
@@ -8320,7 +8351,9 @@
                     body:JSON.stringify({znzId:r.id,paymentId:pid})});
                 const j2=await r2.json().catch(()=>({})); if(!r2.ok||j2.error)throw new Error(j2.error||('HTTP '+r2.status));
                 toast('Оплата '+pid+' привязана к '+r.numZnz,'ok'); box.innerHTML='';
-                PROC=await (await fetch('/api/procurement')).json(); openZnzCard(r.numZnz);
+                // openZnzCard принимает ЗАПИСЬ, а не номер: со строкой рисуется пустая карточка
+                PROC=await (await fetch('/api/procurement')).json();
+                openZnzCard((PROC.requests||[]).find(x=>String(x.id)===String(r.id))||r);
               }catch(e){ out.insertAdjacentHTML('beforeend','<div class="c-red" style="margin-top:6px">'+esc(String(e.message||e))+'</div>'); b.disabled=false; b.textContent='Это она — привязать'; } };
           }catch(e){ out.innerHTML='<span class="c-red">'+esc(String(e.message||e))+'</span>'; }
         };

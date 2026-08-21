@@ -7092,7 +7092,12 @@
               <input id="zn-sup-manual" style="${FINP};margin-top:6px;display:none" placeholder="Наименование поставщика (нет в реестре)">
               <div style="font-size:11px;color:var(--sl-500);margin-top:4px">Реестр = контрагенты с ролью «Поставщик» (РОП). Пусто или нет нужного — «ввести вручную».</div>
             </div>
-            <div style="grid-column:span 6">${FLAB('Привязка к заказу (ПЗ, опц.)')}${ordersList.length?`<select id="zn-order" style="${FINP}"><option value="">— без привязки —</option>${ordersList.map(o=>`<option value="${esc(o.numPz)}">${esc(o.numPz)}${o.customer?' · '+esc(o.customer):''}</option>`).join('')}</select>`:`<input id="zn-order" style="${FINP}" placeholder="№ ПЗ, напр. ПЗ-2026-001">`}</div>
+            <div style="grid-column:span 6">${FLAB('Привязка к заказам (ПЗ, опц.)')}
+              ${ordersList.length
+                ?`<div style="display:flex;gap:6px"><select id="zn-order" style="${FINP};flex:1"><option value="">— выберите заказ —</option>${ordersList.map(o=>`<option value="${esc(o.numPz)}">${esc(o.numPz)}${o.customer?' · '+esc(o.customer):''}</option>`).join('')}</select><button type="button" class="tbtn" id="zn-order-add" style="padding:7px 13px;white-space:nowrap">Добавить</button></div>`
+                :`<div style="display:flex;gap:6px"><input id="zn-order" style="${FINP};flex:1" placeholder="№ ПЗ, напр. ПЗ-2026-001"><button type="button" class="tbtn" id="zn-order-add" style="padding:7px 13px;white-space:nowrap">Добавить</button></div>`}
+              <div id="zn-order-chips" style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"></div>
+              <div style="font-size:11px;color:var(--sl-500);margin-top:4px">Одна заявка может обеспечивать несколько заказов — добавьте все.</div></div>
             <div style="grid-column:span 6">${FLAB('Ссылка / референс (опц.)')}<input id="zn-ref" style="${FINP}" placeholder="URL карточки товара, напр. https://atmt.ru/…"></div>
             ${staffList.length?`<div style="grid-column:span 6">${FLAB('Проверяющий (опц.)')}
               <select id="zn-reviewer-sel" style="${FINP}">
@@ -7221,10 +7226,26 @@
         const bad=positions.find(p=>!p.qty||Number(p.qty)<=0);
         if(bad){errEl.textContent='У каждой позиции укажите количество (> 0): «'+bad.name+'».';return;}
         const sd=readSupplier();
-        const orderRef=v('zn-order');
-        const noteVal=[v('zn-note'), orderRef?('Заказ: '+orderRef):''].filter(Boolean).join(' · ');
+        // K-148: берём накопленный список; если в поле осталось невнесённое — добавляем молча,
+        //  иначе выбранный, но не нажатый «Добавить» заказ потерялся бы без следа.
+        const pending=(v('zn-order')||'').trim();
+        if(pending&&!znOrders.includes(pending))znOrders.push(pending);
+        const orderRef=znOrders.join(', ');
+        const noteVal=[v('zn-note'), orderRef?((znOrders.length>1?'Заказы: ':'Заказ: ')+orderRef):''].filter(Boolean).join(' · ');
         // «Проверяющий» (опц., правка владельца 22.07) — поля есть в форме, только если сотрудники загрузились
-        const fSel=document.getElementById('zn-files'), fLab=document.getElementById('zn-files-sel');
+        // K-148: заявка может обеспечивать НЕСКОЛЬКО заказов — поле было одиночным select'ом.
+      //  Собираем список чипами: видно, что привязано, и легко снять лишнее.
+      const znOrders=[];
+      const znOrderChips=()=>{ const box=document.getElementById('zn-order-chips'); if(!box)return;
+        box.innerHTML=znOrders.map((o,i)=>`<span style="display:inline-flex;align-items:center;gap:6px;background:var(--sl-100);border:1px solid var(--sl-200);border-radius:var(--r-full);padding:3px 10px;font-size:11px;font-family:var(--mono)">${esc(o)}<a data-znord="${i}" style="cursor:pointer;color:var(--red);font-family:inherit">✕</a></span>`).join('')
+          ||'<span style="font-size:11px;color:var(--sl-400)">заказы не привязаны</span>';
+        box.querySelectorAll('[data-znord]').forEach(el=>el.onclick=()=>{ znOrders.splice(+el.dataset.znord,1); znOrderChips(); }); };
+      znOrderChips();
+      const znOrderAdd=document.getElementById('zn-order-add');
+      if(znOrderAdd)znOrderAdd.onclick=()=>{ const el=document.getElementById('zn-order'); const v=(el&&el.value||'').trim();
+        if(!v)return; if(znOrders.includes(v)){ toast('Этот заказ уже добавлен','warn'); return; }
+        znOrders.push(v); if(el.tagName==='SELECT')el.value=''; else el.value=''; znOrderChips(); };
+      const fSel=document.getElementById('zn-files'), fLab=document.getElementById('zn-files-sel');
       if(fSel&&fLab)fSel.onchange=()=>{ const n=fSel.files?fSel.files.length:0;
         fLab.textContent=n?('выбрано: '+n+(n===1?' файл':(n<5?' файла':' файлов'))):'файлы не выбраны'; };
       const revSel=document.getElementById('zn-reviewer-sel');

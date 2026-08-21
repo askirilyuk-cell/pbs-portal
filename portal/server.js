@@ -2158,7 +2158,8 @@ async function buildProcurementLive() {
     category: e['Категория'] || '', assessor: e['Оценку провёл'] || '', approver: e['Утвердил'] || '', note: e['Примечание'] || '',
   }));
   // K-138: справочник мест доставки — в выдачу, чтобы клиент не хардкодил список
-  return { mode: 'live', requests, orders, suppliers, evaluations, deliveryPlaces: deliveryPlaces() };
+  // K-140: позиции всех заявок — для доски по позициям (работа идёт по ним, не по заявкам)
+  return { mode: 'live', requests, orders, suppliers, evaluations, deliveryPlaces: deliveryPlaces(), items: pitems.map(znzItemShape) };
 }
 
 // --- создание заявки на закупку ЗнЗ (цеховая Ф.4–К / плановая Ф.1–К) ----------

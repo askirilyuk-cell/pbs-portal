@@ -6730,6 +6730,9 @@
     const ZNZ_OFFICE_CATS=['ИТ/офис','Услуги','Прочее'];
     const ZNZ_SHELF_CATS=['Резина и пластик','Сварочные материалы'];
     const ZNZ_DOT={'Новая':'gray','Согласована':'amber','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Закрыта':'gray'};
+    // K-140: поток ПОЗИЦИИ — короче потока заявки: у позиции нет согласования и закрытия
+    const ZNZ_ITEM_COLS=['В работе','Размещена','В пути','Принята','Отменена'];
+    const ZNZ_ITEM_DOT={'В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Отменена':'gray'};
     const DOTC={gray:'#9ca3af',navy:'var(--navy)',blue:'var(--blue)',amber:'var(--amber)',green:'var(--green)',red:'var(--red)'};
     const znzCell=(s)=>stCellDot(ZNZ_DOT[s]||'gray',s||'—');
     const znzKind=(r)=>/ВЭД/i.test(r.trigger||'')?'ved':(/Цехов/i.test(r.type||'')?'ceh':'plan');
@@ -6826,7 +6829,7 @@
     function procReq(h,viewHost){
       const all=PROC.requests||[];
       h.innerHTML=`<div class="filters" style="margin:0 0 var(--gap)">
-          <div class="seg" id="prvseg"><button data-v="kanban" class="${procReqView==='kanban'?'on':''}">Канбан</button><button data-v="list" class="${procReqView==='list'?'on':''}">Список</button></div>
+          <div class="seg" id="prvseg"><button data-v="kanban" class="${procReqView==='kanban'?'on':''}" title="Доска по заявкам — сколько потребностей закрыто">Заявки</button><button data-v="kanpos" class="${procReqView==='kanpos'?'on':''}" title="Доска по позициям — что делать дальше закупщику">Позиции</button><button data-v="list" class="${procReqView==='list'?'on':''}">Список</button></div>
           <span style="margin-left:auto;font-size:11px;color:var(--sub)">${all.length} заявок</span>
           ${PROC.mode==='live'&&znzCanAct()?'<button class="tbtn" style="margin-left:8px" id="ppayrefresh" title="Опросить платёжный портал по всем счетам с неоконченной оплатой">⟳ Статусы оплат</button>':''}
           <button class="tbtn primary" style="margin-left:8px" id="pnew">+ Заявка</button></div>
@@ -6844,7 +6847,7 @@
         }catch(e){ prb.disabled=false; prb.textContent='⟳ Статусы оплат'; alert('Не удалось обновить статусы оплат: '+(e.message||e)); }
       };
       const body=h.querySelector('#preqbody');
-      procReqView==='kanban'?procKanban(body):procList(body);
+      procReqView==='kanban'?procKanban(body):procReqView==='kanpos'?procKanbanItems(body):procList(body);
     }
     function procKanban(body){
       const all=PROC.requests||[];
@@ -6865,6 +6868,35 @@
       }).join('');
       body.innerHTML=`<div class="kan" style="grid-template-columns:repeat(7,minmax(166px,1fr));overflow-x:auto">${cols}</div>`;
       body.querySelectorAll('[data-znz]').forEach(el=>el.onclick=()=>{const r=(PROC.requests||[]).find(x=>x.numZnz===el.dataset.znz);if(r)openZnzCard(r);});
+    }
+    // K-140: доска ПО ПОЗИЦИЯМ. Работа теперь идёт по позициям (K-138), и заявка с
+    //  разъехавшимися позициями всегда висит в «В работе» — по доске заявок не видно,
+    //  что там одна размещена, а две ещё ищут поставщика. Здесь видно.
+    function procKanbanItems(body){
+      const items=PROC.items||[];
+      const byNum=Object.fromEntries((PROC.requests||[]).map(r=>[String(r.numZnz),r]));
+      const cols=ZNZ_ITEM_COLS.map(st=>{
+        const list=items.filter(i=>String(i.status||'В работе')===st);
+        const dot=ZNZ_ITEM_DOT[st]||'gray';
+        const cards=list.map(i=>{
+          const r=byNum[String(i.znzNum||'')]||{};
+          const qty=[i.qty,i.unit].filter(x=>x!==''&&x!=null).join(' ');
+          const late=i.due&&daysTo(i.due)<0&&st!=='Принята';
+          return `<div class="kc" data-znzitem="${esc(String(i.znzNum||''))}"${late?' style="border-left-color:var(--red)"':''}>
+            <div style="display:flex;gap:6px;align-items:center"><span class="pz">${esc(i.znzNum||'—')}</span>
+              <span style="margin-left:auto;font-size:11px;color:var(--sl-500)">${esc(qty)}</span></div>
+            <div class="cu" title="${esc(i.name)}">${esc(i.name)}</div>
+            <div style="display:flex;margin-top:7px;font-size:11px;color:var(--sl-500);gap:6px">
+              <span class="ell" style="max-width:120px" title="${esc(i.supplier||'')}">${i.supplier?esc(i.supplier):'<span style="color:var(--sl-400)">поставщик не выбран</span>'}</span>
+              ${i.due?`<span style="margin-left:auto;${late?'color:var(--red);font-weight:600':''}">${esc(fmt(i.due))}</span>`:''}</div>
+            ${r.assignee&&r.assignee.fio?`<div style="margin-top:5px;font-size:11px;color:#1d4e89"><i class=ic-hour></i> ${esc(r.assignee.fioShort||r.assignee.fio)}</div>`:''}</div>`;}).join('')
+          ||'<div style="font-size:11px;color:var(--sl-500);padding:4px 2px">—</div>';
+        return `<div class="kcol"><div class="kh c-${dot}"><i class="i-${dot}"></i>${esc(st)} <span class="cnt">${list.length}</span></div>${cards}</div>`;
+      }).join('');
+      const orphan=(PROC.requests||[]).filter(r=>!items.some(i=>String(i.znzNum)===String(r.numZnz))).length;
+      body.innerHTML=`<div class="kan" style="grid-template-columns:repeat(${ZNZ_ITEM_COLS.length},minmax(180px,1fr));overflow-x:auto">${cols}</div>`
+        +(orphan?`<div style="margin-top:9px;font-size:11px;color:var(--sl-500)">Заявок без разбивки на позиции: ${orphan} — они видны только на доске «Заявки».</div>`:'');
+      body.querySelectorAll('[data-znzitem]').forEach(el=>el.onclick=()=>{const r=byNum[el.dataset.znzitem];if(r)openZnzCard(r);});
     }
     function procList(body){
       const all=PROC.requests||[];

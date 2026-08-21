@@ -2269,13 +2269,16 @@ async function createZnzRequest(body) {
 }
 
 // --- K-86 смена статуса ЗнЗ по этапам (DEF-30) -------------------------------
-// Порядок этапов ЗнЗ (Ф.1–К/Ф.4–К → ДП–К): Новая → Согласована → Поиск поставщика
+// Порядок этапов ЗнЗ (Ф.1–К/Ф.4–К → ДП–К): Новая → Согласована → В работе
 // → Размещена → В пути → Принята → Закрыта. Переход разрешён ТОЛЬКО на соседний
 // шаг (±1): вперёд по циклу или на один шаг назад (откат оператора). Аддитивно —
 // create/list/PDF не затрагиваются; в NocoDB пишем только поле «Статус».
 // TODO K-86 гейт по роли: отдельной роли «снабжение»/«руководитель» в RBAC пока
 // нет — авторизацию перехода (кто согласует/размещает) добавить при уточнении схемы.
-const ZNZ_STATUS_FLOW = ['Новая', 'Согласована', 'Поиск поставщика', 'Размещена', 'В пути', 'Принята', 'Закрыта'];
+// K-133 (решение владельца): «Поиск поставщика» убран как лишний — взял в работу и
+//  значит ищешь поставщика. Колонка «Статус» в заявках — свободный текст (не SingleSelect),
+//  поэтому миграция схемы не требовалась; единственную запись перевели в «В работе».
+const ZNZ_STATUS_FLOW = ['Новая', 'Согласована', 'В работе', 'Размещена', 'В пути', 'Принята', 'Закрыта'];
 async function updateZnzStatus(body, who) {
   const idRaw = body.id ?? body.Id;
   if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
@@ -2296,7 +2299,7 @@ async function updateZnzStatus(body, who) {
   // равнозначны для пользователя, поэтому прыжок через шаг «Согласована» в обе
   // стороны тоже разрешён (сам этап в ZNZ_STATUS_FLOW оставлен для совместимости
   // со старыми заявками, которые уже в статусе «Согласована»).
-  const skipApproval = (from === 'Новая' && target === 'Поиск поставщика') || (from === 'Поиск поставщика' && target === 'Новая');
+  const skipApproval = (from === 'Новая' && target === 'В работе') || (from === 'В работе' && target === 'Новая');
   if (Math.abs(ti - ci) !== 1 && !skipApproval) throw new Error(`Переход «${from}» → «${target}» не разрешён: только соседний этап.`);
   await ncUpdate('procurement_requests', id, { 'Статус': target });
   logEvent({ type: 'статус изменён', obj: 'ЗнЗ', objNum: String(row['№ ЗнЗ'] || '').trim() || `#${id}`,
@@ -2450,6 +2453,13 @@ async function takeZnzRequest(body, session, roles) {
   const prev = map[numZnz];
   if (prev && prev.fio) return { ok: true, unchanged: true, assignee: prev };
   const assignee = { fio, fioShort, when: new Date().toISOString() };
+  // K-133: взять заявку в работу = перевести её в статус «В работе». Раньше отметка
+  //  жила отдельно от статуса, и на доске заявка продолжала висеть в «Новых».
+  const curSt = String(row['Статус'] || '').trim();
+  if (curSt === 'Новая' || curSt === 'Согласована') {
+    try { await ncUpdate('procurement_requests', id, { 'Статус': 'В работе' }); }
+    catch (e) { console.warn('ЗнЗ: статус «В работе» не выставлен:', e.message); }
+  }
   map[numZnz] = assignee;
   if (!writeZnzAssignees(map)) throw new Error('Не удалось сохранить отметку (оверлей znz-assignee.json).');
   // история изменений заявки — тот же append-формат, что rename/verify

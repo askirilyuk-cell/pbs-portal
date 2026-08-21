@@ -6696,14 +6696,15 @@
     // ════════════════════════════════════════════════════════════════════════
     let PROC=null, procTab='req'; // стартовая — реестр заявок, не дашборд (правка Александра 22.07)
     let procReqView=(()=>{try{return localStorage.getItem('pbs-proc-rv')||'kanban';}catch{return 'kanban';}})();
-    const ZNZ_STATUSES=['Новая','Согласована','Поиск поставщика','Размещена','В пути','Принята','Закрыта'];
+    // K-133 (решение владельца): «Поиск поставщика» убран — взял в работу и значит ищешь.
+    const ZNZ_STATUSES=['Новая','Согласована','В работе','Размещена','В пути','Принята','Закрыта'];
     // Пайплайн-полоса карточки ЗнЗ БЕЗ этапа «Согласована» (правка владельца 22.07 —
     // согласование убрано из ЗнЗ вообще, вместо него — опциональный «Проверяющий»,
     // см. блок «Проверка» в openZnzCard). Сам ZNZ_STATUSES/статус «Согласована» в
     // NocoDB оставлены для совместимости со старыми заявками.
     const ZNZ_STATUSES_UI=ZNZ_STATUSES.filter(st=>st!=='Согласована');
     // K-86: подписи действий-переходов (целевой статус → глагол на кнопке)
-    const ZNZ_ACTION={'Поиск поставщика':'В поиск поставщика','Размещена':'Разместить заказ','В пути':'Отгружено (в пути)','Принята':'Принять','Закрыта':'Закрыть'};
+    const ZNZ_ACTION={'В работе':'Взять в работу','Размещена':'Разместить заказ','В пути':'Отгружено (в пути)','Принята':'Принять','Закрыта':'Закрыть'};
     // K-86 гейт перехода (мягкий): отдельной роли снабжения в RBAC пока нет —
     // разрешаем админу и в dev/mock (auth не настроен). TODO: уточнить схему ролей.
     function znzCanAct(){ try{ if(typeof AUTH==='undefined'||!AUTH||!AUTH.auth||AUTH.configured===false)return true; return !!AUTH.isAdmin; }catch(e){ return true; } }
@@ -6720,7 +6721,7 @@
     // получение» вместо полного акта ВК); СРОК_КАТ — позиции с датой изготовления/годности.
     const ZNZ_OFFICE_CATS=['ИТ/офис','Услуги','Прочее'];
     const ZNZ_SHELF_CATS=['Резина и пластик','Сварочные материалы'];
-    const ZNZ_DOT={'Новая':'gray','Согласована':'amber','Поиск поставщика':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Закрыта':'gray'};
+    const ZNZ_DOT={'Новая':'gray','Согласована':'amber','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Закрыта':'gray'};
     const DOTC={gray:'#9ca3af',navy:'var(--navy)',blue:'var(--blue)',amber:'var(--amber)',green:'var(--green)',red:'var(--red)'};
     const znzCell=(s)=>stCellDot(ZNZ_DOT[s]||'gray',s||'—');
     const znzKind=(r)=>/ВЭД/i.test(r.trigger||'')?'ved':(/Цехов/i.test(r.type||'')?'ceh':'plan');
@@ -6769,8 +6770,8 @@
       // плитка «На согласовании» выдавала уже согласованные заявки за находящиеся на согласовании.
       const active=cBy(r=>znzActive(r.status)), fresh=cBy(r=>r.status==='Новая'||r.status==='Согласована');
       const inTransit=cBy(r=>r.status==='В пути'), overdueN=all.filter(znzOverdue).length;
-      const searching=cBy(r=>r.status==='Поиск поставщика'), accepted=cBy(r=>/Принята|Закрыта/.test(r.status));
-      const watch=all.filter(r=>/Поиск поставщика|Размещена|В пути/.test(r.status)&&r.duePlan)
+      const searching=cBy(r=>r.status==='В работе'), accepted=cBy(r=>/Принята|Закрыта/.test(r.status));
+      const watch=all.filter(r=>/В работе|Размещена|В пути/.test(r.status)&&r.duePlan)
         .sort((x,y)=>(daysTo(x.duePlan)??1e9)-(daysTo(y.duePlan)??1e9)).slice(0,6);
       const dueLabel=(r)=>{const d=daysTo(r.duePlan);if(d==null)return '';
         if(d<0)return stCellDot('red','просрочка '+(-d)+' дн.'); if(d===0)return stCellDot('amber','сегодня');
@@ -6784,7 +6785,7 @@
           ${m('Заявок в работе',active)}
           ${m('Новые',fresh,'var(--amber)')}
           ${m('Поставки в пути',inTransit,'var(--blue)',overdueN?overdueN+' просрочка':'')}
-          ${m('Поиск поставщика',searching,'var(--navy)')}
+          ${m('В работе',searching,'var(--navy)')}
           ${m('Принято / закрыто',accepted,'var(--green)')}
         </div>
         <div style="margin-top:var(--gap);display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);align-items:start">
@@ -6839,16 +6840,10 @@
     }
     function procKanban(body){
       const all=PROC.requests||[];
-      // K-132: «В работе» — ВИРТУАЛЬНАЯ колонка. Статус заявки остаётся «Новая» (согласование
-      //  §4 ещё не проходило), но закупщик её уже взял — и висеть в «Новых» она не должна.
-      //  Статус в базе не трогаем: его переводит процесс, а не факт «кто-то открыл».
-      const ZNZ_KAN=['Новая','В работе','Согласована','Поиск поставщика','Размещена','В пути','Принята','Закрыта'];
-      const taken=(r)=>!!(r.assignee&&r.assignee.fio);
-      const inCol=(r,st)=>st==='В работе'?(r.status==='Новая'&&taken(r))
-                        :st==='Новая'?(r.status==='Новая'&&!taken(r))
-                        :r.status===st;
-      const cols=ZNZ_KAN.map(st=>{
-        const items=all.filter(r=>inCol(r,st)), dot=st==='В работе'?'blue':(ZNZ_DOT[st]||'gray');
+      // K-133: «В работе» стал НАСТОЯЩИМ статусом (взамен «Поиск поставщика»), поэтому
+      //  виртуальная колонка из K-132 больше не нужна — доска снова строится по статусам.
+      const cols=ZNZ_STATUSES.map(st=>{
+        const items=all.filter(r=>r.status===st), dot=ZNZ_DOT[st]||'gray';
         const cards=items.map(r=>{const ov=znzOverdue(r), sum=procMoney(r.invoicesSum!=null?r.invoicesSum:(r.orderSum??r.budget));
           const right=r.supplier||r.sourceRef||r.initiatorDept||'';
           return `<div class="kc" data-znz="${esc(r.numZnz)}"${ov?' style="border-left-color:var(--red)"':''}>
@@ -7179,7 +7174,7 @@
       // секции card pad + sec-h, грид-реквизиты. Логика/поля/данные/действия 1:1.
       // правка владельца 22.07: полоса — без этапа «Согласована». Старые заявки в этом
       // статусе показываем в полосе как «Новая» (реальный статус виден отдельно бейджем
-      // в шапке карточки — znzCell(r.status) ниже); следующий шаг для них — «Поиск поставщика».
+      // в шапке карточки — znzCell(r.status) ниже); следующий шаг для них — «В работе».
       // deep-link: карточка ЗнЗ адресуется хешем — открытие фиксирует '#purchase/<№ ЗнЗ>'
       // (replaceState, без записи в историю — по образцу '#orders/<№ ПЗ>' в renderOrdersView)
       try{history.replaceState(null,'','#purchase/'+encodeURIComponent(r.numZnz));}catch{}
@@ -7319,7 +7314,7 @@
       znzCardOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <a class="c-blue" id="znz-back" style="font-size:12px;text-decoration:none;cursor:pointer">← Закупки</a>
           <span class="code" style="font-size:16px;font-family:var(--mono)">${esc(r.numZnz)}</span>${znzTag(r)}${znzCell(r.status)}${takenBadge}${linkBtn('#purchase/'+encodeURIComponent(r.numZnz))}
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${acts.join('')}<a class="pbtn" href="/api/print/znz/${encodeURIComponent(r.numZnz)}" target="_blank" rel="noopener">${aico('print',14)} Печать заявки</a><button class="tbtn" id="znz-pdf">Заказ поставщику (PDF)</button></span>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${acts.join('')}<a class="pbtn" href="/api/print/znz/${encodeURIComponent(r.numZnz)}" target="_blank" rel="noopener">${aico('print',14)} Печать заявки</a></span>
         </div>
         ${track}
         <div class="ztabs" id="znz-tabs">
@@ -7356,7 +7351,10 @@
       loadZnzInvoices(r,canAct);
       // K-83 этап 1a: секция «Оплата» (интеграция payment-portal) — статус + отправка/обновление
       loadZnzPayment(r,canAct);
-      document.getElementById('znz-pdf').onclick=()=>alert('Заказ поставщику (PDF) — генерация на сервере (Gotenberg) по шаблону ДП–К.');
+      // K-133: кнопка «Заказ поставщику (PDF)» убрана (решение владельца). Она показывала
+      //  alert() с описанием несуществующей функции: формы заказа поставщику в ИСМ нет —
+      //  ДП–К §9 её не предусматривает, и Ф.2–К не определён. Заявки на закупку достаточно.
+      //  Заодно снят alert() — канон §9 браузерные диалоги запрещает.
       const doTransition=async(to,btn)=>{
         if(!to)return; if(btn)btn.disabled=true;
         try{

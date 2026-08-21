@@ -7058,6 +7058,12 @@
             <div style="grid-column:span 12">${FLAB('Заявитель',true)}<input id="zn-init" style="${FINP}" placeholder="ФИО инициатора" value="${esc((typeof ME!=='undefined'&&ME&&ME.name)||'')}"></div>
             <div style="grid-column:span 3">${FLAB('Срочность')}${fSelect('zn-urg',['Плановая','Срочная','Критичная'],'Плановая')}</div>
             <div style="grid-column:span 3">${FLAB('Срок поставки (опц.)')}<input id="zn-due" type="date" style="${FINP}"></div>
+            <div style="grid-column:span 6">${FLAB('Куда доставка')}
+              <select id="zn-place" style="${FINP}"><option value="">— не указано —</option>${((PROC&&PROC.deliveryPlaces)||[]).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select></div>
+            <div style="grid-column:span 12">${FLAB('Файлы (счёт, каталог, справочная информация)')}
+              <label class="tbtn" style="padding:7px 13px;cursor:pointer;display:inline-block">Выбрать файлы<input type="file" id="zn-files" multiple style="display:none"></label>
+              <span id="zn-files-sel" style="font-size:11px;color:var(--sl-500);margin-left:9px">файлы не выбраны</span>
+              <div style="font-size:11px;color:var(--sl-500);margin-top:5px">Загрузятся сразу после создания заявки — до неё файл прикреплять не к чему.</div></div>
             <div style="grid-column:span 6">${FLAB('Поставщик (опц.)')}
               <select id="zn-sup-sel" style="${FINP}">
                 <option value="">— выбрать из реестра —</option>
@@ -7199,23 +7205,43 @@
         const orderRef=v('zn-order');
         const noteVal=[v('zn-note'), orderRef?('Заказ: '+orderRef):''].filter(Boolean).join(' · ');
         // «Проверяющий» (опц., правка владельца 22.07) — поля есть в форме, только если сотрудники загрузились
-        const revSel=document.getElementById('zn-reviewer-sel');
+        const fSel=document.getElementById('zn-files'), fLab=document.getElementById('zn-files-sel');
+      if(fSel&&fLab)fSel.onchange=()=>{ const n=fSel.files?fSel.files.length:0;
+        fLab.textContent=n?('выбрано: '+n+(n===1?' файл':(n<5?' файла':' файлов'))):'файлы не выбраны'; };
+      const revSel=document.getElementById('zn-reviewer-sel');
         const reviewer=(revSel&&revSel.value)?staffList.find(s=>String(s.id)===revSel.value):null;
         const body={ type:segVal(segType,'Цеховая (Ф.4–К)'), positions,
           name:positions[0].name, qty:positions[0].qty, unit:positions[0].unit, category:positions[0].category,
           initiator:v('zn-init'), urgency:v('zn-urg'),
           supplier:sd.supplier, supplierId:sd.supplierId, duePlan:v('zn-due'), reference:v('zn-ref'), note:noteVal, orderRef, numPz:orderRef,
+          deliveryPlace:v('zn-place'),
           reviewerId:reviewer?reviewer.id:null, reviewerName:reviewer?reviewer.name:'' };
         if(!body.initiator){errEl.textContent='Укажите заявителя.';return;}
         const btn=document.getElementById('zn-save'); btn.disabled=true; btn.textContent='Создание…';
         try{ const j=await postJson('/api/procurement/znz/create',body);
+          // K-146: файлы грузим ПОСЛЕ создания — до появления записи их не к чему привязать.
+          //  Сбой загрузки не отменяет созданную заявку: говорим честно, что не доехало.
+          const fEl=document.getElementById('zn-files');
+          const picked=fEl&&fEl.files?[...fEl.files]:[];
+          let upOk=0, upErr=0;
+          if(picked.length&&j.id!=null){
+            btn.textContent='Загрузка файлов…';
+            for(const f of picked){
+              try{ const fd=new FormData(); fd.append('id',String(j.id)); fd.append('file',f,f.name);
+                const rs=await fetch('/api/procurement/znz/files',{method:'POST',body:fd});
+                const jj=await rs.json().catch(()=>({})); if(!rs.ok||jj.error)throw new Error(jj.error||('HTTP '+rs.status));
+                upOk++; }catch(e){ upErr++; }
+            }
+          }
           PROC=null; procTab='req';
           renderProcurement(document.getElementById('view'));
           const nt=j.notified||{};
           const notMsg=nt.ok?' · уведомление в чат отправлено':(nt.skipped?' · уведомление в чат не настроено':'');
           const rn=j.reviewerNotified;
           const revMsg=reviewer?(rn&&rn.ok?' · проверяющему отправлено сообщение':' · проверяющему не удалось отправить сообщение'):'';
-          toast('Создана заявка '+j.numZnz+(j.itemsCreated?' · позиций: '+j.itemsCreated:'')+notMsg+revMsg,'ok');
+          const upMsg=upOk?(' · файлов: '+upOk):''; 
+          toast('Создана заявка '+j.numZnz+(j.itemsCreated?' · позиций: '+j.itemsCreated:'')+upMsg+notMsg+revMsg,'ok');
+          if(upErr)toast('Не удалось приложить файлов: '+upErr+'. Заявка создана — приложите их в её карточке.','warn');
         }catch(e){ errEl.textContent='Не удалось создать: '+(e.message||e); btn.disabled=false; btn.textContent='Создать ЗнЗ'; }
       };
     }
@@ -7295,6 +7321,7 @@
           ${fld('Триггер',esc(r.trigger))}${fld('Подразделение-инициатор',esc(r.initiatorDept))}${fld('Инициатор',esc(r.initiator))}
           ${fld('Категория',esc(r.category))}${fld('Ориент. бюджет',r.budget!=null?'<b style="color:var(--ink)">'+esc(procMoney(r.budget))+'</b>':'')}${sourceBlock}
           ${r.stz&&r.stz!=='—'?fld('Режим','<span class="badge b-navy">'+esc(r.stz)+'</span>'):''}${r.urgency?fld('Срочность',/Срочн/i.test(r.urgency)?'<span class="c-amber" style="font-weight:600">'+esc(r.urgency)+'</span>':esc(r.urgency)):''}
+          ${fld('Куда доставка',r.deliveryPlace?esc(r.deliveryPlace):'<span class="c-gray">не указано</span>')}
           ${fld('Нужна к (дата поставки)',`<span id="znz-due-view" style="display:inline-flex;align-items:center;gap:7px">${r.duePlan?`<b style="color:var(--ink)">${esc(fmt(r.duePlan))}</b>`:'<span class="c-gray">не задана</span>'}${znzCanAct()?'<a class="c-blue" style="font-size:11px;cursor:pointer" id="znz-due-edit">изменить</a>':''}</span><span id="znz-due-form"></span>`)}
           ${nameBlock}
           ${reviewerBlock}

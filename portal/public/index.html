@@ -6743,8 +6743,8 @@
     const ZNZ_SHELF_CATS=['Резина и пластик','Сварочные материалы'];
     const ZNZ_DOT={'Новая':'gray','Согласована':'amber','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Закрыта':'gray'};
     // K-140: поток ПОЗИЦИИ — короче потока заявки: у позиции нет согласования и закрытия
-    const ZNZ_ITEM_COLS=['В работе','Размещена','В пути','Принята','Отменена'];
-    const ZNZ_ITEM_DOT={'В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Отменена':'gray'};
+    const ZNZ_ITEM_COLS=['Новая','В работе','Размещена','В пути','Принята','Отменена'];
+    const ZNZ_ITEM_DOT={'Новая':'gray','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Отменена':'gray'};
     const DOTC={gray:'#9ca3af',navy:'var(--navy)',blue:'var(--blue)',amber:'var(--amber)',green:'var(--green)',red:'var(--red)'};
     const znzCell=(s)=>stCellDot(ZNZ_DOT[s]||'gray',s||'—');
     const znzKind=(r)=>/ВЭД/i.test(r.trigger||'')?'ved':(/Цехов/i.test(r.type||'')?'ceh':'plan');
@@ -6907,7 +6907,7 @@
           const late=daysTo(r.due)<0&&r.status!=='Принята'&&r.status!=='Отменена';
           return `<span class="${late?'c-red':'c-gray'}"${late?' style="font-weight:600"':''}>${fmt(r.due)}</span>`;},sortVal:r=>String(r.due||'')},
         {key:'who',label:'В работе у',w:140,cls:'ell c-gray',cell:r=>{const a=r._r.assignee;return a&&a.fio?esc(a.fioShort||a.fio):'<span class="c-gray">—</span>';},sortVal:r=>((r._r.assignee||{}).fio)||''},
-        {key:'status',label:'Статус',w:150,cls:'nw',cell:r=>{const st=r.status||'В работе';const dot=ZNZ_ITEM_DOT[st]||'gray';
+        {key:'status',label:'Статус',w:150,cls:'nw',cell:r=>{const st=r.status||'Новая';const dot=ZNZ_ITEM_DOT[st]||'gray';
           return `<span class="st c-${dot}"><i class="i-${dot}"></i>${esc(st)}</span>`;},sortVal:r=>r.status||''},
       ];
       const orphan=(PROC.requests||[]).filter(r=>!items.some(i=>String(i.znzNum)===String(r.numZnz))).length;

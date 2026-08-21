@@ -2518,6 +2518,13 @@ async function takeZnzRequest(body, session, roles) {
     try { await ncUpdate('procurement_requests', id, { 'Статус': 'В работе' }); }
     catch (e) { console.warn('ЗнЗ: статус «В работе» не выставлен:', e.message); }
   }
+  // K-144: вместе с заявкой в работу уходят и её ещё не начатые позиции — иначе заявка
+  //  «В работе», а выводимый из позиций статус остался бы «Новая».
+  try {
+    const its = (await ncListSoft('znz_items')).filter((x) => String(x['ЗнЗ Id'] || '') === String(id)
+      && String(x['Статус'] || '') === 'Новая');
+    if (its.length) await ncUpdateMany('znz_items', its.map((x) => ({ Id: x.Id ?? x.id, 'Статус': 'В работе' })));
+  } catch (e) { console.warn('ЗнЗ: позиции не переведены в работу:', e.message); }
   map[numZnz] = assignee;
   if (!writeZnzAssignees(map)) throw new Error('Не удалось сохранить отметку (оверлей znz-assignee.json).');
   // история изменений заявки — тот же append-формат, что rename/verify
@@ -3369,7 +3376,9 @@ async function znzItemsTableReady() { try { await tid('znz_items'); return true;
 //  живёт на позиции: в одной заявке легко три позиции, три поставщика, три счёта.
 //  Статус заявки больше не хранится как истина, а ВЫВОДИТСЯ из позиций — тот же приём,
 //  что у ПЗ (derivePzStatus по задачам) и у полноты приёмки (по актам ВК).
-const ZNZ_ITEM_FLOW = ['В работе', 'Размещена', 'В пути', 'Принята', 'Отменена'];
+// K-144: у позиции не было состояния «ещё не начата» — при разметке K-138 всем
+//  проставили «В работе», и НОВАЯ заявка выводилась как «В работе». Добавлена «Новая».
+const ZNZ_ITEM_FLOW = ['Новая', 'В работе', 'Размещена', 'В пути', 'Принята', 'Отменена'];
 // места доставки (справочник, а не хардкод: правится в рантайме без правки кода)
 const DELIVERY_PLACES_DEF = [
   'Храброво — 238315, Калининградская обл., МО Зеленоградский, ИП Храброво, ул. Инноваций, зд. 1',
@@ -3471,7 +3480,8 @@ async function createZnzItem(body) {
   const znz = reqs.find((x) => String(x.Id ?? x.id) === String(znzId));
   if (!znz) throw new Error('Заявка ЗнЗ не найдена.');
   const row = znzItemRowFromBody(body, znz);
-  row['Статус'] = 'В работе';   // K-138: новая позиция всегда стартует в работе
+  // K-144: позиция стартует «Новая»; в работу её переводит приём заявки закупщиком
+  row['Статус'] = String(znz['Статус'] || '') === 'Новая' ? 'Новая' : 'В работе';
   if (String(body.supplier || '').trim()) row['Поставщик'] = String(body.supplier).trim();
   if (String(body.due || '').trim()) row['Срок поставки'] = String(body.due).trim().slice(0, 10);
   const created = await ncCreateMany('znz_items', [row]);

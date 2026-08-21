@@ -7186,7 +7186,11 @@
       // deep-link: карточка ЗнЗ адресуется хешем — открытие фиксирует '#purchase/<№ ЗнЗ>'
       // (replaceState, без записи в историю — по образцу '#orders/<№ ПЗ>' в renderOrdersView)
       try{history.replaceState(null,'','#purchase/'+encodeURIComponent(r.numZnz));}catch{}
-      const dispStatus=r.status==='Согласована'?'Новая':r.status;
+      // K-138: статус заявки ВЫВОДИТСЯ из позиций, а переходы валидируются сервером по
+      //  ХРАНИМОМУ полю. Считать шаги по выводимому нельзя — они разойдутся, и переход
+      //  отобьётся с ошибкой «только соседний этап». Полоса и кнопки идут по statusStored.
+      const stForFlow=r.statusStored||r.status;
+      const dispStatus=stForFlow==='Согласована'?'Новая':stForFlow;
       const ci=ZNZ_STATUSES_UI.indexOf(dispStatus);
       // K-86: право действия — нужно до сборки reqCard (кнопка-карандаш переименования)
       const canAct=PROC.mode==='live'&&r.id!=null&&znzCanAct();

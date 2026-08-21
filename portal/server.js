@@ -2108,11 +2108,20 @@ async function buildProcurementLive() {
     // K-86 этап 2: сумма привязанных счетов + их число (колонка СУММА реестра ЗнЗ)
     invoicesSum: inv ? inv.sum : null, invoicesCount: inv ? inv.count : 0,
     invPaidSum: inv ? inv.paidSum : 0, invPaidCount: inv ? inv.paidCount : 0, invSentCount: inv ? inv.sentCount : 0,
-    status: r['Статус'] || '', approval: r['Согласование (§4)'] || '', supplier: r['Выбранный поставщик'] || '',
+    // K-138: статус ВЫВОДИТСЯ из позиций (заявка — потребность, сделка на позиции).
+    //  Позиций нет — работает прежнее поле, старые заявки не ломаем.
+    status: deriveZnzStatus(pitems.filter((it) => String(it['ЗнЗ Id'] || '') === String(zid)).map((it) => it['Статус']), r['Статус']),
+    statusStored: r['Статус'] || '', approval: r['Согласование (§4)'] || '', supplier: r['Выбранный поставщик'] || '',
     // K-86 этап 3: денормализ. Id поставщика из реестра + число позиций заявки
     supplierId: numOrNull(r['Поставщик Id']), itemsCount: itemsByZnz.get(Number(zid)) || 0,
     sourceRef: r['Триггер-источник (ЗКЗ/ПЗ/склад)'] || '', stz: r['Режим ОЭЗ/СТЗ'] || '',
     files: Array.isArray(r['Файлы']) ? r['Файлы'] : [], // K-134: вложения заявки
+    // K-138: полнота по позициям — цифрой, вместо выдуманных «частично размещена»
+    coverage: znzCoverage(
+      pitems.filter((it) => String(it['ЗнЗ Id'] || '') === String(zid)).map(znzItemShape),
+      pinv.filter((iv) => String(iv['ЗнЗ Id'] || '') === String(zid))
+        .map((iv) => ({ payStatus: iv['Статус оплаты'] || '', itemIds: invoiceItemIdsParse(iv['Позиции счёта (Ids)']) }))),
+    deliveryPlace: r['Место доставки'] || '', // K-138: куда везти
     duePlan: r['Срок поставки план'] || '', dueFact: r['Срок поставки факт'] || '', owner: r['Ответственный'] || '', note: r['Примечание'] || '',
     // K-83 этап 1a: сохранённый статус оплаты (degrade-safe — пусто до migrate-046)
     paymentId: r['Оплата Id'] || '', paymentStatus: r['Оплата статус'] || '',
@@ -2148,7 +2157,8 @@ async function buildProcurementLive() {
     docs: numOrNull(e['Документация (макс 15)']), eco: numOrNull(e['Эколог./ОТ (макс 15)']), total: numOrNull(e['Итог балл']),
     category: e['Категория'] || '', assessor: e['Оценку провёл'] || '', approver: e['Утвердил'] || '', note: e['Примечание'] || '',
   }));
-  return { mode: 'live', requests, orders, suppliers, evaluations };
+  // K-138: справочник мест доставки — в выдачу, чтобы клиент не хардкодил список
+  return { mode: 'live', requests, orders, suppliers, evaluations, deliveryPlaces: deliveryPlaces() };
 }
 
 // --- создание заявки на закупку ЗнЗ (цеховая Ф.4–К / плановая Ф.1–К) ----------
@@ -2209,6 +2219,9 @@ async function createZnzRequest(body) {
   // K-134: несколько источников — через запятую; чистим пробелы и дубликаты
   const sourceRef = sourceRefList(body.sourceRef || body.orderRef).join(', ');
   if (sourceRef) row['Триггер-источник (ЗКЗ/ПЗ/склад)'] = sourceRef;
+  // K-138: куда везти. Раньше в заявке этого не было вообще.
+  const place = String(body.deliveryPlace || '').trim();
+  if (place) row['Место доставки'] = place;
   if (body.duePlan) row['Срок поставки план'] = String(body.duePlan).slice(0, 10);
   // референс/ссылка (напр. atmt.ru) + основание/комментарий → в «Примечание»
   const noteParts = [];
@@ -3344,11 +3357,59 @@ async function znzAcceptOcrClassify(files) {
 // дружелюбную ошибку «секция появится после миграции». Аддитивно.
 const znzNumOrNull = (v) => (v != null && v !== '') ? Number(v) : null;
 async function znzItemsTableReady() { try { await tid('znz_items'); return true; } catch { return false; } }
+// ── K-138: состояние спущено на ПОЗИЦИЮ ───────────────────────────────────────
+//  Заявка — это ПОТРЕБНОСТЬ, а не сделка. Сделка (поставщик + счёт + срок + перевозка)
+//  живёт на позиции: в одной заявке легко три позиции, три поставщика, три счёта.
+//  Статус заявки больше не хранится как истина, а ВЫВОДИТСЯ из позиций — тот же приём,
+//  что у ПЗ (derivePzStatus по задачам) и у полноты приёмки (по актам ВК).
+const ZNZ_ITEM_FLOW = ['В работе', 'Размещена', 'В пути', 'Принята', 'Отменена'];
+// места доставки (справочник, а не хардкод: правится в рантайме без правки кода)
+const DELIVERY_PLACES_DEF = [
+  'Храброво — 238315, Калининградская обл., МО Зеленоградский, ИП Храброво, ул. Инноваций, зд. 1',
+  'Калининград — ул. Огарёва, 38',
+  'Волгоград — ул. Историческая, 191г',
+];
+const deliveryPlaces = () => {
+  const v = runtime.DELIVERY_PLACES;
+  return (Array.isArray(v) && v.length) ? v.map(String) : DELIVERY_PLACES_DEF;
+};
+// Статус заявки из статусов её позиций. Позиций нет — заявка живёт своим полем
+// (старые заявки без разбивки не ломаем).
+function deriveZnzStatus(itemStatuses, stored) {
+  const cur = String(stored || '').trim() || 'Новая';
+  const list = (itemStatuses || []).map((x) => String(x || '').trim()).filter(Boolean);
+  if (!list.length) return cur;
+  if (cur === 'Отменена' || cur === 'Закрыта') return cur;   // ручное решение сильнее
+  const live = list.filter((x) => x !== 'Отменена');
+  if (!live.length) return 'Отменена';
+  if (live.every((x) => x === 'Принята')) return 'Принята';
+  return 'В работе';   // всё промежуточное — заявка в работе, детали на позициях
+}
+// Полнота по позициям: сколько размещено / в пути / принято — показываем цифрой,
+// а не выдумываем статусы «частично размещена».
+function znzCoverage(items, invoices) {
+  const live = items.filter((x) => String(x.status || '') !== 'Отменена');
+  const total = live.length;
+  const at = (st) => live.filter((x) => String(x.status || '') === st).length;
+  const placed = at('Размещена') + at('В пути') + at('Принята');
+  const paidIds = new Set();
+  for (const inv of invoices || []) {
+    if (!/Оплачено/i.test(String(inv.payStatus || ''))) continue;
+    for (const pid of inv.itemIds || []) paidIds.add(String(pid));
+  }
+  const billedIds = new Set();
+  for (const inv of invoices || []) for (const pid of inv.itemIds || []) billedIds.add(String(pid));
+  return { total, placed, inTransit: at('В пути'), accepted: at('Принята'),
+    billed: live.filter((x) => billedIds.has(String(x.id))).length,
+    paid: live.filter((x) => paidIds.has(String(x.id))).length };
+}
 function znzItemShape(r) {
   return {
     id: r.Id ?? r.id,
     name: r['Наименование'] || '', qty: r['Кол-во'] ?? '', unit: r['Ед.изм.'] || '',
     category: r['Категория'] || '', catalogCode: r['Каталог-код'] || '', note: r['Примечание'] || '',
+    status: r['Статус'] || 'В работе', supplier: r['Поставщик'] || '',   // K-138: сделка на позиции
+    due: r['Срок поставки'] ? String(r['Срок поставки']).slice(0, 10) : '',
     znzNum: r['ЗнЗ (№)'] || '', znzId: znzNumOrNull(r['ЗнЗ Id']),
   };
 }
@@ -3399,6 +3460,9 @@ async function createZnzItem(body) {
   const znz = reqs.find((x) => String(x.Id ?? x.id) === String(znzId));
   if (!znz) throw new Error('Заявка ЗнЗ не найдена.');
   const row = znzItemRowFromBody(body, znz);
+  row['Статус'] = 'В работе';   // K-138: новая позиция всегда стартует в работе
+  if (String(body.supplier || '').trim()) row['Поставщик'] = String(body.supplier).trim();
+  if (String(body.due || '').trim()) row['Срок поставки'] = String(body.due).trim().slice(0, 10);
   const created = await ncCreateMany('znz_items', [row]);
   const cr = Array.isArray(created) ? created[0] : created;
   const id = cr && (cr.Id ?? cr.id);
@@ -3418,6 +3482,14 @@ async function updateZnzItem(body) {
   if (body.unit != null) patch['Ед.изм.'] = String(body.unit).trim();
   if (body.category != null) patch['Категория'] = String(body.category).trim();
   if (body.catalogCode != null || body.catalog_code != null) patch['Каталог-код'] = String(body.catalogCode ?? body.catalog_code ?? '').trim();
+  // K-138: сделка на позиции. Пустая строка допустима — снимает значение (typeof, не if(v)).
+  if (typeof body.status === 'string') {
+    const st = body.status.trim();
+    if (st && !ZNZ_ITEM_FLOW.includes(st)) throw new Error(`Недопустимый статус позиции: «${st}».`);
+    patch['Статус'] = st || 'В работе';
+  }
+  if (typeof body.supplier === 'string') patch['Поставщик'] = body.supplier.trim();
+  if (typeof body.due === 'string') patch['Срок поставки'] = body.due.trim().slice(0, 10) || null;
   if (body.note != null) patch['Примечание'] = String(body.note).trim();
   if (!Object.keys(patch).length) return { ok: true, id, unchanged: true };
   await ncUpdate('znz_items', id, patch);

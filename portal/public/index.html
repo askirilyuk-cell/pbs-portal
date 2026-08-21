@@ -7342,7 +7342,10 @@
       if(canAccept)acts.push('<button class="tbtn primary" id="znz-accept-btn" style="background:#2e7d32;border-color:#2e7d32">Провести приёмку</button>');
       const acceptHost=canAccept?'<div id="znz-accept-host"></div>':'';
       // K-102: «Принять в работу» (Снабжение/Админ, LIVE, пока никто не взял) + бейдж «В работе у»
-      const canTake=PROC.mode==='live'&&r.id!=null&&znzCanTake()&&!(r.assignee&&r.assignee.fio);
+      // K-139: проверки статуса тут не было вовсе — «Принять в работу» предлагалась
+      //  и на закрытой заявке, и на отменённой. Терминальные статусы исключаем.
+      const znzDone=['Принята','Закрыта','Отменена'].includes(String(r.statusStored||r.status||''));
+      const canTake=PROC.mode==='live'&&r.id!=null&&znzCanTake()&&!znzDone&&!(r.assignee&&r.assignee.fio);
       if(canTake)acts.push('<button class="ui-btn ui-btn--primary" id="znz-take">Принять в работу</button>');
       const takenBadge=(r.assignee&&r.assignee.fio)?`<span class="st--wait" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}"><i class=ic-hour></i> В работе у: ${esc(r.assignee.fio)}</span>`:'';
       znzCardOpen(`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">

@@ -695,6 +695,21 @@ function orderChatFor(sourceRef) {
   const chat = String(readOrderChats()[m[0]] || '').trim();
   return /^\d+$/.test(chat) ? { numPz: m[0], chat } : null;
 }
+// K-134: одна заявка может обеспечивать НЕСКОЛЬКО заказов — источники хранятся в том же
+//  текстовом поле через запятую. orderChatFor берёт ПЕРВОЕ совпадение регуляркой, поэтому
+//  уведомление уходило бы только в один чат, а про остальные заказы никто бы не узнал.
+//  Ниже — разбор списка и все чаты разом (дубликаты по номеру схлопываются).
+function sourceRefList(sourceRef) {
+  return [...new Set(String(sourceRef || '').split(/[,;]/).map((x) => x.trim()).filter(Boolean))];
+}
+function orderChatsFor(sourceRef) {
+  const seen = new Set(); const out = [];
+  for (const part of sourceRefList(sourceRef)) {
+    const oc = orderChatFor(part);
+    if (oc && !seen.has(oc.chat)) { seen.add(oc.chat); out.push(oc); }
+  }
+  return out;
+}
 // ── K-102: «принята в работу» закупщиком (оверлей, БЕЗ миграции NocoDB) ──────
 // Файловый map { "<№ ЗнЗ>": { fio, when } } — мягкая альтернатива новой колонке схемы.
 const ZNZ_ASSIGNEE_FILE = path.join(__dirname, '.data', 'znz-assignee.json');
@@ -2097,6 +2112,7 @@ async function buildProcurementLive() {
     // K-86 этап 3: денормализ. Id поставщика из реестра + число позиций заявки
     supplierId: numOrNull(r['Поставщик Id']), itemsCount: itemsByZnz.get(Number(zid)) || 0,
     sourceRef: r['Триггер-источник (ЗКЗ/ПЗ/склад)'] || '', stz: r['Режим ОЭЗ/СТЗ'] || '',
+    files: Array.isArray(r['Файлы']) ? r['Файлы'] : [], // K-134: вложения заявки
     duePlan: r['Срок поставки план'] || '', dueFact: r['Срок поставки факт'] || '', owner: r['Ответственный'] || '', note: r['Примечание'] || '',
     // K-83 этап 1a: сохранённый статус оплаты (degrade-safe — пусто до migrate-046)
     paymentId: r['Оплата Id'] || '', paymentStatus: r['Оплата статус'] || '',
@@ -2190,7 +2206,9 @@ async function createZnzRequest(body) {
   const rationale = String(body.rationale || '').trim(); if (rationale) row['Обоснование'] = rationale;
   // K-102/K-104: источник заявки (№ ПЗ/ЗКЗ/склад). Фолбэк orderRef — форма «Привязка к заказу»
   // всегда слала orderRef, но сервер его молча терял (писался только в примечание).
-  const sourceRef = String(body.sourceRef || body.orderRef || '').trim(); if (sourceRef) row['Триггер-источник (ЗКЗ/ПЗ/склад)'] = sourceRef;
+  // K-134: несколько источников — через запятую; чистим пробелы и дубликаты
+  const sourceRef = sourceRefList(body.sourceRef || body.orderRef).join(', ');
+  if (sourceRef) row['Триггер-источник (ЗКЗ/ПЗ/склад)'] = sourceRef;
   if (body.duePlan) row['Срок поставки план'] = String(body.duePlan).slice(0, 10);
   // референс/ссылка (напр. atmt.ru) + основание/комментарий → в «Примечание»
   const noteParts = [];
@@ -2402,7 +2420,8 @@ async function setZnzSource(body, session) {
   if (idRaw == null || String(idRaw).trim() === '') throw new Error('Не указан идентификатор заявки (id).');
   const id = Number(idRaw);
   if (!Number.isFinite(id)) throw new Error('Некорректный идентификатор заявки.');
-  const sourceRef = String(body.sourceRef || '').trim(); // пусто = снять привязку (разрешено)
+  // K-134: список источников нормализуем так же, как при создании. Пусто = снять привязку.
+  const sourceRef = sourceRefList(body.sourceRef).join(', ');
   const rows = await ncListSoft('procurement_requests');
   const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
   if (!row) throw new Error('Заявка ЗнЗ не найдена.');
@@ -3857,8 +3876,8 @@ async function notifyZnzCreated(z) {
 async function notifyOrderChatZnz({ sourceRef, numZnz, name, qty, unit, duePlan }) {
   const c = cfg();
   if (!c.BITRIX) return { ok: false, skipped: true, reason: 'webhook not configured' };
-  const oc = orderChatFor(sourceRef);
-  if (!oc) return { ok: false, skipped: true, reason: 'order chat not configured' };
+  const chats = orderChatsFor(sourceRef);
+  if (!chats.length) return { ok: false, skipped: true, reason: 'order chat not configured' };
   const portal = String(c.PORTAL_BASE || '').replace(/\/+$/, '');
   const qtyStr = [qty, unit].filter((x) => x != null && x !== '').join(' ');
   const L = [
@@ -3870,8 +3889,13 @@ async function notifyOrderChatZnz({ sourceRef, numZnz, name, qty, unit, duePlan 
     L.push(`📁 Заявка в портале: ${portal}/#purchase/${encodeURIComponent(numZnz)}`);
     L.push(`🖨 PDF: ${portal}/api/print/znz/${encodeURIComponent(numZnz)}`);
   }
-  await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: L.join('\n') });
-  return { ok: true, chat: oc.chat, numPz: oc.numPz };
+  // K-134: шлём в чат КАЖДОГО заказа-источника; сбой одного не мешает остальным
+  const sent = [];
+  for (const oc of chats) {
+    try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: L.join('\n') }); sent.push(oc.numPz); }
+    catch (e) { console.warn(`ЗнЗ: уведомление в чат заказа ${oc.numPz} не ушло:`, e.message); }
+  }
+  return { ok: sent.length > 0, chats: chats.map((x) => x.chat), orders: sent };
 }
 
 // --- файлы запроса (папки записей продаж на NAS) ----------------------------
@@ -10656,6 +10680,38 @@ const server = http.createServer(async (req, res) => {
       } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // загрузка скан-файла счёта → attachment-объект (для поля «Файл-скан»)
+    // K-134: файлы к заявке ЗнЗ (счёт от поставщика, каталог, любая справочная инфа).
+    //  Колонка «Файлы» (Attachment) заведена migrate-K134. Файлы ДОБАВЛЯЮТСЯ к уже
+    //  приложенным, а не заменяют их — иначе второй файл затирал бы первый.
+    if (p === '/api/procurement/znz/files' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Загрузка доступна только в LIVE-режиме.' });
+      const ct = String(req.headers['content-type'] || '');
+      const bm = /boundary=([^;]+)/i.exec(ct);
+      if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
+      try {
+        const buf = await readRawBody(req, 25 * 1024 * 1024);
+        const { fields, files } = parseMultipart(buf, bm[1].trim().replace(/^"|"$/g, ''));
+        const id = Number(fields.id);
+        if (!Number.isFinite(id)) return sendJson(res, 400, { error: 'Не указана заявка (id).' });
+        if (!files.length) return sendJson(res, 400, { error: 'Файл не передан.' });
+        const rows = await ncListSoft('procurement_requests');
+        const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
+        if (!row) return sendJson(res, 404, { error: 'Заявка ЗнЗ не найдена.' });
+        const added = [];
+        for (const f of files) added.push(await uploadInvoiceScan(f));
+        const prev = Array.isArray(row['Файлы']) ? row['Файлы'] : [];
+        const next = prev.concat(added);
+        await ncUpdate('procurement_requests', id, { 'Файлы': next });
+        const who = (req.session && (req.session.fioShort || req.session.fio)) || '';
+        const hist = znzHistoryParse(row['История изменений']);
+        hist.push({ ts: new Date().toISOString(), user: who || 'неизвестно', field: 'Файлы', from: String(prev.length),
+          to: added.map((a) => a.title || a.fileName || 'файл').join(', ') });
+        try { await ncUpdate('procurement_requests', id, { 'История изменений': JSON.stringify(hist) }); } catch { /* soft */ }
+        logEvent({ type: 'файл приложен', obj: 'ЗнЗ', objNum: String(row['№ ЗнЗ'] || ''), who,
+          details: added.map((a) => a.title || a.fileName || 'файл').join(', ') });
+        return sendJson(res, 200, { ok: true, files: next, added: added.length });
+      } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/procurement/invoices/upload' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Загрузка доступна только в LIVE-режиме.' });
       const ct = String(req.headers['content-type'] || '');

@@ -7210,10 +7210,14 @@
       // K-102: «Источник» (ЗКЗ/ПЗ/склад) — теперь редактируемый (поздняя привязка к заказу):
       // карандаш → инлайн-инпут → POST /api/procurement/znz/source (+автопост в чат заказа,
       // если у ПЗ-источника задан чат). Источник — ПЗ → номер кликабелен (переход в карточку ПЗ).
-      const srcView=r.sourceRef
-        ?(/^ПЗ-\d{4}-\d{3}$/.test(r.sourceRef)
-          ?'<a class="code" style="font-family:var(--mono);color:var(--blue);cursor:pointer;text-decoration:none" href="#orders/'+encodeURIComponent(r.sourceRef)+'">'+esc(r.sourceRef)+'</a>'
-          :'<span class="code" style="font-family:var(--mono);color:var(--blue)">'+esc(r.sourceRef)+'</span>')
+      // K-134: источников может быть несколько (одна заявка обеспечивает пару заказов) —
+      //  показываем КАЖДЫЙ отдельной ссылкой, а не одной строкой.
+      const srcParts=String(r.sourceRef||'').split(/[,;]/).map(x=>x.trim()).filter(Boolean);
+      const srcOne=(v)=>/^ПЗ-\d{4}-\d{3}$/.test(v)
+        ?'<a class="code" style="font-family:var(--mono);color:var(--blue);cursor:pointer;text-decoration:none" href="#orders/'+encodeURIComponent(v)+'">'+esc(v)+'</a>'
+        :'<span class="code" style="font-family:var(--mono);color:var(--blue)">'+esc(v)+'</span>';
+      const srcView=srcParts.length
+        ?srcParts.map(srcOne).join('<span style="color:var(--sl-300);margin:0 5px">·</span>')
         :'<span class="c-gray">—</span>';
       const sourceBlock=`<div id="znz-src-block">
           <div style="font-size:11px;color:var(--sl-500)">Источник (ЗКЗ/ПЗ/склад)</div>
@@ -7242,6 +7246,24 @@
         </div>${sup?`<div style="margin-top:10px"><a class="c-blue" style="font-size:12px;cursor:pointer" data-gosup="${sup.id}">Открыть карточку поставщика (РОП/ЛОП) →</a></div>`:''}</div>`:'';
       const apprCard=r.approval?`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">Согласование (пороги ДП–К §4)</div>
         <div style="font-size:12px;color:var(--sl-700);line-height:1.6">${esc(r.approval)}</div></div>`:'';
+      // K-134: файлы к заявке — счёт от поставщика, каталог, любая справочная информация.
+      //  Добавляются к уже приложенным, не заменяют их.
+      const fileRow=(f,i)=>{const nm=f.title||f.fileName||('файл '+(i+1));
+        const url=f.signedUrl||f.url||(f.path?('/api/procurement/znz/file?path='+encodeURIComponent(f.path)):'');
+        const kb=f.size?Math.max(1,Math.round(f.size/1024))+' КБ':'';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line2);font-size:12px">
+          <i class=ic-clip></i>${url?`<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none">${esc(nm)}</a>`:esc(nm)}
+          <span style="margin-left:auto;color:var(--sl-500);font-size:11px">${esc(kb)}</span></div>`;};
+      const filesList=(r.files||[]).length?(r.files||[]).map(fileRow).join('')
+        :'<div style="font-size:12px;color:var(--sl-500);padding:4px 0">Файлов нет</div>';
+      const filesCard=`<div class="card pad" id="znz-files-card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div class="sec-h" style="margin:0">Файлы</div>
+          <span style="font-size:11px;color:var(--sl-500)">счёт · каталог · справочная информация</span>
+          ${(PROC.mode==='live'&&znzCanAct())?'<label class="tbtn" style="margin-left:auto;padding:6px 13px;cursor:pointer">Прикрепить<input type="file" id="znz-file-inp" multiple style="display:none"></label>':''}
+        </div>
+        <div id="znz-files-list">${filesList}</div>
+        <div id="znz-files-msg" style="margin-top:7px;font-size:12px"></div></div>`;
       // K-83 этап 4: блок «Приёмка и входной контроль» убран из карточки ЗнЗ (по решению владельца) — код удалён.
       // K-86 этап 3: секция «Позиции» — оболочка (список заполнится в loadZnzItems; degrade-safe).
       const itemAdd=(PROC.mode==='live'&&znzCanAct())?'<button class="tbtn primary" id="znz-item-add" style="margin-left:auto;padding:6px 13px">+ Позиция</button>':'';
@@ -7324,7 +7346,7 @@
           <button data-zt="hist">История приёмки</button>
         </div>
         <div style="display:flex;flex-direction:column;gap:var(--gap)">
-          <div class="ztab-p" data-zp="items">${acceptHost}${reqCard}${midRow}${itemsCard}</div>
+          <div class="ztab-p" data-zp="items">${acceptHost}${reqCard}${midRow}${itemsCard}${filesCard}</div>
           <div class="ztab-p" data-zp="qc" hidden>${actsCard}</div>
           <div class="ztab-p" data-zp="inv" hidden>${invCard}${payCard}</div>
           <div class="ztab-p" data-zp="hist" hidden>${histCard||'<div class="card pad"><div class="ui-empty"><div class="why">Истории пока нет</div><div class="sub">Записи появятся после первых действий с заявкой.</div></div></div>'}</div>
@@ -7411,7 +7433,7 @@
         const view=document.getElementById('znz-src-view'), editWrap=document.getElementById('znz-src-edit');
         view.style.display='none'; editWrap.style.display='flex';
         const escA=(s)=>esc(s).replace(/"/g,'&quot;');
-        editWrap.innerHTML=`<input id="znz-src-input" style="${FINP};min-width:200px;max-width:260px" value="${escA(r.sourceRef||'')}" placeholder="ПЗ-2026-001 / ЗКЗ-… / склад">
+        editWrap.innerHTML=`<input id="znz-src-input" style="${FINP};min-width:260px;max-width:340px" value="${escA(r.sourceRef||'')}" placeholder="ПЗ-2026-001, ПЗ-2026-011 — через запятую" title="Несколько заказов перечисляйте через запятую">
           <button class="ui-btn ui-btn--primary" id="znz-src-save" style="padding:8px 14px">Сохранить</button>
           <button class="ui-btn" id="znz-src-cancel" style="padding:8px 14px">Отмена</button>`;
         const inp=document.getElementById('znz-src-input'); inp.focus(); inp.select();
@@ -8292,6 +8314,27 @@
         };
       }
       const ab=document.getElementById('znz-pay-add'); if(ab){ ab.textContent=has?'Отправить повторно':'Отправить на оплату'; ab.onclick=()=>openPayFormInline(r,canAct); }
+      // K-134: прикрепление файлов к заявке. Несколько файлов за раз; каждый добавляется
+      //  к уже приложенным (сервер конкатенирует, а не заменяет).
+      const fInp=document.getElementById('znz-file-inp');
+      if(fInp)fInp.onchange=async()=>{
+        const msg=document.getElementById('znz-files-msg'); const list=[...fInp.files];
+        if(!list.length)return;
+        const big=list.find(f=>f.size>25*1024*1024);
+        if(big){ if(msg){msg.style.color='var(--red)'; msg.textContent='Файл «'+big.name+'» больше 25 МБ — не примет.';} fInp.value=''; return; }
+        if(msg){ msg.style.color='var(--sl-500)'; msg.textContent='Загрузка ('+list.length+')…'; }
+        try{
+          for(const f of list){
+            const fd=new FormData(); fd.append('id',String(r.id)); fd.append('file',f,f.name);
+            const rs=await fetch('/api/procurement/znz/files',{method:'POST',body:fd});
+            const j=await rs.json().catch(()=>({})); if(!rs.ok||j.error)throw new Error(j.error||('HTTP '+rs.status));
+          }
+          toast('Файлов прикреплено: '+list.length,'ok');
+          PROC=await (await fetch('/api/procurement')).json();
+          openZnzCard((PROC.requests||[]).find(x=>String(x.id)===String(r.id))||r);
+        }catch(e){ if(msg){ msg.style.color='var(--red)'; msg.textContent=String(e.message||e); } }
+        finally{ fInp.value=''; }
+      };
       // K-132: инициатор правит необходимую дату поставки прямо в карточке.
       //  Пустое поле = снять срок: на сервере проверка typeof, а не «если непусто».
       const dueEdit=document.getElementById('znz-due-edit');

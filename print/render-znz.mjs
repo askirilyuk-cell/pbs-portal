@@ -103,7 +103,8 @@ async function main() {
     NOTE: r['Примечание'] ? esc(String(r['Примечание'])).replace(/\r?\n/g, '<br>') : '<span class="muted">—</span>',
     SUPPLIER: v(r['Выбранный поставщик']),
     SIGN_INITIATOR: v(r['Инициатор']),
-    SIGN_ASSIGNEE: assignee && assignee.fio ? esc(assignee.fio) : '',
+    // K-130: в бланке — инициалы (Фамилия И.О.); у записей до правки их нет, тогда полное ФИО
+    SIGN_ASSIGNEE: assignee && (assignee.fioShort || assignee.fio) ? esc(assignee.fioShort || assignee.fio) : '',
     SIGN_ASSIGNEE_DATE: assignee && assignee.when ? esc(fmtD(assignee.when)) : '',
     GENERATED_AT: new Date().toISOString().slice(0, 16).replace('T', ' '),
     POSITIONS: rowsHtml,

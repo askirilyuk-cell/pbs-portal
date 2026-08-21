@@ -2410,10 +2410,13 @@ async function takeZnzRequest(body, session, roles) {
   if (!row) throw new Error('Заявка ЗнЗ не найдена.');
   const numZnz = String(row['№ ЗнЗ'] || '').trim() || `#${id}`;
   const fio = (session && session.fio) || 'неизвестно';
+  // K-130: подпись в бланке Ф.4–К — «Фамилия И.О.», как в Ф.1–П.2 (решение владельца).
+  //  Полное ФИО оставляем для UI и истории: там оно информативнее.
+  const fioShort = (session && session.fioShort) || fioInitials(fio) || fio;
   const map = readZnzAssignees();
   const prev = map[numZnz];
   if (prev && prev.fio) return { ok: true, unchanged: true, assignee: prev };
-  const assignee = { fio, when: new Date().toISOString() };
+  const assignee = { fio, fioShort, when: new Date().toISOString() };
   map[numZnz] = assignee;
   if (!writeZnzAssignees(map)) throw new Error('Не удалось сохранить отметку (оверлей znz-assignee.json).');
   // история изменений заявки — тот же append-формат, что rename/verify
@@ -2431,7 +2434,7 @@ async function takeZnzRequest(body, session, roles) {
     const chat = String(c.ZNZ_CHAT || '').trim();
     if (!c.BITRIX || !chat || !/^\d+$/.test(chat)) notified = { ok: false, skipped: true, reason: 'webhook/chat not configured' };
     else {
-      await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: `⏳ ${numZnz} принята в работу: ${fio}` });
+      await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: `⏳ ${numZnz} принята в работу: ${fioShort} · ${fmtDateRu(assignee.when)}` });
       notified = { ok: true, chat };
     }
   } catch (e) { console.warn('ЗнЗ: автопост «принята в работу» не отправлен:', e.message); notified = { ok: false, error: String(e.message || e) }; }

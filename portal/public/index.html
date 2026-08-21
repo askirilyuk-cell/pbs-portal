@@ -6847,6 +6847,7 @@
             <div style="display:flex;gap:6px;align-items:center"><span class="pz">${esc(r.numZnz)}</span><span style="margin-left:auto">${znzTag(r)}</span></div>
             <div class="cu" title="${esc(r.name)}">${esc(r.name)}</div>
             <div style="display:flex;margin-top:7px;font-size:11px;color:var(--sl-500);gap:6px"><span>${sum||'—'}</span><span class="ell" style="margin-left:auto;max-width:96px;text-align:right" title="${esc(right)}">${esc(right)}</span></div>
+            ${(r.assignee&&r.assignee.fio)?`<div style="margin-top:5px;font-size:11px;color:#1d4e89;display:flex;align-items:center;gap:5px" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}"><i class=ic-hour></i> в работе у: ${esc(r.assignee.fioShort||r.assignee.fio)}</div>`:''}
             ${ov?`<div style="margin-top:5px;font-size:11px;color:var(--red);font-weight:600">просрочка ${-daysTo(r.duePlan)} дн.</div>`:''}</div>`;}).join('')
           ||'<div style="font-size:11px;color:var(--sl-500);padding:4px 2px">—</div>';
         return `<div class="kcol"><div class="kh c-${dot}"><i class="i-${dot}"></i>${esc(st)} <span class="cnt">${items.length}</span></div>${cards}</div>`;

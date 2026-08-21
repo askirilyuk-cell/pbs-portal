@@ -1396,6 +1396,11 @@
     }
     injectIcons();
     const esc=(s)=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    // K-147: экранирование для значения АТРИБУТА (кавычки тоже). Три копии этой функции
+    //  жили внутри отдельных функций; подсказки статусов нужны и в реестре, и на доске,
+    //  поэтому одна вынесена в общую область. Локальные копии её перекрывают тем же кодом —
+    //  трогать их не стал, чтобы не задеть их области видимости.
+    const escA=(s)=>esc(s).replace(/"/g,'&quot;');
     const fmt=(d)=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||''));return m?`${m[3]}.${m[2]}.${m[1]}`:(d?esc(d):'—');};
     // Общий адаптивный рендер журнала движения (металл / инструмент / оснастка / склад).
     // Вход — те же строки thead/tbody, что и раньше; на узкой панели (drawer ≤560px по container-query)
@@ -6746,7 +6751,21 @@
     const ZNZ_ITEM_COLS=['Новая','В работе','Размещена','В пути','Принята','Отменена'];
     const ZNZ_ITEM_DOT={'Новая':'gray','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Отменена':'gray'};
     const DOTC={gray:'#9ca3af',navy:'var(--navy)',blue:'var(--blue)',amber:'var(--amber)',green:'var(--green)',red:'var(--red)'};
-    const znzCell=(s)=>stCellDot(ZNZ_DOT[s]||'gray',s||'—');
+    // K-147: смысл этапов, записанный владельцем. Раньше нигде не был зафиксирован, и
+    //  каждый понимал по-своему — отсюда и вопросы «а что делает Разместить заказ».
+    //  Один словарь на всё: подсказки в реестре, на доске, в строках позиций и в справке.
+    const ZNZ_STATUS_HINT={
+      'Новая':'Сырая заявка: заведена, но никто ещё не взялся.',
+      'Согласована':'Согласована по порогам ДП–К §4 (этап скрыт в интерфейсе, остался у старых заявок).',
+      'В работе':'Принята ответственным, работа начата: поиск поставщика, заключение сделки, согласование договора, выписка счёта.',
+      'Размещена':'Счёт оплачен или договор подписан — ждём, когда изготовят или отгрузят.',
+      'В пути':'Отгружено поставщиком, груз в дороге.',
+      'Принята':'Поступило и прошло входной контроль (Ф.3–Д.1).',
+      'Закрыта':'Заявка завершена, вопросов по ней нет.',
+      'Отменена':'Снята: потребность отпала или закрыта иначе.',
+    };
+    const znzHint=(s)=>ZNZ_STATUS_HINT[s]||'';
+    const znzCell=(s)=>`<span class="st c-${ZNZ_DOT[s]||'gray'}"${znzHint(s)?` title="${escA(znzHint(s))}"`:''}><i class="i-${ZNZ_DOT[s]||'gray'}"></i>${esc(s||'—')}</span>`;
     const znzKind=(r)=>/ВЭД/i.test(r.trigger||'')?'ved':(/Цехов/i.test(r.type||'')?'ceh':'plan');
     const ZNZ_TAG={plan:['b-navy','ПЛАН'],ceh:['b-amber','ЦЕХ'],ved:['b-green','ВЭД']};
     const znzTag=(r)=>{const t=ZNZ_TAG[znzKind(r)];return `<span class="badge ${t[0]}" style="font-size:9px;font-weight:700">${t[1]}</span>`;};
@@ -6885,7 +6904,7 @@
             ${(r.assignee&&r.assignee.fio)?`<div style="margin-top:5px;font-size:11px;color:#1d4e89;display:flex;align-items:center;gap:5px" title="Принята в работу ${esc(fmtDateTimeFull(r.assignee.when))}"><i class=ic-hour></i> в работе у: ${esc(r.assignee.fioShort||r.assignee.fio)}</div>`:''}
             ${ov?`<div style="margin-top:5px;font-size:11px;color:var(--red);font-weight:600">просрочка ${-daysTo(r.duePlan)} дн.</div>`:''}</div>`;}).join('')
           ||'<div style="font-size:11px;color:var(--sl-500);padding:4px 2px">—</div>';
-        return `<div class="kcol"><div class="kh c-${dot}"><i class="i-${dot}"></i>${esc(st)} <span class="cnt">${items.length}</span></div>${cards}</div>`;
+        return `<div class="kcol"><div class="kh c-${dot}"${znzHint(st)?` title="${escA(znzHint(st))}"`:''}><i class="i-${dot}"></i>${esc(st)} <span class="cnt">${items.length}</span></div>${cards}</div>`;
       }).join('');
       body.innerHTML=`<div class="kan" style="grid-template-columns:repeat(7,minmax(${procKanW()}px,1fr));overflow-x:auto">${cols}</div>`;
       body.querySelectorAll('[data-znz]').forEach(el=>el.onclick=()=>{const r=(PROC.requests||[]).find(x=>x.numZnz===el.dataset.znz);if(r)openZnzCard(r);});
@@ -6908,7 +6927,7 @@
           return `<span class="${late?'c-red':'c-gray'}"${late?' style="font-weight:600"':''}>${fmt(r.due)}</span>`;},sortVal:r=>String(r.due||'')},
         {key:'who',label:'В работе у',w:140,cls:'ell c-gray',cell:r=>{const a=r._r.assignee;return a&&a.fio?esc(a.fioShort||a.fio):'<span class="c-gray">—</span>';},sortVal:r=>((r._r.assignee||{}).fio)||''},
         {key:'status',label:'Статус',w:150,cls:'nw',cell:r=>{const st=r.status||'Новая';const dot=ZNZ_ITEM_DOT[st]||'gray';
-          return `<span class="st c-${dot}"><i class="i-${dot}"></i>${esc(st)}</span>`;},sortVal:r=>r.status||''},
+          return `<span class="st c-${dot}"${znzHint(st)?` title="${escA(znzHint(st))}"`:''}><i class="i-${dot}"></i>${esc(st)}</span>`;},sortVal:r=>r.status||''},
       ];
       const orphan=(PROC.requests||[]).filter(r=>!items.some(i=>String(i.znzNum)===String(r.numZnz))).length;
       erpGrid(body,{key:'proc-items',cols,rows,
@@ -8263,8 +8282,8 @@
       const dot=ZNZ_ITEM_DOT[st]||'gray';
       const late=x.due&&daysTo(x.due)<0&&!['Принята','Отменена'].includes(st);
       const sel=(canAct&&!x.legacy)
-        ?`<select data-item-st="${x.id}" title="Статус позиции" style="font:inherit;font-size:11px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff;color:var(--sl-700)">${ZNZ_ITEM_COLS.map(o=>`<option${o===st?' selected':''}>${o}</option>`).join('')}</select>`
-        :(st?`<span class="st c-${dot}" style="white-space:nowrap"><i class="i-${dot}"></i>${esc(st)}</span>`:'');
+        ?`<select data-item-st="${x.id}" title="${escA(znzHint(st)||'Статус позиции')}" style="font:inherit;font-size:11px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff;color:var(--sl-700)">${ZNZ_ITEM_COLS.map(o=>`<option${o===st?' selected':''}>${o}</option>`).join('')}</select>`
+        :(st?`<span class="st c-${dot}" style="white-space:nowrap"${znzHint(st)?` title="${escA(znzHint(st))}"`:''}><i class="i-${dot}"></i>${esc(st)}</span>`:'');
       const line2=x.legacy?'':`<div style="display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11px;flex-wrap:wrap">
           <span class="c-gray">Поставщик:</span>
           ${canAct?`<select data-item-sup="${x.id}" style="font:inherit;font-size:11px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff;min-width:170px">

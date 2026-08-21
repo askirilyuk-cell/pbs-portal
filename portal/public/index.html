@@ -7387,7 +7387,12 @@
       const next=ci>=0&&ci<ZNZ_STATUSES_UI.length-1?ZNZ_STATUSES_UI[ci+1]:null;
       const prev=ci>0?ZNZ_STATUSES_UI[ci-1]:null;
       const acts=[];
-      if(canAct&&next)acts.push(`<button class="tbtn primary" id="znz-next" data-to="${esc(next)}">→ ${esc(ZNZ_ACTION[next]||next)}</button>`);
+      // K-142: «→ Взять в работу» убрана — она дублировала «Принять в работу».
+      //  После K-133/K-136 приём в работу делает и то, и другое: ставит исполнителя И
+      //  переводит статус. Отдельный переход «В работе» оставлял бы способ попасть
+      //  в этот статус БЕЗ исполнителя — заявка «в работе», а спросить не с кого.
+      //  Все прочие переходы на месте.
+      if(canAct&&next&&next!=='В работе')acts.push(`<button class="tbtn primary" id="znz-next" data-to="${esc(next)}">→ ${esc(ZNZ_ACTION[next]||next)}</button>`);
       if(canAct&&prev)acts.push(`<button class="tbtn" id="znz-prev" data-to="${esc(prev)}" title="Вернуть на предыдущий этап">← Вернуть</button>`);
       // К-92 (фаза 2, утв. владельцем): «Провести приёмку» — акт входного контроля Ф.3–Д.1
       // + опц. приход металла на склад. Видна на этапах, где физически уже что-то приходит.

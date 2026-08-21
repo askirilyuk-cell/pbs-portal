@@ -2320,6 +2320,16 @@ async function updateZnzStatus(body, who) {
   const skipApproval = (from === 'Новая' && target === 'В работе') || (from === 'В работе' && target === 'Новая');
   if (Math.abs(ti - ci) !== 1 && !skipApproval) throw new Error(`Переход «${from}» → «${target}» не разрешён: только соседний этап.`);
   await ncUpdate('procurement_requests', id, { 'Статус': target });
+  // K-136: перевод в «В работе» кнопкой этапа тоже фиксирует, КТО взял — иначе
+  //  заявка оказывалась «в работе» без исполнителя, и по доске непонятно, с кого спрашивать.
+  if (target === 'В работе') {
+    const numZ = String(row['№ ЗнЗ'] || '').trim();
+    const mp = readZnzAssignees();
+    if (numZ && who && !(mp[numZ] && mp[numZ].fio)) {
+      mp[numZ] = { fio: who, fioShort: fioInitials(who) || who, when: new Date().toISOString() };
+      writeZnzAssignees(mp);
+    }
+  }
   logEvent({ type: 'статус изменён', obj: 'ЗнЗ', objNum: String(row['№ ЗнЗ'] || '').trim() || `#${id}`,
     from, to: target, who, details: String(row['Наименование'] || '') });
   return { ok: true, id, from, to: target };
@@ -2470,7 +2480,16 @@ async function takeZnzRequest(body, session, roles) {
   const fioShort = (session && session.fioShort) || fioInitials(fio) || fio;
   const map = readZnzAssignees();
   const prev = map[numZnz];
-  if (prev && prev.fio) return { ok: true, unchanged: true, assignee: prev };
+  if (prev && prev.fio) {
+    // K-136: заявку уже брали, но статус мог отстать — например её взяли до того,
+    //  как отметка стала двигать статус. Дотягиваем молча, второй отметки не ставим.
+    const st = String(row['Статус'] || '').trim();
+    if (st === 'Новая' || st === 'Согласована') {
+      try { await ncUpdate('procurement_requests', id, { 'Статус': 'В работе' }); }
+      catch (e) { console.warn('ЗнЗ: статус не выровнен:', e.message); }
+    }
+    return { ok: true, unchanged: true, assignee: prev };
+  }
   const assignee = { fio, fioShort, when: new Date().toISOString() };
   // K-133: взять заявку в работу = перевести её в статус «В работе». Раньше отметка
   //  жила отдельно от статуса, и на доске заявка продолжала висеть в «Новых».

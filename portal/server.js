@@ -3488,7 +3488,27 @@ async function createZnzItem(body) {
   const cr = Array.isArray(created) ? created[0] : created;
   const id = cr && (cr.Id ?? cr.id);
   try { if (id != null) await ncLinkRecords('procurement_requests', 'Позиции', znzId, [id]); } catch { /* soft */ }
+  await syncZnzHeadFromItems(znzId);
   return { ok: true, id, znzId };
+}
+// K-151: количество и наименование живут В ДВУХ местах — в позиции и в старых полях
+//  заявки. Реестр, доска и бланк Ф.4–К читают поля ЗАЯВКИ, поэтому правка позиции
+//  была не видна: в позиции 300, в шапке по-прежнему 150.
+//  Пока заявка ОДНОПОЗИЦИОННАЯ — держим шапку в согласии с её единственной позицией.
+//  У многопозиционной шапку не трогаем: одно число там смысла не имеет.
+async function syncZnzHeadFromItems(znzId) {
+  const id = Number(znzId);
+  if (!Number.isFinite(id)) return;
+  try {
+    const its = (await ncListSoft('znz_items')).filter((x) => String(x['ЗнЗ Id'] || '') === String(id));
+    if (its.length !== 1) return;
+    const it = its[0];
+    await ncUpdate('procurement_requests', id, {
+      'Наименование': String(it['Наименование'] || ''),
+      'Кол-во': (it['Кол-во'] === '' || it['Кол-во'] == null) ? null : Number(it['Кол-во']),
+      'Ед.изм.': String(it['Ед.изм.'] || ''),
+    });
+  } catch (e) { console.warn('ЗнЗ: шапка не синхронизирована с позицией:', e.message); }
 }
 async function updateZnzItem(body) {
   if (!(await znzItemsTableReady())) throw new Error('Раздел «Позиции» появится после применения миграции (таблица «Позиции ЗнЗ» ещё не создана).');
@@ -3514,13 +3534,18 @@ async function updateZnzItem(body) {
   if (body.note != null) patch['Примечание'] = String(body.note).trim();
   if (!Object.keys(patch).length) return { ok: true, id, unchanged: true };
   await ncUpdate('znz_items', id, patch);
+  await syncZnzHeadFromItems(row['ЗнЗ Id'] ?? row['procurement_requests_id']);
   return { ok: true, id, patched: Object.keys(patch) };
 }
 async function deleteZnzItem(body) {
   if (!(await znzItemsTableReady())) throw new Error('Раздел «Позиции» появится после применения миграции (таблица «Позиции ЗнЗ» ещё не создана).');
   const id = Number(body.id ?? body.Id);
   if (!Number.isFinite(id)) throw new Error('Не указан идентификатор позиции (id).');
+  // владельца читаем ДО удаления — после записи уже не найти
+  const gone = (await ncListSoft('znz_items')).find((x) => String(x.Id ?? x.id) === String(id));
+  const owner = gone && (gone['ЗнЗ Id'] ?? gone['procurement_requests_id']);
   await ncDeleteMany('znz_items', [id]);
+  if (owner != null) await syncZnzHeadFromItems(owner);
   return { ok: true, id, deleted: true };
 }
 // список поставщиков из реестра «Контрагенты» (роль «Поставщик» / есть в РОП) для

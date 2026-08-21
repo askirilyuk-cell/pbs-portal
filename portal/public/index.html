@@ -1177,6 +1177,11 @@
        по смыслу панелей выглядит как недоделка. */
     #odetail:has(#od-tabs)::before, #znz-drawer.on::before{ background:rgba(15,23,42,.18); }
 
+    /* K-141: номер на карточке доски не должен ужиматься и переноситься — он
+       опознавательный знак карточки. Ужимается всё остальное. */
+    .kc .pz{white-space:nowrap;flex:0 0 auto;}
+    .kc .cu{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+
     /* Дизайн-канон 10.08: уважение prefers-reduced-motion — все переходы и анимации в 0ms.
        Держать ПОСЛЕДНИМ правилом style-блока, чтобы побеждать всё выше. */
     @media (prefers-reduced-motion: reduce){
@@ -6704,6 +6709,13 @@
     // ════════════════════════════════════════════════════════════════════════
     let PROC=null, procTab='req'; // стартовая — реестр заявок, не дашборд (правка Александра 22.07)
     let procReqView=(()=>{try{return localStorage.getItem('pbs-proc-rv')||'kanban';}catch{return 'kanban';}})();
+    // K-141: ширина колонок доски. Было 166px намертво — номер «ЗнЗ-2026-007» с бейджем
+    //  не влезал. По умолчанию 215, регулируется и запоминается.
+    const PROC_KANW_DEF=215, PROC_KANW_MIN=170, PROC_KANW_MAX=420;
+    let procKanWv=(()=>{try{const v=+localStorage.getItem('pbs-proc-kanw');return (v>=PROC_KANW_MIN&&v<=PROC_KANW_MAX)?v:PROC_KANW_DEF;}catch{return PROC_KANW_DEF;}})();
+    const procKanW=()=>procKanWv;
+    function procKanWset(v){ procKanWv=Math.max(PROC_KANW_MIN,Math.min(PROC_KANW_MAX,v));
+      try{localStorage.setItem('pbs-proc-kanw',String(procKanWv));}catch{} }
     // K-133 (решение владельца): «Поиск поставщика» убран — взял в работу и значит ищешь.
     const ZNZ_STATUSES=['Новая','Согласована','В работе','Размещена','В пути','Принята','Закрыта'];
     // Пайплайн-полоса карточки ЗнЗ БЕЗ этапа «Согласована» (правка владельца 22.07 —
@@ -6830,11 +6842,20 @@
       const all=PROC.requests||[];
       h.innerHTML=`<div class="filters" style="margin:0 0 var(--gap)">
           <div class="seg" id="prvseg"><button data-v="kanban" class="${procReqView==='kanban'?'on':''}" title="Доска по заявкам — сколько потребностей закрыто">Заявки</button><button data-v="kanpos" class="${procReqView==='kanpos'?'on':''}" title="Доска по позициям — что делать дальше закупщику">Позиции</button><button data-v="list" class="${procReqView==='list'?'on':''}">Список</button></div>
+          ${procReqView!=='list'?`<span id="kanw" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px" title="Ширина колонок доски">
+            <button class="tbtn" data-kw="-" style="padding:4px 9px;font-weight:700;line-height:1">−</button>
+            <button class="tbtn" data-kw="+" style="padding:4px 9px;font-weight:700;line-height:1">+</button>
+            <button class="tbtn" data-kw="0" style="padding:4px 9px;font-size:11px" title="Вернуть по умолчанию">сброс</button></span>`:''}
           <span style="margin-left:auto;font-size:11px;color:var(--sub)">${all.length} заявок</span>
           ${PROC.mode==='live'&&znzCanAct()?'<button class="tbtn" style="margin-left:8px" id="ppayrefresh" title="Опросить платёжный портал по всем счетам с неоконченной оплатой">⟳ Статусы оплат</button>':''}
           <button class="tbtn primary" style="margin-left:8px" id="pnew">+ Заявка</button></div>
         <div id="preqbody"></div>`;
       h.querySelectorAll('#prvseg button').forEach(b=>b.onclick=()=>{procReqView=b.dataset.v;try{localStorage.setItem('pbs-proc-rv',procReqView);}catch{} procReq(h,viewHost);});
+      h.querySelectorAll('#kanw button').forEach(b=>b.onclick=()=>{
+        const k=b.dataset.kw;
+        procKanWset(k==='0'?PROC_KANW_DEF:procKanW()+(k==='+'?30:-30));
+        const body=h.querySelector('#preqbody');
+        if(body)procReqView==='kanban'?procKanban(body):procKanbanItems(body); });
       const nb=h.querySelector('#pnew'); if(nb)nb.onclick=()=>openZnzForm();
       // K-83 доп. (реестр): массовое обновление статусов оплаты по всем счетам разом
       // (POST /api/procurement/pay/refresh-all) — вместо клика «Обновить статус» по каждому счёту.
@@ -6866,7 +6887,7 @@
           ||'<div style="font-size:11px;color:var(--sl-500);padding:4px 2px">—</div>';
         return `<div class="kcol"><div class="kh c-${dot}"><i class="i-${dot}"></i>${esc(st)} <span class="cnt">${items.length}</span></div>${cards}</div>`;
       }).join('');
-      body.innerHTML=`<div class="kan" style="grid-template-columns:repeat(7,minmax(166px,1fr));overflow-x:auto">${cols}</div>`;
+      body.innerHTML=`<div class="kan" style="grid-template-columns:repeat(7,minmax(${procKanW()}px,1fr));overflow-x:auto">${cols}</div>`;
       body.querySelectorAll('[data-znz]').forEach(el=>el.onclick=()=>{const r=(PROC.requests||[]).find(x=>x.numZnz===el.dataset.znz);if(r)openZnzCard(r);});
     }
     // K-140: доска ПО ПОЗИЦИЯМ. Работа теперь идёт по позициям (K-138), и заявка с
@@ -6894,7 +6915,7 @@
         return `<div class="kcol"><div class="kh c-${dot}"><i class="i-${dot}"></i>${esc(st)} <span class="cnt">${list.length}</span></div>${cards}</div>`;
       }).join('');
       const orphan=(PROC.requests||[]).filter(r=>!items.some(i=>String(i.znzNum)===String(r.numZnz))).length;
-      body.innerHTML=`<div class="kan" style="grid-template-columns:repeat(${ZNZ_ITEM_COLS.length},minmax(180px,1fr));overflow-x:auto">${cols}</div>`
+      body.innerHTML=`<div class="kan" style="grid-template-columns:repeat(${ZNZ_ITEM_COLS.length},minmax(${procKanW()+20}px,1fr));overflow-x:auto">${cols}</div>`
         +(orphan?`<div style="margin-top:9px;font-size:11px;color:var(--sl-500)">Заявок без разбивки на позиции: ${orphan} — они видны только на доске «Заявки».</div>`:'');
       body.querySelectorAll('[data-znzitem]').forEach(el=>el.onclick=()=>{const r=byNum[el.dataset.znzitem];if(r)openZnzCard(r);});
     }

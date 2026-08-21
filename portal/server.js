@@ -3447,6 +3447,43 @@ async function savePaymentToZnz(znzId, payment) {
   catch (e) { console.warn('K-83: статус оплаты не сохранён в ЗнЗ (колонок может не быть до migrate-046):', e.message); }
 }
 
+// ── K-131: привязка ЗАЯВКИ НА ОПЛАТУ, заведённой в портале оплат МИМО нашего портала ──
+//  Случай реальный: снабжение завело счёт напрямую у Смирнова, и связь с ЗнЗ терялась.
+//  Найти такую заявку по № ЗнЗ НЕЛЬЗЯ: lookup в ingest-API работает только по паре
+//  (externalSource, externalRef), а у ручной заявки оба поля пустые. Зато GET по id
+//  отдаёт её нормально — проверено на живом PBS-26-128PRPBS (200, externalRef: null).
+//  Поэтому связываем по id, который снабжение копирует из реестра оплат.
+//  preview=true — только показать, что нашлось (подтверждение перед записью, чтобы
+//  опечатка в id не привязала чужой платёж).
+async function linkExternalPayment({ znzId, paymentId, preview }) {
+  if (!paymentConfigured()) throw payErr(501, 'Интеграция с оплатой не настроена (нет ключа PAYMENT_INGEST_KEY в «Настройках»).');
+  const id = Number(znzId);
+  if (!Number.isFinite(id)) throw payErr(400, 'Некорректный идентификатор заявки (znzId).');
+  const pid = String(paymentId || '').trim();
+  if (!pid) throw payErr(400, 'Не указан номер заявки на оплату.');
+  const reqs = await ncListSoft('procurement_requests');
+  const znz = reqs.find((x) => String(x.Id ?? x.id) === String(id));
+  if (!znz) throw payErr(404, 'Заявка ЗнЗ не найдена.');
+  const numZnz = String(znz['№ ЗнЗ'] || '').trim();
+  let data;
+  try { ({ data } = await ingestCall('GET', `/payments/${encodeURIComponent(pid)}`)); }
+  catch (e) { if (e.status === 404) throw payErr(404, `Заявка на оплату «${pid}» в реестре оплат не найдена.`); throw e; }
+  const payment = (data && data.payment) || null;
+  if (!payment) throw payErr(404, `Заявка на оплату «${pid}» не найдена.`);
+  // чужая привязка — не перехватываем молча
+  const ref = String(payment.externalRef || '').trim();
+  if (ref && numZnz && ref !== numZnz && !ref.startsWith(numZnz + '/')) {
+    throw payErr(409, `Эта оплата уже привязана к «${ref}». Привязка к ${numZnz} отменена.`);
+  }
+  const already = reqs.find((x) => String(x['Оплата Id'] || '').trim() === pid && String(x.Id ?? x.id) !== String(id));
+  if (already) throw payErr(409, `Эта оплата уже привязана к заявке ${already['№ ЗнЗ'] || ('#' + (already.Id ?? already.id))}.`);
+  if (preview) return { ok: true, preview: true, numZnz, payment };
+  await savePaymentToZnz(id, payment);
+  const who = String(payment.status || '');
+  logEvent({ type: 'комментарий', obj: 'ЗнЗ', objNum: numZnz,
+    details: `привязана заявка на оплату ${pid} (${who}${payment.amount != null ? ', ' + payment.amount + ' ₽' : ''}), заведена вне портала` });
+  return { ok: true, numZnz, payment };
+}
 // K-83 этап 2: маппинг статуса payment-portal (PAID/REJECTED/APPROVED/…) в русский статус
 // оплаты счёта — словарь «Статус оплаты» ограничен INVOICE_PAY_STATUSES, а внешние коды
 // в него не входят, поэтому переводим: PAID→Оплачено, REJECTED→Отклонено, всё
@@ -10624,6 +10661,13 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       try { return sendJson(res, 200, await createPayment(body, sessionFromReq(req))); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), ...(e.payload ? { detail: e.payload } : {}) }); }
+    }
+    // K-131: привязать оплату, заведённую в реестре оплат мимо портала (по её id)
+    if (p === '/api/purchase/pay-link' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Доступно только в LIVE-режиме: задайте токен NocoDB.' });
+      try { const b = await readBody(req);
+        return sendJson(res, 200, await linkExternalPayment({ znzId: b.znzId, paymentId: b.paymentId, preview: !!b.preview })); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/purchase/pay-status' && req.method === 'GET') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', payment: null });

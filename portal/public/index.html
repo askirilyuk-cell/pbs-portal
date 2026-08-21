@@ -7265,8 +7265,10 @@
       // K-83 этап 1a: секция «Оплата» — оболочка (статус/кнопки заполнятся в loadZnzPayment).
       // «Отправить на оплату» доступна в LIVE при праве действия (тот же гейт znzCanAct).
       const payAdd=(PROC.mode==='live'&&znzCanAct())?'<button class="tbtn primary" id="znz-pay-add" style="margin-left:auto;padding:6px 13px">Отправить на оплату</button>':'';
+      // K-131: счёт мог уйти в реестр оплат МИМО портала — тогда связи нет. Привязываем по id оплаты.
+      const payLink=(PROC.mode==='live'&&znzCanAct())?'<button class="tbtn" id="znz-pay-link" style="padding:6px 13px" title="Счёт уже заведён в реестре оплат напрямую — привязать его к этой заявке по номеру">Привязать оплату</button>':'';
       const payCard=`<div class="card pad" id="znz-pay-card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <div class="sec-h" style="margin:0">Оплата</div><span id="znz-pay-sum" style="font-size:12px;color:var(--sub)"></span>${payAdd}
+          <div class="sec-h" style="margin:0">Оплата</div><span id="znz-pay-sum" style="font-size:12px;color:var(--sub)"></span>${payAdd}${payLink}
         </div>
         <div id="znz-pay-form"></div>
         <div id="znz-pay-list"><div class="c-gray" style="font-size:12px">загрузка статуса оплаты…</div></div></div>`;
@@ -8283,6 +8285,46 @@
         };
       }
       const ab=document.getElementById('znz-pay-add'); if(ab){ ab.textContent=has?'Отправить повторно':'Отправить на оплату'; ab.onclick=()=>openPayFormInline(r,canAct); }
+      // K-131: привязка оплаты, заведённой в реестре Смирнова напрямую. Сначала показываем,
+      //  что нашлось по номеру (сумма/статус), и только по подтверждению записываем —
+      //  опечатка в номере иначе привяжет чужой платёж.
+      const lb=document.getElementById('znz-pay-link');
+      if(lb)lb.onclick=()=>{ const box=document.getElementById('znz-pay-form'); if(!box)return;
+        box.innerHTML=`<div style="background:#f2f7fc;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:11px 13px;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#1d4e89;margin-bottom:6px">Привязать заявку из реестра оплат</div>
+          <div style="font-size:11px;color:var(--sl-500);margin-bottom:8px">Если счёт завели в реестре оплат напрямую, минуя портал. Номер видно в самом реестре, вид <span style="font-family:var(--mono)">PBS-26-128PRPBS</span>.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="pl-id" placeholder="PBS-26-…" style="font:inherit;font-size:12px;font-family:var(--mono);padding:7px 9px;border:1px solid var(--sl-300);border-radius:var(--r-s);min-width:220px">
+            <button class="tbtn" id="pl-find">Найти</button>
+            <button class="tbtn" id="pl-cancel">Отмена</button>
+          </div>
+          <div id="pl-out" style="margin-top:9px;font-size:12px"></div></div>`;
+        const out=document.getElementById('pl-out');
+        document.getElementById('pl-cancel').onclick=()=>{ box.innerHTML=''; };
+        document.getElementById('pl-find').onclick=async()=>{
+          const pid=document.getElementById('pl-id').value.trim();
+          if(!pid){ out.innerHTML='<span class="c-red">Укажите номер.</span>'; return; }
+          out.innerHTML='<span class="c-gray">Запрос в реестр оплат…</span>';
+          try{ const rs=await fetch('/api/purchase/pay-link',{method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({znzId:r.id,paymentId:pid,preview:true})});
+            const j=await rs.json().catch(()=>({})); if(!rs.ok||j.error)throw new Error(j.error||('HTTP '+rs.status));
+            const pm=j.payment||{};
+            const money=(v)=>v==null?'—':Number(v).toLocaleString('ru-RU',{minimumFractionDigits:2})+' ₽';
+            out.innerHTML=`<div style="background:#fff;border:1px solid #d8e6f4;border-radius:var(--r-s);padding:9px 11px">
+              <div style="font-family:var(--mono);font-weight:700;color:var(--navy)">${esc(pm.id||pid)}</div>
+              <div style="margin-top:5px;color:var(--sl-700)">Статус: <b>${esc(pm.status||'—')}</b> · Сумма: <b>${money(pm.amount)}</b> · Оплачено: ${money(pm.paidAmount)}</div>
+              ${pm.expectedPaymentDate?`<div style="color:var(--sl-500);margin-top:3px">Ожидаемая дата оплаты: ${esc(fmt(pm.expectedPaymentDate))}</div>`:''}
+              <div style="margin-top:9px;display:flex;gap:8px"><button class="tbtn primary" id="pl-ok">Это она — привязать</button></div></div>`;
+            document.getElementById('pl-ok').onclick=async(ev)=>{ const b=ev.currentTarget; b.disabled=true; b.textContent='Привязка…';
+              try{ const r2=await fetch('/api/purchase/pay-link',{method:'POST',headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({znzId:r.id,paymentId:pid})});
+                const j2=await r2.json().catch(()=>({})); if(!r2.ok||j2.error)throw new Error(j2.error||('HTTP '+r2.status));
+                toast('Оплата '+pid+' привязана к '+r.numZnz,'ok'); box.innerHTML='';
+                PROC=await (await fetch('/api/procurement')).json(); openZnzCard(r.numZnz);
+              }catch(e){ out.insertAdjacentHTML('beforeend','<div class="c-red" style="margin-top:6px">'+esc(String(e.message||e))+'</div>'); b.disabled=false; b.textContent='Это она — привязать'; } };
+          }catch(e){ out.innerHTML='<span class="c-red">'+esc(String(e.message||e))+'</span>'; }
+        };
+      };
     }
     // Инлайн-форма отправки на оплату (отдел/проект из /api/purchase/pay-reference, контрагент, сумма, тип, счёт/договор).
     // prefill (опц., K-83) — вызов «→ На оплату»/«Сохранить и отправить» из конкретного счёта:

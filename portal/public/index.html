@@ -7390,8 +7390,13 @@
       //  переводит статус. Отдельный переход «В работе» оставлял бы способ попасть
       //  в этот статус БЕЗ исполнителя — заявка «в работе», а спросить не с кого.
       //  Все прочие переходы на месте.
-      if(canAct&&next&&next!=='В работе')acts.push(`<button class="tbtn primary" id="znz-next" data-to="${esc(next)}">→ ${esc(ZNZ_ACTION[next]||next)}</button>`);
-      if(canAct&&prev)acts.push(`<button class="tbtn" id="znz-prev" data-to="${esc(prev)}" title="Вернуть на предыдущий этап">← Вернуть</button>`);
+      // K-145: если у заявки ЕСТЬ позиции — её статус выводится из них, и двигать его
+      //  кнопкой бессмысленно: запись в поле не изменит того, что показано. Управление
+      //  переходит в строки позиций. У старых заявок без разбивки кнопки остаются —
+      //  им статус больше взять неоткуда.
+      const hasItems=(PROC.items||[]).some(i=>String(i.znzNum||'')===String(r.numZnz));
+      if(canAct&&next&&next!=='В работе'&&!hasItems)acts.push(`<button class="tbtn primary" id="znz-next" data-to="${esc(next)}">→ ${esc(ZNZ_ACTION[next]||next)}</button>`);
+      if(canAct&&prev&&!hasItems)acts.push(`<button class="tbtn" id="znz-prev" data-to="${esc(prev)}" title="Вернуть на предыдущий этап">← Вернуть</button>`);
       // К-92 (фаза 2, утв. владельцем): «Провести приёмку» — акт входного контроля Ф.3–Д.1
       // + опц. приход металла на склад. Видна на этапах, где физически уже что-то приходит.
       const canAccept=canAct&&['Размещена','В пути','Принята'].includes(r.status);
@@ -8222,14 +8227,37 @@
       return `<span class="${ok?'c-green':'c-amber'}" style="font-size:11px;font-weight:600;white-space:nowrap" title="Принято по актам входного контроля (Ф.3–Д.1)">Принято ${esc(String(a))} из ${esc(String(q))}${ok?' ✓':' ⚠'}</span>`;
     }
     // строка позиции (x.legacy → из полей заявки, без действий править/удалить)
+    // K-145: сделка живёт на ПОЗИЦИИ — статус, поставщик и срок правятся прямо в строке.
+    //  Раньше это можно было только через API: в карточке полей не было вовсе, и модель
+    //  из K-138 работала лишь наполовину.
     function itemRowHtml(x,canAct){
       const acts=(canAct&&!x.legacy)?`<a class="c-blue" data-item-edit="${x.id}" style="font-size:11px;cursor:pointer;white-space:nowrap">править</a><a data-item-del="${x.id}" style="font-size:11px;cursor:pointer;color:#b91c1c;white-space:nowrap">удалить</a>`:'';
-      return `<div style="display:flex;align-items:center;gap:12px;font-size:12px;border:1px solid var(--line2);border-radius:var(--r-m);padding:8px 11px;background:#fff">
-        <span class="ell" title="${esc(x.name)}" style="flex:1;color:var(--ink);font-weight:600">${esc(x.name||'—')}${x.catalogCode?` <span class="code" style="font-family:var(--mono);font-weight:400;color:var(--blue);font-size:11px">${esc(x.catalogCode)}</span>`:''}</span>
-        ${x.category?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(x.category)}</span>`:''}
-        <span style="white-space:nowrap;color:var(--sl-700)">${x.qty!==''&&x.qty!=null?esc(String(x.qty)):'—'}${x.unit?' '+esc(x.unit):''}</span>
-        ${znzAcceptBadge(x.qty,x.accepted)}
-        ${acts}</div>`;
+      const st=x.legacy?'':(x.status||'Новая');
+      const dot=ZNZ_ITEM_DOT[st]||'gray';
+      const late=x.due&&daysTo(x.due)<0&&!['Принята','Отменена'].includes(st);
+      const sel=(canAct&&!x.legacy)
+        ?`<select data-item-st="${x.id}" title="Статус позиции" style="font:inherit;font-size:11px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff;color:var(--sl-700)">${ZNZ_ITEM_COLS.map(o=>`<option${o===st?' selected':''}>${o}</option>`).join('')}</select>`
+        :(st?`<span class="st c-${dot}" style="white-space:nowrap"><i class="i-${dot}"></i>${esc(st)}</span>`:'');
+      const line2=x.legacy?'':`<div style="display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11px;flex-wrap:wrap">
+          <span class="c-gray">Поставщик:</span>
+          ${canAct?`<select data-item-sup="${x.id}" style="font:inherit;font-size:11px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff;min-width:170px">
+              <option value=""${x.supplier?'':' selected'}>— не выбран —</option>
+              ${(PROC.suppliers||[]).map(sp=>`<option value="${esc(sp.name)}"${sp.name===x.supplier?' selected':''}>${esc(sp.name)}</option>`).join('')}
+              ${x.supplier&&!(PROC.suppliers||[]).some(sp=>sp.name===x.supplier)?`<option value="${esc(x.supplier)}" selected>${esc(x.supplier)}</option>`:''}
+            </select>`:`<span>${x.supplier?esc(x.supplier):'<span class="c-gray">не выбран</span>'}</span>`}
+          <span class="c-gray" style="margin-left:6px">Срок:</span>
+          ${canAct?`<input type="date" data-item-due="${x.id}" value="${esc(String(x.due||'').slice(0,10))}" style="font:inherit;font-size:11px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s)">`
+                 :`<span class="${late?'c-red':''}">${x.due?esc(fmt(x.due)):'—'}</span>`}
+          ${late?'<span class="c-red" style="font-weight:600">просрочен</span>':''}
+        </div>`;
+      return `<div style="font-size:12px;border:1px solid var(--line2);border-left:3px solid ${late?'var(--red)':'var(--'+(dot==='green'?'green':dot==='blue'?'blue':'sl-300')+')'};border-radius:var(--r-m);padding:8px 11px;background:#fff">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="ell" title="${esc(x.name)}" style="flex:1;color:var(--ink);font-weight:600">${esc(x.name||'—')}${x.catalogCode?` <span class="code" style="font-family:var(--mono);font-weight:400;color:var(--blue);font-size:11px">${esc(x.catalogCode)}</span>`:''}</span>
+          ${x.category?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(x.category)}</span>`:''}
+          <span style="white-space:nowrap;color:var(--sl-700)">${x.qty!==''&&x.qty!=null?esc(String(x.qty)):'—'}${x.unit?' '+esc(x.unit):''}</span>
+          ${znzAcceptBadge(x.qty,x.accepted)}
+          ${sel}
+          ${acts}</div>${line2}</div>`;
     }
     // Загрузка и отрисовка позиций заявки r в #znz-items-list (degrade-safe: нет
     // таблицы/позиций → показываем одиночную позицию из полей заявки как fallback).
@@ -8268,6 +8296,19 @@
             catch(e){ alert('Не удалось удалить: '+(e.message||e)); }
           });
           listEl.querySelectorAll('[data-item-edit]').forEach(el=>el.onclick=()=>{ const id=Number(el.dataset.itemEdit); openItemFormInline(r,canAct,items.find(x=>x.id===id)||null); });
+          // K-145: статус / поставщик / срок правятся прямо в строке — без захода в форму.
+          //  Пишем сразу, перечитываем заявку: статус ЗнЗ выводится из позиций и меняется вслед.
+          const saveItem=async(id,patch,el)=>{
+            const prev=el?el.value:null; if(el)el.disabled=true;
+            try{ await postJson('/api/procurement/znz/items','PATCH',{id,...patch});
+              PROC=await (await fetch('/api/procurement')).json();
+              const upd=(PROC.requests||[]).find(x=>String(x.id)===String(r.id))||r;
+              openZnzCard(upd);
+            }catch(e){ if(el){el.disabled=false; if(prev!=null)el.value=prev;} toast('Не сохранилось: '+(e.message||e),'err'); }
+          };
+          listEl.querySelectorAll('[data-item-st]').forEach(el=>el.onchange=()=>saveItem(Number(el.dataset.itemSt),{status:el.value},el));
+          listEl.querySelectorAll('[data-item-sup]').forEach(el=>el.onchange=()=>saveItem(Number(el.dataset.itemSup),{supplier:el.value},el));
+          listEl.querySelectorAll('[data-item-due]').forEach(el=>el.onchange=()=>saveItem(Number(el.dataset.itemDue),{due:el.value},el));
         }
       }
       const ab=document.getElementById('znz-item-add'); if(ab)ab.onclick=()=>openItemFormInline(r,canAct,null);

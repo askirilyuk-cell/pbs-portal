@@ -8007,12 +8007,12 @@ function renderPdf(type, id) {
     const tmp = path.join(os.tmpdir(), `portal-${Date.now()}-${Math.round(performance.now())}.pdf`);
     const child = spawn('node', [path.join(ROOT, 'print', script), id, tmp],
       { env: { ...process.env, NC_URL: c.NC_URL, NC_TOKEN: c.NC_TOKEN, GOTENBERG_URL: c.GOTENBERG } });
-    let err = '';
-    child.stderr.on('data', (d) => (err += d));
+    const errChunks = []; // K-135: та же ловушка — копим буферы, декодируем один раз
+    child.stderr.on('data', (d) => errChunks.push(d));
     child.on('error', (e) => reject(e));
     child.on('close', (code) => {
       if (code === 0 && fs.existsSync(tmp)) { const buf = fs.readFileSync(tmp); fs.unlink(tmp, () => {}); resolve(buf); }
-      else reject(new Error(err || `render exit ${code}`));
+      else reject(new Error(Buffer.concat(errChunks).toString('utf8') || `render exit ${code}`));
     });
   });
 }
@@ -8766,12 +8766,17 @@ function readBody(req) {
   // над уже вычитанным потоком иначе вернул бы {} по событию 'close'.
   if (req._bodyCache !== undefined) return Promise.resolve(req._bodyCache);
   return new Promise((resolve) => {
-    let d = ''; let settled = false;
+    // K-135: копим БУФЕРЫ и декодируем ОДИН раз в конце.
+    //  Было `let d=''; d += c` — c это Buffer, и `+=` декодировал КАЖДЫЙ кусок отдельно.
+    //  Кириллица в UTF-8 двухбайтовая: символ, попавший на границу пакетов, распадался
+    //  на два U+FFFD. Короткие тела влезали в один кусок и были целы — поэтому дефект
+    //  бил только по длинным текстам («Условия», «Примечание») и выглядел случайным.
+    const chunks = []; let blen = 0; let settled = false;
     // K-48: единая точка резолва + флаг settled — иначе при теле >1МБ req.destroy()
     // рвёт соединение без 'end', и промис (а с ним HTTP-запрос) подвисает навсегда.
     const done = (v) => { if (settled) return; settled = true; req._bodyCache = v; resolve(v); };
-    req.on('data', (c) => { d += c; if (d.length > 1e6) req.destroy(); });
-    req.on('end', () => { try { done(JSON.parse(d || '{}')); } catch { done({}); } });
+    req.on('data', (c) => { chunks.push(c); blen += c.length; if (blen > 1e6) req.destroy(); });
+    req.on('end', () => { try { done(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch { done({}); } });
     req.on('close', () => done({}));   // destroy/обрыв соединения → разблокировать
     req.on('error', () => done({}));   // сетевая ошибка чтения → не виснем (контракт: {} как при битом теле)
   });

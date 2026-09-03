@@ -6733,11 +6733,16 @@ const eqAttach = (v) => {
   });
 };
 // следующий инв. № ОБ-NNN (сквозной, 3 разряда; нечисловые серии игнорируются)
-async function eqNextInvNo() {
+// K-153: номер реестра с префиксом юрлица площадки — «ПБС-ОБ-NNN» (Храброво) / «ЕНД-ОБ-NNN» (Волгоград),
+// нумерация сквозная в пределах префикса. Это НЕ бухгалтерский инвентарный номер (Александр, 03.09.2026).
+const EQ_SITE_PREFIX = { 'Храброво': 'ПБС', 'Волгоград': 'ЕНД' };
+async function eqNextInvNo(prefix) {
+  const pre = prefix || 'ПБС';
   const rows = await ncListSoft('equipment');
   let max = 0;
-  for (const r of rows) { const m = /^ОБ-(\d+)$/.exec(String(r['Инв. №'] || '').trim()); if (m) max = Math.max(max, Number(m[1])); }
-  return `ОБ-${String(max + 1).padStart(3, '0')}`;
+  const re = new RegExp(`^${pre}-ОБ-(\\d+)$`);
+  for (const r of rows) { const m = re.exec(String(r['Инв. №'] || '').trim()); if (m) max = Math.max(max, Number(m[1])); }
+  return `${pre}-ОБ-${String(max + 1).padStart(3, '0')}`;
 }
 // нормализованная карточка оборудования (без задач)
 function eqShape(r) {
@@ -6793,7 +6798,7 @@ async function buildEquipmentLive() {
     if (!tasksByEq.has(eid)) tasksByEq.set(eid, []);
     tasksByEq.get(eid).push({ id: t.Id ?? t.id, no: t['№ задачи'] || '', status: t['Статус'] || '', op: t['Операция (№ МК / № оп.)'] || '' });
   }
-  const secList = sections.map((s) => ({ id: s.Id ?? s.id, code: s['Код'] || '', name: s['Участок'] || '', type: s['Тип'] || '', mainEquipment: s['Основное оборудование'] || '', site: s['Площадка'] || '', ops: s['Операции (коды)'] || '' })); // K-152: площадка (Храброво/Волгоград) и коды операций участка
+  const secList = sections.map((s) => ({ id: s.Id ?? s.id, code: s['Код'] || '', name: s['Участок'] || '', type: s['Тип'] || '', mainEquipment: s['Основное оборудование'] || '', site: s['Площадка'] || '', ops: s['Операции (коды)'] || '', description: s['Описание'] || '' })); // K-152/K-153: площадка (Храброво/Волгоград) и коды операций участка
   const secName = new Map(secList.map((s) => [String(s.id), s.name]));
   const items = rows.map((r) => { const e = eqShape(r); if (!e.sectionName && e.sectionId != null) e.sectionName = secName.get(String(e.sectionId)) || ''; const tk = tasksByEq.get(e.id) || []; return { ...e, taskCount: tk.length, tasks: tk }; });
   const bySec = new Map(secList.map((s) => [String(s.id), []]));
@@ -6884,7 +6889,10 @@ async function equipmentSave(body) {
   } else {
     const name = String(body.name || '').trim();
     if (!name) throw new Error('Укажите наименование оборудования (name).');
-    invNo = await eqNextInvNo();
+    // префикс — по площадке выбранного участка; без участка — ПБС
+    let pre = 'ПБС';
+    if (secProvided) { try { const secs = await ncListSoft('sections'); const sc = secs.find((x) => String(x.Id ?? x.id) === String(secId)); pre = EQ_SITE_PREFIX[String(sc && sc['Площадка'] || '').trim()] || 'ПБС'; } catch { /* оставляем ПБС */ } }
+    invNo = await eqNextInvNo(pre);
     const cr = await ncCreateMany('equipment', [{ 'Инв. №': invNo, ...patch, 'Наименование': name }]);
     const c = Array.isArray(cr) ? cr[0] : cr; id = c.Id ?? c.id;
     created = true;

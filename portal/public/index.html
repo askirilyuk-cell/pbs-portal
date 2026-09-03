@@ -1014,6 +1014,44 @@
     .fseg.on::after{content:'✓ Фильтр активен';color:var(--acc);font-weight:600;}
 
 
+    /* ── K-153: раздел «Оборудование» по референсу TRS — подчёркнутые вкладки, строка фильтров,
+       реестр во всю ширину, карточка единицы — правый дровер (канон п.4, геометрия как у #odetail). ── */
+    .eq-tabs{display:flex;gap:2px;align-items:flex-end;}
+    .eq-tabs button{font:inherit;font-size:var(--fs-12);font-weight:600;padding:10px 14px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;color:var(--sl-500);cursor:pointer;transition:color var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease);}
+    .eq-tabs button:hover{color:var(--navy);}
+    .eq-tabs button.on{color:var(--navy);border-bottom-color:var(--navy);}
+    .eq-tabbar{display:flex;align-items:flex-end;gap:12px;padding:0 12px;}
+    .eq-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+    .eq-filters input,.eq-filters select{font:inherit;font-size:var(--fs-12);padding:6px 9px;border:1px solid var(--bd);border-radius:var(--r-s);background:#fff;color:var(--ink);}
+    .eq-check{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-12);color:var(--ink);cursor:pointer;padding:0 4px;white-space:nowrap;}
+    #eq-drawer{display:none;}
+    #eq-drawer.on{display:block;position:fixed;inset-block:0;right:0;z-index:80;width:100%;max-width:720px;box-sizing:border-box;
+      background:var(--card,#fff);border-left:1px solid var(--sl-300);box-shadow:-8px 0 28px rgba(15,23,42,.16);
+      padding:16px 18px;overflow-y:auto;overscroll-behavior:contain;animation:ui-slide-right var(--t-norm) var(--ease) both;}
+    #eq-drawer.on::before{content:'';position:fixed;inset:0;z-index:-1;background:rgba(15,23,42,.18);animation:ui-fade-in var(--t-norm) var(--ease) both;}
+    @media (max-width:760px){ #eq-drawer.on{max-width:100%;} }
+    #eq-drawer .eq-tabs{border-bottom:1px solid var(--bd);}
+    .eqd-h{position:relative;padding:0 36px 12px 0;border-bottom:1px solid var(--bd);margin-bottom:4px;}
+    .eqd-h .x{position:absolute;right:0;top:0;font:inherit;font-size:var(--fs-14);border:0;background:none;color:var(--sl-500);cursor:pointer;padding:4px 8px;border-radius:var(--r-s);}
+    .eqd-h .x:hover{background:var(--sl-100);color:var(--ink);}
+    .eqd-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+    .eqd-inv{font-family:var(--mono);font-size:var(--fs-20);font-weight:700;color:var(--navy);letter-spacing:-.01em;}
+    .eqd-name{margin-top:6px;font-size:var(--fs-14);font-weight:700;color:var(--ink);overflow-wrap:anywhere;}
+    .eqd-sub{margin-top:4px;font-size:var(--fs-12);color:var(--sub);}
+    .eqd-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+    .eqd-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 18px;padding:14px 0;}
+    .eqd-grid.two{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .eqd-f .l{font-size:var(--fs-11);color:var(--sl-500);margin-bottom:2px;}
+    .eqd-f .v{font-size:var(--fs-12);font-weight:600;color:var(--ink);overflow-wrap:anywhere;}
+    .eqd-f .v.mono{font-family:var(--mono);}
+    .eqd-note{font-size:var(--fs-12);color:var(--sl-700);white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 12px;background:var(--sl-50);border-radius:var(--r-s);line-height:1.5;}
+    .eqd-sec{font-size:var(--fs-10);font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sl-500);margin:12px 0 6px;}
+    .eqd-doc{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--sl-100);font-size:var(--fs-12);}
+    .eqd-doc .nm{font-weight:600;color:var(--ink);overflow-wrap:anywhere;}
+    .eqd-doc .sz{margin-left:auto;color:var(--sl-500);white-space:nowrap;}
+    #eq-drawer .st{white-space:nowrap;}
+    #eq-drawer .dt td.code{font-family:var(--mono);}
+
     /* ── K-112: карточка заказа как выезжающая панель справа ────────────────
        Концепция референса, которую владелец назвал «супер»: список слева
        остаётся живым, карточка приезжает справа. У нас карточка уже с
@@ -9460,130 +9498,280 @@
       };
     }
 
-    // ══ Раздел «Участки и оборудование» — ДП–О.3 (K-35, реестр «Оборудование» Ф.3–О.3) ══
-    // Разрезы: участок → его оборудование → задачи на оборудовании (mm-связь Ф.14).
-    // Заведение единицы через форму «+ Новое оборудование» (автонумер инв.№ ОБ-NNN на бэкенде).
-    let EQ=null, eqSelId=null, eqOpenSec=null, eqCardCache={};
-    // K-35 редизайн: 3 вкладки раздела — дерево участков · реестр парка · обслуживание
-    let eqTab='tree', eqRegSection='', eqRegFilter='all', eqRegQ='', eqMntSeg='todo', eqMntType='all', eqMntKind='planned', eqRegGridApi=null, eqMntGridApi=null;
-    const EQ_STDOT={'В работе':'green','В ремонте':'amber','Резерв':'gray','Законсервировано':'gray','Списано':'red'};
-    const eqStCell=(s)=>s?`<span class="st"><i class="i-${EQ_STDOT[s]||'gray'}"></i>${esc(s)}</span>`:'<span class="c-gray">—</span>';
+    // ══ Раздел «Оборудование» — ДП–О.3 (K-35 → K-153: по референсу TRS, канон п.4) ══
+    // Структура: подчёркнутые вкладки «Оборудование · Обслуживание» → строка фильтров → реестр
+    // erpGrid во всю ширину → клик по строке — правый дровер #eq-drawer с вкладками
+    // Паспорт · Задачи · ТО · Документы · Закупка · ТТХ (ТТХ — только у токарных).
+    // Дерево «участок → оборудование» и KPI-полоса сняты (аудит 03.09). Фильтр «Участок» —
+    // по id: K-152 принёс две площадки с одинаковыми именами участков, фильтр по имени их смешивал.
+    let EQ=null, eqSelId=null, eqCardCache={};
+    let eqTab='reg', eqRegQ='', eqRegSite='', eqRegSection='', eqRegCat='', eqRegStatus='', eqRegCnc=false, eqRegGridApi=null;
+    let eqMntSeg='todo', eqMntType='all', eqMntKind='planned', eqMntGridApi=null;
+    let eqDrTab='pass';
+    // статус единицы → семантический класс канона п.2 («В работе» = исправна и работает → «готово»)
+    const EQ_STCLS={'В работе':'done','В ремонте':'work','Резерв':'wait','Законсервировано':'neutral','Списано':'problem'};
+    const eqStCell=(s)=>s?`<span class="st st--${EQ_STCLS[s]||'neutral'}">${esc(s)}</span>`:'<span class="c-gray">—</span>';
+    const eqCncChip='<span class="st st--wait">ЧПУ</span>';
     const eqYmd=()=>new Date().toISOString().slice(0,10);
     const eqDaysLeft=(d)=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||''));if(!m)return null;const t=Date.parse(m[1]+'-'+m[2]+'-'+m[3]);if(isNaN(t))return null;return Math.round((t-Date.parse(eqYmd()))/86400000);};
     const eqOverdue=(d)=>{const n=eqDaysLeft(d);return n!=null&&n<0;};
-    // ТО-1 в ячейке: просрочка красным+bold, ≤14 дн — amber, иначе обычный
-    const eqTo1Cell=(i)=>{ if(!i.to1Next)return '<span class="c-gray">—</span>'; const n=eqDaysLeft(i.to1Next); if(n!=null&&n<0)return `<b class="c-red" style="font-weight:800">${fmt(i.to1Next)} · просрочено ${-n} дн</b>`; if(n!=null&&n<=14)return `<span class="c-amber">${fmt(i.to1Next)}</span>`; return `<span style="color:var(--sl-700)">${fmt(i.to1Next)}</span>`; };
-    // бейдж типа ТО (план/внеплан) — только существующие токены
-    const eqTypeChip=(t)=>t==='unplanned'
-      ? '<span class="src-chip" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a">внеплан</span>'
-      : '<span class="src-chip" style="background:#eff6ff;color:#1d4e89;border:1px solid #cfe0f5">план</span>';
+    // ТО-1 в ячейке: просрочка — «проблема», ≤14 дн — «в работе», иначе обычный текст
+    const eqTo1Cell=(i)=>{ if(!i.to1Next)return '<span class="c-gray">—</span>'; const n=eqDaysLeft(i.to1Next); if(n!=null&&n<0)return `<b style="color:var(--red)">${fmt(i.to1Next)} · просрочено ${-n} дн</b>`; if(n!=null&&n<=14)return `<span style="color:var(--amber)">${fmt(i.to1Next)}</span>`; return `<span style="color:var(--sl-700)">${fmt(i.to1Next)}</span>`; };
+    // бейдж типа ТО (план/внеплан) — классы канона, без своих цветов
+    const eqTypeChip=(t)=>t==='unplanned'?'<span class="st st--work">внеплан</span>':'<span class="st st--wait">план</span>';
+    const eqSecById=(id)=>((EQ&&EQ.sections)||[]).find(s=>String(s.id)===String(id))||null;
+    const eqSecLabel=(s)=>s?((s.code?s.code+' · ':'')+(s.name||'')):'';
+    const eqSiteOf=(i)=>{const s=eqSecById(i.sectionId);return s?(s.site||''):'';};
+    // токарные ТТХ показываем только там, где они по смыслу есть (аудит п.7 — «честные нули»)
+    const eqIsTurning=(it)=>/токар/i.test(String(it.subtype||'')+' '+String(it.name||''))||!!(it.headType||it.revolverSlots||it.chuckTypeEq||it.chuckDia||it.spindleBore||it.holderSecExt||it.holderSecInt);
+    const eqDash='<span class="c-gray">—</span>';
+    const eqVal=(v)=>(v==null||v===''||v===0)?'':esc(String(v));
+
     async function renderEquipment(host,arg){
-      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка раздела «Участки и оборудование»…</div>';
+      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка раздела «Оборудование»…</div>';
       if(!EQ){ try{EQ=await (await fetch('/api/equipment')).json();}catch(e){EQ={mode:'mock',warning:String(e.message||e),items:[],groups:[],sections:[],kpis:{}};} }
-      if(arg){ const it=(EQ.items||[]).find(i=>String(i.id)===arg||i.invNo===arg); if(it){eqSelId=it.id; eqTab='tree';} }
-      const live=EQ.mode==='live';
-      const items=EQ.items||[], k=EQ.kpis||{};
-      const to1OverdueN=items.filter(i=>eqOverdue(i.to1Next)).length;
-      const to1SoonN=items.filter(i=>{const n=eqDaysLeft(i.to1Next);return n!=null&&n>=0&&n<=14;}).length;
-      const tag=srcChip(live, live?(items.length+' ед. · '+(k.sections||0)+' участков'):'реестр «Оборудование» ещё не наполнен');
-      const m=(lbl,num,col,sub)=>`<div class="m"><div class="lbl">${lbl}</div><div class="num"${col?` style="color:${col}"`:''}>${num}</div>${sub?`<div style="font-size:10px;color:var(--sub);margin-top:1px">${sub}</div>`:''}</div>`;
-      // п.5 аудита «честные нули»: показатель без данных — прочерк с пояснением, а не 0.
-      //  «ТО-1 просрочено: 0» при пустом графике ТО читалось как «всё в порядке» — это ложь.
-      const noEq=!items.length;                                     // реестра оборудования нет вообще
-      const noTo1=!items.some(i=>i.to1Next);                        // ни у одной единицы не задано ТО-1
-      const dash='<span style="color:var(--gray4,var(--sl-400))">—</span>';
-      host.innerHTML=`<div class="mstrip">
-          ${m('Единиц оборудования',noEq?dash:(k.total??items.length),noEq?'':'var(--navy)',noEq?'реестр Ф.3–О.3 не наполнен':'реестр Ф.3–О.3')}
-          ${m('В работе',noEq?dash:(k.inWork??0),noEq?'':'var(--green)',noEq?'данных нет':(k.repair?k.repair+' в ремонте':''))}
-          ${m('С ЧПУ',noEq?dash:(k.cnc??0),noEq?'':'var(--ink)',noEq?'данных нет':'числовое ПУ')}
-          ${m('ТО-1 просрочено',noTo1?dash:to1OverdueN,(noTo1?'':(to1OverdueN?'var(--red)':'var(--ink)')),(noTo1?(noEq?'данных нет':'график ТО не заведён'):(to1SoonN?to1SoonN+' в ближайшие 14 дн':'по графику')))}
-        </div>
-        <div class="filters card" style="margin-top:var(--gap);padding:8px 10px">
-          <div class="seg" id="eqseg">
-            <button data-t="tree" class="${eqTab==='tree'?'on':''}">Дерево участков</button>
-            <button data-t="reg" class="${eqTab==='reg'?'on':''}">Реестр парка</button>
+      const live=EQ.mode==='live', items=EQ.items||[];
+      const noTo1=!items.some(i=>i.to1Next), overdue=items.filter(i=>eqOverdue(i.to1Next)).length;
+      // одна строка-сводка вместо KPI-полосы: цифры без данных не показываем как «0»
+      const sum=live?[items.length+' ед.', items.filter(i=>i.isCnc).length+' ЧПУ', (EQ.sections||[]).length+' участков', noTo1?'ТО не ведётся':(overdue?overdue+' ТО просрочено':'ТО по графику')].join(' · '):'реестр не наполнен';
+      host.innerHTML=`<div class="card eq-tabbar">
+          <div class="eq-tabs" id="eqseg">
+            <button data-t="reg" class="${eqTab==='reg'?'on':''}">Оборудование</button>
+            <button data-t="sec" class="${eqTab==='sec'?'on':''}">Участки</button>
             <button data-t="mnt" class="${eqTab==='mnt'?'on':''}">Обслуживание</button>
           </div>
-          <span style="margin-left:auto;font-size:12px;color:var(--sl-500)">${tag}</span>
+          <span style="margin-left:auto;padding:8px 0">${srcChip(live,sum)}</span>
         </div>
         <div id="eqbody" style="margin-top:var(--gap)"></div>`;
-      host.querySelectorAll('#eqseg button').forEach(b=>b.onclick=()=>{ eqTab=b.dataset.t;
-        try{history.replaceState(null,'',(eqTab==='tree'&&eqSelId!=null)?('#equipment/'+encodeURIComponent(eqSelId)):'#equipment');}catch{}
-        host.querySelectorAll('#eqseg button').forEach(x=>x.classList.toggle('on',x.dataset.t===eqTab)); eqBody(); });
+      host.querySelectorAll('#eqseg button').forEach(b=>b.onclick=()=>{ eqTab=b.dataset.t; host.querySelectorAll('#eqseg button').forEach(x=>x.classList.toggle('on',x.dataset.t===eqTab)); eqBody(); });
       eqBody();
+      if(arg){ const it=items.find(i=>String(i.id)===String(arg)||i.invNo===arg); if(it) eqDrawerOpen(it.id); }
+      else if(eqDrawerIsOpen()&&eqSelId!=null) eqDrawerOpen(eqSelId,{keepTab:true}); // после правки/ТО — обновить открытую карточку
     }
-    function eqBody(){ const h=document.getElementById('eqbody'); if(!h)return; eqTab==='reg'?eqRegBody(h):eqTab==='mnt'?eqMntBody(h):eqTreeBody(h); }
+    function eqBody(){ const h=document.getElementById('eqbody'); if(!h)return; eqTab==='mnt'?eqMntBody(h):eqTab==='sec'?eqSecBody(h):eqRegBody(h); }
 
-    // ── Вкладка 1a: дерево участков + паспорт ──
-    function eqTreeBody(host){
-      host.innerHTML=`<div class="card" style="padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <button class="tbtn green" id="eq-new">+ Новое оборудование</button>
-          <input id="eq-search" placeholder="Поиск: инв.№ / наименование / модель" style="font:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--bd);border-radius:var(--r-m);min-width:230px">
-        </div>
-        <div class="split" style="margin-top:var(--gap)">
-          <div class="card" style="padding:0;overflow:hidden;align-self:stretch">
-            <div style="padding:7px 11px;border-bottom:1px solid var(--line2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Участок → оборудование</div>
-            <div class="list" id="eqtree" style="max-height:640px;overflow:auto"></div>
-          </div>
-          <div class="detail" id="eqdetail"></div>
-        </div>`;
-      const nb=host.querySelector('#eq-new'); if(nb)nb.onclick=()=>openEquipForm(null);
-      const sr=host.querySelector('#eq-search'); if(sr)sr.oninput=()=>eqPaintTree();
-      eqPaintTree();
-    }
-
-    // ── Вкладка 1b: Реестр парка — плоская erpGrid всего оборудования ──
+    // ── Вкладка «Оборудование»: строка фильтров + реестр ──
     function eqRegBody(host){
-      const items=(EQ&&EQ.items)||[];
-      const sections=[...new Set(items.map(i=>i.sectionName).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
-      const secOpts='<option value="">Все участки</option>'+sections.map(s=>`<option${eqRegSection===s?' selected':''}>${esc(s)}</option>`).join('');
-      const seg=(v,l,col)=>`<button data-f="${esc(v)}" class="${eqRegFilter===v?'on':''}"${col?` style="color:${col}"`:''}>${l}</button>`;
-      host.innerHTML=`<div class="filters card" style="padding:8px 10px">
-          <input id="eqreg-q" placeholder="Поиск: инв.№ / наименование / модель" value="${esc(eqRegQ)}" style="font:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--bd);border-radius:var(--r-m);width:230px">
-          <select id="eqreg-sec" style="font:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--bd);border-radius:var(--r-m)">${secOpts}</select>
-          <div class="seg" id="eqreg-seg">${seg('all','Все')}${seg('work','В работе','var(--green)')}${seg('repair','В ремонте','var(--amber)')}${seg('cnc','ЧПУ')}</div>
-          <button class="tbtn green" id="eqreg-new" style="margin-left:auto">+ Оборудование</button>
+      const secs=(EQ&&EQ.sections)||[], dict=(EQ&&EQ.dict)||{};
+      const sites=[...new Set(secs.map(s=>s.site||''))].filter(Boolean);
+      const opt=(v,l,cur)=>`<option value="${esc(String(v))}"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`;
+      const secList=secs.filter(s=>!eqRegSite||(s.site||'')===eqRegSite);
+      const secOpts=opt('','Все участки',eqRegSection)+((sites.length>1&&!eqRegSite)
+        ? sites.map(site=>`<optgroup label="${esc(site)}">${secList.filter(s=>(s.site||'')===site).map(s=>opt(s.id,eqSecLabel(s),eqRegSection)).join('')}</optgroup>`).join('')
+        : secList.map(s=>opt(s.id,eqSecLabel(s),eqRegSection)).join(''));
+      host.innerHTML=`<div class="card eq-filters" style="padding:8px 10px">
+          <input id="eqreg-q" type="search" placeholder="Поиск: № реестра, наименование, модель, зав. №" value="${esc(eqRegQ)}" style="min-width:260px" aria-label="Поиск">
+          ${sites.length>1?`<select id="eqreg-site" aria-label="Площадка">${opt('','Все площадки',eqRegSite)+sites.map(s=>opt(s,s,eqRegSite)).join('')}</select>`:''}
+          <select id="eqreg-sec" aria-label="Участок">${secOpts}</select>
+          <select id="eqreg-cat" aria-label="Категория">${opt('','Все категории',eqRegCat)+(dict.category||[]).map(c=>opt(c,c,eqRegCat)).join('')}</select>
+          <select id="eqreg-st" aria-label="Статус">${opt('','Любой статус',eqRegStatus)+(dict.status||[]).map(c=>opt(c,c,eqRegStatus)).join('')}</select>
+          <label class="eq-check"><input type="checkbox" id="eqreg-cnc" ${eqRegCnc?'checked':''}> только ЧПУ</label>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="ui-btn" id="eqreg-xls" title="Выгрузить отфильтрованный список (CSV, открывается в Excel)"><i class=ic-down></i> Выгрузить в Excel</button>
+            <button class="ui-btn ui-btn--primary" id="eqreg-new">+ Оборудование</button>
+          </span>
         </div>
         <div id="eqreggrid" style="margin-top:var(--gap);min-width:0"></div>`;
-      const q=host.querySelector('#eqreg-q'); if(q)q.oninput=()=>{eqRegQ=q.value;eqRegGrid();};
-      const sc=host.querySelector('#eqreg-sec'); if(sc)sc.onchange=()=>{eqRegSection=sc.value;eqRegGrid();};
-      host.querySelectorAll('#eqreg-seg button').forEach(b=>b.onclick=()=>{eqRegFilter=b.dataset.f;host.querySelectorAll('#eqreg-seg button').forEach(x=>x.classList.toggle('on',x.dataset.f===eqRegFilter));eqRegGrid();});
-      const nw=host.querySelector('#eqreg-new'); if(nw)nw.onclick=()=>openEquipForm(null);
+      const on=(id,ev,fn)=>{const el=host.querySelector('#'+id); if(el)el[ev]=fn;};
+      on('eqreg-q','oninput',e=>{eqRegQ=e.target.value;eqRegGrid();});
+      on('eqreg-site','onchange',e=>{eqRegSite=e.target.value;eqRegSection='';eqRegBody(host);});
+      on('eqreg-sec','onchange',e=>{eqRegSection=e.target.value;eqRegGrid();});
+      on('eqreg-cat','onchange',e=>{eqRegCat=e.target.value;eqRegGrid();});
+      on('eqreg-st','onchange',e=>{eqRegStatus=e.target.value;eqRegGrid();});
+      on('eqreg-cnc','onchange',e=>{eqRegCnc=!!e.target.checked;eqRegGrid();});
+      on('eqreg-new','onclick',()=>openEquipForm(null));
+      on('eqreg-xls','onclick',()=>eqExportCsv());
       eqRegGrid();
+    }
+    function eqRegRows(){
+      let rows=((EQ&&EQ.items)||[]).slice();
+      const q=(eqRegQ||'').trim().toLowerCase();
+      if(q)rows=rows.filter(i=>[i.invNo,i.name,i.model,i.serialNo,i.manufacturer].some(x=>String(x||'').toLowerCase().includes(q)));
+      if(eqRegSite)rows=rows.filter(i=>eqSiteOf(i)===eqRegSite);
+      if(eqRegSection)rows=rows.filter(i=>String(i.sectionId)===String(eqRegSection));
+      if(eqRegCat)rows=rows.filter(i=>i.category===eqRegCat);
+      if(eqRegStatus)rows=rows.filter(i=>i.status===eqRegStatus);
+      if(eqRegCnc)rows=rows.filter(i=>i.isCnc);
+      rows.sort((a,b)=>String(a.invNo||'').localeCompare(String(b.invNo||''),'ru',{numeric:true}));
+      return rows;
     }
     function eqRegGrid(){
       const gh=document.getElementById('eqreggrid'); if(!gh)return;
-      let rows=((EQ&&EQ.items)||[]).slice();
-      const q=(eqRegQ||'').trim().toLowerCase();
-      if(q)rows=rows.filter(i=>[i.invNo,i.name,i.model,i.serialNo].some(x=>String(x||'').toLowerCase().includes(q)));
-      if(eqRegSection)rows=rows.filter(i=>i.sectionName===eqRegSection);
-      if(eqRegFilter==='work')rows=rows.filter(i=>i.status==='В работе');
-      else if(eqRegFilter==='repair')rows=rows.filter(i=>i.status==='В ремонте');
-      else if(eqRegFilter==='cnc')rows=rows.filter(i=>i.isCnc);
-      // сортировка по умолчанию ↑ по ТО-1 след. (просрочка/ближайшие наверху)
-      rows.sort((a,b)=>{const x=a.to1Next?(Date.parse(a.to1Next)||8e15):8e15,y=b.to1Next?(Date.parse(b.to1Next)||8e15):8e15;return x-y;});
-      const live=EQ&&EQ.mode==='live';
-      if(!rows.length){ gh.innerHTML=(EQ&&EQ.mode==='live')?emptyCard('Оборудования по текущему фильтру нет',{sub:'Снимите фильтр или заведите новую единицу.',action:{label:'+ Оборудование',onClick:()=>openEquipForm(null)}}):emptyCard('Реестр «Оборудование» ещё не наполнен',{sub:'Записи появятся в LIVE-режиме.'}); eqRegGridApi=null; return; }
-      const cncChip='<span class="src-chip" style="font-size:10px;padding:1px 5px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">ЧПУ</span>';
+      const all=(EQ&&EQ.items)||[], rows=eqRegRows(), live=EQ&&EQ.mode==='live';
+      if(!rows.length){ gh.innerHTML=live?emptyCard('Оборудования по текущему фильтру нет',{sub:'Снимите фильтры или заведите новую единицу.',action:{label:'+ Оборудование',onClick:()=>openEquipForm(null)}}):emptyCard('Реестр оборудования ещё не наполнен',{sub:'Записи появятся после подключения базы.'}); eqRegGridApi=null; return; }
       const cols=[
-        {key:'code',label:'Инв. №',w:112,cls:'code',cell:i=>esc(i.invNo||'—'),sortVal:i=>i.invNo},
+        {key:'code',label:'№ реестра',w:112,cls:'code',cell:i=>esc(i.invNo||'—'),sortVal:i=>i.invNo},
         {key:'name',label:'Наименование',cls:'ell',cell:i=>`<span title="${esc(i.name||'')}" style="font-weight:600;color:var(--ink)">${esc(i.name||'—')}</span>`,sortVal:i=>i.name},
-        {key:'model',label:'Модель',w:130,cls:'nw c-gray',cell:i=>esc(i.model||'—'),sortVal:i=>i.model},
-        {key:'sec',label:'Участок',w:130,cls:'nw c-gray',cell:i=>esc(i.sectionName||'—'),sortVal:i=>i.sectionName},
-        {key:'cnc',label:'ЧПУ',w:64,cls:'nw',cell:i=>i.isCnc?cncChip:'<span class="c-gray">—</span>',sortVal:i=>i.isCnc?0:1},
-        {key:'resp',label:'Ответственный',w:140,cls:'nw c-gray',cell:i=>esc(i.responsible||'—'),sortVal:i=>i.responsible},
-        {key:'to1',label:'ТО-1 след.',w:180,cls:'nw',cell:eqTo1Cell,sortVal:i=>i.to1Next?(Date.parse(i.to1Next)||8e15):8e15},
-        {key:'status',label:'Статус',w:130,cls:'nw',cell:i=>eqStCell(i.status),sortVal:i=>i.status},
+        {key:'model',label:'Модель',w:120,cls:'nw c-gray',cell:i=>esc(i.model||'—'),sortVal:i=>i.model},
+        {key:'site',label:'Площадка',w:100,cls:'nw c-gray',cell:i=>esc(eqSiteOf(i)||'—'),sortVal:i=>eqSiteOf(i)},
+        {key:'sec',label:'Участок',w:190,cls:'ell c-gray',cell:i=>{const s=eqSecById(i.sectionId);return s?`<span title="${esc(eqSecLabel(s))}">${esc(eqSecLabel(s))}</span>`:'—';},sortVal:i=>eqSecLabel(eqSecById(i.sectionId))},
+        {key:'cnc',label:'ЧПУ',w:60,cls:'nw',cell:i=>i.isCnc?eqCncChip:'<span class="c-gray">—</span>',sortVal:i=>i.isCnc?0:1},
+        {key:'resp',label:'Ответственный',w:130,cls:'nw c-gray',cell:i=>esc(i.responsible||'—'),sortVal:i=>i.responsible},
+        {key:'to1',label:'ТО-1 след.',w:160,cls:'nw',cell:eqTo1Cell,sortVal:i=>i.to1Next?(Date.parse(i.to1Next)||8e15):8e15},
+        {key:'status',label:'Статус',w:120,cls:'nw',cell:i=>eqStCell(i.status),sortVal:i=>i.status},
       ];
-      eqRegGridApi=erpGrid(gh,{key:'eq-reg',cols,rows,search:false,rowKey:i=>String(i.id),selKey:eqSelId!=null?String(eqSelId):null,
+      eqRegGridApi=erpGrid(gh,{key:'eq-reg2',cols,rows,search:false,rowKey:i=>String(i.id),selKey:eqSelId!=null?String(eqSelId):null,
         rowClass:i=>eqOverdue(i.to1Next)?'row-def':'',
-        onRow:i=>{ eqSelId=i.id; eqTab='tree'; try{history.replaceState(null,'','#equipment/'+encodeURIComponent(i.id));}catch{}
-          const sg=document.getElementById('eqseg'); if(sg)sg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t==='tree')); eqBody(); },
-        info:`${srcChip(live)}<span>Единиц: <b style="color:var(--ink)">${rows.length}</b></span>`});
+        onRow:i=>eqDrawerOpen(i.id),
+        info:`${srcChip(live)}<span>Единиц: <b style="color:var(--ink)">${rows.length}</b>${rows.length!==all.length?` <span class="c-gray">из ${all.length}</span>`:''}</span>`});
+    }
+    // выгрузка отфильтрованного реестра в CSV (UTF-8 с BOM, разделитель «;» — Excel RU открывает как таблицу)
+    function eqExportCsv(){
+      const rows=eqRegRows(); if(!rows.length){ toast('Нечего выгружать: список пуст.','warn'); return; }
+      const H=['№ реестра','Наименование','Модель','Изготовитель','Зав. №','Год выпуска','Площадка','Участок','Категория','Тип/подкатегория','ЧПУ','Статус','Ответственный','Расположение','ТО-1 последнее','ТО-1 следующее'];
+      const q=(v)=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+      const lines=[H.map(q).join(';')].concat(rows.map(i=>[i.invNo,i.name,i.model,i.manufacturer,i.serialNo,i.yearMade||'',eqSiteOf(i),eqSecLabel(eqSecById(i.sectionId)),i.category,i.subtype,i.isCnc?'да':'нет',i.status,i.responsible,i.location,i.to1Last?fmt(i.to1Last):'',i.to1Next?fmt(i.to1Next):''].map(q).join(';')));
+      const blob=new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`Оборудование_${eqYmd()}.csv`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
     }
 
-    // ── Вкладка 1c: Обслуживание — план/внеплан ТО ──
-    // модель обслуживания из реестра: плановые = единицы с ТО-1 следующее; внеплановые = «В ремонте»
+    // ── Дровер карточки единицы (канон п.4; геометрия — как у #odetail / #znz-drawer) ──
+    function eqDrawerHost(){ let d=document.getElementById('eq-drawer'); if(!d){ d=document.createElement('div'); d.id='eq-drawer'; document.body.appendChild(d); } return d; }
+    const eqDrawerIsOpen=()=>{const d=document.getElementById('eq-drawer');return !!(d&&d.classList.contains('on'));};
+    function eqDrawerClose(resetHash){
+      const d=document.getElementById('eq-drawer'); if(d){ d.classList.remove('on'); d.innerHTML=''; }
+      eqSelId=null; eqSecSel=null; if(eqTab==='reg')eqRegGrid(); if(eqTab==='sec')eqSecGrid(); // снять подсветку строки
+      if(resetHash!==false){ try{history.replaceState(null,'','#equipment');}catch{} }
+    }
+    async function eqDrawerOpen(id,opts){
+      const d=eqDrawerHost(); eqSelId=id; if(!(opts&&opts.keepTab)) eqDrTab='pass';
+      try{history.replaceState(null,'','#equipment/'+encodeURIComponent(id));}catch{}
+      const fresh=!d.classList.contains('on'); d.classList.add('on');
+      if(fresh||!eqCardCache[id]) d.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка карточки…</div>';
+      if(eqTab==='reg')eqRegGrid(); // подсветить выбранную строку
+      let card=eqCardCache[id];
+      if(!card){ try{ card=await (await fetch('/api/equipment/item?id='+encodeURIComponent(id))).json(); eqCardCache[id]=card; }catch(e){ card={mode:'mock',warning:String(e.message||e)}; } }
+      if(String(eqSelId)!==String(id)||!eqDrawerIsOpen()) return; // пока грузили — выбрали другую или закрыли
+      if(!card||!card.item){ d.innerHTML=`<div class="eqd-h"><div class="eqd-title"><b>Карточка недоступна</b></div><button class="x" data-act="close" aria-label="Закрыть">✕</button></div>`+emptyState('Данные по единице не получены',{sub:'Проверьте подключение к базе и обновите страницу.'}); d.querySelector('[data-act="close"]').onclick=()=>eqDrawerClose(); return; }
+      eqDrawerPaint(card);
+    }
+    function eqDrawerPaint(card){
+      const d=eqDrawerHost(); const it=card.item, tk=card.tasks||[], docs=(card.docs)||it.docs||[];
+      const sec=eqSecById(it.sectionId), site=sec?(sec.site||''):'';
+      const tabs=[['pass','Паспорт'],['tasks','Задачи'+(tk.length?' · '+tk.length:'')],['mnt','ТО'],['docs','Документы'+(docs.length?' · '+docs.length:'')],['buy','Закупка']];
+      if(eqIsTurning(it))tabs.push(['ttx','ТТХ']);
+      if(!tabs.some(t=>t[0]===eqDrTab))eqDrTab='pass';
+      d.innerHTML=`<div class="eqd-h">
+          <div class="eqd-title"><span class="eqd-inv">${esc(it.invNo||'—')}</span>${eqStCell(it.status)}${it.isCnc?eqCncChip:''}${it.category?`<span class="st st--neutral">${esc(it.category)}</span>`:''}</div>
+          <button class="x" data-act="close" aria-label="Закрыть">✕</button>
+          <div class="eqd-name">${esc(it.name||'—')}</div>
+          <div class="eqd-sub">${sec?esc(eqSecLabel(sec)):'участок не указан'}${site?' · '+esc(site):''}${it.model?' · '+esc(it.model):''}</div>
+          <div class="eqd-actions"><button class="ui-btn" data-act="plan"><i class=ic-wrench></i> Запланировать ТО</button><button class="ui-btn ui-btn--primary" data-act="edit"><i class=ic-pencil></i> Изменить</button></div>
+        </div>
+        <div class="eq-tabs" id="eqd-tabs">${tabs.map(([k,l])=>`<button data-tab="${k}" class="${eqDrTab===k?'on':''}">${l}</button>`).join('')}</div>
+        <div id="eqd-body"></div>`;
+      d.querySelector('[data-act="close"]').onclick=()=>eqDrawerClose();
+      d.querySelector('[data-act="edit"]').onclick=()=>openEquipForm(it);
+      d.querySelector('[data-act="plan"]').onclick=()=>eqMntForm(it);
+      d.querySelectorAll('#eqd-tabs button').forEach(b=>b.onclick=()=>{ eqDrTab=b.dataset.tab; d.querySelectorAll('#eqd-tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab===eqDrTab)); eqDrawerTab(card); });
+      eqDrawerTab(card);
+    }
+    function eqDrawerTab(card){
+      const h=document.getElementById('eqd-body'); if(!h)return;
+      const it=card.item, tk=card.tasks||[], docs=(card.docs)||it.docs||[];
+      const sec=eqSecById(it.sectionId);
+      const F=(l,v,mono)=>`<div class="eqd-f"><div class="l">${l}</div><div class="v${mono?' mono':''}">${v||eqDash}</div></div>`;
+      const to1=it.to1Next?(eqOverdue(it.to1Next)?`<span style="color:var(--red)">${fmt(it.to1Next)} · просрочено</span>`:(eqDaysLeft(it.to1Next)!=null&&eqDaysLeft(it.to1Next)<=14?`<span style="color:var(--amber)">${fmt(it.to1Next)}</span>`:fmt(it.to1Next))):'';
+      if(eqDrTab==='pass'){
+        h.innerHTML=`<div class="eqd-grid">
+            ${F('Наименование',esc(it.name))}${F('Модель',esc(it.model))}${F('Зав. №',esc(it.serialNo),true)}
+            ${F('Изготовитель',esc(it.manufacturer))}${F('Год выпуска',eqVal(it.yearMade),true)}${F('Тип / подкатегория',esc(it.subtype))}
+            ${F('Площадка',esc(sec?(sec.site||''):''))}${F('Участок',esc(eqSecLabel(sec)))}${F('Расположение',esc(it.location))}
+            ${F('Ответственный',esc(it.responsible))}${F('Мощность',it.powerKw?esc(String(it.powerKw))+' кВт':'',true)}${F('Дата ввода',it.commissionedAt?fmt(it.commissionedAt):'',true)}
+            ${F('Числовое ПУ',it.isCnc?'да':'нет')}${F('Поднадзорное',it.isSupervised?'да':'нет')}${F('Освидетельствование до',it.inspectionNext?fmt(it.inspectionNext):'',true)}
+          </div>
+          ${it.notes?`<div class="eqd-sec">Примечание</div><div class="eqd-note">${esc(it.notes)}</div>`:''}`;
+      } else if(eqDrTab==='tasks'){
+        h.innerHTML=tk.length?`<div class="tbl-wrap" style="margin-top:12px"><table class="dt"><thead><tr><th>№ задачи</th><th>Операция</th><th>План</th><th>Факт</th><th>Статус</th></tr></thead><tbody>${tk.map(t=>`<tr>
+            <td class="code">${esc(t.no||'—')}</td><td>${esc(t.op||'—')}</td><td class="nowrap">${t.planDate?fmt(t.planDate):'—'}</td><td class="nowrap">${t.factDate?fmt(t.factDate):'<span class="c-gray">—</span>'}</td><td>${eqStCell(t.status)}</td></tr>`).join('')}</tbody></table></div>`
+          :emptyState('На этой единице задач нет',{sub:'Задачи появляются из карт задачи на участок, где указано это оборудование.'});
+      } else if(eqDrTab==='mnt'){
+        const plan=!!(it.to1Next||it.to1Last);
+        h.innerHTML=`<div class="eqd-grid">
+            ${F('Категория ТО',esc(it.maintClass))}${F('ТО-1 последнее',it.to1Last?fmt(it.to1Last):'',true)}${F('ТО-1 следующее',to1,true)}
+            ${F('Освидетельствование до',it.inspectionNext?fmt(it.inspectionNext):'',true)}${F('Состояние',eqStCell(it.status))}
+          </div>
+          ${plan?'':emptyState('График ТО для этой единицы не заведён',{sub:'Плановое ТО задаёт дату следующего ТО-1; внеплановое переводит единицу «В ремонт».',action:{label:'Запланировать ТО',onClick:()=>eqMntForm(it)}})}`;
+      } else if(eqDrTab==='docs'){
+        const dsize=(n)=>n?(n>1048576?(n/1048576).toFixed(1)+' МБ':Math.round(n/1024)+' КБ'):'';
+        h.innerHTML=docs.length?`<div style="margin-top:8px">${docs.map(d=>`<div class="eqd-doc"><i class=ic-doc></i>${d.url?`<a class="nm" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title||d.name||'файл')}</a>`:`<span class="nm">${esc(d.title||d.name||'файл')}</span>`}<span class="sz">${esc(String(d.type||d.mime||'').replace(/^application\//,'').toUpperCase())}${dsize(d.size)?' · '+dsize(d.size):''}</span></div>`).join('')}</div>`
+          :emptyState('Файлы не прикреплены',{sub:'Руководство, инструкция оператора, регламент ТО, паспорт изготовителя — поле «Документы и инструкции» в базе.'});
+      } else if(eqDrTab==='buy'){
+        const ref=String(it.procurementRef||'').trim(); const refHtml=/^https?:\/\//i.test(ref)?`<a href="${esc(ref)}" target="_blank" rel="noopener" style="overflow-wrap:anywhere">${esc(ref)}</a>`:esc(ref);
+        h.innerHTML=`<div class="eqd-grid two">
+            ${F('Поставщик',esc(it.supplier))}${F('Изготовитель',esc(it.manufacturer))}
+            ${F('Договор',esc(it.contractNo),true)}${F('Дата поставки',it.deliveryDate?fmt(it.deliveryDate):'',true)}
+            ${F('Счёт-фактура',esc(it.invoiceNo),true)}${F('Стоимость',it.cost?esc(String(it.cost))+' ₽':'',true)}
+            ${F('Гарантия до',it.warrantyUntil?fmt(it.warrantyUntil):'',true)}${F('Закупку вёл',esc(it.purchasedBy))}
+            <div class="eqd-f" style="grid-column:span 2">${F('Ссылка на закупку',refHtml)}</div>
+          </div>
+          <a class="ui-btn ui-btn--ghost" href="#purchase" style="text-decoration:none">Открыть раздел «Закупки» →</a>`;
+      } else if(eqDrTab==='ttx'){
+        h.innerHTML=`<div class="eqd-grid">
+            ${F('Тип головки',esc(it.headType))}${F('Позиций револьвера',eqVal(it.revolverSlots),true)}${F('Патрон — тип',esc(it.chuckTypeEq))}
+            ${F('Ø патрона, мм',eqVal(it.chuckDia),true)}${F('Проходное отверстие шпинделя, мм',eqVal(it.spindleBore),true)}${F('Сечение державок (наружн.)',esc(it.holderSecExt),true)}
+            ${F('Сечение державок (внутр.), Ø',esc(it.holderSecInt),true)}
+          </div>
+          <div class="eqd-sub">Характеристики используются конструктором карт наладки и комплектов кулачков.</div>`;
+      }
+    }
+
+    // ── Вкладка «Участки»: справочник Ф.1–П обеих площадок (K-153; правка полей из портала — K-154) ──
+    let eqSecQ='', eqSecSite='', eqSecGridApi=null, eqSecSel=null;
+    const eqSecTypeChip=(t)=>t?`<span class="st st--${t==='Основной'?'wait':'neutral'}">${esc(t)}</span>`:'<span class="c-gray">—</span>';
+    function eqSecBody(host){
+      const secs=(EQ&&EQ.sections)||[]; const sites=[...new Set(secs.map(s=>s.site||''))].filter(Boolean);
+      const opt=(v,l,cur)=>`<option value="${esc(String(v))}"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`;
+      host.innerHTML=`<div class="card eq-filters" style="padding:8px 10px">
+          <input id="eqsec-q" type="search" placeholder="Поиск: код, участок, операции" value="${esc(eqSecQ)}" style="min-width:260px" aria-label="Поиск">
+          ${sites.length>1?`<select id="eqsec-site" aria-label="Площадка">${opt('','Все площадки',eqSecSite)+sites.map(s=>opt(s,s,eqSecSite)).join('')}</select>`:''}
+          <span class="c-gray" style="margin-left:auto;font-size:var(--fs-12)">справочник <span class="src-chip">Ф.1–П</span> · состав и поля правятся в базе</span>
+        </div>
+        <div id="eqsecgrid" style="margin-top:var(--gap);min-width:0"></div>`;
+      const q=host.querySelector('#eqsec-q'); if(q)q.oninput=()=>{eqSecQ=q.value;eqSecGrid();};
+      const st=host.querySelector('#eqsec-site'); if(st)st.onchange=()=>{eqSecSite=st.value;eqSecGrid();};
+      eqSecGrid();
+    }
+    function eqSecGrid(){
+      const gh=document.getElementById('eqsecgrid'); if(!gh)return;
+      const cnt=new Map(); ((EQ&&EQ.items)||[]).forEach(i=>{const k=String(i.sectionId);cnt.set(k,(cnt.get(k)||0)+1);});
+      let rows=((EQ&&EQ.sections)||[]).slice();
+      const q=(eqSecQ||'').trim().toLowerCase();
+      if(q)rows=rows.filter(s=>[s.code,s.name,s.ops,s.mainEquipment].some(x=>String(x||'').toLowerCase().includes(q)));
+      if(eqSecSite)rows=rows.filter(s=>(s.site||'')===eqSecSite);
+      if(!rows.length){ gh.innerHTML=emptyCard('Участков по текущему фильтру нет',{sub:'Снимите фильтры.'}); eqSecGridApi=null; return; }
+      const cols=[
+        {key:'code',label:'Код',w:120,cls:'code',cell:s=>esc(s.code||'—'),sortVal:s=>s.code},
+        {key:'site',label:'Площадка',w:100,cls:'nw c-gray',cell:s=>esc(s.site||'—'),sortVal:s=>s.site},
+        {key:'name',label:'Участок',cls:'ell',cell:s=>`<span title="${esc(s.name||'')}" style="font-weight:600;color:var(--ink)">${esc(s.name||'—')}</span>`,sortVal:s=>s.name},
+        {key:'type',label:'Тип',w:130,cls:'nw',cell:s=>eqSecTypeChip(s.type),sortVal:s=>s.type},
+        {key:'ops',label:'Операции',w:180,cls:'ell c-gray',cell:s=>`<span title="${esc(s.ops||'')}">${esc(s.ops||'—')}</span>`,sortVal:s=>s.ops},
+        {key:'eq',label:'Оборудование',w:120,cls:'nw',cell:s=>{const n=cnt.get(String(s.id))||0;return n?`<b style="color:var(--ink)">${n}</b> <span class="c-gray">ед.</span>`:'<span class="c-gray">—</span>';},sortVal:s=>cnt.get(String(s.id))||0},
+      ];
+      eqSecGridApi=erpGrid(gh,{key:'eq-sec',cols,rows,search:false,rowKey:s=>String(s.id),selKey:eqSecSel!=null?String(eqSecSel):null,
+        onRow:s=>eqSecDrawer(s),
+        info:`${srcChip(EQ&&EQ.mode==='live')}<span>Участков: <b style="color:var(--ink)">${rows.length}</b></span>`});
+    }
+    function eqSecDrawer(s){
+      const d=eqDrawerHost(); eqSecSel=s.id; eqSelId=null; d.classList.add('on'); eqSecGrid();
+      try{history.replaceState(null,'','#equipment');}catch{}
+      const its=((EQ&&EQ.items)||[]).filter(i=>String(i.sectionId)===String(s.id)).sort((a,b)=>String(a.invNo).localeCompare(String(b.invNo),'ru',{numeric:true}));
+      const F=(l,v)=>`<div class="eqd-f"><div class="l">${l}</div><div class="v">${v||eqDash}</div></div>`;
+      d.innerHTML=`<div class="eqd-h">
+          <div class="eqd-title"><span class="eqd-inv">${esc(s.code||'—')}</span>${eqSecTypeChip(s.type)}${s.site?`<span class="st st--neutral">${esc(s.site)}</span>`:''}</div>
+          <button class="x" data-act="close" aria-label="Закрыть">✕</button>
+          <div class="eqd-name">${esc(s.name||'—')}</div>
+          <div class="eqd-sub">участок производства · справочник <span class="src-chip">Ф.1–П</span></div>
+        </div>
+        <div class="eqd-grid two">${F('Типы операций',esc(s.ops))}${F('Единиц оборудования в реестре',its.length?String(its.length):'')}</div>
+        ${s.description?`<div class="eqd-sec">Описание деятельности</div><div class="eqd-note">${esc(s.description)}</div>`:''}
+        ${s.mainEquipment?`<div class="eqd-sec">Основное оборудование по справочнику</div><div class="eqd-note">${esc(s.mainEquipment)}</div>`:''}
+        <div class="eqd-sec">Оборудование в реестре</div>
+        ${its.length?its.map(i=>`<div class="eqd-doc" data-eq="${esc(String(i.id))}" style="cursor:pointer"><span style="font-family:var(--mono);font-weight:600;color:var(--navy)">${esc(i.invNo||'—')}</span><span class="nm">${esc(i.name||'')}</span><span class="sz">${eqStCell(i.status)}</span></div>`).join('')
+          :emptyState('На участке нет оборудования в реестре',{sub:'Заведите единицу в реестре оборудования и укажите этот участок.'})}`;
+      d.querySelector('[data-act="close"]').onclick=()=>eqDrawerClose();
+      d.querySelectorAll('[data-eq]').forEach(el=>el.onclick=()=>eqDrawerOpen(el.dataset.eq));
+    }
     function eqMntRows(){
       const items=(EQ&&EQ.items)||[]; const out=[];
       for(const i of items){
@@ -9613,12 +9801,12 @@
           ${noPlan?tile('—','в 14 дней','var(--gray4,var(--sl-400))','график ТО не заведён')
                   :tile(soon.length,'в 14 дней','var(--amber)','плановые по графику')}
           ${noEqMnt?tile('—','внеплановое сейчас','var(--gray4,var(--sl-400))','реестр оборудования пуст')
-                   :tile(unpl.length,'внеплановое сейчас','#7c3aed',unpl.map(r=>r.eq.invNo).slice(0,3).join(', ')||'нет')}
+                   :tile(unpl.length,'внеплановое сейчас','var(--amber)',unpl.map(r=>r.eq.invNo).slice(0,3).join(', ')||'нет')}
           ${tile('—','выполнено за месяц','var(--gray4,var(--sl-400))','журнал фактов ТО ведётся в LIVE')}
         </div>
         <div class="filters card" style="padding:8px 10px;margin-top:var(--gap)">
           <div class="seg" id="eqmnt-seg">${segT('todo','К выполнению')}${segT('all','Все')}${segT('done','Выполненные')}</div>
-          <div class="seg" id="eqmnt-type">${segY('all','Все типы')}${segY('planned','Плановые','#1d4e89')}${segY('unplanned','Внеплановые','var(--amber)')}</div>
+          <div class="seg" id="eqmnt-type">${segY('all','Все типы')}${segY('planned','Плановые','var(--navy)')}${segY('unplanned','Внеплановые','var(--amber)')}</div>
           <span style="margin-left:auto;font-size:11px;color:var(--sl-500)">по сроку ↑</span>
         </div>
         <div id="eqmntgrid" style="margin-top:var(--gap);min-width:0"></div>`;
@@ -9675,16 +9863,16 @@
           <div style="grid-column:span 4">${FLAB('Плановая дата',true)}<input id="mnt-plan" type="date" style="${FINP}" value="${cur&&cur.to1Next?String(cur.to1Next).slice(0,10):''}"></div>
           <div style="grid-column:span 4">${FLAB('Плановый простой')}<input id="mnt-down" style="${FINP}" placeholder="напр. 4 ч"></div>
           <div style="grid-column:span 12">${FLAB('Работы / регламент')}<input id="mnt-works" style="${FINP}" placeholder="что выполнить: замена СОЖ, проверка направляющих…"></div>
-          <div style="grid-column:span 12"><div style="background:#eff6ff;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:8px 11px;font-size:11px;color:#1d4e89;line-height:1.5"><b>Плановое:</b> дата = «последнее ТО» + период категории (можно скорректировать). Запись попадёт в план-график и KPI «ТО-1».</div></div>`;
+          <div style="grid-column:span 12"><div style="background:var(--sk-50);border:1px solid var(--sk-100);border-radius:var(--r-s);padding:8px 11px;font-size:var(--fs-11);color:var(--sk-800);line-height:1.5"><b>Плановое:</b> дата = «последнее ТО» + период категории (можно скорректировать). Запись попадёт в план-график и KPI «ТО-1».</div></div>`;
       const unplanned=`<div style="grid-column:span 4">${FLAB('Вид работ',true)}<select id="mnt-work" style="${FINP}"><option>Ремонт по отказу</option><option>Аварийный ремонт</option><option>Внеплановый осмотр</option></select></div>
           <div style="grid-column:span 4">${FLAB('Дата',true)}<input id="mnt-plan" type="date" style="${FINP}" value="${eqYmd()}"></div>
           <div style="grid-column:span 4">${FLAB('Ответственный',true)}<input id="mnt-resp" style="${FINP}" value="${cur?esc(cur.responsible||''):''}"></div>
           <div style="grid-column:span 12">${FLAB('Причина (отказ / поломка)',true)}<input id="mnt-reason" style="${FINP}" placeholder="что произошло"></div>
           <div style="grid-column:span 6">${FLAB('Связанная заявка / НП')}<input id="mnt-ref" style="${FINP}" placeholder="№ заявки в ремонт / НП"></div>
           <div style="grid-column:span 6">${FLAB('Плановый простой')}<input id="mnt-down" style="${FINP}" placeholder="напр. 1 смена"></div>
-          <div style="grid-column:span 12"><div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-s);padding:8px 11px;font-size:11px;color:#8a5a13;line-height:1.5"><b>Внеплановое</b> не сдвигает график планового ТО-1; оборудование переводится в статус «В ремонте».</div></div>`;
+          <div style="grid-column:span 12"><div style="background:var(--am-50);border:1px solid var(--am-100);border-radius:var(--r-s);padding:8px 11px;font-size:var(--fs-11);color:var(--am-800);line-height:1.5"><b>Внеплановое</b> не сдвигает график планового ТО-1; оборудование переводится в статус «В ремонте».</div></div>`;
       modal.style.width='min(720px,96vw)';
-      modal.innerHTML=`<div class="mh"><b>Планирование ТО</b><span class="op">ДП–О.3 · план-график</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
+      modal.innerHTML=`<div class="mh"><b>Планирование ТО</b><span class="op">план-график обслуживания</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
         <div class="mb" style="gap:0">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
             <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--sl-500)">Тип ТО:</span>
@@ -9695,9 +9883,9 @@
             <div style="grid-column:span 12">${FLAB('Оборудование',true)}<select id="mnt-eq" style="${FINP}">${eqOpts}</select></div>
             <div id="mnt-fields" style="grid-column:span 12"><div style="${G}">${eqMntKind==='planned'?planned:unplanned}</div></div>
           </div>
-          <div id="mnt-err" style="margin-top:12px;color:#b91c1c;font-size:12px"></div>
+          <div id="mnt-err" style="margin-top:12px;color:var(--red);font-size:12px"></div>
           <div style="margin-top:14px;padding-top:13px;border-top:1px solid var(--sl-200);display:flex;align-items:center;gap:10px">
-            <span style="font-size:12px;color:var(--sl-500)"><span style="color:#b91c1c">*</span> — обязательное поле</span>
+            <span style="font-size:12px;color:var(--sl-500)"><span style="color:var(--red)">*</span> — обязательное поле</span>
             <div style="margin-left:auto;display:flex;gap:10px">
               <button class="tbtn" id="mnt-cancel" style="padding:9px 18px">Отмена</button>
               <button class="tbtn ${eqMntKind==='planned'?'green':'primary'}" id="mnt-save" style="padding:9px 18px">${eqMntKind==='planned'?'Запланировать':'Создать внеплановое ТО'}</button>
@@ -9728,151 +9916,6 @@
         }catch(e){ err.textContent=e.message; toast('Не сохранено: '+e.message,'err'); btn.disabled=false; btn.textContent=eqMntKind==='planned'?'Запланировать':'Создать внеплановое ТО'; }
       };
     }
-    function eqFilteredGroups(){
-      const q=((document.getElementById('eq-search')||{}).value||'').trim().toLowerCase();
-      const groups=(EQ&&EQ.groups)||[];
-      if(!q)return groups;
-      const hit=(e)=>[e.invNo,e.name,e.model,e.serialNo,e.category].some(x=>String(x||'').toLowerCase().includes(q));
-      return groups.map(g=>({section:g.section,equipment:(g.equipment||[]).filter(hit)})).filter(g=>g.equipment.length);
-    }
-    function eqPaintTree(){
-      const el=document.getElementById('eqtree'); if(!el)return;
-      const groups=eqFilteredGroups();
-      const total=groups.reduce((s,g)=>s+(g.equipment||[]).length,0);
-      if(!total){ el.innerHTML='<div style="padding:20px 14px;color:var(--sub);font-size:12px;text-align:center">'+((EQ&&EQ.mode==='live')?'Оборудование не найдено. Заведите первую единицу кнопкой «+ Новое оборудование».':'Реестр «Оборудование» ещё не наполнен (появится в LIVE-режиме).')+'</div>'; eqShowDetail(null); return; }
-      // авто-раскрытие: если ничего не выбрано — раскрыть участок первой найденной единицы
-      if(eqOpenSec===null){ const fg=groups.find(g=>(g.equipment||[]).length); eqOpenSec=fg?String(fg.section.id):''; }
-      let firstId=null;
-      // K-152: две площадки (Храброво / Волгоград) — над первым участком каждой площадки ставим полосу-заголовок
-      const siteCount=new Set(groups.filter(g=>(g.equipment||[]).length).map(g=>g.section.site||'')).size;
-      let lastSite=null;
-      const html=groups.map(g=>{
-        const list=g.equipment||[]; if(!list.length)return '';
-        const secKey=String(g.section.id);
-        let siteHead='';
-        if(siteCount>1&&(g.section.site||'')!==lastSite){ lastSite=g.section.site||''; siteHead=`<div class="li" style="background:var(--sl-100);cursor:default;padding:5px 11px"><div class="row"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sl-500)">Площадка · ${esc(lastSite||'не указана')}</span></div></div>`; }
-        const open=String(eqOpenSec)===secKey;
-        const head=`<div class="li" data-sec="${esc(secKey)}" style="background:#f7faff;cursor:pointer">
-            <div class="row"><span class="c-blue">${open?'▾':'▸'}</span> <b style="color:var(--ink);font-size:12px">${esc(g.section.name||'—')}</b><span style="margin-left:auto;font-size:11px;color:var(--sub)">${list.length} ед.</span></div>
-            ${g.section.code?`<div class="meta"><span class="c-gray" style="font-size:11px">${esc(g.section.code)}${g.section.type?' · '+esc(g.section.type):''}</span></div>`:''}</div>`;
-        if(!open)return siteHead+head;
-        const rows=list.map(e=>{ if(firstId===null)firstId=e.id; const sel=String(e.id)===String(eqSelId);
-          return `<div class="li${sel?' on':''}" data-eq="${esc(String(e.id))}" style="padding-left:22px">
-            <div class="row"><span class="num" style="font-size:12px">${esc(e.invNo||'—')}</span>${e.isCnc?'<span class="src-chip" style="font-size:10px;padding:1px 5px;margin-left:6px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">ЧПУ</span>':''}<span style="margin-left:auto">${eqStCell(e.status)}</span></div>
-            <div class="cust" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--ink)">${esc(e.name||'—')}</div>
-            <div class="meta" style="gap:8px;flex-wrap:wrap">${e.model?`<span class="c-gray" style="font-size:11px">${esc(e.model)}</span>`:''}${e.taskCount?`<span class="c-blue" style="font-size:11px">${e.taskCount} задач</span>`:''}</div>
-          </div>`;}).join('');
-        return siteHead+head+rows;
-      }).join('');
-      el.innerHTML=html;
-      el.querySelectorAll('[data-sec]').forEach(x=>x.onclick=()=>{ const k=x.dataset.sec; eqOpenSec=(String(eqOpenSec)===k)?'__none__':k; eqPaintTree(); });
-      el.querySelectorAll('[data-eq]').forEach(x=>x.onclick=()=>{ eqSelId=x.dataset.eq;
-        try{history.replaceState(null,'','#equipment/'+encodeURIComponent(eqSelId));}catch{}
-        el.querySelectorAll('.li[data-eq]').forEach(y=>y.classList.toggle('on',y.dataset.eq===String(eqSelId)));
-        eqShowDetail(eqSelId); });
-      if(!eqSelId||!(EQ.items||[]).some(i=>String(i.id)===String(eqSelId))) eqSelId=firstId;
-      el.querySelectorAll('.li[data-eq]').forEach(y=>y.classList.toggle('on',y.dataset.eq===String(eqSelId)));
-      eqShowDetail(eqSelId);
-    }
-    async function eqShowDetail(id){
-      const host=document.getElementById('eqdetail'); if(!host)return;
-      if(id==null){ host.innerHTML='<div class="card pad" style="color:var(--sub)">Выберите оборудование слева или заведите новую единицу.</div>'; return; }
-      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка карточки оборудования…</div>';
-      let card=eqCardCache[id];
-      if(!card){ try{ card=await (await fetch('/api/equipment/item?id='+encodeURIComponent(id))).json(); eqCardCache[id]=card; }catch(e){ card={mode:'mock',warning:String(e.message||e)}; } }
-      if(String(eqSelId)!==String(id)) return; // устарело
-      if(!card||!card.item){ host.innerHTML='<div class="card pad" style="color:var(--sub)">Карточка оборудования недоступна (нет данных).</div>'; return; }
-      const it=card.item, tk=card.tasks||[];
-      const F=(lbl,val)=>`<div><div style="font-size:11px;color:var(--sl-500)">${lbl}</div><div style="color:var(--ink);font-weight:600">${val||'<span style=\"color:var(--sl-500);font-weight:400\">—</span>'}</div></div>`;
-      const trows=tk.length?tk.map(t=>`<tr>
-          <td class="code" style="color:var(--sl-700)">${esc(t.no||'—')}</td>
-          <td>${esc(t.op||'—')}</td>
-          <td class="nowrap">${fmt(t.planDate)}</td>
-          <td class="nowrap">${t.factDate?fmt(t.factDate):'<span class="c-gray">—</span>'}</td>
-          <td>${eqStCell(t.status)}</td></tr>`).join(''):'<tr><td colspan="5" style="padding:14px;color:var(--sl-500);text-align:center">Задач на этой единице оборудования нет (mm-связь Ф.14 «Оборудование (реестр)»).</td></tr>';
-      host.innerHTML=`<div class="card pad" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span class="code" style="font-size:18px;color:var(--navy);font-weight:700">${esc(it.invNo||'—')}</span>
-          ${it.category?`<span class="src-chip" style="background:var(--sl-100);color:#475569;border:1px solid var(--sl-200)">${esc(it.category)}</span>`:''}
-          ${it.isCnc?'<span class="src-chip" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">ЧПУ</span>':''}
-          <span style="margin-left:auto"></span>${eqStCell(it.status)}
-          <button class="tbtn" data-act="plan">+ Запланировать ТО</button>
-          <button class="tbtn primary" data-act="edit">✎ Редактировать</button>
-        </div>
-        <div class="card pad">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:10px">Паспорт единицы (Ф.3–О.3 · «Оборудование»)</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px 22px;font-size:12px">
-            ${F('Наименование',esc(it.name))}
-            ${F('Модель',esc(it.model))}
-            ${F('Зав. №',esc(it.serialNo))}
-            ${F('Изготовитель',esc(it.manufacturer))}
-            ${F('Год выпуска',it.yearMade?esc(it.yearMade):'')}
-            ${F('Участок',esc(it.sectionName))}
-            ${F('Тип/подкатегория',esc(it.subtype))}
-            ${F('Мощность',it.powerKw?esc(it.powerKw)+' кВт':'')}
-            ${F('Категория ТО',esc(it.maintClass))}
-            ${F('Ответственный',esc(it.responsible))}
-            ${F('Расположение',esc(it.location))}
-            ${F('Дата ввода',it.commissionedAt?fmt(it.commissionedAt):'')}
-            ${F('ТО-1 следующее',it.to1Next?(eqOverdue(it.to1Next)?`<span class="c-red" style="font-weight:700">${fmt(it.to1Next)} · просрочено</span>`:(eqDaysLeft(it.to1Next)!=null&&eqDaysLeft(it.to1Next)<=14?`<span class="c-amber">${fmt(it.to1Next)}</span>`:fmt(it.to1Next))):'')}
-          </div>
-          ${it.notes?`<div style="margin-top:11px;font-size:12px;color:#475569"><span style="color:var(--sl-500)">Примечание:</span> ${esc(it.notes)}</div>`:''}
-        </div>
-        <div class="card pad">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub)">Задачи на оборудовании (Ф.14 · mm «Оборудование (реестр)»)</div>
-            <span class="c-gray" style="margin-left:auto;font-size:11px">${tk.length} связанных задач</span>
-          </div>
-          <div class="tbl-wrap"><table class="dt"><thead><tr><th>№ задачи</th><th>Операция (МК / оп.)</th><th>План</th><th>Факт</th><th>Статус</th></tr></thead><tbody>${trows}</tbody></table></div>
-        </div>
-        ${eqDetailExtras(it,card)}`;
-      const eb=host.querySelector('[data-act="edit"]'); if(eb)eb.onclick=()=>openEquipForm(it);
-      const pb=host.querySelector('[data-act="plan"]'); if(pb)pb.onclick=()=>eqMntForm(it);
-      const ab=host.querySelector('[data-act="attach"]'); if(ab)ab.onclick=()=>toast('Прикрепление документов к оборудованию доступно в LIVE-режиме (нужен токен NocoDB).','err');
-      const ob=host.querySelector('[data-act="openproc"]'); if(ob)ob.onclick=()=>{ location.hash='#purchase'; };
-    }
-    // Блоки 4б: «Документы и инструкции» + «Данные о закупке» (данные из card/it; в mock — пустые)
-    function eqDetailExtras(it,card){
-      const P=(lbl,val,mono)=>`<div><div style="font-size:10px;color:var(--sl-500)">${lbl}</div><div style="font-weight:600;color:${mono?'var(--blue)':'var(--ink)'}${mono?';font-family:var(--mono)':''}">${val||'<span style="color:var(--sl-500);font-weight:400">—</span>'}</div></div>`;
-      const docs=(card&&card.docs)||it.docs||[];
-      const dico=(t)=>{const e=String(t||'').toLowerCase();return e.includes('pdf')?'#b91c1c':(e.includes('doc')?'#1d4e89':'#7c3aed');};
-      const dsize=(n)=>n?(' · '+(n>1048576?(n/1048576).toFixed(1)+' МБ':Math.round(n/1024)+' КБ')):'';
-      const docRows=docs.length?docs.map(d=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--sl-100)"><span style="color:${dico(d.type||d.mime||d.title)}">▤</span><span style="font-size:12px;color:var(--ink);font-weight:600">${esc(d.title||d.name||'файл')}</span><span style="margin-left:auto;font-size:10px;color:var(--sl-500)">${esc(String(d.type||'').toUpperCase())}${dsize(d.size)}</span></div>`).join('')
-        :'<div style="padding:12px 11px;color:var(--sl-500);font-size:12px;text-align:center">Файлы не прикреплены (руководство, инструкция оператора, регламент ТО, паспорт изготовителя).</div>';
-      const hasTurn=it.headType||it.revolverSlots||it.chuckTypeEq||it.chuckDia!=null||it.spindleBore!=null||it.holderSecExt||it.holderSecInt;
-      const turnBlock=hasTurn?`<div class="card" style="padding:0;overflow:hidden;grid-column:span 2">
-            <div style="padding:7px 11px;border-bottom:1px solid var(--line2)"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Токарные ТТХ (карты наладки · кулачки)</span></div>
-            <div style="padding:9px 11px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px 14px;font-size:12px">
-              ${P('Тип головки',esc(it.headType))}
-              ${P('Позиций револьвера',it.revolverSlots?esc(String(it.revolverSlots)):'')}
-              ${P('Патрон — тип',esc(it.chuckTypeEq))}
-              ${P('Ø патрона, мм',it.chuckDia!=null?esc(String(it.chuckDia)):'',true)}
-              ${P('Проходное отв. шпинделя, Ø',it.spindleBore!=null?esc(String(it.spindleBore)):'',true)}
-              ${P('Сечение державок (наружн.)',esc(it.holderSecExt),true)}
-              ${P('Сечение державок (внутр.), Ø',esc(it.holderSecInt),true)}
-            </div>
-          </div>`:'';
-      return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)">
-          ${turnBlock}
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:7px 11px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:8px"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Документы и инструкции</span><button class="tbtn" data-act="attach" style="margin-left:auto;padding:3px 9px;font-size:11px;color:var(--blue);border-color:#cfe0f5">+ Прикрепить</button></div>
-            <div>${docRows}</div>
-          </div>
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:7px 11px;border-bottom:1px solid var(--line2)"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Данные о закупке</span></div>
-            <div style="padding:9px 11px;display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:12px">
-              ${P('Поставщик',esc(it.supplier))}
-              ${P('Производитель',esc(it.manufacturer))}
-              ${P('Договор',esc(it.contractNo),true)}
-              ${P('Дата поставки',it.deliveryDate?fmt(it.deliveryDate):'')}
-              ${P('Счёт-фактура',esc(it.invoiceNo),true)}
-              ${P('Стоимость',it.cost?esc(String(it.cost))+' ₽':'')}
-              ${P('Гарантия до',it.warrantyUntil?fmt(it.warrantyUntil):'')}
-              ${P('Закупку вёл',esc(it.purchasedBy))}
-              <div style="grid-column:span 2;padding-top:4px;border-top:1px solid var(--sl-100)"><span data-act="openproc" style="font-size:11px;color:var(--blue);font-weight:600;cursor:pointer">Открыть закупку (ДП–К) →</span></div>
-            </div>
-          </div>
-        </div>`;
-    }
     // ── Форма заведения/правки единицы оборудования (все поля паспорта Ф.3–О.3) ──
     function openEquipForm(it){
       if(!EQ||EQ.mode!=='live'){ toast('Заведение оборудования доступно только в LIVE-режиме (нужен токен NocoDB в «Настройках»).','err'); return; }
@@ -9887,11 +9930,11 @@
         :sections.map(secOpt).join(''));
       const v=(x)=>edit&&it[x]!=null?esc(it[x]):'';
       modal.style.width='min(820px,96vw)';
-      modal.innerHTML=`<div class="mh"><b>${edit?'Оборудование '+esc(it.invNo):'Новое оборудование'}</b><span class="op">Ф.3–О.3 · паспорт единицы${edit?'':' · инв.№ ОБ-NNN присвоится автоматически'}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
+      modal.innerHTML=`<div class="mh"><b>${edit?'Оборудование '+esc(it.invNo):'Новое оборудование'}</b><span class="op">паспорт единицы <span class="src-chip">Ф.3–О.3</span>${edit?'':' · инвентарный номер присвоится автоматически'}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
         <div class="mb" style="gap:0">
           <div style="${G}">
             <div style="grid-column:span 8">${FLAB('Наименование',true)}<input id="eqf-name" style="${FINP}" value="${v('name')}" placeholder="напр. Токарно-винторезный станок 16К40"></div>
-            <div style="grid-column:span 4">${FLAB('Инв. №')}<input style="${FINP};background:var(--sl-100);color:var(--sl-500)" value="${edit?esc(it.invNo):'ОБ-NNN (авто)'}" readonly></div>
+            <div style="grid-column:span 4">${FLAB('№ в реестре')}<input style="${FINP};background:var(--sl-100);color:var(--sl-500)" value="${edit?esc(it.invNo):'присвоится автоматически'}" readonly></div>
             <div style="grid-column:span 4">${FLAB('Категория')}<select id="eqf-category" style="${FINP}">${selOpts(dict.category,edit?it.category:'')}</select></div>
             <div style="grid-column:span 4">${FLAB('Тип/подкатегория')}<input id="eqf-subtype" style="${FINP}" value="${v('subtype')}"></div>
             <div style="grid-column:span 4">${FLAB('Участок')}<select id="eqf-section" style="${FINP}">${secOpts}</select></div>
@@ -9910,7 +9953,7 @@
             <div style="grid-column:span 6;display:flex;gap:20px;align-items:center;padding-top:6px">
               <label style="display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer"><input type="checkbox" id="eqf-isCnc" ${edit&&it.isCnc?'checked':''}> С ЧПУ (числовое ПУ)</label>
             </div>
-            <div style="grid-column:span 12;margin-top:4px;padding-top:8px;border-top:1px dashed #d9e2ec"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Токарные ТТХ (для карт наладки и кулачков)</span></div>
+            <div style="grid-column:span 12;margin-top:4px;padding-top:8px;border-top:1px dashed var(--sl-200)"><span style="font-size:var(--fs-11);font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Токарные характеристики (для карт наладки и кулачков)</span></div>
             <div style="grid-column:span 4">${FLAB('Тип головки')}<select id="eqf-headType" style="${FINP}">${['<option value="">—</option>'].concat(['Плоская (4 поз.)','Револьверная круглая'].map(o=>`<option${(edit&&it.headType===o)?' selected':''}>${esc(o)}</option>`)).join('')}</select></div>
             <div style="grid-column:span 4">${FLAB('Позиций револьвера')}<input id="eqf-revolverSlots" type="number" min="1" max="60" step="1" style="${FINP}" value="${edit&&it.revolverSlots?esc(String(it.revolverSlots)):''}" placeholder="напр. 12"></div>
             <div style="grid-column:span 4">${FLAB('Проходное отверстие шпинделя, Ø мм')}<input id="eqf-spindleBore" type="number" step="any" style="${FINP}" value="${edit&&it.spindleBore!=null?esc(String(it.spindleBore)):''}" placeholder="напр. 120"></div>
@@ -9920,9 +9963,9 @@
             <div style="grid-column:span 6">${FLAB('Сечение державок — внутр., Ø')}<input id="eqf-holderSecInt" style="${FINP}" value="${v('holderSecInt')}" placeholder="напр. 40"></div>
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="eqf-notes" style="${FINP}" value="${v('notes')}"></div>
           </div>
-          <div id="eqf-err" style="margin-top:12px;color:#b91c1c;font-size:12px"></div>
+          <div id="eqf-err" style="margin-top:12px;color:var(--red);font-size:12px"></div>
           <div style="margin-top:14px;padding-top:13px;border-top:1px solid var(--sl-200);display:flex;align-items:center;gap:10px">
-            <span style="font-size:12px;color:var(--sl-500)"><span style="color:#b91c1c">*</span> — обязательное поле</span>
+            <span style="font-size:12px;color:var(--sl-500)"><span style="color:var(--red)">*</span> — обязательное поле</span>
             <div style="margin-left:auto;display:flex;gap:10px">
               <button class="tbtn" id="eqf-cancel" style="padding:9px 18px">Отмена</button>
               <button class="tbtn green" id="eqf-save" style="padding:9px 18px">${edit?'Сохранить':'Завести оборудование'}</button>
@@ -9947,7 +9990,7 @@
         try{ const r=await fetch('/api/equipment/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
           const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
           toast(`Оборудование ${j.invNo} ${j.created?'заведено':'обновлено'}.`,'ok');
-          EQ=null; eqCardCache={}; eqSelId=j.id; eqOpenSec=null; closeModal(); renderEquipment(document.getElementById('view'));
+          EQ=null; eqCardCache={}; eqSelId=j.id; closeModal(); renderEquipment(document.getElementById('view')); if(!eqDrawerIsOpen()) eqDrawerOpen(j.id);
         }catch(e){ err.textContent=e.message; toast('Не сохранено: '+e.message,'err'); btn.disabled=false; btn.textContent=edit?'Сохранить':'Завести оборудование'; }
       };
     }
@@ -14760,18 +14803,25 @@
   (function(){
     const od=()=>document.getElementById('odetail');
     const zd=()=>{const d=document.getElementById('znz-drawer');return d&&d.classList.contains('on')?d:null;};
-    const open=()=>!!document.getElementById('od-tabs')||!!zd();
+    const ed=()=>{const d=document.getElementById('eq-drawer');return d&&d.classList.contains('on')?d:null;}; // K-153: дровер оборудования
+    const open=()=>!!document.getElementById('od-tabs')||!!zd()||!!ed();
+    const modalOpen=()=>{const m=document.getElementById('modal');return !!(m&&m.classList.contains('open'));};
     const close=()=>{ if(zd()){ if(typeof znzFormBack==='function') znzFormBack(); return; }
+      if(ed()){ if(typeof eqDrawerClose==='function') eqDrawerClose(); return; }
       const x=document.getElementById('od-x'); if(x) x.click(); };
     document.addEventListener('mousedown',(ev)=>{
       if(!open())return;
-      const e=zd()||od();
+      const e=zd()||ed()||od();
       if(e&&e.contains(ev.target))return;       // клик внутри панели — не трогаем
       if(ev.target.closest('#ogrid'))return;    // клик по строке списка = выбор другой карточки
       if(ev.target.closest('[data-znz]'))return;// то же для списка заявок
+      if(ev.target.closest('#eqreggrid,#eqsecgrid'))return;// то же для реестров оборудования и участков (K-153)
+      if(modalOpen()||ev.target.closest('#modal,#mscrim'))return; // модалка поверх дровера — дровер не закрываем
       close();
     },true);
-    document.addEventListener('keydown',(ev)=>{ if(ev.key==='Escape'&&open()) close(); });
+    document.addEventListener('keydown',(ev)=>{ if(ev.key==='Escape'&&open()&&!modalOpen()) close(); });
+    // уход из раздела оборудования (смена #hash) — дровер живёт в body, закрываем сами
+    window.addEventListener('hashchange',()=>{ if(ed()&&!String(location.hash||'').startsWith('#equipment')&&typeof eqDrawerClose==='function') eqDrawerClose(false); });
   })();
 
 </script>

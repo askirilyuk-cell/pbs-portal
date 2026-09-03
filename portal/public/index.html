@@ -9743,21 +9743,26 @@
       // авто-раскрытие: если ничего не выбрано — раскрыть участок первой найденной единицы
       if(eqOpenSec===null){ const fg=groups.find(g=>(g.equipment||[]).length); eqOpenSec=fg?String(fg.section.id):''; }
       let firstId=null;
+      // K-152: две площадки (Храброво / Волгоград) — над первым участком каждой площадки ставим полосу-заголовок
+      const siteCount=new Set(groups.filter(g=>(g.equipment||[]).length).map(g=>g.section.site||'')).size;
+      let lastSite=null;
       const html=groups.map(g=>{
         const list=g.equipment||[]; if(!list.length)return '';
         const secKey=String(g.section.id);
+        let siteHead='';
+        if(siteCount>1&&(g.section.site||'')!==lastSite){ lastSite=g.section.site||''; siteHead=`<div class="li" style="background:var(--sl-100);cursor:default;padding:5px 11px"><div class="row"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sl-500)">Площадка · ${esc(lastSite||'не указана')}</span></div></div>`; }
         const open=String(eqOpenSec)===secKey;
         const head=`<div class="li" data-sec="${esc(secKey)}" style="background:#f7faff;cursor:pointer">
             <div class="row"><span class="c-blue">${open?'▾':'▸'}</span> <b style="color:var(--ink);font-size:12px">${esc(g.section.name||'—')}</b><span style="margin-left:auto;font-size:11px;color:var(--sub)">${list.length} ед.</span></div>
             ${g.section.code?`<div class="meta"><span class="c-gray" style="font-size:11px">${esc(g.section.code)}${g.section.type?' · '+esc(g.section.type):''}</span></div>`:''}</div>`;
-        if(!open)return head;
+        if(!open)return siteHead+head;
         const rows=list.map(e=>{ if(firstId===null)firstId=e.id; const sel=String(e.id)===String(eqSelId);
           return `<div class="li${sel?' on':''}" data-eq="${esc(String(e.id))}" style="padding-left:22px">
             <div class="row"><span class="num" style="font-size:12px">${esc(e.invNo||'—')}</span>${e.isCnc?'<span class="src-chip" style="font-size:10px;padding:1px 5px;margin-left:6px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">ЧПУ</span>':''}<span style="margin-left:auto">${eqStCell(e.status)}</span></div>
             <div class="cust" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--ink)">${esc(e.name||'—')}</div>
             <div class="meta" style="gap:8px;flex-wrap:wrap">${e.model?`<span class="c-gray" style="font-size:11px">${esc(e.model)}</span>`:''}${e.taskCount?`<span class="c-blue" style="font-size:11px">${e.taskCount} задач</span>`:''}</div>
           </div>`;}).join('');
-        return head+rows;
+        return siteHead+head+rows;
       }).join('');
       el.innerHTML=html;
       el.querySelectorAll('[data-sec]').forEach(x=>x.onclick=()=>{ const k=x.dataset.sec; eqOpenSec=(String(eqOpenSec)===k)?'__none__':k; eqPaintTree(); });
@@ -9874,7 +9879,12 @@
       const dict=EQ.dict||{}, sections=EQ.sections||[]; const edit=!!(it&&it.id);
       const G='display:grid;grid-template-columns:repeat(12,1fr);gap:12px';
       const selOpts=(arr,cur)=>['<option value="">—</option>'].concat((arr||[]).map(o=>`<option${String(o)===String(cur||'')?' selected':''}>${esc(o)}</option>`)).join('');
-      const secOpts=['<option value="">— без участка —</option>'].concat(sections.map(s=>`<option value="${esc(String(s.id))}"${edit&&String(it.sectionId)===String(s.id)?' selected':''}>${esc((s.code?s.code+' · ':'')+s.name)}</option>`)).join('');
+      // K-152: участки в select сгруппированы по площадке (Храброво / Волгоград)
+      const secOpt=s=>`<option value="${esc(String(s.id))}"${edit&&String(it.sectionId)===String(s.id)?' selected':''}>${esc((s.code?s.code+' · ':'')+s.name)}</option>`;
+      const secSites=[...new Set(sections.map(s=>s.site||''))];
+      const secOpts='<option value="">— без участка —</option>'+(secSites.length>1
+        ?secSites.map(site=>`<optgroup label="${esc(site||'Площадка не указана')}">${sections.filter(s=>(s.site||'')===site).map(secOpt).join('')}</optgroup>`).join('')
+        :sections.map(secOpt).join(''));
       const v=(x)=>edit&&it[x]!=null?esc(it[x]):'';
       modal.style.width='min(820px,96vw)';
       modal.innerHTML=`<div class="mh"><b>${edit?'Оборудование '+esc(it.invNo):'Новое оборудование'}</b><span class="op">Ф.3–О.3 · паспорт единицы${edit?'':' · инв.№ ОБ-NNN присвоится автоматически'}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>

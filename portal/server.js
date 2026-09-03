@@ -6103,7 +6103,7 @@ async function buildBoardLive() {
       id: idOf(t), num: t['№ задачи'], op,
       title: opType['Наименование'] || '',
       section: secCode ? (secName ? `${secCode} · ${secName}` : secCode) : '',
-      sectionCode: secCode, sectionName: secName,
+      sectionCode: secCode, sectionName: secName, sectionSite: section['Площадка'] || '', // K-152: площадка участка
       opTypeCode: opType['Код типа'] || '', opNum: operation['№ операции'] ?? '',
       status: t['Статус'] || 'В очереди', priority: t['Приоритет'], plan: t['Дата плановая'],
       equip: t['Оборудование'] || operation['Оборудование'] || '',
@@ -6793,7 +6793,7 @@ async function buildEquipmentLive() {
     if (!tasksByEq.has(eid)) tasksByEq.set(eid, []);
     tasksByEq.get(eid).push({ id: t.Id ?? t.id, no: t['№ задачи'] || '', status: t['Статус'] || '', op: t['Операция (№ МК / № оп.)'] || '' });
   }
-  const secList = sections.map((s) => ({ id: s.Id ?? s.id, code: s['Код'] || '', name: s['Участок'] || '', type: s['Тип'] || '', mainEquipment: s['Основное оборудование'] || '' }));
+  const secList = sections.map((s) => ({ id: s.Id ?? s.id, code: s['Код'] || '', name: s['Участок'] || '', type: s['Тип'] || '', mainEquipment: s['Основное оборудование'] || '', site: s['Площадка'] || '', ops: s['Операции (коды)'] || '' })); // K-152: площадка (Храброво/Волгоград) и коды операций участка
   const secName = new Map(secList.map((s) => [String(s.id), s.name]));
   const items = rows.map((r) => { const e = eqShape(r); if (!e.sectionName && e.sectionId != null) e.sectionName = secName.get(String(e.sectionId)) || ''; const tk = tasksByEq.get(e.id) || []; return { ...e, taskCount: tk.length, tasks: tk }; });
   const bySec = new Map(secList.map((s) => [String(s.id), []]));

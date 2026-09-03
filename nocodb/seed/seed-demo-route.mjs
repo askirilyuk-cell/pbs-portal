@@ -42,7 +42,7 @@ async function main() {
   const byCode = new Map((await nc.listRows(TID('op_types'))).map((o) => [o['Код типа'], idOf(o)]));
   const ops = [
     { n: 1, code: 'ОП-ЗАГ', mat: 'Труба бронзовая БрАЖ; отрезать L=120 мм', ctl: 'нет' },
-    { n: 2, code: 'ОП-ТОК', mat: 'Заготовка с УЧ-16', ctl: 'С', what: 'Ø наружный', si: 'штангенциркуль' },
+    { n: 2, code: 'ОП-ТОК', mat: 'Заготовка с ПБС-УЧ-16', ctl: 'С', what: 'Ø наружный', si: 'штангенциркуль' },
     { n: 3, code: 'ОП-НАП', mat: 'Проволока наплавочная', ctl: 'ОТК', what: 'твёрдость HV', si: 'твердомер' },
   ];
   for (const o of ops) {

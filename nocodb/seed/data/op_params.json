@@ -412,5 +412,72 @@
     "value_type": "Number",
     "options": [],
     "required": false
+  },
+  {
+    "op_type_code": "ОП-ХФ",
+    "param": "Раствор (состав ванны)",
+    "unit": "—",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ХФ",
+    "param": "Температура раствора",
+    "unit": "°C",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ХФ",
+    "param": "Время выдержки",
+    "unit": "мин",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ХФ",
+    "param": "Масса покрытия",
+    "unit": "г/м²",
+    "value_type": "Decimal",
+    "options": [],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ГИ",
+    "param": "Давление испытания",
+    "unit": "МПа",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ГИ",
+    "param": "Время выдержки",
+    "unit": "мин",
+    "value_type": "Decimal",
+    "options": [],
+    "required": true
+  },
+  {
+    "op_type_code": "ОП-ГИ",
+    "param": "Среда",
+    "unit": "—",
+    "value_type": "SingleSelect",
+    "options": [
+      "вода",
+      "масло"
+    ],
+    "required": false
+  },
+  {
+    "op_type_code": "ОП-ГИ",
+    "param": "Результат",
+    "unit": "—",
+    "value_type": "SingleLineText",
+    "options": [],
+    "required": true
   }
 ]

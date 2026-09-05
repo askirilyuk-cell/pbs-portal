@@ -1665,6 +1665,10 @@ function mkPlanClean(arr) {
     name: String(m.name || '').trim(), unit: String(m.unit || '').trim(),
     qty: (m.qty != null && m.qty !== '' && !isNaN(Number(String(m.qty).replace(',', '.')))) ? Number(String(m.qty).replace(',', '.')) : null,
     note: String(m.note || '').trim(),
+    // K-160: материалы задаются на операциях (решение владельца) — роль, карточка склада и деталей из заготовки живут здесь
+    role: MK_BOM_ROLES.includes(m.role) ? m.role : 'Материал',
+    stockId: (m.stockId != null && m.stockId !== '') ? Number(m.stockId) : null,
+    partsPerBlank: (m.partsPerBlank != null && m.partsPerBlank !== '' && Number(m.partsPerBlank) > 0) ? Number(m.partsPerBlank) : null,
   })).filter((m) => m.canonId != null || m.name);
 }
 // ── K-160: спецификация материалов изделия (роль / канон / норма на шт / операция входа) — колонка МК

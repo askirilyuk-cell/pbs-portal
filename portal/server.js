@@ -131,6 +131,7 @@ const KEY2TITLE = {
   // Каталог канон-номенклатуры (K-54, migrate-032) — канон + алиасы + история цен (таблиц может ещё не быть до APPLY)
   catalog_canon: 'Номенклатура-канон', catalog_aliases: 'Алиасы номенклатуры', catalog_prices: 'История цен',
   onec_items: 'Материалы 1С', // K-156: зеркало номенклатуры и остатков 1С ПБС
+  retro_outputs: 'Акты выпуска', retro_lines: 'Состав актов выпуска', // K-158: ретро-учёт произведённого
   // Раздел «Учёт остатков металла» (migrate-035) — реестр остатка + журнал движений + деловые остатки (таблиц может ещё не быть до APPLY)
   metal_stock: 'Остаток металла', metal_movements: 'Движения металла', metal_remnants: 'Деловые остатки',
   // ISO-каталог режущего инструмента (Этап 2a, migrate-036) — пластины (ISO 1832) и державки (ISO 5608); таблиц может ещё не быть до APPLY
@@ -6908,6 +6909,236 @@ async function onecCreateCanon(body) {
 }
 
 // ============================================================================
+//  K-158: АКТ ВЫПУСКА (ретро-учёт произведённого) — фиксация уже изготовленной оснастки/изделий
+//  с составом материалов из зеркала 1С. Концепт — vault «Ретро-учёт произведённого и мост в 1С —
+//  концепт (03.09)», §2.3, §9, §10. Таблицы: «Акты выпуска» (retro_outputs) + «Состав актов выпуска»
+//  (retro_lines, hm «Состав»); у канона изделия — «Типовой состав» (JSON) и hm «Акты выпуска».
+//  Правила (концепт §9.3): состав — только из позиций с остатком в 1С; резерв держат акты в статусах
+//  «Утверждён»/«Черновик в 1С»; портал остатки 1С не правит, черновик в 1С создаёт K-159.
+// ============================================================================
+const RETRO_WHERE = ['Оснастка (10.10)', 'Инвентарь для цеха (10.09)', 'Готовая продукция (43)', 'Полуфабрикат (21)', 'Оборудование (08)'];
+const RETRO_STATUS = ['Черновик', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С', 'Отклонён', 'Закрыт'];
+const RETRO_RESERVING = new Set(['Утверждён', 'Черновик в 1С']);
+const RETRO_EDITABLE = new Set(['Черновик', 'Отклонён']);
+const RETRO_SOURCES = ['План МК', 'Типовой состав', 'Вручную', 'Расчёт по чертежу'];
+const retroAccountOf = (where) => { const m = /\(([\d.]+)\)/.exec(String(where || '')); return m ? m[1] : ''; };
+async function retroNextNo() {
+  const rows = await ncListSoft('retro_outputs');
+  const y = new Date().getFullYear(); let max = 0;
+  const re = new RegExp(`^ВП-${y}-(\\d+)$`);
+  for (const r of rows) { const m = re.exec(String(r['№ акта'] || '').trim()); if (m) max = Math.max(max, Number(m[1])); }
+  return `ВП-${y}-${String(max + 1).padStart(3, '0')}`;
+}
+function retroLineShape(l) {
+  return {
+    id: l.Id ?? l.id, canonId: l['Канон (id)'] ?? null, name: l['Наименование'] || '',
+    onecKey: l['Ключ 1С'] || '', onecCode: l['Код 1С'] || '', onecName: l['Наименование 1С'] || '', warehouse: l['Склад'] || '',
+    unit: l['ЕИ'] || '', qtyPlan: l['Кол-во план'] != null ? Number(l['Кол-во план']) : null, qtyFact: l['Кол-во факт'] != null ? Number(l['Кол-во факт']) : null,
+    cost: Number(l['Себестоимость']) || 0, sum: Number(l['Сумма']) || 0, source: l['Источник'] || 'Вручную', reason: l['Причина замены'] || '', note: l['Примечание'] || '',
+    order: Number(l['Порядок']) || 0, actId: l.retro_outputs_id ?? null,
+  };
+}
+function retroActShape(r, lines) {
+  const canon = r['Номенклатура-канон'];
+  const ls = (lines || []).filter((l) => String(l.actId) === String(r.Id ?? r.id)).sort((a, b) => a.order - b.order);
+  return {
+    id: r.Id ?? r.id, no: r['№ акта'] || '', date: r['Дата'] || '', name: r['Наименование'] || '', designation: r['Обозначение / чертёж'] || '',
+    qty: Number(r['Кол-во']) || 0, unit: r['ЕИ'] || 'шт', whereTo: r['Куда приходуем'] || '', account: r['Счёт учёта'] || retroAccountOf(r['Куда приходуем']),
+    period: r['Фактический период'] || '', responsible: r['Ответственный'] || '', mk: r['МК (№)'] || '', status: r['Статус'] || 'Черновик',
+    cost: Number(r['Себестоимость']) || 0, note: r['Примечание'] || '', ismUid: r['ИСМ-ид'] || '',
+    onecDocKey: r['Документ 1С (ключ)'] || '', onecDocNo: r['Документ 1С (№)'] || '', onecDocDate: r['Документ 1С (дата)'] || '',
+    approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '',
+    canonId: r.catalog_canon_id ?? (canon ? (canon.Id ?? canon.id) : null) ?? null, canonName: canon ? (canon['Каноническое наименование'] || '') : '',
+    lines: ls, lineCount: ls.length, editable: RETRO_EDITABLE.has(r['Статус'] || 'Черновик'),
+  };
+}
+// резерв по ключу 1С: сумма факта по строкам актов в резервирующих статусах (кроме excludeActId)
+async function retroReserveMap(excludeActId) {
+  const [acts, lines] = await Promise.all([ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
+  const reserving = new Set(acts.filter((a) => RETRO_RESERVING.has(a['Статус'] || '') && String(a.Id ?? a.id) !== String(excludeActId ?? '')).map((a) => a.Id ?? a.id));
+  const map = new Map();
+  for (const l of lines) { if (!reserving.has(l.retro_outputs_id)) continue; const k = String(l['Ключ 1С'] || ''); if (!k) continue; map.set(k, (map.get(k) || 0) + (Number(l['Кол-во факт']) || 0)); }
+  return map;
+}
+// доступность по строкам: остаток 1С (зеркало) − резерв других актов
+async function retroAvailability(lines, excludeActId) {
+  const keys = new Set(lines.map((l) => String(l.onecKey || '')).filter(Boolean));
+  if (!keys.size) return {};
+  const [mirror, reserve] = await Promise.all([ncListAll('onec_items'), retroReserveMap(excludeActId)]);
+  const byKey = new Map(mirror.map((m) => [String(m['Ключ 1С'] || ''), m]));
+  const out = {};
+  for (const k of keys) { const m = byKey.get(k); const stock = m ? (Number(m['Остаток']) || 0) : 0; const res = reserve.get(k) || 0; out[k] = { stock, reserved: res, available: +(stock - res).toFixed(3), cost: m ? (Number(m['Себестоимость']) || 0) : 0, unit: m ? (m['ЕИ'] || '') : '', warehouses: (() => { try { return JSON.parse((m && m['Остатки по складам']) || '[]'); } catch { return []; } })(), found: !!m }; }
+  return out;
+}
+async function buildRetroLive() {
+  const [acts, lines] = await Promise.all([ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
+  const ls = lines.map(retroLineShape);
+  const items = acts.map((a) => retroActShape(a, ls)).sort((a, b) => String(b.no).localeCompare(String(a.no), 'ru', { numeric: true }));
+  const kpis = { total: items.length, draft: items.filter((i) => i.status === 'Черновик').length, approved: items.filter((i) => i.status === 'Утверждён').length, in1c: items.filter((i) => i.status === 'Черновик в 1С').length, posted: items.filter((i) => i.status === 'Проведён в 1С' || i.status === 'Закрыт').length, cost: +items.reduce((s, i) => s + i.cost, 0).toFixed(2) };
+  return { mode: 'live', items, kpis, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } };
+}
+async function buildRetroCard(id) {
+  const [acts, lines] = await Promise.all([ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
+  const a = acts.find((x) => String(x.Id ?? x.id) === String(id));
+  if (!a) return null;
+  const act = retroActShape(a, lines.map(retroLineShape));
+  const avail = await retroAvailability(act.lines, act.id);
+  return { mode: 'live', act, availability: avail, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } };
+}
+// создание/правка акта и его состава (только в редактируемых статусах)
+async function retroSave(body, session) {
+  const id = (body.id != null && body.id !== '') ? Number(body.id) : null;
+  const acts = await ncListSoft('retro_outputs');
+  const existing = id != null ? acts.find((x) => String(x.Id ?? x.id) === String(id)) : null;
+  if (id != null && !existing) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
+  if (existing && !RETRO_EDITABLE.has(existing['Статус'] || 'Черновик')) { const e = new Error(`Акт в статусе «${existing['Статус']}» не редактируется — верните в черновик.`); e.status = 400; throw e; }
+  const name = String(body.name || '').trim(); if (!name) { const e = new Error('Укажите, что произведено (наименование).'); e.status = 400; throw e; }
+  const qty = Number(String(body.qty ?? '').replace(',', '.')); if (!(qty > 0)) { const e = new Error('Укажите количество произведённого (> 0).'); e.status = 400; throw e; }
+  const whereTo = String(body.whereTo || '').trim(); if (whereTo && !RETRO_WHERE.includes(whereTo)) { const e = new Error('Недопустимое значение «Куда приходуем».'); e.status = 400; throw e; }
+  const row = {
+    'Наименование': name, 'Обозначение / чертёж': String(body.designation || '').trim(), 'Кол-во': qty, 'ЕИ': String(body.unit || 'шт').trim() || 'шт',
+    'Куда приходуем': whereTo, 'Счёт учёта': String(body.account || retroAccountOf(whereTo)).trim(), 'Фактический период': String(body.period || '').trim(),
+    'Ответственный': String(body.responsible || '').trim(), 'МК (№)': String(body.mk || '').trim(), 'Примечание': String(body.note || '').trim(),
+    'Дата': body.date ? String(body.date).slice(0, 10) : (existing ? existing['Дата'] : whToday()),
+  };
+  // строки: себестоимость и сумма — из зеркала 1С по ключу (справочно; бухгалтер считает свою)
+  const linesIn = Array.isArray(body.lines) ? body.lines : [];
+  const mirror = linesIn.some((l) => l && l.onecKey) ? await ncListAll('onec_items') : [];
+  const byKey = new Map(mirror.map((m) => [String(m['Ключ 1С'] || ''), m]));
+  let total = 0;
+  const cleanLines = linesIn.map((l, i) => {
+    const key = String(l.onecKey || '').trim(); const m = key ? byKey.get(key) : null;
+    const qf = (l.qtyFact != null && l.qtyFact !== '') ? Number(String(l.qtyFact).replace(',', '.')) : null;
+    const qp = (l.qtyPlan != null && l.qtyPlan !== '') ? Number(String(l.qtyPlan).replace(',', '.')) : null;
+    const cost = m ? (Number(m['Себестоимость']) || 0) : (Number(l.cost) || 0);
+    const sum = (qf != null && !isNaN(qf)) ? +(qf * cost).toFixed(2) : 0; total += sum;
+    return {
+      id: (l.id != null && l.id !== '') ? Number(l.id) : null,
+      row: {
+        'Строка': `${String(l.name || (m && m['Наименование']) || '').trim().slice(0, 60)}${qf != null ? ' · ' + qf : ''}`,
+        'Канон (id)': (l.canonId != null && l.canonId !== '') ? Number(l.canonId) : null, 'Наименование': String(l.name || (m && m['Наименование']) || '').trim(),
+        'Ключ 1С': key, 'Код 1С': key ? String((m && m['Код 1С']) || l.onecCode || '') : '', 'Наименование 1С': key ? String((m && m['Наименование']) || l.onecName || '') : '',
+        'Склад': String(l.warehouse || '').trim(), 'ЕИ': String(l.unit || (m && m['ЕИ']) || '').trim(),
+        'Кол-во план': (qp != null && !isNaN(qp)) ? qp : null, 'Кол-во факт': (qf != null && !isNaN(qf)) ? qf : null,
+        'Себестоимость': cost, 'Сумма': sum, 'Источник': RETRO_SOURCES.includes(l.source) ? l.source : 'Вручную',
+        'Причина замены': String(l.reason || '').trim(), 'Примечание': String(l.note || '').trim(), 'Порядок': i + 1,
+      },
+    };
+  }).filter((x) => x.row['Наименование'] || x.row['Ключ 1С']);
+  row['Себестоимость'] = +total.toFixed(2);
+  let actId = id;
+  if (existing) await ncUpdate('retro_outputs', actId, row);
+  else {
+    row['№ акта'] = await retroNextNo(); row['Статус'] = 'Черновик';
+    row['ИСМ-ид'] = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    const cr = await ncCreateMany('retro_outputs', [row]); const c = Array.isArray(cr) ? cr[0] : cr; actId = c.Id ?? c.id;
+  }
+  // канон изделия (belongsTo на акте): связь со стороны канона «Акты выпуска»
+  if ('canonId' in body) {
+    const cid = (body.canonId != null && body.canonId !== '') ? Number(body.canonId) : null;
+    const cur = existing ? existing.catalog_canon_id : null;
+    if (cur && String(cur) !== String(cid ?? '')) await ncUnlinkRecords('catalog_canon', 'Акты выпуска', cur, [actId]).catch(() => {});
+    if (cid && String(cur) !== String(cid)) await ncLinkRecords('catalog_canon', 'Акты выпуска', cid, [actId]).catch((e) => console.warn('акт выпуска: связь с каноном не создана:', e.message));
+  }
+  // состав: удалить пропавшие, обновить существующие, создать новые
+  const oldLines = (await ncListSoft('retro_lines')).filter((l) => String(l.retro_outputs_id) === String(actId));
+  const keep = new Set(cleanLines.map((x) => x.id).filter((x) => x != null));
+  const del = oldLines.map((l) => l.Id ?? l.id).filter((lid) => !keep.has(lid));
+  if (del.length) await ncDeleteMany('retro_lines', del);
+  const upd = cleanLines.filter((x) => x.id != null && oldLines.some((l) => (l.Id ?? l.id) === x.id)).map((x) => ({ Id: x.id, ...x.row }));
+  if (upd.length) await ncUpdateMany('retro_lines', upd);
+  const crt = cleanLines.filter((x) => x.id == null || !oldLines.some((l) => (l.Id ?? l.id) === x.id)).map((x) => x.row);
+  if (crt.length) { const created = await ncCreateMany('retro_lines', crt); const ids = (Array.isArray(created) ? created : [created]).map((c) => c.Id ?? c.id); await ncLinkRecords('retro_outputs', 'Состав', actId, ids); }
+  return { ok: true, id: actId, no: row['№ акта'] || (existing && existing['№ акта']) || '', cost: row['Себестоимость'], lines: cleanLines.length };
+}
+// смена статуса: Утверждён (с проверкой доступности) / Черновик / Отклонён / Закрыт; «Черновик в 1С» и «Проведён» — K-159
+async function retroSetStatus(body, session) {
+  const acts = await ncListSoft('retro_outputs');
+  const a = acts.find((x) => String(x.Id ?? x.id) === String(body.id));
+  if (!a) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
+  const to = String(body.status || '').trim(); const from = a['Статус'] || 'Черновик';
+  const allowed = { 'Черновик': ['Утверждён'], 'Отклонён': ['Черновик', 'Утверждён'], 'Утверждён': ['Черновик', 'Закрыт'], 'Проведён в 1С': ['Закрыт'] };
+  if (!(allowed[from] || []).includes(to)) { const e = new Error(`Переход «${from}» → «${to}» не разрешён.`); e.status = 400; throw e; }
+  const patch = { 'Статус': to };
+  if (to === 'Утверждён') {
+    const lines = (await ncListSoft('retro_lines')).filter((l) => String(l.retro_outputs_id) === String(a.Id ?? a.id)).map(retroLineShape);
+    const avail = await retroAvailability(lines, a.Id ?? a.id);
+    const bad = lines.filter((l) => l.onecKey && l.qtyFact != null && (!avail[l.onecKey] || !avail[l.onecKey].found || l.qtyFact > avail[l.onecKey].available + 1e-9));
+    if (bad.length) { const e = new Error('Нельзя утвердить: по строкам «' + bad.map((l) => l.name || l.onecName).join('», «') + '» факт больше доступного остатка в 1С (остаток минус резерв других актов).'); e.status = 400; throw e; }
+    patch['Утвердил'] = (session && session.fio) || 'портал'; patch['Дата утверждения'] = whToday();
+  }
+  await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
+  return { ok: true, id: a.Id ?? a.id, status: to };
+}
+// предзаполнение состава: из плана МК (planMaterials операций × кол-во) или из типового состава канона
+async function retroPrefill(q) {
+  const qty = Number(String(q.qty || '1').replace(',', '.')) || 1;
+  let plan = [];
+  if (q.routeId) {
+    const ops = (await ncListSoft('operations')).filter((o) => String(o.routes_id) === String(q.routeId));
+    ops.forEach((o) => mkPlanParse(o['Материалы (план)']).forEach((m) => plan.push({ ...m, source: 'План МК' })));
+  } else if (q.canonId) {
+    const c = (await ncListSoft('catalog_canon')).find((x) => String(x.Id ?? x.id) === String(q.canonId));
+    let t = []; try { t = JSON.parse((c && c['Типовой состав']) || '[]'); } catch { t = []; }
+    (Array.isArray(t) ? t : []).forEach((m) => plan.push({ ...m, source: 'Типовой состав' }));
+  }
+  // свернуть по канону
+  const acc = new Map();
+  for (const m of plan) { const k = m.canonId != null ? 'c' + m.canonId : 'n' + String(m.name || '').toLowerCase(); const a = acc.get(k) || { canonId: m.canonId ?? null, name: m.name || '', unit: m.unit || '', norm: 0, source: m.source }; a.norm += Number(m.qty) || 0; acc.set(k, a); }
+  // подбор позиции 1С: алиас канона с наибольшим доступным остатком
+  const mirror = await ncListAll('onec_items'); const reserve = await retroReserveMap(null);
+  const byCanon = new Map();
+  for (const m of mirror) { const cid = m.catalog_canon_id; if (!cid) continue; if (!byCanon.has(cid)) byCanon.set(cid, []); byCanon.get(cid).push(m); }
+  const lines = [...acc.values()].map((a) => {
+    const cands = (a.canonId != null ? (byCanon.get(Number(a.canonId)) || []) : []).map((m) => ({ m, avail: (Number(m['Остаток']) || 0) - (reserve.get(String(m['Ключ 1С'])) || 0) })).sort((x, y) => y.avail - x.avail);
+    const best = cands[0] && cands[0].avail > 0 ? cands[0].m : (cands[0] ? cands[0].m : null);
+    let wh = ''; try { const w = JSON.parse((best && best['Остатки по складам']) || '[]'); if (Array.isArray(w) && w.length) wh = w.sort((p, r) => r.qty - p.qty)[0].name; } catch { /* нет складов */ }
+    const qp = +(a.norm * qty).toFixed(3);
+    return { canonId: a.canonId, name: a.name, unit: a.unit || (best ? best['ЕИ'] : ''), qtyPlan: qp, qtyFact: qp, source: a.source,
+      onecKey: best ? best['Ключ 1С'] : '', onecCode: best ? best['Код 1С'] : '', onecName: best ? best['Наименование'] : '', warehouse: wh, cost: best ? (Number(best['Себестоимость']) || 0) : 0,
+      candidates: cands.slice(0, 6).map((c) => ({ key: c.m['Ключ 1С'], code: c.m['Код 1С'], name: c.m['Наименование'], available: +c.avail.toFixed(3), unit: c.m['ЕИ'] || '' })) };
+  });
+  return { ok: true, qty, lines, note: lines.length ? '' : (q.routeId ? 'У операций этой МК нет плановых материалов (K-157).' : 'У канона нет типового состава — сохраните его из первого акта.') };
+}
+// сохранить состав акта как типовой состав канона изделия (норма на 1 шт = факт / кол-во акта)
+async function retroSaveTypical(body) {
+  const [acts, lines] = await Promise.all([ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
+  const a = acts.find((x) => String(x.Id ?? x.id) === String(body.id));
+  if (!a) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
+  const cid = a.catalog_canon_id; if (!cid) { const e = new Error('У акта не указан канон изделия — типовой состав хранится на каноне.'); e.status = 400; throw e; }
+  const qty = Number(a['Кол-во']) || 1;
+  const typical = lines.filter((l) => String(l.retro_outputs_id) === String(a.Id ?? a.id)).map(retroLineShape)
+    .filter((l) => l.canonId != null && l.qtyFact != null).map((l) => ({ canonId: l.canonId, name: l.name, unit: l.unit, qty: +(l.qtyFact / qty).toFixed(4) }));
+  if (!typical.length) { const e = new Error('В составе нет строк с каноном материала — типовой состав пуст.'); e.status = 400; throw e; }
+  await ncUpdate('catalog_canon', cid, { 'Типовой состав': JSON.stringify(typical) });
+  return { ok: true, canonId: cid, lines: typical.length };
+}
+// печатная форма акта (HTML под печать браузером; PDF через Gotenberg — следующим шагом вместе с кодом формы ИСМ)
+async function retroPrintHtml(id) {
+  const card = await buildRetroCard(id); if (!card) return null;
+  const a = card.act; const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const fmtD = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${m[3]}.${m[2]}.${m[1]}` : esc(d || ''); };
+  const n2 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const n3 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
+  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.reason ? `<div class="sm">замена: ${esc(l.reason)}</div>` : ''}</td><td class="mono">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyPlan != null ? n3(l.qtyPlan) : '—'}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td><td class="r">${n2(l.cost)}</td><td class="r">${n2(l.sum)}</td></tr>`).join('');
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(a.no)} — Акт выпуска</title>
+<style>body{font-family:'Times New Roman',serif;font-size:12pt;color:#000;margin:18mm 15mm}h1{font-size:15pt;margin:0 0 4px}.sub{font-size:10pt;color:#333;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:10.5pt}th,td{border:1px solid #000;padding:4px 6px;vertical-align:top}th{background:#eee;font-weight:700}.c{text-align:center}.r{text-align:right;white-space:nowrap}.mono{font-family:'Courier New',monospace;white-space:nowrap}.sm{font-size:9pt;color:#444}.kv{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin:10px 0 14px;font-size:11pt}.kv b{display:inline-block;min-width:150px;font-weight:400;color:#444}.sign{margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:30px;font-size:11pt}.line{border-bottom:1px solid #000;height:22px}@media print{@page{size:A4 landscape;margin:12mm}body{margin:0}}</style></head><body>
+<div class="sub">ООО «Петробалт Сервис» · Форма Ф.16–Д.1 (проект) · Акт выпуска продукции и оснастки</div>
+<h1>Акт выпуска ${esc(a.no)} от ${fmtD(a.date)}</h1>
+<div class="kv"><div><b>Произведено:</b> ${esc(a.name)}</div><div><b>Обозначение / чертёж:</b> ${esc(a.designation) || '—'}</div>
+<div><b>Количество:</b> ${n3(a.qty)} ${esc(a.unit)}</div><div><b>Куда приходуем:</b> ${esc(a.whereTo) || '—'}${a.account ? ` (счёт ${esc(a.account)})` : ''}</div>
+<div><b>Фактический период:</b> ${esc(a.period) || '—'}</div><div><b>Маршрутная карта:</b> ${esc(a.mk) || '—'}</div>
+<div><b>Ответственный:</b> ${esc(a.responsible) || '—'}</div><div><b>Статус:</b> ${esc(a.status)}${a.onecDocNo ? ` · документ 1С ${esc(a.onecDocNo)} от ${fmtD(a.onecDocDate)}` : ''}</div></div>
+<table><thead><tr><th>№</th><th>Материал (канон)</th><th>Код 1С</th><th>Наименование в 1С</th><th>Склад</th><th>ЕИ</th><th>План</th><th>Факт</th><th>Себест., ₽/ед.</th><th>Сумма, ₽</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="10" class="c">Материалы к списанию не указаны (ранее списаны / выпуск без материалов)</td></tr>'}</tbody>
+<tfoot><tr><th colspan="9" class="r">Итого по себестоимости 1С</th><th class="r">${n2(a.cost)}</th></tr></tfoot></table>
+${a.note ? `<p><b>Примечание:</b> ${esc(a.note)}</p>` : ''}
+<div class="sign"><div>Составил (производство): <div class="line"></div><div class="sm">${esc(a.responsible)}</div></div><div>Утвердил: <div class="line"></div><div class="sm">${esc(a.approvedBy)}${a.approvedAt ? ' · ' + fmtD(a.approvedAt) : ''}</div></div>
+<div>Принял к учёту (бухгалтерия): <div class="line"></div></div><div>ИСМ-ид: <span class="mono">${esc(a.ismUid)}</span></div></div>
+<script>if(location.search.includes('print=1'))window.print();</script></body></html>`;
+}
+
+// ============================================================================
 //  Раздел «Участки и оборудование» (K-35, контур ДП–О.3 «Инфраструктура и рабочая
 //  среда») — бэкенд поверх модели migrate-025 (таблица «Оборудование» + связи
 //  участок→оборудование (hm) и задачи↔оборудование (mm, поле «Оборудование (реестр)»)).
@@ -9391,24 +9622,24 @@ function resolveRole(user) { return resolvePortalRoles(user)[0] || 'guest'; }
 //  Уровни доступа к разделу: 'write' (✏ запись), 'view' (👁 просмотр), отсутствие
 //  ключа = нет доступа (—). Спецключ _all задаёт дефолт для всех разделов роли.
 // ════════════════════════════════════════════════════════════════════════════
-const RBAC_SECTIONS = ['board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'onec', 'warehouse', 'design', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
+const RBAC_SECTIONS = ['board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'onec', 'retro', 'warehouse', 'design', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
 const RBAC_MATRIX = {
   // Администратор — всё ✏ (обрабатывается отдельно как '*').
   'Администратор': '*',
   // Руководство — всё 👁; аппрувы ЛОВ/подпись КП = запись в Продажах/ЛОВ; Настройки — нет.
-  'Руководство': { _all: 'view', sales: 'write', lov: 'write', settings: null },
+  'Руководство': { _all: 'view', sales: 'write', lov: 'write', retro: 'write', settings: null },
   // Продажи — Продажи(sales/lov/kp) ✏, Контрагенты ✏; Заказы/Склад/КД/Документы 👁; Каталог 👁.
   'Продажи': { sales: 'write', lov: 'write', counterparties: 'write', orders: 'view', warehouse: 'view', catalog: 'view', onec: 'view', design: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // Конструктор — КД/Проектирование/Оборудование ✏; Заказы/Маршруты/Склад/Инструмент/Каталог/Документы 👁.
   'Конструктор': { design: 'write', equipment: 'write', prodgroups: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Технолог — Маршруты/Карты наладки/Произв.доска/Заказы ✏; КД/Инструмент/Оборуд/Склад/Каталог/Документы 👁.
-  'Технолог': { routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', onec: 'view', docs: 'view' },
+  'Технолог': { routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', retro: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Цех — ЗнЗ ✏ (закупки); Доска/Заказы/Маршруты/Карты наладки/Склад/Инструмент/Каталог/Документы 👁.
-  'Цех': { purchase: 'write', board: 'view', station: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', docs: 'view' },
+  'Цех': { purchase: 'write', board: 'view', station: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', retro: 'view', docs: 'view' },
   // Кладовщик — Склад/Инструмент ✏, ЗнЗ ✏, Каталог ✏; Заказы/Поставщики/Документы 👁.
-  'Кладовщик': { warehouse: 'write', tools: 'write', purchase: 'write', catalog: 'write', onec: 'write', orders: 'view', counterparties: 'view', prodgroups: 'view', docs: 'view' },
+  'Кладовщик': { warehouse: 'write', tools: 'write', purchase: 'write', catalog: 'write', onec: 'write', retro: 'write', orders: 'view', counterparties: 'view', prodgroups: 'view', docs: 'view' },
   // Снабжение — ЗнЗ/Поставщики ✏, Склад-приход ✏, Каталог ✏ (справочник закупок), Контрагенты 👁; Заказы/Документы 👁.
-  'Снабжение': { purchase: 'write', warehouse: 'write', catalog: 'write', onec: 'write', counterparties: 'view', orders: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
+  'Снабжение': { purchase: 'write', warehouse: 'write', catalog: 'write', onec: 'write', retro: 'view', counterparties: 'view', orders: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // ОТК — Входной контроль/Приказы-Штампы-Утверждения ✏; Заказы/КД/Склад/Маршруты/Документы 👁.
   'ОТК': { control: 'write', orders: 'view', design: 'view', warehouse: 'view', onec: 'view', routes: 'view', docs: 'view' },
   // Инструментальщик — Инструмент ✏; всё остальное 👁; Настройки — нет (Анохин: работает с инструментом, остальное просмотр).
@@ -9477,7 +9708,7 @@ const RBAC_API_PREFIX = [
   ['/api/sales', 'sales'], ['/api/lov', 'lov'],
   ['/api/counterparties', 'counterparties'], ['/api/counterparty', 'counterparties'],
   ['/api/procurement', 'purchase'], ['/api/purchase', 'purchase'], // /api/purchase/* — интеграция оплаты (K-83), тот же раздел «Закупки»
-  ['/api/catalog', 'catalog'], ['/api/onec', 'onec'], ['/api/product-groups', 'prodgroups'], ['/api/design', 'design'], ['/api/docs', 'docs'],
+  ['/api/catalog', 'catalog'], ['/api/onec', 'onec'], ['/api/retro', 'retro'], ['/api/product-groups', 'prodgroups'], ['/api/design', 'design'], ['/api/docs', 'docs'],
   ['/api/logistics', 'logistics'], ['/api/drawing-mass', 'logistics'],
   ['/api/settings', 'settings'],
   ['/api/dict', '@ref'], ['/api/records', '@records'], ['/api/bitrix', '@system'], ['/api/print', '@print'],
@@ -11706,6 +11937,20 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await whIssue(await readBody(req))); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
+    // ── Акты выпуска (K-158, ретро-учёт произведённого) ──
+    if (p === '/api/retro') {
+      if (!isLive()) return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } });
+      try { return sendJson(res, 200, await buildRetroLive()); } catch (e) { return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES }, warning: String(e.message || e) }); }
+    }
+    if (p === '/api/retro/item') { try { const c = await buildRetroCard(url.searchParams.get('id')); return c ? sendJson(res, 200, c) : sendJson(res, 404, { error: 'Акт не найден.' }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/prefill') { try { return sendJson(res, 200, await retroPrefill({ routeId: url.searchParams.get('routeId') || '', canonId: url.searchParams.get('canonId') || '', qty: url.searchParams.get('qty') || '1' })); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/print') {
+      try { const html = await retroPrintHtml(url.searchParams.get('id')); if (!html) return sendJson(res, 404, { error: 'Акт не найден.' }); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(html); }
+      catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/retro/save' && req.method === 'POST') { try { return sendJson(res, 200, await retroSave(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/status' && req.method === 'POST') { try { return sendJson(res, 200, await retroSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/typical' && req.method === 'POST') { try { return sendJson(res, 200, await retroSaveTypical(await readBody(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     // ── Материалы по 1С (K-156, этап 0 ретро-учёта) — зеркало номенклатуры и остатков; запись только в портал ──
     if (p === '/api/onec') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', configured: false, items: [], accounts: [], warehouses: [], kpis: {}, sync: onecSync });

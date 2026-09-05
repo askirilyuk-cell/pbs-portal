@@ -1024,13 +1024,13 @@
     .eq-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
     .eq-filters input,.eq-filters select{font:inherit;font-size:var(--fs-12);padding:6px 9px;border:1px solid var(--bd);border-radius:var(--r-s);background:#fff;color:var(--ink);}
     .eq-check{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-12);color:var(--ink);cursor:pointer;padding:0 4px;white-space:nowrap;}
-    #eq-drawer{display:none;}
-    #eq-drawer.on{display:block;position:fixed;inset-block:0;right:0;z-index:80;width:100%;max-width:720px;box-sizing:border-box;
+    #eq-drawer,#onec-drawer{display:none;}
+    #eq-drawer.on,#onec-drawer.on{display:block;position:fixed;inset-block:0;right:0;z-index:80;width:100%;max-width:720px;box-sizing:border-box;
       background:var(--card,#fff);border-left:1px solid var(--sl-300);box-shadow:-8px 0 28px rgba(15,23,42,.16);
       padding:16px 18px;overflow-y:auto;overscroll-behavior:contain;animation:ui-slide-right var(--t-norm) var(--ease) both;}
-    #eq-drawer.on::before{content:'';position:fixed;inset:0;z-index:-1;background:rgba(15,23,42,.18);animation:ui-fade-in var(--t-norm) var(--ease) both;}
-    @media (max-width:760px){ #eq-drawer.on{max-width:100%;} }
-    #eq-drawer .eq-tabs{border-bottom:1px solid var(--bd);}
+    #eq-drawer.on::before,#onec-drawer.on::before{content:'';position:fixed;inset:0;z-index:-1;background:rgba(15,23,42,.18);animation:ui-fade-in var(--t-norm) var(--ease) both;}
+    @media (max-width:760px){ #eq-drawer.on,#onec-drawer.on{max-width:100%;} }
+    #eq-drawer .eq-tabs,#onec-drawer .eq-tabs{border-bottom:1px solid var(--bd);}
     .eqd-h{position:relative;padding:0 36px 12px 0;border-bottom:1px solid var(--bd);margin-bottom:4px;}
     .eqd-h .x{position:absolute;right:0;top:0;font:inherit;font-size:var(--fs-14);border:0;background:none;color:var(--sl-500);cursor:pointer;padding:4px 8px;border-radius:var(--r-s);}
     .eqd-h .x:hover{background:var(--sl-100);color:var(--ink);}
@@ -1049,8 +1049,8 @@
     .eqd-doc{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--sl-100);font-size:var(--fs-12);}
     .eqd-doc .nm{font-weight:600;color:var(--ink);overflow-wrap:anywhere;}
     .eqd-doc .sz{margin-left:auto;color:var(--sl-500);white-space:nowrap;}
-    #eq-drawer .st{white-space:nowrap;}
-    #eq-drawer .dt td.code{font-family:var(--mono);}
+    #eq-drawer .st,#onec-drawer .st{white-space:nowrap;}
+    #eq-drawer .dt td.code,#onec-drawer .dt td.code{font-family:var(--mono);}
 
     /* ── K-112: карточка заказа как выезжающая панель справа ────────────────
        Концепция референса, которую владелец назвал «супер»: список слева
@@ -1256,6 +1256,7 @@
           <div class="ngrp">Закупки<span class="chev">▾</span></div>
           <a data-view="purchase" href="#purchase"><span class="i" data-ic="purchase"></span> Закупки</a>
           <a data-view="catalog" href="#catalog"><span class="i" data-ic="catalog"></span> Каталог (номенклатура)</a>
+          <a data-view="onec" href="#onec"><span class="i" data-ic="onec"></span> Материалы 1С</a>
           <a data-view="warehouse" href="#warehouse"><span class="i" data-ic="warehouse"></span> Склад (ДП–СХ)</a>
         </div>
         <div class="navg" data-g="design">
@@ -1354,6 +1355,7 @@
       board:'<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/>',
       station:'<rect x="4.5" y="2.5" width="11" height="15" rx="2"/><line x1="8.2" y1="14.6" x2="11.8" y2="14.6"/>',
       orders:'<path d="M5 4h10M5 8h10M5 12h7"/>',
+      onec:'<ellipse cx="10" cy="5" rx="6" ry="2.5"/><path d="M4 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5"/><path d="M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5"/>',
       routes:'<circle cx="5" cy="5" r="2"/><circle cx="15" cy="15" r="2"/><path d="M5 7v3.5A3.5 3.5 0 0 0 8.5 14H13"/>',
       control:'<path d="M10 2.5l6 2.2v4.1c0 4-2.6 6.5-6 7.7-3.4-1.2-6-3.7-6-7.7V4.7z"/><path d="M7.4 9.7l1.9 1.9 3.4-3.7"/>',
       counterparties:'<circle cx="7" cy="7" r="3"/><path d="M2.5 16.5c0-2.8 2-4.5 4.5-4.5s4.5 1.7 4.5 4.5"/><path d="M13.5 6.5a2.6 2.6 0 0 1 0 5"/><path d="M14 12c2 .4 3.5 1.8 3.5 4.5"/>',
@@ -2006,7 +2008,7 @@
 
     // --- роутер по разделам навигации (hash) ----------------------------------
     const TITLES={board:'Производственная доска',station:'Рабочее место',orders:'Заказы (ПЗ)',routes:'Маршруты (Ф.13)',setup:'Карты наладки',control:'Контроль качества',
-      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
+      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
     // заглушки блоков ИСМ — тексты по утверждённым процедурам/Руководству ИСМ (ИСМ-РК)
     const STUBS={
       nc:{tag:'Качество · ДП–У.2 · ISO 9001 п.8.7/10.2',
@@ -2059,6 +2061,7 @@
       lov:{t:'Лист оценки выполнимости (ЛОВ)',c:'Ф.2–З.1',s:'Техническая и ресурсная проверка запроса перед выпуском КП'},
       purchase:{t:'Управление закупками и оценка поставщиков',c:'ДП–К',s:'Заявки на закупку (ЗнЗ) · входной контроль · счета и приёмка'},
       catalog:{t:'Обозначение и наименование изделий продукции',c:'РИ.1–Д.1.2',s:'Канон-номенклатура · группы и подгруппы · децимальные номера'},
+      onec:{t:'Материалы по данным 1С',c:'ДП–СХ',s:'Зеркало номенклатуры и остатков 1С:Бухгалтерия ПБС · привязка к канон-номенклатуре'},
       warehouse:{t:'Управление складом и запасами',c:'ДП–СХ',s:'Номенклатура склада · журнал движения · выдача в производство'},
       design:{t:'Проектирование, разработка и актуализация продукции',c:'ДП–П.1',s:'Конструкторская и технологическая документация · ревизии · извещения об изменении'},
       prodgroups:{t:'Справочники производства: продуктовые группы',c:'Ф.1–П',s:'Группы и подгруппы продукции для обозначения изделий'},
@@ -2108,6 +2111,7 @@
       else if(v==='lov')renderLov(host,arg);
       else if(v==='purchase')renderProcurement(host,arg);
       else if(v==='catalog')renderCatalog(host,arg);
+      else if(v==='onec')renderOnec(host,arg);
       else if(v==='warehouse')renderWarehouse(host,arg);
       else if(v==='equipment')renderEquipment(host,arg);
       else if(v==='tools')renderTools(host,arg);
@@ -9498,6 +9502,157 @@
       };
     }
 
+    // ══ Раздел «Материалы по 1С» — K-156 (этап 0 ретро-учёта): зеркало номенклатуры и остатков 1С ПБС ══
+    // Паттерн K-153 (референс TRS): строка фильтров → erpGrid → правый дровер #onec-drawer.
+    // Запись только в портал: привязка позиции 1С к канон-номенклатуре и «завести канон из позиции».
+    let ONEC=null, onecQ='', onecAcc='', onecWh='', onecStock=true, onecNoCanon=false, onecSel=null, onecGridApi=null, onecDrTab='pass', onecPoll=null, onecCat=null;
+    const onecNum=(n,d)=>(Number(n)||0).toLocaleString('ru-RU',{minimumFractionDigits:d??0,maximumFractionDigits:d??3});
+    const onecWhen=(s)=>{ if(!s)return ''; const d=new Date(s); return isNaN(d)?esc(s):d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
+    const onecCanWrite=()=>{ try{ return !!(AUTH&&AUTH.isAdmin) || rbacAccess('onec')==='write' || (ME&&!ME.access); }catch{ return false; } };
+    async function renderOnec(host,arg){
+      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка раздела «Материалы по 1С»…</div>';
+      try{ ONEC=await (await fetch('/api/onec')).json(); }catch(e){ ONEC={mode:'mock',configured:false,items:[],accounts:[],warehouses:[],kpis:{},sync:{},warning:String(e.message||e)}; }
+      const live=ONEC.mode==='live', k=ONEC.kpis||{}, sy=ONEC.sync||{};
+      if(onecPoll){clearInterval(onecPoll);onecPoll=null;}
+      if(sy.running){ onecPoll=setInterval(async()=>{ try{ const st=await (await fetch('/api/onec/status')).json(); const el=document.getElementById('onec-stage'); if(el)el.textContent='идёт синхронизация · '+(st.sync&&st.sync.stage||''); if(!(st.sync&&st.sync.running)){ clearInterval(onecPoll); onecPoll=null; const v=document.getElementById('view'); if(v&&location.hash.startsWith('#onec')) renderOnec(v); } }catch{} },4000); }
+      const sum=live?`${onecNum(k.total)} позиций · ${onecNum(k.withStock)} с остатком · ${onecNum(k.noCanon)} без канона · синхр. ${ONEC.syncedAt?onecWhen(ONEC.syncedAt):'ещё не было'}`:'зеркало 1С не наполнено';
+      host.innerHTML=`<div class="card eq-tabbar">
+          <div class="eq-tabs"><button class="on">Материалы 1С</button></div>
+          <span style="margin-left:auto;display:flex;gap:10px;align-items:center;padding:6px 0;flex-wrap:wrap">
+            ${srcChip(live,sum)}
+            ${sy.running?`<span class="st st--work" id="onec-stage">идёт синхронизация · ${esc(sy.stage||'')}</span>`:(onecCanWrite()?`<button class="ui-btn" id="onec-sync" title="Перечитать номенклатуру и остатки из 1С (только чтение)"><i class=ic-down></i> Обновить из 1С</button>`:'')}
+            ${sy.error&&!sy.running?`<span class="st st--problem" title="${esc(sy.error)}">ошибка синхронизации</span>`:''}
+          </span></div>
+        <div id="onecbody" style="margin-top:var(--gap)"></div>`;
+      const sb=host.querySelector('#onec-sync'); if(sb)sb.onclick=async()=>{ sb.disabled=true; try{ const r=await fetch('/api/onec/sync',{method:'POST'}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast('Синхронизация с 1С запущена.','ok'); renderOnec(host); }catch(e){ toast('Не запущено: '+e.message,'err'); sb.disabled=false; } };
+      const body=host.querySelector('#onecbody');
+      if(!live||!ONEC.items.length){
+        body.innerHTML=emptyCard(ONEC.configured===false?'Интеграция с 1С не настроена':'Зеркало 1С ещё пустое',{sub:ONEC.configured===false?'Нужны адрес OData, логин и пароль в настройках портала (ONEC_URL / ONEC_LOGIN / ONEC_PASSWORD).':(sy.running?'Идёт первая синхронизация — страница обновится сама.':(ONEC.warning?esc(ONEC.warning):'Нажмите «Обновить из 1С» — портал прочитает номенклатуру и остатки по счетам 10, 21, 41, 43.'))});
+        return;
+      }
+      onecBody(body);
+      if(arg){ const it=ONEC.items.find(i=>String(i.id)===String(arg)||i.code===arg); if(it)onecDrawerOpen(it.id); }
+      else if(onecDrawerIsOpen()&&onecSel!=null) onecDrawerOpen(onecSel,{keepTab:true});
+    }
+    function onecBody(host){
+      const opt=(v,l,cur)=>`<option value="${esc(String(v))}"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`;
+      host.innerHTML=`<div class="card eq-filters" style="padding:8px 10px">
+          <input id="onec-q" type="search" placeholder="Поиск: код 1С, наименование, артикул, группа" value="${esc(onecQ)}" style="min-width:280px" aria-label="Поиск">
+          <select id="onec-acc" aria-label="Счёт">${opt('','Все счета',onecAcc)+(ONEC.accounts||[]).map(a=>opt(a,'Счёт '+a,onecAcc)).join('')}</select>
+          <select id="onec-wh" aria-label="Склад">${opt('','Все склады',onecWh)+(ONEC.warehouses||[]).map(w=>opt(w,w,onecWh)).join('')}</select>
+          <label class="eq-check"><input type="checkbox" id="onec-stock" ${onecStock?'checked':''}> только с остатком</label>
+          <label class="eq-check"><input type="checkbox" id="onec-nocanon" ${onecNoCanon?'checked':''}> без канона</label>
+        </div>
+        <div id="onecgrid" style="margin-top:var(--gap);min-width:0"></div>`;
+      const on=(id,ev,fn)=>{const el=host.querySelector('#'+id); if(el)el[ev]=fn;};
+      on('onec-q','oninput',e=>{onecQ=e.target.value;onecGrid();});
+      on('onec-acc','onchange',e=>{onecAcc=e.target.value;onecGrid();});
+      on('onec-wh','onchange',e=>{onecWh=e.target.value;onecGrid();});
+      on('onec-stock','onchange',e=>{onecStock=!!e.target.checked;onecGrid();});
+      on('onec-nocanon','onchange',e=>{onecNoCanon=!!e.target.checked;onecGrid();});
+      onecGrid();
+    }
+    function onecRows(){
+      let rows=((ONEC&&ONEC.items)||[]).slice();
+      const q=(onecQ||'').trim().toLowerCase();
+      if(q)rows=rows.filter(i=>[i.code,i.name,i.article,i.group].some(x=>String(x||'').toLowerCase().includes(q)));
+      if(onecAcc)rows=rows.filter(i=>(i.accounts||'').split(', ').includes(onecAcc));
+      if(onecWh)rows=rows.filter(i=>i.warehouses.some(w=>w.name===onecWh));
+      if(onecStock)rows=rows.filter(i=>i.hasStock);
+      if(onecNoCanon)rows=rows.filter(i=>!i.canonId);
+      rows.sort((a,b)=>String(a.name).localeCompare(String(b.name),'ru'));
+      return rows;
+    }
+    function onecGrid(){
+      const gh=document.getElementById('onecgrid'); if(!gh)return;
+      const rows=onecRows(), all=(ONEC&&ONEC.items)||[];
+      if(!rows.length){ gh.innerHTML=emptyCard('Позиций по текущему фильтру нет',{sub:'Снимите фильтры или измените запрос.'}); onecGridApi=null; return; }
+      const canonCell=(i)=>i.canonId?`<span title="${esc(i.canonName)}" style="color:var(--ink)">${esc(i.canonName||('канон #'+i.canonId))}</span>`:(i.hasStock?'<span class="st st--problem">нет канона</span>':'<span class="c-gray">—</span>');
+      const cols=[
+        {key:'code',label:'Код 1С',w:118,cls:'code',cell:i=>esc(i.code||'—'),sortVal:i=>i.code},
+        {key:'name',label:'Наименование',cls:'ell',cell:i=>`<span title="${esc(i.name)}" style="font-weight:600;color:var(--ink)">${esc(i.name||'—')}</span>`,sortVal:i=>i.name},
+        {key:'unit',label:'ЕИ',w:58,cls:'nw c-gray',cell:i=>esc(i.unit||'—'),sortVal:i=>i.unit},
+        {key:'qty',label:'Остаток',w:100,cls:'nw code',cell:i=>i.hasStock?onecNum(i.qty):'<span class="c-gray">—</span>',sortVal:i=>i.qty},
+        {key:'sum',label:'Сумма, ₽',w:120,cls:'nw code',cell:i=>i.sum?onecNum(i.sum,2):'<span class="c-gray">—</span>',sortVal:i=>i.sum},
+        {key:'cost',label:'Себест., ₽/ед.',w:110,cls:'nw code',cell:i=>i.cost?onecNum(i.cost,2):'<span class="c-gray">—</span>',sortVal:i=>i.cost},
+        {key:'acc',label:'Счета',w:96,cls:'nw c-gray',cell:i=>esc(i.accounts||'—'),sortVal:i=>i.accounts},
+        {key:'wh',label:'Склады',w:170,cls:'ell c-gray',cell:i=>{const s=i.warehouses.map(w=>w.name+' · '+onecNum(w.qty)).join('; ');return s?`<span title="${esc(s)}">${esc(s)}</span>`:'—';},sortVal:i=>i.warehouses.map(w=>w.name).join(', ')},
+        {key:'canon',label:'Канон',w:190,cls:'ell',cell:canonCell,sortVal:i=>i.canonName||''},
+      ];
+      onecGridApi=erpGrid(gh,{key:'onec-reg',cols,rows,search:false,rowKey:i=>String(i.id),selKey:onecSel!=null?String(onecSel):null,
+        onRow:i=>onecDrawerOpen(i.id),
+        info:`${srcChip(true)}<span>Позиций: <b style="color:var(--ink)">${onecNum(rows.length)}</b>${rows.length!==all.length?` <span class="c-gray">из ${onecNum(all.length)}</span>`:''}</span><span class="c-gray">на сумму ${onecNum(rows.reduce((s,i)=>s+i.sum,0),2)} ₽</span>`});
+    }
+    // ── дровер позиции 1С ──
+    function onecDrawerHost(){ let d=document.getElementById('onec-drawer'); if(!d){ d=document.createElement('div'); d.id='onec-drawer'; document.body.appendChild(d); } return d; }
+    const onecDrawerIsOpen=()=>{const d=document.getElementById('onec-drawer');return !!(d&&d.classList.contains('on'));};
+    function onecDrawerClose(resetHash){
+      const d=document.getElementById('onec-drawer'); if(d){ d.classList.remove('on'); d.innerHTML=''; }
+      onecSel=null; onecGrid();
+      if(resetHash!==false){ try{history.replaceState(null,'','#onec');}catch{} }
+    }
+    function onecDrawerOpen(id,opts){
+      const it=((ONEC&&ONEC.items)||[]).find(i=>String(i.id)===String(id)); if(!it)return;
+      const d=onecDrawerHost(); onecSel=it.id; if(!(opts&&opts.keepTab))onecDrTab='pass';
+      try{history.replaceState(null,'','#onec/'+encodeURIComponent(it.id));}catch{}
+      d.classList.add('on'); onecGrid();
+      const tabs=[['pass','Паспорт'],['stock','Остатки'+(it.warehouses.length?' · '+it.warehouses.length:'')],['canon','Канон']];
+      d.innerHTML=`<div class="eqd-h">
+          <div class="eqd-title"><span class="eqd-inv">${esc(it.code||'—')}</span>${it.hasStock?'<span class="st st--done">есть остаток</span>':'<span class="st st--neutral">без остатка</span>'}${it.canonId?'<span class="st st--wait">канон привязан</span>':'<span class="st st--problem">без канона</span>'}${it.deleted?'<span class="st st--problem">пометка удаления</span>':''}</div>
+          <button class="x" data-act="close" aria-label="Закрыть">✕</button>
+          <div class="eqd-name">${esc(it.name||'—')}</div>
+          <div class="eqd-sub">${esc(it.group||'без группы')}${it.unit?' · '+esc(it.unit):''}${it.accounts?' · счета '+esc(it.accounts):''}</div>
+        </div>
+        <div class="eq-tabs" id="onecd-tabs">${tabs.map(([k,l])=>`<button data-tab="${k}" class="${onecDrTab===k?'on':''}">${l}</button>`).join('')}</div>
+        <div id="onecd-body"></div>`;
+      d.querySelector('[data-act="close"]').onclick=()=>onecDrawerClose();
+      d.querySelectorAll('#onecd-tabs button').forEach(b=>b.onclick=()=>{ onecDrTab=b.dataset.tab; d.querySelectorAll('#onecd-tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab===onecDrTab)); onecDrawerTab(it); });
+      onecDrawerTab(it);
+    }
+    async function onecDrawerTab(it){
+      const h=document.getElementById('onecd-body'); if(!h)return;
+      const F=(l,v,mono)=>`<div class="eqd-f"><div class="l">${l}</div><div class="v${mono?' mono':''}">${v||eqDash}</div></div>`;
+      if(onecDrTab==='pass'){
+        h.innerHTML=`<div class="eqd-grid">
+            ${F('Код 1С',esc(it.code),true)}${F('Артикул',esc(it.article),true)}${F('Единица',esc(it.unit))}
+            ${F('Группа в 1С',esc(it.group))}${F('Счета учёта',esc(it.accounts),true)}${F('Синхронизировано',it.syncedAt?onecWhen(it.syncedAt):'',true)}
+            ${F('Остаток',it.hasStock?onecNum(it.qty)+' '+esc(it.unit):'',true)}${F('Сумма остатка',it.sum?onecNum(it.sum,2)+' ₽':'',true)}${F('Себестоимость',it.cost?onecNum(it.cost,2)+' ₽/'+esc(it.unit||'ед.'):'',true)}
+          </div>
+          <div class="eqd-sub">Данные из 1С:Бухгалтерия ПБС, только чтение. Себестоимость — средняя по остатку (сумма ÷ количество, без НДС).</div>`;
+      } else if(onecDrTab==='stock'){
+        h.innerHTML=it.warehouses.length?`<div class="tbl-wrap" style="margin-top:12px"><table class="dt"><thead><tr><th>Склад</th><th style="text-align:right">Остаток</th></tr></thead><tbody>${it.warehouses.map(w=>`<tr><td>${esc(w.name)}</td><td class="code" style="text-align:right">${onecNum(w.qty)} ${esc(it.unit)}</td></tr>`).join('')}<tr><td><b>Итого</b></td><td class="code" style="text-align:right"><b>${onecNum(it.qty)} ${esc(it.unit)}</b></td></tr></tbody></table></div>`
+          :emptyState('Остатка на складах нет',{sub:'По счетам 10, 21, 41, 43 у позиции нулевой остаток.'});
+      } else if(onecDrTab==='canon'){
+        const w=onecCanWrite();
+        if(it.canonId){
+          h.innerHTML=`<div class="eqd-grid two">${F('Канон-позиция',`<a href="#catalog/${esc(String(it.canonId))}">${esc(it.canonName||('канон #'+it.canonId))}</a>`)}${F('Что это даёт','находки, акты выпуска и описи ссылаются на канон; в 1С уходит эта позиция')}</div>
+            ${w?`<button class="ui-btn" data-act="unlink">Отвязать от канона</button>`:''}`;
+          const ub=h.querySelector('[data-act="unlink"]'); if(ub)ub.onclick=()=>onecPost('/api/onec/unlink',{id:it.id},'Привязка снята.');
+          return;
+        }
+        h.innerHTML=`<div class="eqd-sub" style="margin-top:12px">У позиции нет канон-номенклатуры. Найдите существующий канон или заведите новый из данных 1С.</div>
+          ${w?`<div class="eq-filters" style="margin-top:10px"><input id="onec-cq" type="search" placeholder="Поиск канона по наименованию" value="${esc(it.name.split(' ').slice(0,2).join(' '))}" style="flex:1;min-width:200px"></div>
+          <div id="onec-cres" style="margin-top:8px"></div>
+          <div class="eqd-sec">Или завести канон из этой позиции</div>
+          <div class="eq-filters"><input id="onec-cname" value="${esc(it.name)}" style="flex:1;min-width:220px" aria-label="Каноническое наименование"><select id="onec-ccat" aria-label="Категория"><option value="">— категория —</option></select><button class="ui-btn ui-btn--primary" id="onec-ccreate">Завести канон</button></div>`
+          :'<div class="eqd-sub">Привязка доступна ролям с правом записи в разделе.</div>'}`;
+        if(!w)return;
+        if(!onecCat){ try{ onecCat=await (await fetch('/api/catalog')).json(); }catch{ onecCat={items:[],categories:[]}; } }
+        const cs=h.querySelector('#onec-ccat'); if(cs)cs.innerHTML='<option value="">— категория —</option>'+(onecCat.categories||[]).map(c=>`<option>${esc(c)}</option>`).join('');
+        const res=h.querySelector('#onec-cres'), cq=h.querySelector('#onec-cq');
+        const paint=()=>{ const q=(cq.value||'').trim().toLowerCase(); const list=q?(onecCat.items||[]).filter(c=>String(c.name||'').toLowerCase().includes(q)).slice(0,12):[];
+          res.innerHTML=list.length?list.map(c=>`<div class="eqd-doc"><span class="nm">${esc(c.name)}</span><span class="sz">${esc(c.category||'')}</span><button class="ui-btn" data-link="${esc(String(c.id))}" style="margin-left:8px">Привязать</button></div>`).join(''):(q?'<div class="eqd-sub">Ничего не найдено — заведите канон ниже.</div>':'');
+          res.querySelectorAll('[data-link]').forEach(b=>b.onclick=()=>onecPost('/api/onec/link',{id:it.id,canonId:b.dataset.link},'Позиция привязана к канону.')); };
+        cq.oninput=paint; paint();
+        h.querySelector('#onec-ccreate').onclick=()=>{ const name=h.querySelector('#onec-cname').value.trim(); if(!name){toast('Укажите наименование.','err');return;} onecPost('/api/onec/canon-create',{id:it.id,name,category:h.querySelector('#onec-ccat').value},'Канон заведён и привязан.'); };
+      }
+    }
+    async function onecPost(url,body,okMsg){
+      try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+        toast(okMsg,'ok'); onecCat=null; onecDrTab='canon'; const v=document.getElementById('view'); if(v)renderOnec(v);
+      }catch(e){ toast('Не сохранено: '+e.message,'err'); }
+    }
+
     // ══ Раздел «Оборудование» — ДП–О.3 (K-35 → K-153: по референсу TRS, канон п.4) ══
     // Структура: подчёркнутые вкладки «Оборудование · Обслуживание» → строка фильтров → реестр
     // erpGrid во всю ширину → клик по строке — правый дровер #eq-drawer с вкладками
@@ -14804,24 +14959,26 @@
     const od=()=>document.getElementById('odetail');
     const zd=()=>{const d=document.getElementById('znz-drawer');return d&&d.classList.contains('on')?d:null;};
     const ed=()=>{const d=document.getElementById('eq-drawer');return d&&d.classList.contains('on')?d:null;}; // K-153: дровер оборудования
-    const open=()=>!!document.getElementById('od-tabs')||!!zd()||!!ed();
+    const nd=()=>{const d=document.getElementById('onec-drawer');return d&&d.classList.contains('on')?d:null;}; // K-156: дровер позиции 1С
+    const open=()=>!!document.getElementById('od-tabs')||!!zd()||!!ed()||!!nd();
     const modalOpen=()=>{const m=document.getElementById('modal');return !!(m&&m.classList.contains('open'));};
     const close=()=>{ if(zd()){ if(typeof znzFormBack==='function') znzFormBack(); return; }
       if(ed()){ if(typeof eqDrawerClose==='function') eqDrawerClose(); return; }
+      if(nd()){ if(typeof onecDrawerClose==='function') onecDrawerClose(); return; }
       const x=document.getElementById('od-x'); if(x) x.click(); };
     document.addEventListener('mousedown',(ev)=>{
       if(!open())return;
-      const e=zd()||ed()||od();
+      const e=zd()||ed()||nd()||od();
       if(e&&e.contains(ev.target))return;       // клик внутри панели — не трогаем
       if(ev.target.closest('#ogrid'))return;    // клик по строке списка = выбор другой карточки
       if(ev.target.closest('[data-znz]'))return;// то же для списка заявок
-      if(ev.target.closest('#eqreggrid,#eqsecgrid'))return;// то же для реестров оборудования и участков (K-153)
+      if(ev.target.closest('#eqreggrid,#eqsecgrid,#onecgrid'))return;// то же для реестров оборудования и участков (K-153)
       if(modalOpen()||ev.target.closest('#modal,#mscrim'))return; // модалка поверх дровера — дровер не закрываем
       close();
     },true);
     document.addEventListener('keydown',(ev)=>{ if(ev.key==='Escape'&&open()&&!modalOpen()) close(); });
     // уход из раздела оборудования (смена #hash) — дровер живёт в body, закрываем сами
-    window.addEventListener('hashchange',()=>{ if(ed()&&!String(location.hash||'').startsWith('#equipment')&&typeof eqDrawerClose==='function') eqDrawerClose(false); });
+    window.addEventListener('hashchange',()=>{ if(ed()&&!String(location.hash||'').startsWith('#equipment')&&typeof eqDrawerClose==='function') eqDrawerClose(false); if(nd()&&!String(location.hash||'').startsWith('#onec')&&typeof onecDrawerClose==='function') onecDrawerClose(false); });
   })();
 
 </script>

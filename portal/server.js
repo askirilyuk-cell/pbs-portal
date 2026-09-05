@@ -40,6 +40,10 @@ function cfg() {
     GOTENBERG: runtime.GOTENBERG_URL || process.env.GOTENBERG_URL || '',
     BITRIX: runtime.BITRIX_WEBHOOK || process.env.BITRIX_WEBHOOK || '',
     BITRIX_USERS: runtime.BITRIX_USERS || process.env.BITRIX_USERS || '',
+    // K-156: OData 1С ПБС (зеркало номенклатуры и остатков); пароль только в runtime/env
+    ONEC_URL: String(runtime.ONEC_URL || process.env.ONEC_URL || '').replace(/\/+$/, ''),
+    ONEC_LOGIN: runtime.ONEC_LOGIN || process.env.ONEC_LOGIN || '',
+    ONEC_PASSWORD: runtime.ONEC_PASSWORD || process.env.ONEC_PASSWORD || '',
     SALES_DEPT: String(runtime.SALES_DEPT_ID || process.env.SALES_DEPT_ID || '81'), // отдел продаж ПБС в Bitrix → участники чата ЗП по умолчанию
     HUB_CHAT: String(runtime.BITRIX_HUB_CHAT ?? process.env.BITRIX_HUB_CHAT ?? '4175'), // хаб-чат «Запросы ПБС» → анонс новых ЗП (пусто = не слать)
     ZNZ_CHAT: String(runtime.BITRIX_ZNZ_CHAT ?? process.env.BITRIX_ZNZ_CHAT ?? '8873'), // чат «Портал ИСМ — Цеховые заявки» → анонс новых ЗнЗ (пусто = не слать)
@@ -126,6 +130,7 @@ const KEY2TITLE = {
   dict_movement_types: 'Типы движения', dict_issue_directions: 'Направления расхода',
   // Каталог канон-номенклатуры (K-54, migrate-032) — канон + алиасы + история цен (таблиц может ещё не быть до APPLY)
   catalog_canon: 'Номенклатура-канон', catalog_aliases: 'Алиасы номенклатуры', catalog_prices: 'История цен',
+  onec_items: 'Материалы 1С', // K-156: зеркало номенклатуры и остатков 1С ПБС
   // Раздел «Учёт остатков металла» (migrate-035) — реестр остатка + журнал движений + деловые остатки (таблиц может ещё не быть до APPLY)
   metal_stock: 'Остаток металла', metal_movements: 'Движения металла', metal_remnants: 'Деловые остатки',
   // ISO-каталог режущего инструмента (Этап 2a, migrate-036) — пластины (ISO 1832) и державки (ISO 5608); таблиц может ещё не быть до APPLY
@@ -176,6 +181,17 @@ async function ncList(key) {
   const res = await fetch(url, { headers: { 'xc-token': c.NC_TOKEN } });
   if (!res.ok) throw new Error(`NocoDB ${res.status}: ${await res.text()}`);
   return (await res.json()).list || [];
+}
+// K-156: чтение большой таблицы целиком (ncList режет на 1000) — постранично через offset
+async function ncListAll(key) {
+  const c = cfg(); const id = await tid(key); const out = [];
+  for (let off = 0; off < 200000; off += 1000) {
+    const res = await fetch(`${c.NC_URL}/api/v2/tables/${id}/records?limit=1000&offset=${off}`, { headers: { 'xc-token': c.NC_TOKEN } });
+    if (!res.ok) throw new Error(`NocoDB ${res.status}: ${await res.text()}`);
+    const j = await res.json(); const list = j.list || []; out.push(...list);
+    if (list.length < 1000 || (j.pageInfo && j.pageInfo.isLastPage)) break;
+  }
+  return out;
 }
 
 // --- реестр документов ИСМ (отдельная база «ИСМ ПБС», резолв по meta) --------
@@ -6705,6 +6721,164 @@ async function buildWarehouseF4(fromIso, toIso) {
 }
 
 // ============================================================================
+//  K-156 (этап 0 ретро-учёта): ЗЕРКАЛО 1С — номенклатура и остатки ПБС в портале.
+//  Только чтение из 1С (GET, Basic под учёткой из runtime ONEC_*). Данные кладутся в
+//  таблицу «Материалы 1С» (onec_items), связанную с каноном (catalog_canon → «Позиции 1С»).
+//  Концепт — vault «Ретро-учёт произведённого и мост в 1С — концепт (03.09)», §2.1.
+//  Грабли OData (проверены на базах scloud, vault «MCP-коннектор к 1С Ендейвер» §4b):
+//   • $filter по Code/Ref_Key → AUTOORDER; справочники тянем целиком страницами по Ref_Key;
+//   • $skip «плавает» → копим в Map по ключу, стоп по неполной странице или без новых ключей;
+//   • 1С сериализует запросы — параллелить бесполезно, ходим последовательно;
+//   • Balance() без Period = текущий остаток; субконто — ExtDimensionN (+ _Type), не СубконтоДт.
+// ============================================================================
+const ONEC_LOG_FILE = path.join(__dirname, '.data', '1c', 'requests.log');
+const ONEC_TIMEOUT_MS = 25000;
+const ONEC_PAGE = 1000;
+const ONEC_ACC_PREFIX = ['10', '21', '41', '43']; // материалы, полуфабрикаты, товары, готовая продукция
+const onecConfigured = () => { const c = cfg(); return !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD); };
+function onecLog(kind, msg) {
+  try { fs.mkdirSync(path.dirname(ONEC_LOG_FILE), { recursive: true }); fs.appendFileSync(ONEC_LOG_FILE, `${new Date().toISOString()} ${kind} ${msg}\n`); } catch { /* лог — best-effort */ }
+}
+// GET к OData. Тело ответа 1С наружу не отдаём (только в лог) — там могут быть данные учёта.
+async function onecGet(pathQuery) {
+  const c = cfg();
+  if (!onecConfigured()) { const e = new Error('Интеграция с 1С не настроена (ONEC_URL / ONEC_LOGIN / ONEC_PASSWORD).'); e.status = 501; throw e; }
+  const sep = pathQuery.includes('?') ? '&' : '?';
+  const url = `${c.ONEC_URL}/${String(pathQuery).replace(/^\/+/, '')}${sep}$format=json`;
+  const t0 = Date.now();
+  let res;
+  try {
+    res = await fetch(url, { headers: { Authorization: 'Basic ' + Buffer.from(`${c.ONEC_LOGIN}:${c.ONEC_PASSWORD}`).toString('base64'), Accept: 'application/json' }, signal: AbortSignal.timeout(ONEC_TIMEOUT_MS) });
+  } catch (e) { onecLog('FAIL', `${pathQuery.slice(0, 160)} → ${e.name}: ${e.message}`); const err = new Error('1С не ответила за отведённое время.'); err.status = 504; throw err; }
+  const txt = await res.text();
+  onecLog(res.ok ? 'OK' : 'ERR', `${res.status} ${Date.now() - t0}мс ${pathQuery.slice(0, 160)}${res.ok ? '' : ' :: ' + txt.slice(0, 300).replace(/\s+/g, ' ')}`);
+  if (!res.ok) { const err = new Error(`1С ответила ${res.status} на ${pathQuery.split('?')[0].slice(0, 80)}`); err.status = 502; throw err; }
+  try { return JSON.parse(txt); } catch { const err = new Error('1С вернула не JSON.'); err.status = 502; throw err; }
+}
+// весь справочник страницами по Ref_Key (Map по ключу — страницы «плавают»)
+async function onecFetchAll(entity, select) {
+  const out = new Map();
+  for (let page = 0; page < 60; page++) {
+    const rows = (await onecGet(`${entity}?$select=${select}&$orderby=Ref_Key&$top=${ONEC_PAGE}&$skip=${page * ONEC_PAGE}`)).value || [];
+    let fresh = 0;
+    for (const r of rows) if (r.Ref_Key && !out.has(r.Ref_Key)) { out.set(r.Ref_Key, r); fresh++; }
+    if (rows.length < ONEC_PAGE || !fresh) break;
+  }
+  return [...out.values()];
+}
+// состояние синхронизации (одна на процесс; запуск — POST /api/onec/sync, ход — GET /api/onec/status)
+const onecSync = { running: false, startedAt: null, finishedAt: null, error: null, stage: '', counts: null };
+async function onecRunSync() {
+  if (onecSync.running) return onecSync;
+  Object.assign(onecSync, { running: true, startedAt: new Date().toISOString(), finishedAt: null, error: null, stage: 'номенклатура', counts: null });
+  (async () => {
+    try {
+      const nomen = await onecFetchAll('Catalog_Номенклатура', 'Ref_Key,Code,Description,IsFolder,Parent_Key,Артикул,ЕдиницаИзмерения_Key,DeletionMark,Услуга');
+      onecSync.stage = 'единицы измерения';
+      const units = await onecFetchAll('Catalog_КлассификаторЕдиницИзмерения', 'Ref_Key,Description,НаименованиеПолное');
+      const unitName = new Map(units.map((u) => [u.Ref_Key, String(u.Description || u.НаименованиеПолное || '').trim()]));
+      const folderName = new Map(nomen.filter((n) => n.IsFolder).map((n) => [n.Ref_Key, String(n.Description || '').trim()]));
+      onecSync.stage = 'план счетов';
+      const accounts = (await onecGet('ChartOfAccounts_Хозрасчетный?$select=Ref_Key,Code,Description,Parent_Key&$top=600')).value || [];
+      const hasChild = new Set(accounts.map((a) => a.Parent_Key).filter((k) => k && !/^0{8}-/.test(k)));
+      const leaf = accounts.filter((a) => !hasChild.has(a.Ref_Key) && ONEC_ACC_PREFIX.some((p) => String(a.Code || '').startsWith(p)));
+      onecSync.stage = 'склады';
+      const whs = (await onecGet('Catalog_Склады?$select=Ref_Key,Description&$top=200')).value || [];
+      const whName = new Map(whs.map((w) => [w.Ref_Key, String(w.Description || '').trim()]));
+      // остатки по каждому счёту-листу; субконто узнаём по типу (Номенклатура / Склады), а не по номеру
+      const bal = new Map();
+      let i = 0;
+      for (const a of leaf) {
+        onecSync.stage = `остатки ${++i}/${leaf.length} (${a.Code})`;
+        const rows = (await onecGet(`AccountingRegister_Хозрасчетный/Balance(AccountCondition='Account_Key eq guid''${a.Ref_Key}''')?$select=ExtDimension1,ExtDimension1_Type,ExtDimension2,ExtDimension2_Type,ExtDimension3,ExtDimension3_Type,КоличествоBalance,СуммаBalance`)).value || [];
+        for (const r of rows) {
+          let ref = null, wh = '';
+          for (const n of [1, 2, 3]) { const t = String(r[`ExtDimension${n}_Type`] || ''); const v = r[`ExtDimension${n}`]; if (t.includes('Catalog_Номенклатура')) ref = v; else if (t.includes('Catalog_Склады')) wh = whName.get(v) || ''; }
+          if (!ref) continue;
+          const qty = Number(r['КоличествоBalance']) || 0, sum = Number(r['СуммаBalance']) || 0;
+          if (!qty && !sum) continue;
+          const b = bal.get(ref) || { qty: 0, sum: 0, accounts: new Set(), wh: new Map() };
+          b.qty += qty; b.sum += sum; b.accounts.add(String(a.Code)); if (wh) b.wh.set(wh, (b.wh.get(wh) || 0) + qty);
+          bal.set(ref, b);
+        }
+      }
+      onecSync.stage = 'запись в базу';
+      const stamp = new Date().toISOString();
+      const existing = await ncListAll('onec_items');
+      const byKey = new Map(existing.map((r) => [String(r['Ключ 1С'] || ''), r]));
+      const toCreate = [], toUpdate = [];
+      for (const n of nomen) {
+        if (n.IsFolder) continue;
+        const b = bal.get(n.Ref_Key);
+        const qty = b ? +b.qty.toFixed(3) : 0, sum = b ? +b.sum.toFixed(2) : 0;
+        const row = {
+          'Ключ 1С': n.Ref_Key, 'Код 1С': String(n.Code || '').trim(), 'Наименование': String(n.Description || '').trim(),
+          'Артикул': String(n.Артикул || '').trim(), 'ЕИ': unitName.get(n.ЕдиницаИзмерения_Key) || '', 'Группа': folderName.get(n.Parent_Key) || '',
+          'Счета': b ? [...b.accounts].sort().join(', ') : '', 'Остаток': qty, 'Сумма': sum,
+          'Себестоимость': qty ? +(sum / qty).toFixed(2) : 0,
+          'Остатки по складам': (b && b.wh.size) ? JSON.stringify([...b.wh].map(([name, q]) => ({ name, qty: +q.toFixed(3) }))) : '',
+          'Есть остаток': qty > 0, 'Услуга': !!n.Услуга, 'Пометка удаления': !!n.DeletionMark, 'Синхронизировано': stamp,
+        };
+        const ex = byKey.get(n.Ref_Key);
+        if (ex) { if (Object.keys(row).some((k) => k !== 'Синхронизировано' && String(ex[k] ?? '') !== String(row[k] ?? ''))) toUpdate.push({ Id: ex.Id ?? ex.id, ...row }); }
+        else toCreate.push(row);
+      }
+      for (let k = 0; k < toCreate.length; k += 100) { onecSync.stage = `запись ${k}/${toCreate.length}`; await ncCreateMany('onec_items', toCreate.slice(k, k + 100)); } // NocoDB: не больше 100 записей за запрос
+      for (let k = 0; k < toUpdate.length; k += 100) { onecSync.stage = `обновление ${k}/${toUpdate.length}`; await ncUpdateMany('onec_items', toUpdate.slice(k, k + 100)); }
+      onecSync.counts = { items: nomen.filter((n) => !n.IsFolder).length, withStock: [...bal.values()].filter((b) => b.qty > 0).length, accounts: leaf.length, created: toCreate.length, updated: toUpdate.length };
+      onecLog('SYNC', JSON.stringify(onecSync.counts));
+    } catch (e) { onecSync.error = String(e.message || e); onecLog('SYNC-FAIL', onecSync.error); }
+    finally { onecSync.running = false; onecSync.finishedAt = new Date().toISOString(); onecSync.stage = ''; }
+  })();
+  return onecSync;
+}
+function onecShape(r) {
+  let wh = []; try { wh = JSON.parse(r['Остатки по складам'] || '[]'); } catch { wh = []; }
+  const canon = r['Номенклатура-канон'];
+  return {
+    id: r.Id ?? r.id, key: r['Ключ 1С'] || '', code: r['Код 1С'] || '', name: r['Наименование'] || '', article: r['Артикул'] || '',
+    unit: r['ЕИ'] || '', group: r['Группа'] || '', accounts: r['Счета'] || '',
+    qty: Number(r['Остаток']) || 0, sum: Number(r['Сумма']) || 0, cost: Number(r['Себестоимость']) || 0, warehouses: Array.isArray(wh) ? wh : [],
+    hasStock: !!r['Есть остаток'], isService: !!r['Услуга'], deleted: !!r['Пометка удаления'], syncedAt: r['Синхронизировано'] || '',
+    canonId: r.catalog_canon_id ?? (canon ? (canon.Id ?? canon.id) : null) ?? null, canonName: canon ? (canon['Каноническое наименование'] || '') : '',
+  };
+}
+async function buildOnecLive() {
+  const rows = await ncListAll('onec_items');
+  const items = rows.map(onecShape).filter((i) => !i.isService);
+  const accounts = [...new Set(items.flatMap((i) => i.accounts ? i.accounts.split(', ') : []))].sort();
+  const warehouses = [...new Set(items.flatMap((i) => i.warehouses.map((w) => w.name)))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const syncedAt = items.reduce((m, i) => (i.syncedAt > m ? i.syncedAt : m), '');
+  const kpis = { total: items.length, withStock: items.filter((i) => i.hasStock).length, noCanon: items.filter((i) => i.hasStock && !i.canonId).length, sumStock: +items.reduce((s, i) => s + i.sum, 0).toFixed(2) };
+  return { mode: 'live', configured: onecConfigured(), items, accounts, warehouses, kpis, syncedAt, sync: onecSync };
+}
+// привязка позиции 1С к канону (+ алиас «1С ПБС» на каноне, чтобы поиск «алиас → канон» знал имя из 1С)
+async function onecLinkCanon(body, unlink) {
+  const id = body.id;
+  const item = (await ncListAll('onec_items')).find((r) => String(r.Id ?? r.id) === String(id));
+  if (!item) { const e = new Error('Позиция 1С не найдена.'); e.status = 404; throw e; }
+  const itemId = item.Id ?? item.id;
+  if (unlink) { const cid = item.catalog_canon_id; if (cid) await ncUnlinkRecords('catalog_canon', 'Позиции 1С', cid, [itemId]); return { ok: true, id: itemId, canonId: null }; }
+  const canonId = body.canonId;
+  if (canonId == null || canonId === '') { const e = new Error('Не указан канон.'); e.status = 400; throw e; }
+  await ncLinkRecords('catalog_canon', 'Позиции 1С', canonId, [itemId]);
+  try {
+    const name = String(item['Наименование'] || '').trim();
+    const dup = (await ncListSoft('catalog_aliases')).find((a) => String(a['Наименование'] || '').trim() === name && String(a['Источник / производитель'] || '') === '1С ПБС');
+    if (!dup && name) await catalogSaveAlias({ canonId, name, source: '1С ПБС', sourceUnit: item['ЕИ'] || '', note: `Код 1С ${item['Код 1С'] || ''}` });
+  } catch { /* алиас — best-effort */ }
+  return { ok: true, id: itemId, canonId };
+}
+// «Завести канон из позиции 1С»: карточка канона из данных 1С + привязка
+async function onecCreateCanon(body) {
+  const item = (await ncListAll('onec_items')).find((r) => String(r.Id ?? r.id) === String(body.id));
+  if (!item) { const e = new Error('Позиция 1С не найдена.'); e.status = 404; throw e; }
+  const r = await catalogSaveCanon({ name: String(body.name || item['Наименование'] || '').trim(), category: body.category || '', kind: body.kind || '', grade: body.grade || '', size: body.size || '', unit: item['ЕИ'] || '', note: `Заведён из 1С: код ${item['Код 1С'] || ''}` });
+  await onecLinkCanon({ id: item.Id ?? item.id, canonId: r.id }, false);
+  return { ok: true, canonId: r.id, name: r.name };
+}
+
+// ============================================================================
 //  Раздел «Участки и оборудование» (K-35, контур ДП–О.3 «Инфраструктура и рабочая
 //  среда») — бэкенд поверх модели migrate-025 (таблица «Оборудование» + связи
 //  участок→оборудование (hm) и задачи↔оборудование (mm, поле «Оборудование (реестр)»)).
@@ -9188,26 +9362,26 @@ function resolveRole(user) { return resolvePortalRoles(user)[0] || 'guest'; }
 //  Уровни доступа к разделу: 'write' (✏ запись), 'view' (👁 просмотр), отсутствие
 //  ключа = нет доступа (—). Спецключ _all задаёт дефолт для всех разделов роли.
 // ════════════════════════════════════════════════════════════════════════════
-const RBAC_SECTIONS = ['board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'warehouse', 'design', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
+const RBAC_SECTIONS = ['board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'onec', 'warehouse', 'design', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
 const RBAC_MATRIX = {
   // Администратор — всё ✏ (обрабатывается отдельно как '*').
   'Администратор': '*',
   // Руководство — всё 👁; аппрувы ЛОВ/подпись КП = запись в Продажах/ЛОВ; Настройки — нет.
   'Руководство': { _all: 'view', sales: 'write', lov: 'write', settings: null },
   // Продажи — Продажи(sales/lov/kp) ✏, Контрагенты ✏; Заказы/Склад/КД/Документы 👁; Каталог 👁.
-  'Продажи': { sales: 'write', lov: 'write', counterparties: 'write', orders: 'view', warehouse: 'view', catalog: 'view', design: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
+  'Продажи': { sales: 'write', lov: 'write', counterparties: 'write', orders: 'view', warehouse: 'view', catalog: 'view', onec: 'view', design: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // Конструктор — КД/Проектирование/Оборудование ✏; Заказы/Маршруты/Склад/Инструмент/Каталог/Документы 👁.
-  'Конструктор': { design: 'write', equipment: 'write', prodgroups: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', docs: 'view' },
+  'Конструктор': { design: 'write', equipment: 'write', prodgroups: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Технолог — Маршруты/Карты наладки/Произв.доска/Заказы ✏; КД/Инструмент/Оборуд/Склад/Каталог/Документы 👁.
-  'Технолог': { routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', docs: 'view' },
+  'Технолог': { routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Цех — ЗнЗ ✏ (закупки); Доска/Заказы/Маршруты/Карты наладки/Склад/Инструмент/Каталог/Документы 👁.
-  'Цех': { purchase: 'write', board: 'view', station: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', docs: 'view' },
+  'Цех': { purchase: 'write', board: 'view', station: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Кладовщик — Склад/Инструмент ✏, ЗнЗ ✏, Каталог ✏; Заказы/Поставщики/Документы 👁.
-  'Кладовщик': { warehouse: 'write', tools: 'write', purchase: 'write', catalog: 'write', orders: 'view', counterparties: 'view', prodgroups: 'view', docs: 'view' },
+  'Кладовщик': { warehouse: 'write', tools: 'write', purchase: 'write', catalog: 'write', onec: 'write', orders: 'view', counterparties: 'view', prodgroups: 'view', docs: 'view' },
   // Снабжение — ЗнЗ/Поставщики ✏, Склад-приход ✏, Каталог ✏ (справочник закупок), Контрагенты 👁; Заказы/Документы 👁.
-  'Снабжение': { purchase: 'write', warehouse: 'write', catalog: 'write', counterparties: 'view', orders: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
+  'Снабжение': { purchase: 'write', warehouse: 'write', catalog: 'write', onec: 'write', counterparties: 'view', orders: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // ОТК — Входной контроль/Приказы-Штампы-Утверждения ✏; Заказы/КД/Склад/Маршруты/Документы 👁.
-  'ОТК': { control: 'write', orders: 'view', design: 'view', warehouse: 'view', routes: 'view', docs: 'view' },
+  'ОТК': { control: 'write', orders: 'view', design: 'view', warehouse: 'view', onec: 'view', routes: 'view', docs: 'view' },
   // Инструментальщик — Инструмент ✏; всё остальное 👁; Настройки — нет (Анохин: работает с инструментом, остальное просмотр).
   'Инструментальщик': { _all: 'view', tools: 'write', settings: null },
   // Наблюдатель — всё 👁; Настройки — нет.
@@ -9274,7 +9448,7 @@ const RBAC_API_PREFIX = [
   ['/api/sales', 'sales'], ['/api/lov', 'lov'],
   ['/api/counterparties', 'counterparties'], ['/api/counterparty', 'counterparties'],
   ['/api/procurement', 'purchase'], ['/api/purchase', 'purchase'], // /api/purchase/* — интеграция оплаты (K-83), тот же раздел «Закупки»
-  ['/api/catalog', 'catalog'], ['/api/product-groups', 'prodgroups'], ['/api/design', 'design'], ['/api/docs', 'docs'],
+  ['/api/catalog', 'catalog'], ['/api/onec', 'onec'], ['/api/product-groups', 'prodgroups'], ['/api/design', 'design'], ['/api/docs', 'docs'],
   ['/api/logistics', 'logistics'], ['/api/drawing-mass', 'logistics'],
   ['/api/settings', 'settings'],
   ['/api/dict', '@ref'], ['/api/records', '@records'], ['/api/bitrix', '@system'], ['/api/print', '@print'],
@@ -11503,6 +11677,20 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await whIssue(await readBody(req))); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
+    // ── Материалы по 1С (K-156, этап 0 ретро-учёта) — зеркало номенклатуры и остатков; запись только в портал ──
+    if (p === '/api/onec') {
+      if (!isLive()) return sendJson(res, 200, { mode: 'mock', configured: false, items: [], accounts: [], warehouses: [], kpis: {}, sync: onecSync });
+      try { return sendJson(res, 200, await buildOnecLive()); }
+      catch (e) { return sendJson(res, 200, { mode: 'mock', configured: onecConfigured(), items: [], accounts: [], warehouses: [], kpis: {}, sync: onecSync, warning: String(e.message || e) }); }
+    }
+    if (p === '/api/onec/status') return sendJson(res, 200, { configured: onecConfigured(), sync: onecSync });
+    if (p === '/api/onec/sync' && req.method === 'POST') {
+      if (!onecConfigured()) return sendJson(res, 501, { error: 'Интеграция с 1С не настроена (ONEC_URL / ONEC_LOGIN / ONEC_PASSWORD в настройках).' });
+      return sendJson(res, 200, { ok: true, sync: await onecRunSync() });
+    }
+    if (p === '/api/onec/link' && req.method === 'POST') { try { return sendJson(res, 200, await onecLinkCanon(await readBody(req), false)); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/onec/unlink' && req.method === 'POST') { try { return sendJson(res, 200, await onecLinkCanon(await readBody(req), true)); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/onec/canon-create' && req.method === 'POST') { try { return sendJson(res, 200, await onecCreateCanon(await readBody(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     // ── Каталог канон-номенклатуры (K-54, migrate-032) — forward-tolerant (таблиц может ещё не быть) ──
     if (p === '/api/catalog') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, categories: [], priceSources: [] });

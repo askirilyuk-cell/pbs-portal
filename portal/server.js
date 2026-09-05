@@ -7010,6 +7010,7 @@ function retroActShape(r, lines) {
     approverId: r['Утверждающий (id)'] != null && r['Утверждающий (id)'] !== '' ? Number(r['Утверждающий (id)']) : null, approverName: r['Утверждающий'] || '',
     sentBy: r['Отправил на утверждение'] || '', sentAt: r['Дата отправки'] || '', approverComment: r['Комментарий утверждающего'] || '', chatSent: r['В чат бухгалтерии'] || '',
     acceptedBy: r['Принял к учёту (1С)'] || '', acceptedAt: r['Дата проведения 1С'] || '',
+    returnedAt: r['Дата возврата'] || '', // K-165: возвращён на доработку утверждающим (комментарий — approverComment)
     canonId: r.catalog_canon_id ?? (canon ? (canon.Id ?? canon.id) : null) ?? null, canonName: canon ? (canon['Каноническое наименование'] || '') : '',
     lines: ls, lineCount: ls.length, editable: RETRO_EDITABLE.has(r['Статус'] || 'Черновик'),
   };
@@ -7118,7 +7119,7 @@ async function retroSave(body, session) {
 }
 // смена статуса: Утверждён (с проверкой доступности) / Черновик / Отклонён / Закрыт; «Черновик в 1С» и «Проведён» — K-159
 // K-161: колонки маршрута утверждения (degrade-safe — создаются при первой отправке)
-const RETRO_APPROVAL_COLS = [['Утверждающий (id)', 'Number'], ['Утверждающий', 'SingleLineText'], ['Отправил на утверждение', 'SingleLineText'], ['Дата отправки', 'Date'], ['Комментарий утверждающего', 'LongText']];
+const RETRO_APPROVAL_COLS = [['Утверждающий (id)', 'Number'], ['Утверждающий', 'SingleLineText'], ['Отправил на утверждение', 'SingleLineText'], ['Дата отправки', 'Date'], ['Комментарий утверждающего', 'LongText'], ['Дата возврата', 'Date']];
 async function retroEnsureApprovalCols() { for (const [t, u] of RETRO_APPROVAL_COLS) { try { await ncEnsureColumn('retro_outputs', t, u); } catch (e) { console.warn('[retro] колонка «' + t + '» недоступна:', e.message); } } }
 // личное сообщение пользователю Bitrix (best-effort; DIALOG_ID = id пользователя, как у проверяющего ЗнЗ)
 async function retroDm(userId, text) {
@@ -7134,7 +7135,9 @@ async function retroSetStatus(body, session) {
   if (!a) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
   const to = String(body.status || '').trim(); const from = a['Статус'] || 'Черновик';
   // K-161: Черновик/Отклонён → На утверждении (выбранному сотруднику) → Утверждён | Отклонён (утверждающим) | Черновик (отозвать)
+  // K-165 (решение владельца): отклонение утверждающим = возврат в «Черновик» на доработку с комментарием, ничего не удаляется; «Отклонён» — только когда документ удалили в 1С
   const allowed = { 'Черновик': ['На утверждении', 'Утверждён'], 'Отклонён': ['Черновик', 'На утверждении', 'Утверждён'], 'На утверждении': ['Утверждён', 'Отклонён', 'Черновик'], 'Утверждён': ['Черновик', 'Закрыт'], 'Проведён в 1С': ['Закрыт'] };
+  const returning = from === 'На утверждении' && to === 'Отклонён'; // «отклонить» → возврат на доработку
   if (!(allowed[from] || []).includes(to)) { const e = new Error(`Переход «${from}» → «${to}» не разрешён.`); e.status = 400; throw e; }
   const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
   const meId = session && session.userId != null ? String(session.userId) : '';
@@ -7150,7 +7153,7 @@ async function retroSetStatus(body, session) {
     await retroEnsureApprovalCols();
     try { await ncEnsureSelectOption('retro_outputs', 'Статус', 'На утверждении'); } catch (e) { console.warn('[retro] статус «На утверждении» в NocoDB:', e.message); }
     patch['Утверждающий (id)'] = apId; patch['Утверждающий'] = apName || ('id' + apId);
-    patch['Отправил на утверждение'] = (session && session.fio) || 'портал'; patch['Дата отправки'] = whToday(); patch['Комментарий утверждающего'] = '';
+    patch['Отправил на утверждение'] = (session && session.fio) || 'портал'; patch['Дата отправки'] = whToday(); patch['Комментарий утверждающего'] = ''; patch['Дата возврата'] = null; // Date-колонка NocoDB не принимает ''
     await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
     const lines = (await ncListSoft('retro_lines')).filter((l) => String(l.retro_outputs_id) === String(a.Id ?? a.id));
     const sum = Number(a['Себестоимость']) || 0;
@@ -7168,7 +7171,7 @@ async function retroSetStatus(body, session) {
     if (bad.length) { const e = new Error('Нельзя утвердить: по строкам «' + bad.map((l) => l.name || l.onecName).join('», «') + '» факт больше доступного остатка в 1С (остаток минус резерв других актов).'); e.status = 400; throw e; }
     patch['Утвердил'] = (session && session.fio) || 'портал'; patch['Дата утверждения'] = whToday();
   }
-  if (to === 'Отклонён' && from === 'На утверждении') { await retroEnsureApprovalCols(); patch['Комментарий утверждающего'] = String(body.comment || '').trim(); }
+  if (returning) { await retroEnsureApprovalCols(); patch['Статус'] = 'Черновик'; patch['Комментарий утверждающего'] = String(body.comment || '').trim() || 'без комментария'; patch['Дата возврата'] = whToday(); }
   await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
   // K-161: обратное уведомление отправителю (ЛС) — утверждён / отклонён / отозван
   if (from === 'На утверждении') {
@@ -7177,24 +7180,39 @@ async function retroSetStatus(body, session) {
     if (senderId && String(senderId) !== meId) {
       const who = (session && session.fio) || 'портал';
       const msg = to === 'Утверждён' ? `Акт выпуска ${no} (${title}) утверждён: ${who}. Материалы зарезервированы. ${link}`
-        : to === 'Отклонён' ? `Акт выпуска ${no} (${title}) отклонён: ${who}.${body.comment ? ' Комментарий: ' + String(body.comment).trim() : ''} ${link}`
+        : to === 'Отклонён' ? `Акт выпуска ${no} (${title}) возвращён на доработку: ${who}.${body.comment ? ' Комментарий: ' + String(body.comment).trim() : ''} Доработайте и отправьте снова или удалите черновик. ${link}`
         : `Акт выпуска ${no} возвращён в черновик: ${who}. ${link}`;
       await retroDm(senderId, msg);
     }
   }
-  return { ok: true, id: a.Id ?? a.id, status: to };
+  return { ok: true, id: a.Id ?? a.id, status: returning ? 'Черновик' : to, returned: returning };
+}
+// K-165: удаление черновика акта (создатель, утверждающий или админ) — только «Черновик»
+async function retroDelete(body, session) {
+  const acts = await ncListSoft('retro_outputs');
+  const a = acts.find((x) => String(x.Id ?? x.id) === String(body.id));
+  if (!a) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
+  if ((a['Статус'] || 'Черновик') !== 'Черновик') { const e = new Error(`Удалить можно только черновик (сейчас «${a['Статус']}»).`); e.status = 400; throw e; }
+  const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
+  const meId = session && session.userId != null ? Number(session.userId) : 0; const fio = (session && session.fio) || '';
+  if (!isAdmin && !retroApproverIds().includes(meId) && String(a['Ответственный'] || '') !== fio) { const e = new Error('Удалить черновик может его создатель, утверждающий или Администратор.'); e.status = 403; throw e; }
+  const lines = (await ncListSoft('retro_lines')).filter((l) => String(l.retro_outputs_id) === String(a.Id ?? a.id)).map((l) => l.Id ?? l.id);
+  if (lines.length) await ncDeleteMany('retro_lines', lines);
+  await ncDeleteMany('retro_outputs', [a.Id ?? a.id]);
+  return { ok: true, id: a.Id ?? a.id, no: a['№ акта'] || '', lines: lines.length };
 }
 // K-161: кабинет сотрудника — документы, ждущие его решения (пока акты выпуска; дальше — ЗнЗ, ЛОВ, КД и т.д.)
 async function buildCabinet(session) {
   const meId = session && session.userId != null ? String(session.userId) : '';
   const fio = (session && session.fio) || '';
   const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
-  const out = { ok: true, me: { id: meId, fio, isAdmin, purchaseHandler: purchaseHandlerIds().includes(Number(meId)) }, approvals: [], sent: [], recent: [], purchases: [] };
+  const out = { ok: true, me: { id: meId, fio, isAdmin, purchaseHandler: purchaseHandlerIds().includes(Number(meId)) }, approvals: [], sent: [], recent: [], purchases: [], drafts: [] };
   if (!isLive()) return out;
   try {
     const d = await buildRetroLive();
     for (const a of d.items) {
       const item = { kind: 'retro', kindLabel: 'Акт выпуска', id: a.id, no: a.no, title: a.name, sub: `${a.qty} ${a.unit} · ${a.whereTo || '—'} · материалов ${a.lineCount}${a.cost ? ' · ' + a.cost.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽' : ''}`, status: a.status, date: a.sentAt || a.date, by: a.sentBy, approver: a.approverName, url: '#retro/' + a.id };
+      if (a.status === 'Черновик' && a.responsible && a.responsible === fio) out.drafts.push({ ...item, section: 'Акты выпуска', returned: a.returnedAt ? { by: a.approverName, at: a.returnedAt, comment: a.approverComment } : null });
       if (a.status === 'На утверждении' && (String(a.approverId ?? '') === meId || (isAdmin && !a.approverId))) out.approvals.push(item);
       else if (a.status === 'На утверждении' && a.sentBy && a.sentBy === fio) out.sent.push(item);
       else if (a.responsible === fio && ['Отклонён', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С'].includes(a.status) && a.approvedAt && (Date.now() - Date.parse(a.approvedAt)) < 30 * 86400000) out.recent.push(item);
@@ -7212,6 +7230,13 @@ async function buildCabinet(session) {
     } catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'ЗнЗ: ' + String(e.message || e); }
     out.purchases.sort((x, y) => String(x.date).localeCompare(String(y.date)));
   }
+  // K-165: мои черновики в других разделах — ЗнЗ «Новая», где я инициатор (МК автора не хранят — не включаем)
+  try {
+    const pr = await buildProcurementLive(); const list = (pr && pr.requests) || [];
+    for (const z of list) { const st = String(z.status || z.statusStored || '').trim() || 'Новая'; if (st !== 'Новая' || String(z.initiator || '').trim() !== fio) continue;
+      out.drafts.push({ kind: 'znz', kindLabel: 'Заявка на закупку', section: 'Закупки', id: z.id, no: z.numZnz, title: z.name, sub: `${z.qty || ''} ${z.unit || ''} · ${z.category || z.type || '—'}`, status: st, date: z.created, url: '#purchase/' + encodeURIComponent(z.numZnz || z.id), returned: null }); }
+  } catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'черновики ЗнЗ: ' + String(e.message || e); }
+  out.drafts.sort((x, y) => String(y.date).localeCompare(String(x.date)));
   out.approvals.sort((x, y) => String(x.date).localeCompare(String(y.date)));
   return out;
 }
@@ -12446,6 +12471,7 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
     if (p === '/api/retro/save' && req.method === 'POST') { try { return sendJson(res, 200, await retroSave(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/delete' && req.method === 'POST') { try { return sendJson(res, 200, await retroDelete(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/status' && req.method === 'POST') { try { return sendJson(res, 200, await retroSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/typical' && req.method === 'POST') { try { return sendJson(res, 200, await retroSaveTypical(await readBody(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/chat-send' && req.method === 'POST') { try { return sendJson(res, 200, await retroChatSend(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }

@@ -7040,6 +7040,8 @@ async function buildRetroLive() {
   return { mode: 'live', items, kpis, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } };
 }
 async function buildRetroCard(id) {
+  // K-164: при открытии/печати акта в статусе «Черновик в 1С» — точечная проверка проведения (не чаще раза в 10 мин)
+  try { const pre = (await ncListSoft('retro_outputs')).find((x) => String(x.Id ?? x.id) === String(id)); if (pre && pre['Статус'] === 'Черновик в 1С' && onecConfigured()) await retroPollOne(id); } catch { /* best-effort */ }
   const [acts, lines] = await Promise.all([ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
   const a = acts.find((x) => String(x.Id ?? x.id) === String(id));
   if (!a) return null;
@@ -7285,16 +7287,16 @@ async function retroPrintHtml(id, opts) {
   .title{text-align:center;font-size:15px;font-weight:700;color:#1F4E79;line-height:1.2;margin:3px 0 1px}
   .sub{text-align:center;font-size:9.5px;color:#555;margin-bottom:8px}
   .no{display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 8px;font-size:11px} .no b{font-size:13px;color:#1c2b3a}
-  .prod{border:2px solid #1F4E79;background:#F2F6FB;padding:8px 12px;margin:0 0 8px;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+  .prod{border:2px solid #1F4E79;background:#fff;padding:8px 12px;margin:0 0 8px;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
   .prod .k{font-size:9px;color:#41546a;text-transform:uppercase;letter-spacing:.04em} .prod .v{font-size:16px;font-weight:700;color:#1c2b3a} .prod .q{font-size:14px;font-weight:700;white-space:nowrap;color:#1F4E79} .prod .d{font-family:'DejaVu Sans Mono','Consolas',monospace;font-size:11px;color:#1c2b3a}
   table.info{width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed;margin-bottom:8px}
   table.info td{border:1px solid #C4D2E2;padding:3px 6px;vertical-align:top}
-  table.info td.k{width:16%;background:#F2F6FB;color:#41546a;font-size:9px} table.info td.v{width:17.3%;font-weight:600;color:#1c2b3a}
+  table.info td.k{width:16%;background:#F7F9FC;color:#41546a;font-size:9px} table.info td.v{width:17.3%;font-weight:600;color:#1c2b3a}
   .sec{margin-top:8px;font-size:9.5px;font-weight:700;color:#1F4E79;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid #C4D2E2;padding-bottom:2px;margin-bottom:5px}
   table.pos{width:100%;border-collapse:collapse;font-size:9.5px;table-layout:fixed}
   table.pos thead{display:table-header-group} table.pos tfoot{display:table-row-group} table.pos tr{page-break-inside:avoid}
   table.pos th{background:#1F4E79;color:#fff;font-weight:600;padding:4px 5px;border:1px solid #1F4E79;text-align:center}
-  table.pos td{padding:3px 5px;border:1px solid #BBB;vertical-align:top;word-wrap:break-word} table.pos tbody tr:nth-child(even){background:#F7FAFD} table.pos tfoot th{background:#F2F6FB;color:#1c2b3a;border-color:#BBB;text-align:right}
+  table.pos td{padding:3px 5px;border:1px solid #BBB;vertical-align:top;word-wrap:break-word} table.pos tfoot th{background:#F7F9FC;color:#1c2b3a;border-color:#BBB;text-align:right}
   .c{text-align:center} .r{text-align:right;white-space:nowrap} .mono{font-family:'DejaVu Sans Mono','Consolas',monospace} .sm{font-size:8.5px;color:#444}
   .note{margin-top:6px;font-size:10px} .note b{color:#444;font-weight:600}
   .signs{display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;margin-top:14px}
@@ -7492,15 +7494,30 @@ async function retroAcceptedFrom1c(d) {
   if (onecIsGuid(d.Ответственный_Key)) { try { const u = await onecGet(`Catalog_Пользователи(guid'${d.Ответственный_Key}')?$select=Description`); if (u && u.Description) out['Принял к учёту (1С)'] = String(u.Description); } catch (e) { onecLog('POLL-USER', String(e.message || e)); } }
   return out;
 }
-async function retroPoll1c() {
+// уведомить автора акта (кто отправил на утверждение, иначе ответственный) о решении 1С — системное уведомление Bitrix
+async function retroNotifyAuthor(a, text) {
+  const names = [a['Отправил на утверждение'], a['Ответственный']].map((x) => String(x || '').trim()).filter(Boolean);
+  if (!names.length) return false;
+  try { const st = await getStaffList(); const u = st.find((x) => names.includes(x.name)); if (u) return await retroDm(u.id, text); } catch { /* без уведомления */ }
+  return false;
+}
+const _retroPolledAt = new Map(); // id акта → время последней точечной проверки
+async function retroPollOne(id) {
+  const t = _retroPolledAt.get(String(id)) || 0; if (Date.now() - t < 10 * 60 * 1000) return null;
+  _retroPolledAt.set(String(id), Date.now());
+  try { return await retroPoll1c({ id }); } catch (e) { onecLog('POLL-ONE', String(e.message || e)); return null; }
+}
+async function retroPoll1c(opts) {
   if (!onecConfigured()) return { ok: false, note: '1С не настроена' };
-  const acts = (await ncListSoft('retro_outputs')).filter((a) => a['Статус'] === 'Черновик в 1С' && onecIsGuid(a['Документ 1С (ключ)']));
+  const only = opts && opts.id != null ? String(opts.id) : null;
+  const acts = (await ncListSoft('retro_outputs')).filter((a) => a['Статус'] === 'Черновик в 1С' && onecIsGuid(a['Документ 1С (ключ)']) && (!only || String(a.Id ?? a.id) === only));
   const out = { checked: acts.length, posted: [], rejected: [], errors: [] };
   for (const a of acts) {
     try {
       const d = await onecGet(`${ONEC_PROD.entity}(guid'${a['Документ 1С (ключ)']}')?$select=Ref_Key,Number,Posted,DeletionMark,Date,Ответственный_Key`);
-      if (d.DeletionMark) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); await retroChatNotify(`✖ ${a['№ акта']} «${a['Наименование']}»: документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. Александр, посмотрите причину.`); }
-      else if (d.Posted) { const acc = await retroAcceptedFrom1c(d); await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С', ...acc }); out.posted.push(a['№ акта']); await retroChatNotify(`✔ ${a['№ акта']} «${a['Наименование']}»: ${ONEC_PROD.title} №${d.Number || ''} проведён. Спасибо!`); }
+      const link = `${String(cfg().PORTAL_BASE || '').replace(/\/+$/, '')}/#retro/${a.Id ?? a.id}`;
+      if (d.DeletionMark) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}): документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. ${link}`); await retroChatNotify(`✖ ${a['№ акта']} «${a['Наименование']}»: документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. Александр, посмотрите причину.`); }
+      else if (d.Posted) { const acc = await retroAcceptedFrom1c(d); await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С', ...acc }); out.posted.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}) проведён в 1С: ${ONEC_PROD.title} №${d.Number || ''}${acc['Принял к учёту (1С)'] ? ', принял к учёту ' + acc['Принял к учёту (1С)'] : ''}. ${link}`); await retroChatNotify(`✔ ${a['№ акта']} «${a['Наименование']}»: ${ONEC_PROD.title} №${d.Number || ''} проведён. Спасибо!`); }
     } catch (e) { if (e.status === 502 && /404|не найден/.test(String(e.message))) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); } else out.errors.push(`${a['№ акта']}: ${e.message}`); }
   }
   if (out.posted.length) { try { onecRunSync(); } catch { /* синк — best-effort */ } }
@@ -7599,8 +7616,9 @@ async function retroWeeklyDigest(force) {
   return { ok: true, sent, lines: L };
 }
 // таймеры: опрос проведения — раз в час; сводка — проверка каждые 20 минут (сработает в понедельник 09:xx)
+// K-164 (решение владельца 05.09): не «раз в час», а фоном раз в 4 часа + точечная проверка при открытии/печати акта (retroPollOne)
 setTimeout(() => { retroPoll1c().catch(() => {}); }, 90 * 1000);
-setInterval(() => { retroPoll1c().catch(() => {}); }, 60 * 60 * 1000);
+setInterval(() => { retroPoll1c().catch(() => {}); }, 4 * 60 * 60 * 1000);
 setInterval(() => { retroWeeklyDigest(false).catch(() => {}); }, 20 * 60 * 1000);
 
 // ============================================================================

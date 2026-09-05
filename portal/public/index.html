@@ -1038,7 +1038,12 @@
     .retro-line .rl-n{font-family:var(--mono);color:var(--sl-500);}
     .retro-line .rl-1c{margin-top:4px;font-size:var(--fs-12);color:var(--sl-700);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
     .retro-line .mono{font-family:var(--mono);}
-    .retro-line .rl-grid{display:grid;grid-template-columns:1.2fr .7fr .7fr 1.3fr 1.2fr;gap:8px 12px;margin-top:8px;align-items:end;}
+    .retro-line .rl-grid{display:grid;grid-template-columns:1.2fr .8fr 1.3fr 1.2fr;gap:8px 12px;margin-top:8px;align-items:end;}
+    /* K-161: бейдж кабинета в меню и поле-поиск (МК, канон) */
+    .nbadge{margin-left:auto;background:var(--red,#c0392b);color:#fff;font-size:10px;font-weight:700;border-radius:9px;padding:1px 6px;min-width:18px;text-align:center;line-height:16px;}
+    .rsf{position:relative;} .rsf-list{position:absolute;z-index:30;left:0;right:0;top:100%;background:var(--card,#fff);border:1px solid var(--sl-300);border-radius:var(--r-s);max-height:260px;overflow:auto;box-shadow:0 8px 24px rgba(15,40,70,.14);}
+    .rsf-list div{padding:6px 10px;cursor:pointer;font-size:12px;line-height:1.3;} .rsf-list div:hover{background:var(--sl-50);} .rsf-list .rsf-sub{display:block;color:var(--sl-500);font-size:11px;font-family:var(--mono);}
+    .cab-item{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--bd);border-radius:var(--r-s);background:var(--card,#fff);margin-top:8px;flex-wrap:wrap;} .cab-item .cab-t{flex:1;min-width:220px;} .cab-item .cab-t b{color:var(--ink);} .cab-item .cab-s{font-size:12px;color:var(--sl-500);margin-top:2px;}
     .retro-line .rl-grid label{display:flex;flex-direction:column;gap:3px;font-size:var(--fs-11);color:var(--sl-500);}
     .retro-line .rl-grid .l{font-size:var(--fs-11);color:var(--sl-500);}
     .retro-line .rl-grid .v{font-size:var(--fs-12);font-weight:600;color:var(--ink);}
@@ -1246,6 +1251,9 @@
     <aside class="side" id="side">
       <div class="brand"><img src="/assets/PBS_LOGO_2026.png" alt="ПБС" /><div class="t">ИСМ ПБС<small>Производство</small></div></div>
       <nav id="nav">
+        <div class="navg" data-g="me">
+          <a data-view="cabinet" href="#cabinet"><span class="i" data-ic="cabinet"></span> Мой кабинет<span class="nbadge" id="cab-badge" hidden></span></a>
+        </div>
         <div class="navg" data-g="prod">
           <div class="ngrp">Производство<span class="chev">▾</span></div>
           <a data-view="board" class="active" href="#board"><span class="i" data-ic="board"></span> Производственная доска</a>
@@ -1370,6 +1378,7 @@
       station:'<rect x="4.5" y="2.5" width="11" height="15" rx="2"/><line x1="8.2" y1="14.6" x2="11.8" y2="14.6"/>',
       orders:'<path d="M5 4h10M5 8h10M5 12h7"/>',
       retro:'<rect x="4" y="3.5" width="12" height="14" rx="1.5"/><path d="M7.5 3.5V2.5h5v1"/><path d="M7 10.5l2 2 4-4.5"/>',
+      cabinet:'<circle cx="10" cy="6.5" r="3"/><path d="M4 17.5c0-3.4 2.7-5.5 6-5.5s6 2.1 6 5.5"/>',
       onec:'<ellipse cx="10" cy="5" rx="6" ry="2.5"/><path d="M4 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5"/><path d="M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5"/>',
       routes:'<circle cx="5" cy="5" r="2"/><circle cx="15" cy="15" r="2"/><path d="M5 7v3.5A3.5 3.5 0 0 0 8.5 14H13"/>',
       control:'<path d="M10 2.5l6 2.2v4.1c0 4-2.6 6.5-6 7.7-3.4-1.2-6-3.7-6-7.7V4.7z"/><path d="M7.4 9.7l1.9 1.9 3.4-3.7"/>',
@@ -1897,6 +1906,7 @@
     async function initRbac(){
       try{ME=await (await _fetch('/api/me')).json();}catch{ME=null;}
       RBAC_ON=!!(ME&&ME.enforce);
+      try{cabBadgeRefresh();}catch{} // K-161: счётчик «ждут моего утверждения» в меню
       try{updateDbBadge();}catch{} // ME.live известен — обновить глобальный бейдж БД (не зависит от роли)
       applyRbac();
     }
@@ -2023,7 +2033,7 @@
 
     // --- роутер по разделам навигации (hash) ----------------------------------
     const TITLES={board:'Производственная доска',station:'Рабочее место',orders:'Заказы (ПЗ)',routes:'Маршруты (Ф.13)',setup:'Карты наладки',control:'Контроль качества',
-      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Акты выпуска',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
+      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Акты выпуска',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
     // заглушки блоков ИСМ — тексты по утверждённым процедурам/Руководству ИСМ (ИСМ-РК)
     const STUBS={
       nc:{tag:'Качество · ДП–У.2 · ISO 9001 п.8.7/10.2',
@@ -2076,6 +2086,7 @@
       lov:{t:'Лист оценки выполнимости (ЛОВ)',c:'Ф.2–З.1',s:'Техническая и ресурсная проверка запроса перед выпуском КП'},
       purchase:{t:'Управление закупками и оценка поставщиков',c:'ДП–К',s:'Заявки на закупку (ЗнЗ) · входной контроль · счета и приёмка'},
       catalog:{t:'Обозначение и наименование изделий продукции',c:'РИ.1–Д.1.2',s:'Канон-номенклатура · группы и подгруппы · децимальные номера'},
+      cabinet:{t:'Мой кабинет — документы на моём решении',c:'',s:'Ждут моего утверждения · отправлено мной · недавние решения по моим документам'},
       retro:{t:'Акты выпуска — ретро-учёт произведённого',c:'Ф.16–Д.1',s:'Что произведено · состав материалов из 1С · утверждение и передача в бухгалтерию'},
       onec:{t:'Материалы по данным 1С',c:'ДП–СХ',s:'Зеркало номенклатуры и остатков 1С:Бухгалтерия ПБС · привязка к канон-номенклатуре'},
       warehouse:{t:'Управление складом и запасами',c:'ДП–СХ',s:'Номенклатура склада · журнал движения · выдача в производство'},
@@ -2128,6 +2139,7 @@
       else if(v==='purchase')renderProcurement(host,arg);
       else if(v==='catalog')renderCatalog(host,arg);
       else if(v==='onec')renderOnec(host,arg);
+      else if(v==='cabinet')renderCabinet(host);
       else if(v==='retro')renderRetro(host,arg);
       else if(v==='warehouse')renderWarehouse(host,arg);
       else if(v==='equipment')renderEquipment(host,arg);
@@ -9522,7 +9534,7 @@
     // ══ Раздел «Акты выпуска» — K-158 (ретро-учёт произведённого): реестр + дровер Акт · Состав · Документы ══
     // Паттерн K-153 (TRS). Состав — из канона с подбором позиции 1С по зеркалу (K-156); план из МК (K-157).
     let RETRO=null, retroQ='', retroStatus='', retroSel=null, retroGridApi=null, retroCard=null, retroDraft=null, retroTab='act', retroRoutes=null, retroPick=null;
-    const RETRO_STCLS={'Черновик':'neutral','Утверждён':'wait','Черновик в 1С':'work','Проведён в 1С':'done','Отклонён':'problem','Закрыт':'done'};
+    const RETRO_STCLS={'Черновик':'neutral','На утверждении':'wait','Утверждён':'work','Черновик в 1С':'work','Проведён в 1С':'done','Отклонён':'problem','Закрыт':'done'};
     const retroStCell=(s)=>`<span class="st st--${RETRO_STCLS[s]||'neutral'}">${esc(s||'Черновик')}</span>`;
     const retroCanWrite=()=>{ try{ return !!(AUTH&&AUTH.isAdmin) || rbacAccess('retro')==='write' || (ME&&!ME.access); }catch{ return false; } };
     const retroN=(n,d)=>(Number(n)||0).toLocaleString('ru-RU',{minimumFractionDigits:d??0,maximumFractionDigits:d??3});
@@ -9530,12 +9542,13 @@
       if(typeof CAT==='undefined'||!CAT){ try{ CAT=await (await fetch('/api/catalog')).json(); }catch{ CAT={items:[],categories:[]}; } }
       if(!ONEC){ try{ ONEC=await (await fetch('/api/onec')).json(); }catch{ ONEC={items:[]}; } }
       if(!retroRoutes){ try{ const d=await (await fetch('/api/routes')).json(); retroRoutes=(d&&d.routes)||[]; }catch{ retroRoutes=[]; } }
+      await retroLoadApprovers(); // K-161
     }
     async function renderRetro(host,arg){
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка раздела «Акты выпуска»…</div>';
       try{ RETRO=await (await fetch('/api/retro')).json(); }catch(e){ RETRO={mode:'mock',items:[],kpis:{},dict:{},warning:String(e.message||e)}; }
       const live=RETRO.mode==='live', k=RETRO.kpis||{};
-      const sum=live?`${retroN(k.total)} актов · черновиков ${retroN(k.draft)} · утверждено ${retroN(k.approved)} · в 1С ${retroN(k.in1c)} · проведено ${retroN(k.posted)}`:'реестр не наполнен';
+      const sum=live?`${retroN(k.total)} актов · черновиков ${retroN(k.draft)} · на утверждении ${retroN(k.pending)} · утверждено ${retroN(k.approved)} · в 1С ${retroN(k.in1c)} · проведено ${retroN(k.posted)}`:'реестр не наполнен';
       host.innerHTML=`<div class="card eq-tabbar">
           <div class="eq-tabs"><button class="on">Акты выпуска</button></div>
           <span style="margin-left:auto;display:flex;gap:10px;align-items:center;padding:6px 0;flex-wrap:wrap">${srcChip(live,sum)}${retroCanWrite()?'<button class="ui-btn ui-btn--primary" id="retro-new">+ Акт выпуска</button>':''}</span></div>
@@ -9582,7 +9595,7 @@
     function retroDrawerHost(){ let d=document.getElementById('retro-drawer'); if(!d){ d=document.createElement('div'); d.id='retro-drawer'; document.body.appendChild(d); } return d; }
     const retroDrawerIsOpen=()=>{const d=document.getElementById('retro-drawer');return !!(d&&d.classList.contains('on'));};
     function retroDrawerClose(resetHash){ const d=document.getElementById('retro-drawer'); if(d){ d.classList.remove('on'); d.innerHTML=''; } retroSel=null; retroCard=null; retroDraft=null; retroGrid(); if(resetHash!==false){ try{history.replaceState(null,'','#retro');}catch{} } }
-    function retroBlankDraft(){ return { id:null, no:'', date:new Date().toISOString().slice(0,10), name:'', designation:'', canonId:'', qty:1, unit:'шт', whereTo:'Оснастка (10.10)', account:'10.10', period:'', responsible:(AUTH&&AUTH.user&&(AUTH.user.fio||AUTH.user.name))||'', mk:'', note:'', status:'Черновик', lines:[], editable:true, cost:0 }; }
+    function retroBlankDraft(){ return { id:null, no:'', date:new Date().toISOString().slice(0,10), name:'', designation:'', canonId:'', qty:1, unit:'шт', whereTo:'Оснастка (10.10)', account:'10.10', period:'', responsible:(AUTH&&AUTH.fio)||'', mk:'', note:'', status:'Черновик', lines:[], editable:true, cost:0 }; }
     async function retroOpenNew(){ await retroEnsureRefs(); retroSel='new'; retroCard={act:retroBlankDraft(),availability:{}}; retroDraft=JSON.parse(JSON.stringify(retroCard.act)); retroTab='act'; const d=retroDrawerHost(); d.classList.add('on'); retroPaint(); }
     async function retroOpen(id,opts){
       await retroEnsureRefs(); const d=retroDrawerHost(); retroSel=id; if(!(opts&&opts.keepTab))retroTab='act';
@@ -9600,10 +9613,13 @@
           <div class="eqd-title"><span class="eqd-inv">${isNew?'Новый акт':esc(a.no)}</span>${retroStCell(a.status)}${a.cost?`<span class="st st--neutral">${retroN(a.cost,2)} ₽</span>`:''}</div>
           <button class="x" data-act="close" aria-label="Закрыть">✕</button>
           <div class="eqd-name">${esc(a.name||'что произведено — заполните ниже')}</div>
-          <div class="eqd-sub">${esc(a.whereTo||'куда приходуем не выбрано')}${a.mk?' · '+esc(a.mk):''}${a.approvedBy?' · утвердил '+esc(a.approvedBy)+' '+fmt(a.approvedAt):''}</div>
+          <div class="eqd-sub">${esc(a.whereTo||'куда приходуем не выбрано')}${a.mk?' · '+esc(a.mk):''}${a.status==='На утверждении'?' · на утверждении у '+esc(a.approverName||'—')+(a.sentAt?' с '+fmt(a.sentAt):'')+(a.sentBy?' · отправил '+esc(a.sentBy):''):''}${a.approvedBy&&a.status!=='На утверждении'&&a.status!=='Черновик'?' · утвердил '+esc(a.approvedBy)+' '+fmt(a.approvedAt):''}${a.status==='Отклонён'&&a.approverComment?' · <span style="color:var(--red)">отклонено: '+esc(a.approverComment)+'</span>':''}</div>
           <div class="eqd-actions">
             ${w?'<button class="ui-btn ui-btn--primary" data-act="save">Сохранить</button>':''}
-            ${(!isNew&&retroCanWrite()&&(a.status==='Черновик'||a.status==='Отклонён'))?'<button class="ui-btn" data-act="approve" title="Проверит доступность материалов в 1С и зафиксирует резерв">Утвердить</button>':''}
+            ${(!isNew&&retroCanWrite()&&(a.status==='Черновик'||a.status==='Отклонён'))?'<button class="ui-btn ui-btn--primary" data-act="send" title="Выбранный утверждающий получит сообщение в Bitrix и увидит акт в своём кабинете">Отправить на утверждение</button>':''}
+            ${(!isNew&&retroIsApprover()&&(a.status==='Черновик'||a.status==='Отклонён'))?'<button class="ui-btn" data-act="approve" title="Утвердить сразу (вы в списке утверждающих): проверит доступность материалов в 1С и зафиксирует резерв">Утвердить</button>':''}
+            ${(!isNew&&a.status==='На утверждении'&&retroMayDecide(a))?'<button class="ui-btn ui-btn--primary" data-act="approve" title="Проверит доступность материалов в 1С и зафиксирует резерв">Утвердить</button><button class="ui-btn" data-act="reject">Отклонить</button>':''}
+            ${(!isNew&&a.status==='На утверждении'&&(retroMayDecide(a)||a.sentBy===(AUTH&&AUTH.fio)))?'<button class="ui-btn ui-btn--ghost" data-act="unapprove">Отозвать</button>':''}
             ${(!isNew&&retroCanWrite()&&a.status==='Утверждён')?'<button class="ui-btn" data-act="unapprove">Вернуть в черновик</button>':''}
             ${!isNew?`<a class="ui-btn" href="/api/retro/print?id=${encodeURIComponent(a.id)}&print=1" target="_blank" rel="noopener"><i class=ic-print></i> Печать</a>`:''}
             ${(!isNew&&retroCanWrite()&&a.canonId&&a.lines.length)?'<button class="ui-btn ui-btn--ghost" data-act="typical" title="Норма на 1 шт из этого состава — на канон изделия">Сохранить как типовой состав</button>':''}
@@ -9615,7 +9631,9 @@
       const on=(sel,fn)=>{const el=d.querySelector(sel); if(el)el.onclick=fn;};
       on('[data-act="save"]',()=>retroSave());
       on('[data-act="approve"]',()=>retroStatusPost('Утверждён','Акт утверждён, материалы зарезервированы.'));
-      on('[data-act="unapprove"]',()=>retroStatusPost('Черновик','Акт возвращён в черновик, резерв снят.'));
+      on('[data-act="unapprove"]',()=>retroStatusPost('Черновик',a.status==='На утверждении'?'Акт отозван в черновик.':'Акт возвращён в черновик, резерв снят.'));
+      on('[data-act="send"]',()=>retroSendForApproval());
+      on('[data-act="reject"]',()=>{ const c=prompt('Причина отклонения (увидит отправитель):',''); if(c===null)return; retroPost('/api/retro/status',{id:a.id,status:'Отклонён',comment:c},'Акт отклонён, отправитель уведомлён.'); });
       on('[data-act="typical"]',()=>retroPost('/api/retro/typical',{id:a.id},'Типовой состав сохранён на каноне изделия.'));
       retroTab==='lines'?retroPaintLines():retroTab==='docs'?retroPaintDocs():retroPaintAct();
     }
@@ -9629,13 +9647,13 @@
       h.innerHTML=`<div class="eqd-grid two" style="padding-top:12px">
           <div class="eqd-f" style="grid-column:span 2">${F('Что произведено *',inp('name','напр. Пресс-форма протектора 178, станина'))}</div>
           ${F('Обозначение / чертёж',inp('designation','ПБС.ПЧ0001.01.000'))}
-          ${F('Канон изделия',`<select class="rt-inp" data-rf="canonId"${dis}>${canonOpts}</select>`)}
+          ${F('Канон изделия',retroSearchHtml('canonId',a.canonId,(((CAT&&CAT.items)||[]).find(c=>String(c.id)===String(a.canonId))||{}).name||'','поиск по каталогу: наименование, категория',w))}
           ${F('Количество *',inp('qty','1','number'))}${F('Единица',inp('unit','шт'))}
           ${F('Куда приходуем',`<select class="rt-inp" data-rf="whereTo"${dis}>${(dict.whereTo||[]).map(x=>opt(x,x,a.whereTo)).join('')}</select>`)}
           ${F('Счёт учёта (можно поправить)',inp('account','10.10'))}
           ${F('Фактический период изготовления',inp('period','напр. март–май 2026'))}${F('Дата акта',inp('date','','date'))}
-          ${F('Ответственный',inp('responsible','мастер / технолог'))}
-          ${F('Маршрутная карта',`<select class="rt-inp" data-rf="mk"${dis}>${mkOpts}</select>`)}
+          ${F('Ответственный (заполняет)',`<input class="rt-inp" value="${esc(a.responsible||(AUTH&&AUTH.fio)||'')}" disabled title="Подставляется автоматически: кто заполняет акт в портале">`)}
+          ${F('Маршрутная карта',retroSearchHtml('mk',a.mk,a.mk?(a.mk+(((retroRoutes||[]).find(r=>r.mk===a.mk)||{}).name?' · '+((retroRoutes||[]).find(r=>r.mk===a.mk)||{}).name:'')):'','поиск: № МК, наименование, обозначение',w))}
           <div class="eqd-f" style="grid-column:span 2">${F('Примечание',`<textarea class="rt-inp" data-rf="note" rows="2"${dis}>${esc(a.note||'')}</textarea>`)}</div>
         </div>
         ${w?`<div class="eqd-sec">Предзаполнить состав</div><div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -9644,6 +9662,31 @@
           <span class="eqd-sub" style="align-self:center">Строки добавятся к составу; факт можно править.</span></div>`:''}`;
       h.querySelectorAll('[data-rf]').forEach(el=>{ el.oninput=el.onchange=()=>{ a[el.dataset.rf]=el.value; if(el.dataset.rf==='whereTo'){ const m=/\(([\d.]+)\)/.exec(el.value); const ac=h.querySelector('[data-rf="account"]'); if(m&&ac){ ac.value=m[1]; a.account=m[1]; } } if(el.dataset.rf==='mk'||el.dataset.rf==='canonId'){ h.querySelectorAll('[data-pre]').forEach(b=>{ b.disabled=b.dataset.pre==='mk'?!a.mk:!a.canonId; }); } }; });
       h.querySelectorAll('[data-pre]').forEach(b=>b.onclick=()=>retroPrefill(b.dataset.pre));
+      // K-161: поиск вместо длинных списков (МК будет много) — по подстроке, первые 12 совпадений
+      retroSearchWire(h,'mk',(q)=>(retroRoutes||[]).filter(r=>[r.mk,r.name,r.designation].some(x=>String(x||'').toLowerCase().includes(q))).slice(0,12).map(r=>({v:r.mk,l:r.name||'',s:r.mk+(r.designation?' · '+r.designation:''),d:r.mk+(r.name?' · '+r.name:'')})),(v)=>{ a.mk=v; h.querySelectorAll('[data-pre]').forEach(b=>{ if(b.dataset.pre==='mk')b.disabled=!a.mk; }); });
+      retroSearchWire(h,'canonId',(q)=>((CAT&&CAT.items)||[]).filter(c=>[c.name,c.category,c.kind].some(x=>String(x||'').toLowerCase().includes(q))).slice(0,12).map(c=>({v:c.id,l:c.name,s:[c.category,c.unit].filter(Boolean).join(' · ')})),(v)=>{ a.canonId=v; h.querySelectorAll('[data-pre]').forEach(b=>{ if(b.dataset.pre==='canon')b.disabled=!a.canonId; }); });
+    }
+    function retroSearchHtml(key,value,display,ph,w){ return `<div class="rsf" data-rsf="${key}"><input class="rt-inp" data-rsfq placeholder="${esc(ph)}" value="${esc(display||'')}" data-v="${esc(value==null?'':value)}"${w?'':' disabled'} autocomplete="off"><div class="rsf-list" hidden></div></div>`; }
+    function retroSearchWire(h,key,find,onPick){
+      const box=h.querySelector(`[data-rsf="${key}"]`); if(!box)return; const inp=box.querySelector('[data-rsfq]'), list=box.querySelector('.rsf-list'); if(inp.disabled)return;
+      const paint=()=>{ const q=inp.value.trim().toLowerCase(); const items=find(q); list.hidden=false; list.innerHTML=items.length?items.map((it,i)=>`<div data-i="${i}"><b>${esc(it.l||it.s)}</b>${it.l&&it.s?`<span class="rsf-sub">${esc(it.s)}</span>`:''}</div>`).join(''):'<div class="c-gray">ничего не найдено</div>';
+        list.querySelectorAll('[data-i]').forEach(el=>el.onmousedown=(e)=>{ e.preventDefault(); const it=items[+el.dataset.i]; inp.value=it.d||it.l||it.s; inp.dataset.v=it.v; list.hidden=true; onPick(it.v); }); };
+      inp.onfocus=paint; inp.oninput=()=>{ if(!inp.value.trim()){ inp.dataset.v=''; onPick(''); } paint(); }; inp.onblur=()=>setTimeout(()=>{ list.hidden=true; if(!inp.value.trim()){ inp.dataset.v=''; onPick(''); } },150);
+    }
+    const retroIsApprover=()=>{ try{ return !!(AUTH&&AUTH.isAdmin)||((RETRO_APPROVERS||[]).some(u=>String(u.id)===String(ME&&ME.id))); }catch{ return false; } };
+    const retroMayDecide=(a)=>{ const me=String((ME&&ME.id)||''); return !!(AUTH&&AUTH.isAdmin)||(!!me&&String(a.approverId||'')===me); };
+    let RETRO_APPROVERS=null;
+    async function retroLoadApprovers(){ if(RETRO_APPROVERS)return RETRO_APPROVERS; try{ const j=await (await fetch('/api/retro/approvers')).json(); RETRO_APPROVERS=(j&&j.approvers)||[]; }catch{ RETRO_APPROVERS=[]; } return RETRO_APPROVERS; }
+    // K-161: отправить на утверждение — выбор из списка утверждающих (Настройки → 1С и бухгалтерия)
+    async function retroSendForApproval(){
+      const a=retroDraft; const list=await retroLoadApprovers(); if(!list.length){ toast('Список утверждающих пуст — Настройки → «1С и бухгалтерия».','err'); return; }
+      const d=retroDrawerHost(); let box=d.querySelector('#retro-sendbox'); if(box){ box.remove(); return; }
+      box=document.createElement('div'); box.id='retro-sendbox'; box.className='card pad'; box.style.cssText='margin:8px 14px 0;border:1px dashed var(--sl-300)';
+      const last=(()=>{ try{ return localStorage.getItem('retro.approver')||''; }catch{ return ''; } })();
+      box.innerHTML=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Кому на утверждение</b><select class="rt-inp" id="retro-apsel" style="min-width:240px">${list.map(u=>`<option value="${u.id}"${String(u.id)===last?' selected':''}>${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join('')}</select><button class="ui-btn ui-btn--primary" id="retro-apgo">Отправить</button><button class="ui-btn ui-btn--ghost" id="retro-apx">отмена</button></div><div class="eqd-sub" style="margin-top:6px">Утверждающий получит личное сообщение в Bitrix и увидит акт в «Мой кабинет». Несохранённые правки сохраните до отправки.</div>`;
+      const hdr=d.querySelector('.eqd-h'); hdr.insertAdjacentElement('afterend',box);
+      box.querySelector('#retro-apx').onclick=()=>box.remove();
+      box.querySelector('#retro-apgo').onclick=async()=>{ const sel=box.querySelector('#retro-apsel'); const u=list.find(x=>String(x.id)===sel.value); if(!u)return; try{ localStorage.setItem('retro.approver',sel.value); }catch{} await retroPost('/api/retro/status',{id:a.id,status:'На утверждении',approverId:u.id,approverName:u.name},'Отправлено на утверждение: '+u.name); try{cabBadgeRefresh();}catch{} };
     }
     function retroCollect(){ const h=document.getElementById('retro-body'); if(!h||!retroDraft)return; h.querySelectorAll('[data-rf]').forEach(el=>{ retroDraft[el.dataset.rf]=el.value; }); h.querySelectorAll('[data-lf]').forEach(el=>{ const i=+el.dataset.li, f=el.dataset.lf; if(retroDraft.lines[i])retroDraft.lines[i][f]=el.value; }); }
     async function retroPrefill(kind){
@@ -9666,11 +9709,9 @@
           <div class="rl-1c">${l.onecKey?`<span class="mono">${esc(l.onecCode)}</span> ${esc(l.onecName)}`:'<span class="st st--problem">позиция 1С не выбрана — списывать нечего</span>'}${w?` <button class="ui-btn ui-btn--ghost" data-lpick="${i}" style="padding:2px 8px">${l.onecKey?'заменить':'выбрать позицию 1С'}</button>`:''}</div>
           <div class="rl-grid">
             <label>Склад<select class="rt-inp" data-lf="warehouse" data-li="${i}"${dis}><option value="">—</option>${whOpts}${l.warehouse&&!(av&&av.warehouses||[]).some(x=>x.name===l.warehouse)?`<option selected>${esc(l.warehouse)}</option>`:''}</select></label>
-            <label>План<input class="rt-inp" data-lf="qtyPlan" data-li="${i}" type="number" step="any" value="${esc(l.qtyPlan==null?'':l.qtyPlan)}"${dis}></label>
-            <label>Факт *<input class="rt-inp" data-lf="qtyFact" data-li="${i}" type="number" step="any" value="${esc(l.qtyFact==null?'':l.qtyFact)}"${dis}></label>
+            <label>Количество *<input class="rt-inp" data-lf="qtyFact" data-li="${i}" type="number" step="any" value="${esc(l.qtyFact==null?'':l.qtyFact)}"${dis}></label>
             <div><div class="l">Доступно в 1С</div><div class="v ${over?'bad':''}">${av?(av.found?retroN(av.available)+' '+esc(av.unit||l.unit)+(av.reserved?` <span class="c-gray">(остаток ${retroN(av.stock)}, резерв ${retroN(av.reserved)})</span>`:(av.fresh?' <span class="c-gray">(без учёта резерва)</span>':'')):'нет в зеркале 1С'):'—'}</div></div>
             <div><div class="l">Себест. / сумма</div><div class="v mono">${av&&av.cost?retroN(av.cost,2)+' ₽ · '+retroN((isNaN(qf)?0:qf)*av.cost,2)+' ₽':'—'}</div></div>
-            <label style="grid-column:span 2">Причина замены / примечание<input class="rt-inp" data-lf="reason" data-li="${i}" value="${esc(l.reason||'')}" placeholder="если материал отличается от плана"${dis}></label>
           </div>${over?'<div class="rl-warn">Факт больше доступного остатка в 1С — акт не утвердится.</div>':''}${none?'<div class="rl-warn">Позиции нет в зеркале 1С — обновите зеркало или выберите другую.</div>':''}
         </div>`; }).join('');
       h.innerHTML=`<div style="padding-top:10px">${rows||emptyState('Состав пуст',{sub:'Добавьте материалы вручную или предзаполните из плана МК / типового состава на вкладке «Акт». Выпуск без материалов допустим — если они были списаны раньше.'})}
@@ -9705,11 +9746,14 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
           ${(w&&a.id!=null&&(a.status==='Утверждён'||a.status==='Черновик в 1С'))?`<button class="ui-btn ui-btn--primary" data-act="to1c">${a.status==='Черновик в 1С'?'Проверить документ в 1С':(st.dryRun?'Показать план документа 1С':'Создать черновик в 1С')}</button>`:''}
           ${(w&&a.status==='Черновик в 1С')?'<button class="ui-btn" data-act="poll">Проверить проведение</button>':''}
-          ${(isAdmin&&!st.chat)?'<button class="ui-btn" data-act="chat">Создать чат с бухгалтерией</button>':''}
           ${a.id!=null?`<a class="ui-btn" href="/api/retro/print?id=${encodeURIComponent(a.id)}" target="_blank" rel="noopener"><i class=ic-print></i> Печатная форма</a>`:''}
         </div>
         <div id="retro-1c-out" style="margin-top:10px"></div>
-        <div class="eqd-sub" style="margin-top:10px">${a.status==='Черновик'||a.status==='Отклонён'?'Соберите состав и нажмите «Утвердить»: портал проверит доступность материалов в 1С и зафиксирует резерв. Потом — черновик в 1С.':a.status==='Утверждён'?'Черновик «Отчёт производства за смену» создаётся кнопкой выше; в режиме проверки портал только показывает план. После создания бухгалтерия получает сообщение в чат.':a.status==='Черновик в 1С'?'Документ в 1С создан. Проведение проверяется автоматически раз в час; можно проверить сейчас.':'Документ проведён бухгалтерией — цикл закрыт.'}</div>`;
+        ${(a.id!=null&&['Утверждён','Черновик в 1С','Проведён в 1С','Закрыт'].includes(a.status))?`<div class="eqd-sec">Печатная форма — в чат бухгалтерии</div>
+        <div class="eqd-sub">${a.chatSent?'Отправлено: '+esc(a.chatSent)+'. Можно отправить повторно.':'Сообщение показывается заранее — поправьте текст и отправьте вместе с формой ('+(st.pdf?'PDF':'HTML')+').'}${st.chat?'':' <span style="color:var(--red)">Чат ещё не создан — Настройки → «1С и бухгалтерия».</span>'}</div>
+        <textarea class="rt-inp" id="retro-chattext" rows="9" style="margin-top:6px;font-size:12px;font-family:var(--mono)" placeholder="загружаю предпросмотр…"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap"><button class="ui-btn ui-btn--primary" data-act="chatsend" ${(w||retroIsApprover())&&st.chat?'':'disabled'}>Отправить в чат с формой</button><a class="ui-btn ui-btn--ghost" href="/api/retro/print?id=${encodeURIComponent(a.id)}${st.pdf?'&pdf=1':''}" target="_blank" rel="noopener">Посмотреть форму</a></div>`:''}
+        <div class="eqd-sub" style="margin-top:10px">${a.status==='Черновик'||a.status==='Отклонён'?'Соберите состав и отправьте акт на утверждение (или утвердите, если вы в списке утверждающих): портал проверит доступность материалов в 1С и зафиксирует резерв. Потом — печатная форма в чат бухгалтерии и черновик в 1С.':a.status==='На утверждении'?'Акт ждёт решения утверждающего — он видит его в «Мой кабинет».':a.status==='Утверждён'?'Черновик «Отчёт производства за смену» создаётся кнопкой выше; в режиме проверки портал только показывает план. После создания бухгалтерия получает сообщение в чат.':a.status==='Черновик в 1С'?'Документ в 1С создан. Проведение проверяется автоматически раз в час; можно проверить сейчас.':'Документ проведён бухгалтерией — цикл закрыт.'}</div>`;
       const out=h.querySelector('#retro-1c-out');
       const show=(j)=>{ if(j.dryRun&&j.plan){ const p=j.plan; out.innerHTML=`<div class="card pad" style="border:1px dashed var(--am-500);background:var(--am-50)"><div style="font-weight:700;margin-bottom:6px">План документа «${esc(p.entity)}» (в 1С не записано)</div>
             <div class="eqd-grid two">${F('Организация',esc(p.org))}${F('Склад',esc(p.warehouse))}${F('Продукция',esc(p.product.name)+(p.product.code?' · '+esc(p.product.code):p.product.willCreate?' · <span class="st st--work">будет создана в 1С</span>':''))}${F('Кол-во / счёт',retroN(p.product.qty)+' '+esc(p.product.unit)+' · '+esc(p.product.account||'из образца'))}</div>
@@ -9721,7 +9765,23 @@
       const on=(sel,fn)=>{const el=h.querySelector(sel); if(el)el.onclick=fn;};
       on('[data-act="to1c"]',async()=>{ out.innerHTML='<div class="eqd-sub">Обращаюсь к 1С…</div>'; try{ const r=await fetch('/api/retro/to1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); show(j); if(!j.dryRun){ toast(j.already?'Документ уже был в 1С — связка обновлена.':'Черновик в 1С создан, бухгалтерия уведомлена.','ok'); RETRO=null; const v=document.getElementById('view'); const id=a.id; await renderRetro(v); retroOpen(id,{keepTab:true}); } }catch(e){ out.innerHTML=`<div class="eqd-sub" style="color:var(--red)">${esc(e.message)}</div>`; } });
       on('[data-act="poll"]',async()=>{ try{ const r=await fetch('/api/retro/poll1c',{method:'POST'}); const j=await r.json(); if(j.error)throw new Error(j.error); toast(`Проверено: ${j.checked}, проведено: ${j.posted.length}, отклонено: ${j.rejected.length}`,'ok'); RETRO=null; const v=document.getElementById('view'); const id=a.id; await renderRetro(v); retroOpen(id,{keepTab:true}); }catch(e){ toast('Не проверено: '+e.message,'err'); } });
-      on('[data-act="chat"]',async()=>{ try{ const r=await fetch('/api/retro/chat-create',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); const j=await r.json(); if(j.error)throw new Error(j.error); toast(`Чат создан: chat${j.chat}. Участники добавлены.`,'ok'); retroPaintDocs(); }catch(e){ toast('Чат не создан: '+e.message,'err'); } });
+      const ct=h.querySelector('#retro-chattext');
+      if(ct){ try{ const j=await (await fetch('/api/retro/chat-preview?id='+encodeURIComponent(a.id))).json(); ct.value=j.text||''; if(j.error)ct.value=j.error; }catch(e){ ct.value='предпросмотр недоступен: '+e.message; } }
+      on('[data-act="chatsend"]',async(ev)=>{ const b=ev.currentTarget; b.disabled=true; b.textContent='Отправляю…'; try{ const r=await fetch('/api/retro/chat-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.id,text:ct?ct.value:''})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast(j.attached?`Отправлено в чат с файлом ${j.file}.`:`Отправлено в чат ссылкой (файл не прикрепился: ${j.warning||'?'}).`,j.attached?'ok':'warn'); RETRO=null; const v=document.getElementById('view'); const id=a.id; await renderRetro(v); retroOpen(id,{keepTab:true}); }catch(e){ toast('Не отправлено: '+e.message,'err'); b.disabled=false; b.textContent='Отправить в чат с формой'; } });
+    }
+    // ── K-161: «Мой кабинет» — документы, ждущие решения сотрудника (пока акты выпуска; потом — ЗнЗ, ЛОВ, КД) ──
+    async function cabBadgeRefresh(){ const b=document.getElementById('cab-badge'); if(!b)return; if(!(ME&&ME.authenticated)){ b.hidden=true; return; } try{ const j=await (await fetch('/api/cabinet')).json(); const n=(j.approvals||[]).length; b.textContent=n; b.hidden=!n; }catch{ b.hidden=true; } }
+    async function renderCabinet(host){
+      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка кабинета…</div>';
+      let j; try{ j=await (await fetch('/api/cabinet')).json(); }catch(e){ j={approvals:[],sent:[],recent:[],warning:String(e.message||e)}; }
+      const item=(it,btns)=>`<div class="cab-item"><span class="st st--neutral">${esc(it.kindLabel)}</span><div class="cab-t"><b>${esc(it.no)}</b> · ${esc(it.title)}<div class="cab-s">${esc(it.sub)}${it.by?' · отправил '+esc(it.by):''}${it.date?' · '+fmt(it.date):''}${it.approver&&!btns?' · у '+esc(it.approver):''}</div></div>${retroStCell(it.status)}<div style="display:flex;gap:6px">${btns?`<button class="ui-btn ui-btn--primary" data-cab="approve" data-id="${it.id}">Утвердить</button><button class="ui-btn" data-cab="reject" data-id="${it.id}">Отклонить</button>`:''}<a class="ui-btn ui-btn--ghost" href="${esc(it.url)}">Открыть</a></div></div>`;
+      const sec=(t,arr,btns,empty)=>`<div class="card pad" style="margin-top:var(--gap)"><div style="font-size:14px;font-weight:700;color:var(--ink)">${t}${arr.length?` <span class="c-gray" style="font-weight:400">· ${arr.length}</span>`:''}</div>${arr.length?arr.map(it=>item(it,btns)).join(''):`<div class="eqd-sub" style="margin-top:6px">${empty}</div>`}</div>`;
+      host.innerHTML=`<div class="card pad"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="color:var(--ink)">${esc((j.me&&j.me.fio)||(AUTH&&AUTH.fio)||'')}</b><span class="eqd-sub">${esc((AUTH&&AUTH.position)||'')}</span>${j.warning?`<span class="st st--problem">${esc(j.warning)}</span>`:''}</div></div>
+        ${sec('Ждут моего утверждения',j.approvals||[],true,'Сейчас ничего не ждёт вашего решения.')}
+        ${sec('Отправлено мной на утверждение',j.sent||[],false,'Нет документов на утверждении у других.')}
+        ${sec('Недавние решения по моим документам (30 дней)',j.recent||[],false,'Пока пусто.')}`;
+      host.querySelectorAll('[data-cab]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.id, act=b.dataset.cab; let body={id,status:act==='approve'?'Утверждён':'Отклонён'}; if(act==='reject'){ const c=prompt('Причина отклонения (увидит отправитель):',''); if(c===null)return; body.comment=c; }
+        try{ const r=await fetch('/api/retro/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='approve'?'Акт утверждён, материалы зарезервированы.':'Акт отклонён, отправитель уведомлён.','ok'); RETRO=null; renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); } });
     }
     async function retroSave(){
       retroCollect(); const a=retroDraft; if(!String(a.name||'').trim()){ toast('Укажите, что произведено.','err'); retroTab='act'; retroPaint(); return; }
@@ -14887,10 +14947,17 @@
         ${card(aico('doc',18),'1С и бухгалтерия','Зеркало номенклатуры и остатков 1С ПБС (только чтение) и черновики «Отчёт производства за смену» из актов выпуска. Учётка 1С — только в runtime на сервере.', !!STG.onecSet, `<div style="margin-top:12px"><label class="stg-flab">Адрес OData</label><input class="stg-inp" value="${esc(STG.onecUrl||'не задан')}" readonly style="background:var(--sl-100)"></div>
           <div style="margin-top:10px"><label class="stg-flab">Склад выпуска в 1С</label><div class="stg-hint">точное наименование из справочника «Склады»</div><input class="stg-inp" id="s_onecwh" value="${esc(STG.onecWarehouse||'')}"></div>
           <div style="margin-top:10px"><label class="stg-flab">Запись в 1С</label><label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="s_onecdry" ${STG.onecDryRun?'checked':''}> Режим проверки (ONEC_DRY_RUN): черновики в 1С не создаются, портал показывает план документа</label></div>
-          <div style="margin-top:10px"><label class="stg-flab">Чат «Производство ↔ Бухгалтерия ПБС» (id чата Bitrix)</label><div class="stg-hint">создаётся кнопкой в разделе «Акты выпуска» или укажите id существующего</div><input class="stg-inp" id="s_accchat" value="${esc(STG.accChat||'')}" placeholder="напр. 9123"></div>`)}
+          <div style="margin-top:10px"><label class="stg-flab">Чат «Производство ↔ Бухгалтерия ПБС» (id чата Bitrix)</label><div class="stg-hint">один общий чат: живое общение с бухгалтерией + уведомления портала (печатные формы утверждённых актов, черновики в 1С, проводки, сводка по понедельникам). Создаётся один раз кнопкой (участники: Кирилюк, Герасимов, Лещенок, Ветелкина) или укажите id существующего</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_accchat" value="${esc(STG.accChat||'')}" placeholder="напр. 9123" style="flex:1">${STG.accChat?'':'<button class="ui-btn" id="s_accchat_create" type="button">Создать чат</button>'}</div></div>
+          <div style="margin-top:10px"><label class="stg-flab">Кто утверждает акты выпуска</label><div class="stg-hint">только эти сотрудники видят акты в «Мой кабинет» и могут утверждать; id пользователей Bitrix через запятую (сейчас: ${esc(STG.retroApprovers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_apr" value="${esc(STG.retroApprovers||'')}" placeholder="11,159" style="flex:1"><select class="stg-inp" id="s_apr_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_apr_names"></div></div>`)}
         ${card(aico('folder',18),'NAS — записи и файлы','Папка «06-Записи-ПБС» для просмотра файлов запросов.', !!STG.recordsRoot, `<div style="margin-top:12px"><label class="stg-flab">Путь к записям</label><div class="stg-hint">На NAS — примонтированная папка, напр. <code>/records</code></div><input class="stg-inp" id="s_records" value="${esc(STG.recordsRoot||'')}" placeholder="/records"></div>`)}
         <div style="margin-top:14px"><button class="stg-btn primary" id="s_saveInteg">Сохранить</button></div><div class="stg-msg" id="s_integMsg"></div>`;
-      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,onecWarehouse:$s('s_onecwh').value,onecDryRun:$s('s_onecdry').checked,accChat:$s('s_accchat').value},'s_integMsg');
+      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,onecWarehouse:$s('s_onecwh').value,onecDryRun:$s('s_onecdry').checked,accChat:$s('s_accchat').value,retroApprovers:$s('s_apr').value},'s_integMsg');
+      // K-161: чат бухгалтерии создаётся отсюда (один раз); список утверждающих — подбор из сотрудников ПБС
+      const cc=$s('s_accchat_create'); if(cc)cc.onclick=async()=>{ cc.disabled=true; try{ const r=await fetch('/api/retro/chat-create',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); const j=await r.json(); if(j.error)throw new Error(j.error); stgMsg('s_integMsg',true,`Чат создан: chat${j.chat}, участники добавлены.`); STG.accChat=String(j.chat); renderSettings(stgHost); }catch(e){ stgMsg('s_integMsg',false,'Чат не создан: '+e.message); cc.disabled=false; } };
+      (async()=>{ const ap=$s('s_apr'), pick=$s('s_apr_pick'), names=$s('s_apr_names'); if(!ap||!pick)return; let staff=[]; try{ const sj=await (await fetch('/api/staff')).json(); staff=(sj&&sj.staff)||[]; }catch{}
+        const paintNames=()=>{ const ids=ap.value.split(/[,;\s]+/).filter(Boolean); names.textContent=ids.length?ids.map(id=>{ const u=staff.find(x=>String(x.id)===id); return u?u.name:('id'+id); }).join(', '):'список пуст — по умолчанию Кирилюк и Герасимов'; };
+        pick.innerHTML='<option value="">— добавить сотрудника —</option>'+staff.map(u=>`<option value="${u.id}">${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join('');
+        pick.onchange=()=>{ if(!pick.value)return; const ids=ap.value.split(/[,;\s]+/).filter(Boolean); if(!ids.includes(pick.value))ids.push(pick.value); ap.value=ids.join(','); pick.value=''; paintNames(); }; ap.oninput=paintNames; paintNames(); })();
     }
     // Параметры продаж/КП (K-05 §5.3) — «магические числа» ДП–З.1 вынесены сюда: порог подписи,
     // ставка НДС, плановая прибыль, SLA. Правятся без деплоя кода (server: settingsView/saveSettings).

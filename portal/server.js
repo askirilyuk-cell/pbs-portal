@@ -5738,6 +5738,20 @@ async function ncTableMeta(key) {
   if (!res.ok) throw new Error(`NocoDB meta ${res.status}: ${await res.text()}`);
   return res.json();
 }
+// K-161: добавить вариант в SingleSelect-колонку (degrade-safe; нужен для новых статусов уже созданных таблиц)
+const _ncOptEnsured = new Set();
+async function ncEnsureSelectOption(key, title, option) {
+  const k = `${key}|${title}|${option}`; if (_ncOptEnsured.has(k)) return false;
+  const meta = await ncTableMeta(key); const col = (meta.columns || []).find((x) => x.title === title);
+  if (!col) throw new Error(`колонка «${title}» не найдена`);
+  const opts = (col.colOptions && col.colOptions.options) ? col.colOptions.options : [];
+  if (opts.some((o) => o.title === option)) { _ncOptEnsured.add(k); return false; }
+  const c = cfg();
+  const res = await fetch(`${c.NC_URL}/api/v1/db/meta/columns/${col.id}`, { method: 'PATCH', headers: { 'xc-token': c.NC_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: col.title, column_name: col.column_name, uidt: col.uidt, colOptions: { options: [...opts.map((o) => ({ title: o.title, color: o.color })), { title: option }] } }) });
+  if (!res.ok) throw new Error(`NocoDB meta ${res.status}: ${await res.text()}`);
+  _ncOptEnsured.add(k); return true;
+}
 async function ncDeleteMany(key, ids) {
   if (!ids.length) return null;
   const c = cfg();
@@ -6950,7 +6964,7 @@ async function onecCreateCanon(body) {
 //  «Утверждён»/«Черновик в 1С»; портал остатки 1С не правит, черновик в 1С создаёт K-159.
 // ============================================================================
 const RETRO_WHERE = ['Оснастка (10.10)', 'Инвентарь для цеха (10.09)', 'Готовая продукция (43)', 'Полуфабрикат (21)', 'Оборудование (08)'];
-const RETRO_STATUS = ['Черновик', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С', 'Отклонён', 'Закрыт'];
+const RETRO_STATUS = ['Черновик', 'На утверждении', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С', 'Отклонён', 'Закрыт'];
 const RETRO_RESERVING = new Set(['Утверждён', 'Черновик в 1С']);
 const RETRO_EDITABLE = new Set(['Черновик', 'Отклонён']);
 const RETRO_SOURCES = ['План МК', 'Типовой состав', 'Вручную', 'Расчёт по чертежу'];
@@ -6981,6 +6995,9 @@ function retroActShape(r, lines) {
     cost: Number(r['Себестоимость']) || 0, note: r['Примечание'] || '', ismUid: r['ИСМ-ид'] || '',
     onecDocKey: r['Документ 1С (ключ)'] || '', onecDocNo: r['Документ 1С (№)'] || '', onecDocDate: r['Документ 1С (дата)'] || '',
     approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '',
+    // K-161: маршрут утверждения — кому отправлен, кем и когда; комментарий утверждающего (при отклонении)
+    approverId: r['Утверждающий (id)'] != null && r['Утверждающий (id)'] !== '' ? Number(r['Утверждающий (id)']) : null, approverName: r['Утверждающий'] || '',
+    sentBy: r['Отправил на утверждение'] || '', sentAt: r['Дата отправки'] || '', approverComment: r['Комментарий утверждающего'] || '', chatSent: r['В чат бухгалтерии'] || '',
     canonId: r.catalog_canon_id ?? (canon ? (canon.Id ?? canon.id) : null) ?? null, canonName: canon ? (canon['Каноническое наименование'] || '') : '',
     lines: ls, lineCount: ls.length, editable: RETRO_EDITABLE.has(r['Статус'] || 'Черновик'),
   };
@@ -7007,7 +7024,7 @@ async function buildRetroLive() {
   const [acts, lines] = await Promise.all([ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
   const ls = lines.map(retroLineShape);
   const items = acts.map((a) => retroActShape(a, ls)).sort((a, b) => String(b.no).localeCompare(String(a.no), 'ru', { numeric: true }));
-  const kpis = { total: items.length, draft: items.filter((i) => i.status === 'Черновик').length, approved: items.filter((i) => i.status === 'Утверждён').length, in1c: items.filter((i) => i.status === 'Черновик в 1С').length, posted: items.filter((i) => i.status === 'Проведён в 1С' || i.status === 'Закрыт').length, cost: +items.reduce((s, i) => s + i.cost, 0).toFixed(2) };
+  const kpis = { total: items.length, draft: items.filter((i) => i.status === 'Черновик').length, pending: items.filter((i) => i.status === 'На утверждении').length, approved: items.filter((i) => i.status === 'Утверждён').length, in1c: items.filter((i) => i.status === 'Черновик в 1С').length, posted: items.filter((i) => i.status === 'Проведён в 1С' || i.status === 'Закрыт').length, cost: +items.reduce((s, i) => s + i.cost, 0).toFixed(2) };
   return { mode: 'live', items, kpis, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } };
 }
 async function buildRetroCard(id) {
@@ -7031,7 +7048,8 @@ async function retroSave(body, session) {
   const row = {
     'Наименование': name, 'Обозначение / чертёж': String(body.designation || '').trim(), 'Кол-во': qty, 'ЕИ': String(body.unit || 'шт').trim() || 'шт',
     'Куда приходуем': whereTo, 'Счёт учёта': String(body.account || retroAccountOf(whereTo)).trim(), 'Фактический период': String(body.period || '').trim(),
-    'Ответственный': String(body.responsible || '').trim(), 'МК (№)': String(body.mk || '').trim(), 'Примечание': String(body.note || '').trim(),
+    // K-161 (решение владельца): ответственный — тот, кто заполняет акт в портале сейчас; поле руками не правится
+    'Ответственный': (session && session.fio) ? String(session.fio) : String(body.responsible || '').trim(), 'МК (№)': String(body.mk || '').trim(), 'Примечание': String(body.note || '').trim(),
     'Дата': body.date ? String(body.date).slice(0, 10) : (existing ? existing['Дата'] : whToday()),
   };
   // строки: себестоимость и сумма — из зеркала 1С по ключу (справочно; бухгалтер считает свою)
@@ -7085,14 +7103,47 @@ async function retroSave(body, session) {
   return { ok: true, id: actId, no: row['№ акта'] || (existing && existing['№ акта']) || '', cost: row['Себестоимость'], lines: cleanLines.length };
 }
 // смена статуса: Утверждён (с проверкой доступности) / Черновик / Отклонён / Закрыт; «Черновик в 1С» и «Проведён» — K-159
+// K-161: колонки маршрута утверждения (degrade-safe — создаются при первой отправке)
+const RETRO_APPROVAL_COLS = [['Утверждающий (id)', 'Number'], ['Утверждающий', 'SingleLineText'], ['Отправил на утверждение', 'SingleLineText'], ['Дата отправки', 'Date'], ['Комментарий утверждающего', 'LongText']];
+async function retroEnsureApprovalCols() { for (const [t, u] of RETRO_APPROVAL_COLS) { try { await ncEnsureColumn('retro_outputs', t, u); } catch (e) { console.warn('[retro] колонка «' + t + '» недоступна:', e.message); } } }
+// личное сообщение пользователю Bitrix (best-effort; DIALOG_ID = id пользователя, как у проверяющего ЗнЗ)
+async function retroDm(userId, text) {
+  if (!userId || !cfg().BITRIX) return false;
+  try { await bitrixCall('im.message.add', { DIALOG_ID: String(userId), MESSAGE: text }); return true; } catch (e) { onecLog('DM-ERR', `${userId}: ${e.message || e}`); return false; }
+}
 async function retroSetStatus(body, session) {
   const acts = await ncListSoft('retro_outputs');
   const a = acts.find((x) => String(x.Id ?? x.id) === String(body.id));
   if (!a) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
   const to = String(body.status || '').trim(); const from = a['Статус'] || 'Черновик';
-  const allowed = { 'Черновик': ['Утверждён'], 'Отклонён': ['Черновик', 'Утверждён'], 'Утверждён': ['Черновик', 'Закрыт'], 'Проведён в 1С': ['Закрыт'] };
+  // K-161: Черновик/Отклонён → На утверждении (выбранному сотруднику) → Утверждён | Отклонён (утверждающим) | Черновик (отозвать)
+  const allowed = { 'Черновик': ['На утверждении', 'Утверждён'], 'Отклонён': ['Черновик', 'На утверждении', 'Утверждён'], 'На утверждении': ['Утверждён', 'Отклонён', 'Черновик'], 'Утверждён': ['Черновик', 'Закрыт'], 'Проведён в 1С': ['Закрыт'] };
   if (!(allowed[from] || []).includes(to)) { const e = new Error(`Переход «${from}» → «${to}» не разрешён.`); e.status = 400; throw e; }
+  const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
+  const meId = session && session.userId != null ? String(session.userId) : '';
+  const approverId = a['Утверждающий (id)'] != null && a['Утверждающий (id)'] !== '' ? String(a['Утверждающий (id)']) : '';
+  const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+  const link = `${portal}/#retro/${a.Id ?? a.id}`;
+  const no = a['№ акта'] || ''; const title = a['Наименование'] || '';
   const patch = { 'Статус': to };
+  if (to === 'На утверждении') {
+    const apId = Number(body.approverId); const apName = String(body.approverName || '').trim();
+    if (!apId) { const e = new Error('Выберите, кому отправить на утверждение.'); e.status = 400; throw e; }
+    if (!retroApproverIds().includes(apId)) { const e = new Error('Этот сотрудник не в списке утверждающих (Настройки → «1С и бухгалтерия»).'); e.status = 400; throw e; }
+    await retroEnsureApprovalCols();
+    try { await ncEnsureSelectOption('retro_outputs', 'Статус', 'На утверждении'); } catch (e) { console.warn('[retro] статус «На утверждении» в NocoDB:', e.message); }
+    patch['Утверждающий (id)'] = apId; patch['Утверждающий'] = apName || ('id' + apId);
+    patch['Отправил на утверждение'] = (session && session.fio) || 'портал'; patch['Дата отправки'] = whToday(); patch['Комментарий утверждающего'] = '';
+    await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
+    const lines = (await ncListSoft('retro_lines')).filter((l) => String(l.retro_outputs_id) === String(a.Id ?? a.id));
+    const sum = Number(a['Себестоимость']) || 0;
+    const dm = await retroDm(apId, `Акт выпуска ${no} ждёт вашего утверждения: ${title}, ${a['Кол-во'] || ''} ${a['ЕИ'] || 'шт'}, материалов ${lines.length} поз.${sum ? ', ' + sum.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽' : ''}. Отправил: ${(session && session.fio) || 'портал'}. Кабинет: ${portal}/#cabinet · акт: ${link}`);
+    return { ok: true, id: a.Id ?? a.id, status: to, notified: dm };
+  }
+  if (to === 'Утверждён' && from !== 'На утверждении' && !isAdmin && !retroApproverIds().includes(Number(meId))) { const e = new Error('Утверждать акты могут только сотрудники из списка утверждающих — отправьте акт на утверждение.'); e.status = 403; throw e; }
+  if (from === 'На утверждении' && (to === 'Утверждён' || to === 'Отклонён')) {
+    if (!isAdmin && approverId && meId !== approverId) { const e = new Error(`Утвердить или отклонить этот акт может ${a['Утверждающий'] || 'назначенный утверждающий'} (или Администратор).`); e.status = 403; throw e; }
+  }
   if (to === 'Утверждён') {
     const lines = (await ncListSoft('retro_lines')).filter((l) => String(l.retro_outputs_id) === String(a.Id ?? a.id)).map(retroLineShape);
     const avail = await retroAvailability(lines, a.Id ?? a.id);
@@ -7100,8 +7151,40 @@ async function retroSetStatus(body, session) {
     if (bad.length) { const e = new Error('Нельзя утвердить: по строкам «' + bad.map((l) => l.name || l.onecName).join('», «') + '» факт больше доступного остатка в 1С (остаток минус резерв других актов).'); e.status = 400; throw e; }
     patch['Утвердил'] = (session && session.fio) || 'портал'; patch['Дата утверждения'] = whToday();
   }
+  if (to === 'Отклонён' && from === 'На утверждении') { await retroEnsureApprovalCols(); patch['Комментарий утверждающего'] = String(body.comment || '').trim(); }
   await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
+  // K-161: обратное уведомление отправителю (ЛС) — утверждён / отклонён / отозван
+  if (from === 'На утверждении') {
+    const senderName = a['Отправил на утверждение'] || '';
+    let senderId = null; try { const st = await getStaffList(); const u = st.find((x) => x.name === senderName); if (u) senderId = u.id; } catch { /* без ЛС */ }
+    if (senderId && String(senderId) !== meId) {
+      const who = (session && session.fio) || 'портал';
+      const msg = to === 'Утверждён' ? `Акт выпуска ${no} (${title}) утверждён: ${who}. Материалы зарезервированы. ${link}`
+        : to === 'Отклонён' ? `Акт выпуска ${no} (${title}) отклонён: ${who}.${body.comment ? ' Комментарий: ' + String(body.comment).trim() : ''} ${link}`
+        : `Акт выпуска ${no} возвращён в черновик: ${who}. ${link}`;
+      await retroDm(senderId, msg);
+    }
+  }
   return { ok: true, id: a.Id ?? a.id, status: to };
+}
+// K-161: кабинет сотрудника — документы, ждущие его решения (пока акты выпуска; дальше — ЗнЗ, ЛОВ, КД и т.д.)
+async function buildCabinet(session) {
+  const meId = session && session.userId != null ? String(session.userId) : '';
+  const fio = (session && session.fio) || '';
+  const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
+  const out = { ok: true, me: { id: meId, fio, isAdmin }, approvals: [], sent: [], recent: [] };
+  if (!isLive()) return out;
+  try {
+    const d = await buildRetroLive();
+    for (const a of d.items) {
+      const item = { kind: 'retro', kindLabel: 'Акт выпуска', id: a.id, no: a.no, title: a.name, sub: `${a.qty} ${a.unit} · ${a.whereTo || '—'} · материалов ${a.lineCount}${a.cost ? ' · ' + a.cost.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽' : ''}`, status: a.status, date: a.sentAt || a.date, by: a.sentBy, approver: a.approverName, url: '#retro/' + a.id };
+      if (a.status === 'На утверждении' && (String(a.approverId ?? '') === meId || (isAdmin && !a.approverId))) out.approvals.push(item);
+      else if (a.status === 'На утверждении' && a.sentBy && a.sentBy === fio) out.sent.push(item);
+      else if (a.responsible === fio && ['Отклонён', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С'].includes(a.status) && a.approvedAt && (Date.now() - Date.parse(a.approvedAt)) < 30 * 86400000) out.recent.push(item);
+    }
+  } catch (e) { out.warning = String(e.message || e); }
+  out.approvals.sort((x, y) => String(x.date).localeCompare(String(y.date)));
+  return out;
 }
 // предзаполнение состава: из плана МК (planMaterials операций × кол-во) или из типового состава канона
 async function retroPrefill(q) {
@@ -7157,7 +7240,7 @@ async function retroPrintHtml(id) {
   const fmtD = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${m[3]}.${m[2]}.${m[1]}` : esc(d || ''); };
   const n2 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const n3 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
-  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.reason ? `<div class="sm">замена: ${esc(l.reason)}</div>` : ''}</td><td class="mono">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyPlan != null ? n3(l.qtyPlan) : '—'}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td><td class="r">${n2(l.cost)}</td><td class="r">${n2(l.sum)}</td></tr>`).join('');
+  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td><td class="r">${n2(l.cost)}</td><td class="r">${n2(l.sum)}</td></tr>`).join('');
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(a.no)} — Акт выпуска</title>
 <style>body{font-family:'Times New Roman',serif;font-size:12pt;color:#000;margin:18mm 15mm}h1{font-size:15pt;margin:0 0 4px}.sub{font-size:10pt;color:#333;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:10.5pt}th,td{border:1px solid #000;padding:4px 6px;vertical-align:top}th{background:#eee;font-weight:700}.c{text-align:center}.r{text-align:right;white-space:nowrap}.mono{font-family:'Courier New',monospace;white-space:nowrap}.sm{font-size:9pt;color:#444}.kv{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin:10px 0 14px;font-size:11pt}.kv b{display:inline-block;min-width:150px;font-weight:400;color:#444}.sign{margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:30px;font-size:11pt}.line{border-bottom:1px solid #000;height:22px}@media print{@page{size:A4 landscape;margin:12mm}body{margin:0}}</style></head><body>
 <div class="sub">ООО «Петробалт Сервис» · Форма Ф.16–Д.1 (проект) · Акт выпуска продукции и оснастки</div>
@@ -7165,10 +7248,10 @@ async function retroPrintHtml(id) {
 <div class="kv"><div><b>Произведено:</b> ${esc(a.name)}</div><div><b>Обозначение / чертёж:</b> ${esc(a.designation) || '—'}</div>
 <div><b>Количество:</b> ${n3(a.qty)} ${esc(a.unit)}</div><div><b>Куда приходуем:</b> ${esc(a.whereTo) || '—'}${a.account ? ` (счёт ${esc(a.account)})` : ''}</div>
 <div><b>Фактический период:</b> ${esc(a.period) || '—'}</div><div><b>Маршрутная карта:</b> ${esc(a.mk) || '—'}</div>
-<div><b>Ответственный:</b> ${esc(a.responsible) || '—'}</div><div><b>Статус:</b> ${esc(a.status)}${a.onecDocNo ? ` · документ 1С ${esc(a.onecDocNo)} от ${fmtD(a.onecDocDate)}` : ''}</div></div>
-<table><thead><tr><th>№</th><th>Материал (канон)</th><th>Код 1С</th><th>Наименование в 1С</th><th>Склад</th><th>ЕИ</th><th>План</th><th>Факт</th><th>Себест., ₽/ед.</th><th>Сумма, ₽</th></tr></thead>
-<tbody>${rows || '<tr><td colspan="10" class="c">Материалы к списанию не указаны (ранее списаны / выпуск без материалов)</td></tr>'}</tbody>
-<tfoot><tr><th colspan="9" class="r">Итого по себестоимости 1С</th><th class="r">${n2(a.cost)}</th></tr></tfoot></table>
+<div><b>Ответственный (заполнил):</b> ${esc(a.responsible) || '—'}</div><div><b>Статус:</b> ${esc(a.status)}${a.approverName ? ` · на утверждение: ${esc(a.approverName)}` : ''}${a.onecDocNo ? ` · документ 1С ${esc(a.onecDocNo)} от ${fmtD(a.onecDocDate)}` : ''}</div></div>
+<table><thead><tr><th>№</th><th>Материал (канон)</th><th>Код 1С</th><th>Наименование в 1С</th><th>Склад</th><th>ЕИ</th><th>Кол-во</th><th>Себест., ₽/ед.</th><th>Сумма, ₽</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="9" class="c">Материалы к списанию не указаны (ранее списаны / выпуск без материалов)</td></tr>'}</tbody>
+<tfoot><tr><th colspan="8" class="r">Итого по себестоимости 1С</th><th class="r">${n2(a.cost)}</th></tr></tfoot></table>
 ${a.note ? `<p><b>Примечание:</b> ${esc(a.note)}</p>` : ''}
 <div class="sign"><div>Составил (производство): <div class="line"></div><div class="sm">${esc(a.responsible)}</div></div><div>Утвердил: <div class="line"></div><div class="sm">${esc(a.approvedBy)}${a.approvedAt ? ' · ' + fmtD(a.approvedAt) : ''}</div></div>
 <div>Принял к учёту (бухгалтерия): <div class="line"></div></div><div>ИСМ-ид: <span class="mono">${esc(a.ismUid)}</span></div></div>
@@ -7343,6 +7426,13 @@ async function retroPoll1c() {
 const RETRO_CHAT_TITLE = 'Производство ↔ Бухгалтерия ПБС';
 const RETRO_CHAT_USERS = [11, 159, 69, 217]; // Кирилюк А.С., Герасимов А.С., Лещенок Н.И., Ветелкина И.
 const retroChatId = () => String(runtime.BITRIX_ACC_CHAT || process.env.BITRIX_ACC_CHAT || '').trim();
+// K-161: кто может утверждать акты выпуска — id пользователей Bitrix, настраивается в «Настройки → 1С и бухгалтерия» (решение владельца 05.09: сейчас Кирилюк и Герасимов)
+const RETRO_APPROVERS_DEFAULT = [11, 159];
+const retroApproverIds = () => { const raw = runtime.RETRO_APPROVERS != null ? runtime.RETRO_APPROVERS : (process.env.RETRO_APPROVERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : RETRO_APPROVERS_DEFAULT; };
+async function retroApprovers() {
+  const ids = retroApproverIds(); let staff = []; try { staff = await getStaffList(); } catch { staff = []; }
+  return ids.map((id) => { const u = staff.find((x) => Number(x.id) === id); return { id, name: u ? u.name : ('id' + id), position: u ? u.position : '', known: !!u }; });
+}
 async function retroChatNotify(text) {
   const chat = retroChatId(); if (!chat || !/^\d+$/.test(chat)) { onecLog('CHAT-SKIP', 'чат бухгалтерии не настроен (BITRIX_ACC_CHAT)'); return false; }
   try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: text }); return true; } catch (e) { onecLog('CHAT-ERR', String(e.message || e)); return false; }
@@ -7355,6 +7445,49 @@ async function retroChatCreate(body) {
   try { fs.writeFileSync(RUNTIME_FILE, JSON.stringify(runtime, null, 2)); } catch (e) { console.warn('[retro] BITRIX_ACC_CHAT не сохранён в runtime:', e.message); }
   try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: `Чат производства и бухгалтерии ПБС. Сюда портал ИСМ будет присылать: акты выпуска оснастки и изделий (черновики «${ONEC_PROD.title}» в 1С, их нужно проверить и провести), уведомления о проведении, и по понедельникам — сводку за неделю. Вопросы по акту — здесь же, по его номеру.` }); } catch { /* сообщение — не критично */ }
   return { ok: true, chat: String(chatId), users };
+}
+// K-161: печатная форма утверждённого акта — в чат бухгалтерии файлом (PDF через Gotenberg, иначе HTML) с сопроводительным текстом.
+// Текст показывается отправителю заранее (предпросмотр) и правится перед отправкой — решение владельца 05.09.
+async function retroChatPreview(id) {
+  const card = await buildRetroCard(id); if (!card) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
+  const a = card.act; const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+  const n0 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
+  const L = [`📄 Акт выпуска ${a.no} от ${ruDate(a.date)} — ${a.name}${a.designation ? ' (' + a.designation + ')' : ''}`,
+    `Количество: ${n0(a.qty)} ${a.unit} · приходуем: ${a.whereTo || '—'}${a.account ? ' (счёт ' + a.account + ')' : ''}`,
+    a.period ? `Период изготовления: ${a.period}` : '',
+    `Материалы к списанию: ${a.lines.length} поз.${a.cost ? ' · по себестоимости 1С ' + n0(a.cost.toFixed(2)) + ' ₽' : ''}`,
+    ...a.lines.slice(0, 15).map((l, i) => `${i + 1}. ${l.name || l.onecName} — ${l.qtyFact != null ? n0(l.qtyFact) : '?'} ${l.unit}${l.onecCode ? ' · 1С ' + l.onecCode : ''}${l.warehouse ? ' · ' + l.warehouse : ''}`),
+    a.lines.length > 15 ? `… ещё ${a.lines.length - 15} поз. — в форме` : '',
+    `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''} · заполнил: ${a.responsible || '—'}`,
+    a.note ? `Примечание: ${a.note}` : '',
+    `Печатная форма — во вложении. Акт в портале: ${portal}/#retro/${a.id}`].filter(Boolean);
+  return { ok: true, text: L.join('\n'), chat: retroChatId(), chatSent: a.chatSent || '', pdf: !!cfg().GOTENBERG, status: a.status };
+}
+async function retroChatSend(body, session) {
+  const chat = retroChatId(); if (!chat || !/^\d+$/.test(chat)) { const e = new Error('Чат с бухгалтерией не создан — Настройки → «1С и бухгалтерия».'); e.status = 400; throw e; }
+  const card = await buildRetroCard(body.id); if (!card) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
+  const a = card.act;
+  if (!['Утверждён', 'Черновик в 1С', 'Проведён в 1С', 'Закрыт'].includes(a.status)) { const e = new Error(`В чат бухгалтерии уходит утверждённый акт (сейчас «${a.status}»).`); e.status = 400; throw e; }
+  const text = String(body.text || '').trim() || (await retroChatPreview(a.id)).text;
+  const html = await retroPrintHtml(a.id);
+  let buf, fname; try { buf = await htmlToPdf(html, { landscape: true }); fname = `${a.no}.pdf`; } catch (e) { onecLog('CHAT-PDF-SKIP', String(e.message || e)); buf = Buffer.from(html, 'utf8'); fname = `${a.no}.html`; }
+  let attached = false, warning = '';
+  try {
+    const folder = await bitrixCall('im.disk.folder.get', { CHAT_ID: Number(chat) });
+    const folderId = folder && (folder.ID || folder.id); if (!folderId) throw new Error('im.disk.folder.get: папка чата не получена');
+    const up = await bitrixCall('disk.folder.uploadfile', { id: folderId, data: { NAME: fname }, fileContent: [fname, buf.toString('base64')], generateUniqueName: true });
+    const fileId = up && (up.ID || up.id); if (!fileId) throw new Error('disk.folder.uploadfile: файл не загружен');
+    await bitrixCall('im.disk.file.commit', { CHAT_ID: Number(chat), UPLOAD_ID: fileId, MESSAGE: text });
+    attached = true;
+  } catch (e) {
+    warning = String(e.message || e); onecLog('CHAT-FILE-ERR', warning);
+    const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+    const sent = await retroChatNotify(text + `\nПечатная форма: ${portal}/api/retro/print?id=${a.id}${fname.endsWith('.pdf') ? '&pdf=1' : ''}`);
+    if (!sent) { const e = new Error('Сообщение в чат не отправлено: ' + warning); e.status = 502; throw e; }
+  }
+  const mark = `${whToday()} · ${(session && session.fio) || 'портал'}${attached ? '' : ' · ссылкой'}`;
+  try { await ncEnsureColumn('retro_outputs', 'В чат бухгалтерии', 'SingleLineText'); await ncUpdate('retro_outputs', a.id, { 'В чат бухгалтерии': mark }); } catch (e) { console.warn('[retro] отметка «В чат бухгалтерии» не записана:', e.message); }
+  return { ok: true, attached, file: fname, warning, chatSent: mark };
 }
 // недельная сводка (понедельник 09:00) — раз в неделю, состояние в .data/1c/digest.json
 const RETRO_DIGEST_FILE = path.join(__dirname, '.data', '1c', 'digest.json');
@@ -8857,7 +8990,7 @@ function settingsView() {
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
     // K-159: 1С и бухгалтерия
-    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''),
+    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','),
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -8897,6 +9030,7 @@ function saveSettings(body) {
   if (typeof body.onecWarehouse === 'string' && body.onecWarehouse.trim()) next.ONEC_WAREHOUSE = body.onecWarehouse.trim();
   if (body.onecDryRun != null) next.ONEC_DRY_RUN = (body.onecDryRun === true || body.onecDryRun === 'true' || body.onecDryRun === 1 || body.onecDryRun === '1') ? '1' : '0';
   if (typeof body.accChat === 'string') next.BITRIX_ACC_CHAT = body.accChat.trim().replace(/^chat/, '');
+  if (typeof body.retroApprovers === 'string') next.RETRO_APPROVERS = body.retroApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
   // и вернуться к env/дефолту (заодно это штатный способ выключить канонический редирект).
   if (body.portalBase === '__clear__') delete next.PORTAL_BASE;
@@ -9869,7 +10003,7 @@ function resolveRole(user) { return resolvePortalRoles(user)[0] || 'guest'; }
 //  Уровни доступа к разделу: 'write' (✏ запись), 'view' (👁 просмотр), отсутствие
 //  ключа = нет доступа (—). Спецключ _all задаёт дефолт для всех разделов роли.
 // ════════════════════════════════════════════════════════════════════════════
-const RBAC_SECTIONS = ['board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'onec', 'retro', 'warehouse', 'design', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
+const RBAC_SECTIONS = ['cabinet', 'board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'onec', 'retro', 'warehouse', 'design', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
 const RBAC_MATRIX = {
   // Администратор — всё ✏ (обрабатывается отдельно как '*').
   'Администратор': '*',
@@ -9900,6 +10034,7 @@ const RBAC_MATRIX = {
 // Уровень доступа роли к разделу: 'write' | 'view' | null(—).
 function sectionAccess(role, section) {
   if (role === 'Администратор') return 'write';
+  if (section === 'cabinet') return role && role !== 'guest' ? 'write' : null; // K-161: кабинет сотрудника — у каждого авторизованного
   const m = RBAC_MATRIX[role];
   if (!m) return null;
   if (Object.prototype.hasOwnProperty.call(m, section)) return m[section]; // явное (в т.ч. null)
@@ -9955,7 +10090,7 @@ const RBAC_API_PREFIX = [
   ['/api/sales', 'sales'], ['/api/lov', 'lov'],
   ['/api/counterparties', 'counterparties'], ['/api/counterparty', 'counterparties'],
   ['/api/procurement', 'purchase'], ['/api/purchase', 'purchase'], // /api/purchase/* — интеграция оплаты (K-83), тот же раздел «Закупки»
-  ['/api/catalog', 'catalog'], ['/api/onec', 'onec'], ['/api/retro', 'retro'], ['/api/product-groups', 'prodgroups'], ['/api/design', 'design'], ['/api/docs', 'docs'],
+  ['/api/catalog', 'catalog'], ['/api/onec', 'onec'], ['/api/retro', 'retro'], ['/api/cabinet', 'cabinet'], ['/api/product-groups', 'prodgroups'], ['/api/design', 'design'], ['/api/docs', 'docs'],
   ['/api/logistics', 'logistics'], ['/api/drawing-mass', 'logistics'],
   ['/api/settings', 'settings'],
   ['/api/dict', '@ref'], ['/api/records', '@records'], ['/api/bitrix', '@system'], ['/api/print', '@print'],
@@ -12185,19 +12320,25 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
     // ── Акты выпуска (K-158, ретро-учёт произведённого) ──
+    if (p === '/api/cabinet') { try { return sendJson(res, 200, await buildCabinet(sessionFromReq(req))); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } });
       try { return sendJson(res, 200, await buildRetroLive()); } catch (e) { return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES }, warning: String(e.message || e) }); }
     }
     if (p === '/api/retro/item') { try { const c = await buildRetroCard(url.searchParams.get('id')); return c ? sendJson(res, 200, c) : sendJson(res, 404, { error: 'Акт не найден.' }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/approvers') { try { return sendJson(res, 200, { ok: true, approvers: await retroApprovers(), me: (sessionFromReq(req) || {}).userId || null }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/chat-preview') { try { return sendJson(res, 200, await retroChatPreview(url.searchParams.get('id'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/prefill') { try { return sendJson(res, 200, await retroPrefill({ routeId: url.searchParams.get('routeId') || '', canonId: url.searchParams.get('canonId') || '', qty: url.searchParams.get('qty') || '1' })); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/print') {
-      try { const html = await retroPrintHtml(url.searchParams.get('id')); if (!html) return sendJson(res, 404, { error: 'Акт не найден.' }); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(html); }
+      try { const html = await retroPrintHtml(url.searchParams.get('id')); if (!html) return sendJson(res, 404, { error: 'Акт не найден.' });
+        if (url.searchParams.get('pdf') === '1' && cfg().GOTENBERG) { try { const pdf = await htmlToPdf(html, { landscape: true }); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="act-${encodeURIComponent(url.searchParams.get('id'))}.pdf"` }); return res.end(pdf); } catch (e) { console.warn('[retro] PDF не собран, отдаю HTML:', e.message); } }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(html); }
       catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
     if (p === '/api/retro/save' && req.method === 'POST') { try { return sendJson(res, 200, await retroSave(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/status' && req.method === 'POST') { try { return sendJson(res, 200, await retroSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/typical' && req.method === 'POST') { try { return sendJson(res, 200, await retroSaveTypical(await readBody(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/chat-send' && req.method === 'POST') { try { return sendJson(res, 200, await retroChatSend(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/to1c' && req.method === 'POST') { try { return sendJson(res, 200, await retroTo1c(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/poll1c' && req.method === 'POST') { try { return sendJson(res, 200, await retroPoll1c()); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/chat-create' && req.method === 'POST') {

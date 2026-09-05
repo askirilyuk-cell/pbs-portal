@@ -44,6 +44,7 @@ function cfg() {
     ONEC_URL: String(runtime.ONEC_URL || process.env.ONEC_URL || '').replace(/\/+$/, ''),
     ONEC_LOGIN: runtime.ONEC_LOGIN || process.env.ONEC_LOGIN || '',
     ONEC_PASSWORD: runtime.ONEC_PASSWORD || process.env.ONEC_PASSWORD || '',
+    ONEC_WAREHOUSE: String(runtime.ONEC_WAREHOUSE ?? process.env.ONEC_WAREHOUSE ?? 'Склад производство').trim() || 'Склад производство', // K-159: склад выпуска в 1С
     SALES_DEPT: String(runtime.SALES_DEPT_ID || process.env.SALES_DEPT_ID || '81'), // отдел продаж ПБС в Bitrix → участники чата ЗП по умолчанию
     HUB_CHAT: String(runtime.BITRIX_HUB_CHAT ?? process.env.BITRIX_HUB_CHAT ?? '4175'), // хаб-чат «Запросы ПБС» → анонс новых ЗП (пусто = не слать)
     ZNZ_CHAT: String(runtime.BITRIX_ZNZ_CHAT ?? process.env.BITRIX_ZNZ_CHAT ?? '8873'), // чат «Портал ИСМ — Цеховые заявки» → анонс новых ЗнЗ (пусто = не слать)
@@ -7139,6 +7140,210 @@ ${a.note ? `<p><b>Примечание:</b> ${esc(a.note)}</p>` : ''}
 }
 
 // ============================================================================
+//  K-159: ЧЕРНОВИК «ОТЧЁТ ПРОИЗВОДСТВА ЗА СМЕНУ» ИЗ АКТА ВЫПУСКА + ЧАТ С БУХГАЛТЕРИЕЙ + ОПРОС ПРОВЕДЕНИЯ.
+//  Наследует границы этапа 1 коннектора (ветка feature/1c-connector-etap1, принята QA 28.07):
+//   • к 1С — только GET и POST; POST — только НЕпроведённые черновики (Posted=false) в белый список;
+//   • любой POST закрыт флагом ONEC_DRY_RUN (по умолчанию ВКЛЮЧЁН) — портал показывает план, не пишет;
+//   • связка акт ↔ документ: «ИСМ-ид:<uuid>» в «Комментарий» документа + Ref_Key в акте;
+//   • дубль ищем по uuid ПЕРЕД созданием; тело ответа 1С наружу не отдаём (только лог .data/1c).
+//  Реквизиты (организация, ответственный, счёт затрат, номенклатурная группа) — из свежего документа
+//  того же вида в базе, склад — по имени из ONEC_WAREHOUSE, счета — по коду из плана счетов.
+// ============================================================================
+const ONEC_ZERO_GUID = '00000000-0000-0000-0000-000000000000';
+const ONEC_PROD = { entity: 'Document_ОтчетПроизводстваЗаСмену', vid: 'ОтчетПроизводстваЗаСмену', title: 'Отчёт производства за смену' };
+const ONEC_POST_ALLOWED = new Set([ONEC_PROD.entity, 'Catalog_Номенклатура']);
+const ONEC_UID_TAG = 'ИСМ-ид:';
+const ONEC_UID_RE = new RegExp(ONEC_UID_TAG + '([0-9a-fA-F-]{36})');
+const ONEC_NOM_GROUP_PORTAL = 'Создано порталом';
+const onecIsGuid = (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
+const onecLit = (s) => String(s == null ? '' : s).replace(/'/g, "''");
+const onecErr = (status, msg) => { const e = new Error(msg); e.status = status; return e; };
+const onecDryRun = () => { const v = runtime.ONEC_DRY_RUN ?? process.env.ONEC_DRY_RUN; return !(v === 0 || v === '0' || v === false || v === 'false'); };
+const onecUidFromComment = (s) => { const m = ONEC_UID_RE.exec(String(s == null ? '' : s)); return (m && onecIsGuid(m[1])) ? m[1].toLowerCase() : ''; };
+const onecDateNow = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+// Единственная точка ЗАПИСИ в 1С. PATCH/PUT/DELETE не существуют как возможность.
+async function onecPost(entity, payload) {
+  if (!onecConfigured()) throw onecErr(501, 'Интеграция с 1С не настроена.');
+  if (onecDryRun()) { onecLog('REFUSE', `POST ${entity} заблокирован флагом ONEC_DRY_RUN`); throw onecErr(409, 'Запись в 1С выключена (режим проверки). Портал показал план документа; включить запись можно в «Настройках» → «1С и бухгалтерия».'); }
+  if (!ONEC_POST_ALLOWED.has(entity)) { onecLog('REFUSE', `запись в «${entity}» вне белого списка`); throw onecErr(500, 'Отказ: портал пишет только в разрешённые объекты 1С.'); }
+  if (!payload || typeof payload !== 'object' || payload.DeletionMark) throw onecErr(500, 'Отказ: некорректное тело документа.');
+  if (entity.startsWith('Document_') && payload.Posted !== false) throw onecErr(500, 'Отказ: портал создаёт только непроведённые черновики.');
+  if (entity.startsWith('Catalog_') && (payload.IsFolder === true || !/Портал ИСМ/.test(String(payload.Комментарий || '')))) throw onecErr(500, 'Отказ: элемент справочника без метки портала не создаётся.');
+  const c = cfg(); const t0 = Date.now();
+  let res;
+  try {
+    res = await fetch(`${c.ONEC_URL}/${entity}?$format=json`, { method: 'POST', headers: { Authorization: 'Basic ' + Buffer.from(`${c.ONEC_LOGIN}:${c.ONEC_PASSWORD}`).toString('base64'), Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(ONEC_TIMEOUT_MS) });
+  } catch (e) { onecLog('FAIL', `POST ${entity} → ${e.name}: ${e.message}`); throw onecErr(504, '1С не ответила на создание документа.'); }
+  const txt = await res.text();
+  onecLog(res.ok ? 'POST-OK' : 'POST-ERR', `${res.status} ${Date.now() - t0}мс ${entity}${res.ok ? '' : ' :: ' + txt.slice(0, 500).replace(/\s+/g, ' ')}`);
+  if (!res.ok) throw onecErr(502, `1С отклонила создание (${res.status}). Подробности — в серверном логе portal/.data/1c/requests.log.`);
+  try { return JSON.parse(txt); } catch { throw onecErr(502, '1С вернула не JSON на создание.'); }
+}
+// реквизиты по образцу свежего документа + план счетов + склад (кэш 10 мин по базе/логину/складу)
+let _onecTpl = null, _onecTplKey = '', _onecTplExp = 0;
+async function onecRetroTemplate() {
+  const c = cfg(); const key = [c.ONEC_URL, c.ONEC_LOGIN, c.ONEC_WAREHOUSE].join('|');
+  if (_onecTpl && _onecTplKey === key && Date.now() < _onecTplExp) return _onecTpl;
+  const gid = (v) => (onecIsGuid(v) && v !== ONEC_ZERO_GUID) ? v : null;
+  const last = ((await onecGet(`${ONEC_PROD.entity}?$top=1&$orderby=Date desc&$filter=ВидОперации eq '${ONEC_PROD.vid}'`)).value || [])[0] || {};
+  const orgs = (await onecGet(`Catalog_Организации?$top=2&$select=Ref_Key,Description&$filter=DeletionMark eq false`)).value || [];
+  const whs = (await onecGet(`Catalog_Склады?$top=50&$select=Ref_Key,Description,IsFolder,DeletionMark`)).value || [];
+  const want = String(c.ONEC_WAREHOUSE || 'Склад производство').trim();
+  const wh = whs.find((w) => !w.IsFolder && !w.DeletionMark && String(w.Description || '').trim() === want);
+  if (!wh) throw onecErr(400, `Склад «${want}» в 1С не найден. Доступные: ${whs.filter((w) => !w.IsFolder).map((w) => '«' + String(w.Description || '').trim() + '»').join(', ')}. Поправьте «Склад в 1С» в настройках.`);
+  const accounts = (await onecGet('ChartOfAccounts_Хозрасчетный?$top=600&$select=Ref_Key,Code')).value || [];
+  const accByCode = new Map(accounts.map((a) => [String(a.Code || '').trim(), a.Ref_Key]));
+  const pRow = (Array.isArray(last.Продукция) && last.Продукция[0]) || {};
+  const mRow = (Array.isArray(last.Материалы) && last.Материалы[0]) || {};
+  const tpl = {
+    orgKey: gid(last.Организация_Key) || gid(orgs[0] && orgs[0].Ref_Key) || ONEC_ZERO_GUID, orgName: (orgs[0] && orgs[0].Description) || '',
+    responsibleKey: gid(last.Ответственный_Key) || ONEC_ZERO_GUID, costAccountKey: gid(last.СчетЗатрат_Key) || ONEC_ZERO_GUID,
+    deptKey: gid(last.ПодразделениеОрганизации_Key) || ONEC_ZERO_GUID, costDeptKey: gid(last.ПодразделениеЗатрат_Key) || ONEC_ZERO_GUID,
+    nomGroupKey: gid(pRow.НоменклатурнаяГруппа_Key) || gid(mRow.НоменклатурнаяГруппа_Key) || ONEC_ZERO_GUID,
+    prodAccountKey: gid(pRow.Счет_Key) || ONEC_ZERO_GUID, costItemKey: gid(mRow.СтатьяЗатрат_Key) || ONEC_ZERO_GUID,
+    warehouseKey: wh.Ref_Key, warehouseName: String(wh.Description || '').trim(), accByCode, sampleNo: last.Number || '',
+  };
+  _onecTpl = tpl; _onecTplKey = key; _onecTplExp = Date.now() + 10 * 60 * 1000;
+  return tpl;
+}
+// единица измерения и группа номенклатуры по ключу (точечное чтение)
+async function onecNomInfo(key) {
+  if (!onecIsGuid(key)) return {};
+  try { return await onecGet(`Catalog_Номенклатура(guid'${key}')?$select=Ref_Key,Description,ЕдиницаИзмерения_Key,ВидНоменклатуры_Key,НоменклатурнаяГруппа_Key`); } catch { return {}; }
+}
+// номенклатура произведённого: по канону → 1С-алиас; по точному имени в зеркале; иначе — план создать черновик в группе «Создано порталом»
+async function onecRetroProduct(act, mirror) {
+  const byCanon = act.canonId ? mirror.filter((m) => String(m.catalog_canon_id) === String(act.canonId)) : [];
+  const exact = mirror.filter((m) => String(m['Наименование'] || '').trim().toLowerCase() === String(act.name || '').trim().toLowerCase());
+  const hit = byCanon.find((m) => String(m['Наименование'] || '').trim().toLowerCase() === String(act.name || '').trim().toLowerCase()) || byCanon[0] || exact[0] || null;
+  if (hit) return { key: hit['Ключ 1С'], code: hit['Код 1С'], name: hit['Наименование'], create: null };
+  const groups = (await onecGet(`Catalog_Номенклатура?$top=5&$select=Ref_Key,Description&$filter=IsFolder eq true and Description eq '${onecLit(ONEC_NOM_GROUP_PORTAL)}'`)).value || [];
+  const g = groups[0];
+  if (!g) throw onecErr(400, `Для «${act.name}» нет номенклатуры в 1С, а группы «${ONEC_NOM_GROUP_PORTAL}» в справочнике нет — заведите её в 1С или создайте позицию вручную.`);
+  const units = (await onecGet(`Catalog_КлассификаторЕдиницИзмерения?$top=300&$select=Ref_Key,Description`)).value || [];
+  const u = units.find((x) => String(x.Description || '').trim().toLowerCase() === String(act.unit || 'шт').trim().toLowerCase()) || units.find((x) => String(x.Description || '').trim() === 'шт');
+  return { key: '', code: '', name: act.name, create: { Description: String(act.name).slice(0, 100), Parent_Key: g.Ref_Key, ЕдиницаИзмерения_Key: (u && u.Ref_Key) || ONEC_ZERO_GUID, Комментарий: `Портал ИСМ: акт выпуска ${act.no}, ${ONEC_UID_TAG}${act.ismUid}. Черновик номенклатуры — требует проверки бухгалтером.` } };
+}
+// сборка тела документа + план для показа (dry-run) — из акта и его состава
+async function onecRetroBuild(act) {
+  const tpl = await onecRetroTemplate();
+  const mirror = await ncListAll('onec_items'); const byKey = new Map(mirror.map((m) => [String(m['Ключ 1С'] || ''), m]));
+  const product = await onecRetroProduct(act, mirror);
+  const prodAcc = tpl.accByCode.get(String(act.account || '').trim()) || tpl.prodAccountKey;
+  const prodInfo = product.key ? await onecNomInfo(product.key) : {};
+  const materials = [];
+  const skipped = [];
+  for (const l of act.lines) {
+    const qf = Number(l.qtyFact); if (!l.onecKey || !(qf > 0)) { skipped.push(l.name || l.onecName || '—'); continue; }
+    const m = byKey.get(String(l.onecKey)); const info = await onecNomInfo(l.onecKey);
+    const accCode = String((m && m['Счета']) || '').split(', ').filter(Boolean)[0] || '';
+    materials.push({ LineNumber: String(materials.length + 1), Номенклатура_Key: l.onecKey, Количество: qf, КоличествоМест: 0, ЕдиницаИзмерения_Key: info.ЕдиницаИзмерения_Key || ONEC_ZERO_GUID, Коэффициент: 1,
+      Счет_Key: tpl.accByCode.get(accCode) || ONEC_ZERO_GUID, НоменклатурнаяГруппа_Key: info.НоменклатурнаяГруппа_Key || tpl.nomGroupKey, СтатьяЗатрат_Key: tpl.costItemKey, _view: { name: l.onecName || (m && m['Наименование']) || l.name, code: l.onecCode || (m && m['Код 1С']) || '', qty: qf, unit: l.unit, account: accCode } });
+  }
+  const comment = `${ONEC_UID_TAG}${act.ismUid} · ${act.no} · Портал ИСМ: акт выпуска «${act.name}», ${act.qty} ${act.unit}${act.period ? ', период ' + act.period : ''}${act.whereTo ? ', ' + act.whereTo : ''}`;
+  const doc = {
+    Date: onecDateNow(), Posted: false, ВидОперации: ONEC_PROD.vid, Организация_Key: tpl.orgKey, Склад_Key: tpl.warehouseKey,
+    ПодразделениеОрганизации_Key: tpl.deptKey, СчетЗатрат_Key: tpl.costAccountKey, ПодразделениеЗатрат_Key: tpl.costDeptKey, Ответственный_Key: tpl.responsibleKey, Комментарий: comment,
+    Продукция: [{ LineNumber: '1', Номенклатура_Key: product.key || ONEC_ZERO_GUID, Количество: act.qty, КоличествоМест: 0, ЕдиницаИзмерения_Key: prodInfo.ЕдиницаИзмерения_Key || ONEC_ZERO_GUID, Коэффициент: 1, ПлановаяСтоимость: 0, СуммаПлановая: 0, Счет_Key: prodAcc, НоменклатурнаяГруппа_Key: prodInfo.НоменклатурнаяГруппа_Key || tpl.nomGroupKey }],
+    Материалы: materials.map(({ _view, ...r }) => r),
+  };
+  const plan = { entity: ONEC_PROD.title, warehouse: tpl.warehouseName, org: tpl.orgName, sampleNo: tpl.sampleNo, product: { name: product.name, code: product.code, willCreate: !!product.create, account: act.account, qty: act.qty, unit: act.unit }, materials: materials.map((m) => m._view), skipped, comment };
+  return { doc, plan, product };
+}
+// найти уже созданный документ по uuid (предфильтр 1С + точное сравнение) или по сохранённой ссылке
+async function onecRetroFindExisting(act) {
+  if (onecIsGuid(act.onecDocKey)) {
+    try { const d = await onecGet(`${ONEC_PROD.entity}(guid'${act.onecDocKey}')?$select=Ref_Key,Number,Date,Posted,DeletionMark,Комментарий`); if (d && d.Ref_Key && !d.DeletionMark) return d; } catch { /* нет — ищем по uid */ }
+  }
+  if (!onecIsGuid(act.ismUid)) return null;
+  try {
+    const rows = (await onecGet(`${ONEC_PROD.entity}?$top=20&$orderby=Date desc&$select=Ref_Key,Number,Date,Posted,DeletionMark,Комментарий&$filter=substringof('${onecLit(ONEC_UID_TAG + act.ismUid)}',Комментарий) and DeletionMark eq false`)).value || [];
+    return rows.find((r) => onecUidFromComment(r.Комментарий) === String(act.ismUid).toLowerCase()) || null;
+  } catch (e) { throw onecErr(502, 'Не удалось проверить, есть ли уже документ в 1С — создание отменено, чтобы не задвоить выпуск.'); }
+}
+// главный сценарий: акт «Утверждён» → черновик в 1С (или план при ONEC_DRY_RUN)
+async function retroTo1c(body, session) {
+  const card = await buildRetroCard(body.id); if (!card) throw onecErr(404, 'Акт не найден.');
+  const act = card.act;
+  if (!['Утверждён', 'Черновик в 1С'].includes(act.status)) throw onecErr(400, `Черновик в 1С создаётся из акта в статусе «Утверждён» (сейчас «${act.status}»).`);
+  if (!onecConfigured()) throw onecErr(501, 'Интеграция с 1С не настроена.');
+  const existing = await onecRetroFindExisting(act);
+  if (existing) {
+    const patch = { 'Документ 1С (ключ)': existing.Ref_Key, 'Документ 1С (№)': existing.Number || '', 'Документ 1С (дата)': String(existing.Date || '').slice(0, 10) };
+    if (act.status !== 'Черновик в 1С') patch['Статус'] = existing.Posted ? 'Проведён в 1С' : 'Черновик в 1С';
+    await ncUpdate('retro_outputs', act.id, patch);
+    return { ok: true, already: true, doc: { ref: existing.Ref_Key, number: existing.Number, date: String(existing.Date || '').slice(0, 10), posted: !!existing.Posted } };
+  }
+  const built = await onecRetroBuild(act);
+  if (onecDryRun()) return { ok: true, dryRun: true, plan: built.plan, note: 'Режим проверки: в 1С ничего не записано. Так будет выглядеть документ.' };
+  if (built.product.create) {
+    const nom = await onecPost('Catalog_Номенклатура', built.product.create);
+    built.doc.Продукция[0].Номенклатура_Key = nom.Ref_Key; built.plan.product.code = nom.Code || ''; built.plan.product.created = true;
+  }
+  const created = await onecPost(ONEC_PROD.entity, built.doc);
+  const doc = { ref: created.Ref_Key, number: created.Number || '', date: String(created.Date || '').slice(0, 10) };
+  await ncUpdate('retro_outputs', act.id, { 'Статус': 'Черновик в 1С', 'Документ 1С (ключ)': doc.ref, 'Документ 1С (№)': doc.number, 'Документ 1С (дата)': doc.date });
+  onecLog('RETRO', `${act.no} → ${ONEC_PROD.title} №${doc.number} (${doc.ref})`);
+  await retroChatNotify(`📄 ${act.no} «${act.name}» — ${act.qty} ${act.unit}, ${act.whereTo || ''}\nЧерновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')}. Материалов: ${built.plan.materials.length}, себестоимость ${(act.cost || 0).toLocaleString('ru-RU')} ₽.${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '» — проверьте реквизиты.' : ''}\nПросьба проверить и провести. Акт в портале: ${cfg().PORTAL_BASE}/#retro/${act.id}`);
+  return { ok: true, doc, plan: built.plan };
+}
+// опрос проведения: акты «Черновик в 1С» → Posted / DeletionMark
+async function retroPoll1c() {
+  if (!onecConfigured()) return { ok: false, note: '1С не настроена' };
+  const acts = (await ncListSoft('retro_outputs')).filter((a) => a['Статус'] === 'Черновик в 1С' && onecIsGuid(a['Документ 1С (ключ)']));
+  const out = { checked: acts.length, posted: [], rejected: [], errors: [] };
+  for (const a of acts) {
+    try {
+      const d = await onecGet(`${ONEC_PROD.entity}(guid'${a['Документ 1С (ключ)']}')?$select=Ref_Key,Number,Posted,DeletionMark`);
+      if (d.DeletionMark) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); await retroChatNotify(`✖ ${a['№ акта']} «${a['Наименование']}»: документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. Александр, посмотрите причину.`); }
+      else if (d.Posted) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С' }); out.posted.push(a['№ акта']); await retroChatNotify(`✔ ${a['№ акта']} «${a['Наименование']}»: ${ONEC_PROD.title} №${d.Number || ''} проведён. Спасибо!`); }
+    } catch (e) { if (e.status === 502 && /404|не найден/.test(String(e.message))) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); } else out.errors.push(`${a['№ акта']}: ${e.message}`); }
+  }
+  if (out.posted.length) { try { onecRunSync(); } catch { /* синк — best-effort */ } }
+  if (out.checked) onecLog('POLL', JSON.stringify(out));
+  return { ok: true, ...out };
+}
+// чат «Производство ↔ Бухгалтерия ПБС»: id — в runtime BITRIX_ACC_CHAT; сообщения best-effort
+const RETRO_CHAT_TITLE = 'Производство ↔ Бухгалтерия ПБС';
+const RETRO_CHAT_USERS = [11, 159, 69, 217]; // Кирилюк А.С., Герасимов А.С., Лещенок Н.И., Ветелкина И.
+const retroChatId = () => String(runtime.BITRIX_ACC_CHAT || process.env.BITRIX_ACC_CHAT || '').trim();
+async function retroChatNotify(text) {
+  const chat = retroChatId(); if (!chat || !/^\d+$/.test(chat)) { onecLog('CHAT-SKIP', 'чат бухгалтерии не настроен (BITRIX_ACC_CHAT)'); return false; }
+  try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${chat}`, MESSAGE: text }); return true; } catch (e) { onecLog('CHAT-ERR', String(e.message || e)); return false; }
+}
+async function retroChatCreate(body) {
+  if (retroChatId()) return { ok: true, already: true, chat: retroChatId() };
+  const users = (Array.isArray(body.users) && body.users.length ? body.users : RETRO_CHAT_USERS).map(Number).filter(Boolean);
+  const chatId = await bitrixCall('im.chat.add', { TYPE: 'CHAT', TITLE: RETRO_CHAT_TITLE, DESCRIPTION: 'Акты выпуска и списание материалов из портала ИСМ: черновики в 1С, вопросы по проведению, недельная сводка.', USERS: users });
+  runtime.BITRIX_ACC_CHAT = String(chatId);
+  try { fs.writeFileSync(RUNTIME_FILE, JSON.stringify(runtime, null, 2)); } catch (e) { console.warn('[retro] BITRIX_ACC_CHAT не сохранён в runtime:', e.message); }
+  try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${chatId}`, MESSAGE: `Чат производства и бухгалтерии ПБС. Сюда портал ИСМ будет присылать: акты выпуска оснастки и изделий (черновики «${ONEC_PROD.title}» в 1С, их нужно проверить и провести), уведомления о проведении, и по понедельникам — сводку за неделю. Вопросы по акту — здесь же, по его номеру.` }); } catch { /* сообщение — не критично */ }
+  return { ok: true, chat: String(chatId), users };
+}
+// недельная сводка (понедельник 09:00) — раз в неделю, состояние в .data/1c/digest.json
+const RETRO_DIGEST_FILE = path.join(__dirname, '.data', '1c', 'digest.json');
+async function retroWeeklyDigest(force) {
+  const now = new Date(); const wk = `${now.getFullYear()}-${Math.floor((now - new Date(now.getFullYear(), 0, 1)) / 604800000)}`;
+  let st = {}; try { st = JSON.parse(fs.readFileSync(RETRO_DIGEST_FILE, 'utf8')); } catch { st = {}; }
+  if (!force && (now.getDay() !== 1 || now.getHours() !== 9 || st.week === wk)) return { ok: true, skipped: true };
+  const d = await buildRetroLive(); const it = d.items;
+  const waiting = it.filter((a) => a.status === 'Черновик в 1С'), approved = it.filter((a) => a.status === 'Утверждён'), posted = it.filter((a) => a.status === 'Проведён в 1С');
+  const overdue = waiting.filter((a) => a.approvedAt && (Date.now() - Date.parse(a.approvedAt)) > 7 * 86400000);
+  const L = [`📊 Сводка по актам выпуска на ${now.toLocaleDateString('ru-RU')}`,
+    `Ждут проведения в 1С: ${waiting.length}${waiting.length ? ' — ' + waiting.map((a) => `${a.no} (${a.onecDocNo || 'без №'})`).join(', ') : ''}`,
+    overdue.length ? `⚠ Висят больше недели: ${overdue.map((a) => a.no).join(', ')}` : '',
+    `Утверждены, черновик в 1С ещё не создан: ${approved.length}`, `Проведено всего: ${posted.length}`,
+    `Реестр: ${cfg().PORTAL_BASE}/#retro`].filter(Boolean);
+  const sent = await retroChatNotify(L.join('\n'));
+  try { fs.mkdirSync(path.dirname(RETRO_DIGEST_FILE), { recursive: true }); fs.writeFileSync(RETRO_DIGEST_FILE, JSON.stringify({ week: wk, at: now.toISOString(), sent })); } catch { /* best-effort */ }
+  return { ok: true, sent, lines: L };
+}
+// таймеры: опрос проведения — раз в час; сводка — проверка каждые 20 минут (сработает в понедельник 09:xx)
+setTimeout(() => { retroPoll1c().catch(() => {}); }, 90 * 1000);
+setInterval(() => { retroPoll1c().catch(() => {}); }, 60 * 60 * 1000);
+setInterval(() => { retroWeeklyDigest(false).catch(() => {}); }, 20 * 60 * 1000);
+
+// ============================================================================
 //  Раздел «Участки и оборудование» (K-35, контур ДП–О.3 «Инфраструктура и рабочая
 //  среда») — бэкенд поверх модели migrate-025 (таблица «Оборудование» + связи
 //  участок→оборудование (hm) и задачи↔оборудование (mm, поле «Оборудование (реестр)»)).
@@ -8615,6 +8820,8 @@ function settingsView() {
     // параметры продаж/КП (K-05 §5.3) — редактируются в «Настройках раздела», без деплоя кода
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
+    // K-159: 1С и бухгалтерия
+    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''),
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -8650,6 +8857,10 @@ function saveSettings(body) {
   if (typeof body.bitrixUsers === 'string') next.BITRIX_USERS = body.bitrixUsers.trim();
   if (typeof body.salesDept === 'string' && body.salesDept.trim()) next.SALES_DEPT_ID = body.salesDept.trim();
   if (typeof body.hubChat === 'string') next.BITRIX_HUB_CHAT = body.hubChat.trim();
+  // K-159: 1С и бухгалтерия (пароль 1С через настройки не меняется — только runtime/env)
+  if (typeof body.onecWarehouse === 'string' && body.onecWarehouse.trim()) next.ONEC_WAREHOUSE = body.onecWarehouse.trim();
+  if (body.onecDryRun != null) next.ONEC_DRY_RUN = (body.onecDryRun === true || body.onecDryRun === 'true' || body.onecDryRun === 1 || body.onecDryRun === '1') ? '1' : '0';
+  if (typeof body.accChat === 'string') next.BITRIX_ACC_CHAT = body.accChat.trim().replace(/^chat/, '');
   // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
   // и вернуться к env/дефолту (заодно это штатный способ выключить канонический редирект).
   if (body.portalBase === '__clear__') delete next.PORTAL_BASE;
@@ -11951,6 +12162,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/retro/save' && req.method === 'POST') { try { return sendJson(res, 200, await retroSave(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/status' && req.method === 'POST') { try { return sendJson(res, 200, await retroSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/typical' && req.method === 'POST') { try { return sendJson(res, 200, await retroSaveTypical(await readBody(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/to1c' && req.method === 'POST') { try { return sendJson(res, 200, await retroTo1c(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/poll1c' && req.method === 'POST') { try { return sendJson(res, 200, await retroPoll1c()); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/chat-create' && req.method === 'POST') {
+      if (!(req.roles || []).includes('Администратор') && rbacEnforceOn()) return sendJson(res, 403, { error: 'Создать чат с бухгалтерией может только Администратор.' });
+      try { return sendJson(res, 200, await retroChatCreate(await readBody(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/retro/digest' && req.method === 'POST') { try { return sendJson(res, 200, await retroWeeklyDigest(true)); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/onec-status') return sendJson(res, 200, { configured: onecConfigured(), dryRun: onecDryRun(), warehouse: cfg().ONEC_WAREHOUSE || '', chat: retroChatId() });
     // ── Материалы по 1С (K-156, этап 0 ретро-учёта) — зеркало номенклатуры и остатков; запись только в портал ──
     if (p === '/api/onec') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', configured: false, items: [], accounts: [], warehouses: [], kpis: {}, sync: onecSync });

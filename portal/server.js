@@ -1337,7 +1337,7 @@ async function buildRoutesLive() {
     return {
       id: rid, mk: r['№ МК'] || '', type: r['Тип МК'] || '', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '',
-      revision: r['Ревизия'] || '', status: r['Статус'] || '', opCount: _linkIds(r['Операции маршрута']).length,
+      revision: r['Ревизия'] || '', status: r['Статус'] || '', statusMk: r['Статус МК'] || 'Черновик', author: r['Автор'] || '', opCount: _linkIds(r['Операции маршрута']).length,
       hasCoop, coopDone: hasCoop ? coopDone : null, coopOverdueDays,
     };
   }).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
@@ -1412,7 +1412,7 @@ async function buildRouteCard(id) {
     route: {
       id: r.Id ?? r.id, mk: r['№ МК'] || '', type: r['Тип МК'] || '', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
-      material: r['Материал'] || '',
+      material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
       blank, blankText: mkBlankText(blank),
       bom: mkBomParse(r['Спецификация материалов']), bomText: mkBomText(mkBomParse(r['Спецификация материалов'])), // K-160
@@ -1484,7 +1484,7 @@ async function buildRouteEdit(id) {
     route: {
       id: rid, mk: r['№ МК'] || '', type: r['Тип МК'] || 'КОМ', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '',
-      revision: r['Ревизия'] || '', statusMk: r['Статус МК'] || 'Черновик', material: r['Материал'] || '',
+      revision: r['Ревизия'] || '', statusMk: r['Статус МК'] || 'Черновик', material: r['Материал'] || '', author: r['Автор'] || '',
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
       bom: mkBomParse(r['Спецификация материалов']), // K-160
     },
@@ -1527,7 +1527,7 @@ async function nextMkNumber(type, year) {
 }
 
 // создать/обновить маршрутную карту вместе с операциями и входящими компонентами
-async function saveRoute(body) {
+async function saveRoute(body, session) {
   const type = String(body.type || '').trim();
   if (!['КОМ', 'СБР'].includes(type)) throw new Error('Тип МК должен быть КОМ или СБР.');
   const name = String(body.name || '').trim();
@@ -1572,6 +1572,10 @@ async function saveRoute(body) {
   const otById = new Map(opTypes.map((t) => [t.Id ?? t.id, t]));
 
   let routeId = (body.id != null && body.id !== '') ? Number(body.id) : null;
+  // K-166: автор МК — кто создал в портале (для «Мои черновики» и Ф.13); у старых МК без автора — тот, кто сохраняет
+  try { await ncEnsureColumn('routes', 'Автор', 'SingleLineText'); const fio = (session && session.fio) || '';
+    if (fio) { const prev = routeId != null ? (await ncListSoft('routes')).find((x) => (x.Id ?? x.id) === routeId) : null; if (!prev || !String(prev['Автор'] || '').trim()) routeRow['Автор'] = fio; } }
+  catch (e) { console.warn('МК: колонка «Автор» недоступна:', e.message); }
   let mk = '';
   let oldStatusMk = null; // МК-резерв металла (этап 1): нужен статус ДО этого сохранения — иначе не увидеть переход «→ В производстве»
   if (routeId == null) {
@@ -7230,7 +7234,11 @@ async function buildCabinet(session) {
     } catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'ЗнЗ: ' + String(e.message || e); }
     out.purchases.sort((x, y) => String(x.date).localeCompare(String(y.date)));
   }
-  // K-165: мои черновики в других разделах — ЗнЗ «Новая», где я инициатор (МК автора не хранят — не включаем)
+  // K-166: черновики МК (статус МК «Черновик»), где я автор
+  try { const rl = await buildRoutesLive(); for (const r of ((rl && rl.routes) || [])) { if (r.statusMk !== 'Черновик' || String(r.author || '').trim() !== fio) continue;
+      out.drafts.push({ kind: 'mk', kindLabel: 'Маршрутная карта', section: 'Маршруты (Ф.13)', id: r.id, no: r.mk, title: r.name, sub: `${r.type || ''}${r.designation ? ' · ' + r.designation : ''}${r.productType ? ' · ' + r.productType : ''} · операций ${r.opCount || 0}`, status: 'Черновик', date: '', url: '#routes/' + encodeURIComponent(r.mk || r.id), returned: null }); } }
+  catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'черновики МК: ' + String(e.message || e); }
+  // K-165: мои черновики в других разделах — ЗнЗ «Новая», где я инициатор
   try {
     const pr = await buildProcurementLive(); const list = (pr && pr.requests) || [];
     for (const z of list) { const st = String(z.status || z.statusStored || '').trim() || 'Новая'; if (st !== 'Новая' || String(z.initiator || '').trim() !== fio) continue;
@@ -11982,7 +11990,7 @@ const server = http.createServer(async (req, res) => {
     // K-18 сохранение маршрута (создать/обновить + операции + компоненты)
     if (p === '/api/routes/save' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 400, { error: 'Запись доступна только в режиме LIVE (NocoDB).' });
-      try { return sendJson(res, 200, await saveRoute(await readBody(req))); }
+      try { return sendJson(res, 200, await saveRoute(await readBody(req), sessionFromReq(req))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // K-18 генерация карт задач Ф.14 из МК

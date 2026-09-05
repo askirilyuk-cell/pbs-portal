@@ -13686,6 +13686,7 @@
         {key:'desig',label:'Чертёж',w:150,cls:'nw c-gray',cell:r=>r.designation?`<span style="font-family:var(--mono)">${esc(r.designation)}</span>`:'<span class="c-gray">—</span>',sortVal:r=>r.designation},
         {key:'prod',label:'Продукция',w:140,cls:'nw c-gray',cell:r=>esc(r.productType||'—'),sortVal:r=>r.productType},
         {key:'ops',label:'Опер.',w:72,align:'center',cls:'nw ct',cell:r=>r.type==='СБР'?'<span class="c-gray">сборка</span>':String(r.opCount||0),sortVal:r=>r.opCount||0},
+        {key:'author',label:'Автор',w:150,cls:'nw ell c-gray',cell:r=>esc(r.author||'—'),sortVal:r=>r.author},
         {key:'status',label:'Статус',w:180,cls:'nw',cell:r=>rtStatus(r.status)+rtCoopBadge(r),sortVal:r=>r.status},
       ];
       erpGrid(document.getElementById('rtgrid'),{key:'routes',cols,rows,onRow:r=>openRouteCard(host,r.id),
@@ -13764,6 +13765,7 @@
           <div><div style="font-size:11px;color:var(--sl-500)">Чертёж / обозначение</div><div style="font-family:var(--mono)">${esc(r.designation||'—')}</div></div>
           <div><div style="font-size:11px;color:var(--sl-500)">Продукция / линейка</div><div>${esc(r.productType||'—')}</div></div>
           <div><div style="font-size:11px;color:var(--sl-500)">Материал</div><div>${esc(r.material||'—')}</div></div>
+          <div><div style="font-size:11px;color:var(--sl-500)">Автор</div><div>${esc(r.author||'—')}</div></div>
           ${r.blankText?`<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500)">Заготовка (рекомендация технолога)</div><div style="color:#1e7d43;font-weight:600">${esc(r.blankText)}</div></div>`:''}
           ${(()=>{ const bom=r.bom||[]; if(bom.length) return `<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500);margin-bottom:4px">Спецификация материалов (на 1 шт)</div><table class="dt" style="font-size:12px;width:100%"><thead><tr><th style="width:130px">Роль</th><th>Материал</th><th style="width:140px">Норма</th><th style="width:150px">Входит на</th></tr></thead><tbody>${bom.map(m=>`<tr><td>${esc(m.role)}</td><td>${esc(m.name||('канон #'+m.canonId))}</td><td class="code">${m.norm!=null?rtNum(m.norm)+' '+esc(m.unit||''):'—'}</td><td class="c-gray">${m.opNo?'оп. '+esc(String(m.opNo)):'с первой операции'}</td></tr>`).join('')}</tbody></table></div>`; const agg=rtPlanAggregate(d.operations||[]); return agg.length?`<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500)">Материалы по маршруту (план, из канона · на 1 шт)</div><div style="color:var(--navy);font-weight:600">${agg.map(m=>esc(m.name)+(m.qty!=null?' — '+rtNum(m.qty)+(m.unit?' '+esc(m.unit):''):'')).join('; ')}</div></div>`:''; })()}
         </div>
@@ -14028,6 +14030,7 @@
           <div class="rt-fld"><label>Изделие / обозначение (чертёж)</label><input class="rt-inp" id="rb-desig" value="${rtEscA(rt.designation)}" placeholder="2ДТ.180.00.00"></div>
           <div class="rt-fld" style="grid-column:span 2"><label>Материал изделия (текст для Ф.13; авто из спецификации, можно поправить)</label><input class="rt-inp" id="rb-material" value="${rtEscA(rt.material)}" placeholder="напр. Сталь 45 + наплавка ПГ-СР4"></div>
           <div class="rt-fld"><label>Ревизия</label><input class="rt-inp" id="rb-rev" value="${rtEscA(rt.revision)}" placeholder="A"></div>
+          <div class="rt-fld"><label>Автор</label><input class="rt-inp" value="${rtEscA(rt.author||(AUTH&&AUTH.fio)||'')}" disabled title="Кто создал МК в портале; подставляется автоматически"></div>
           <div class="rt-fld"><label>Тип продукции</label><select class="rt-inp" id="rb-prod"><option value="">— не указан —</option>${opt(cat.productTypes,rt.productType)}</select></div>
           <div class="rt-fld"><label>Статус МК</label><select class="rt-inp" id="rb-status">${opt(cat.statuses,rt.statusMk)}</select></div>
         </div>

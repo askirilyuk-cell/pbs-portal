@@ -357,6 +357,14 @@ function pbsLogoDataUri() {
   catch { _pbsLogoDataUri = ''; }
   return _pbsLogoDataUri;
 }
+// K-162: монохромный вариант логотипа для бланков, которые печатают на ч/б принтере (решение владельца 05.09) — public/assets/PBS_LOGO_2026_mono.png
+let _pbsLogoMonoDataUri;
+function pbsLogoMonoDataUri() {
+  if (_pbsLogoMonoDataUri !== undefined) return _pbsLogoMonoDataUri;
+  try { _pbsLogoMonoDataUri = 'data:image/png;base64,' + fs.readFileSync(path.join(__dirname, 'public', 'assets', 'PBS_LOGO_2026_mono.png')).toString('base64'); }
+  catch { _pbsLogoMonoDataUri = pbsLogoDataUri(); }
+  return _pbsLogoMonoDataUri;
+}
 // бланк «Лист регистрации изменений к документам ИСМ» (Ф.3–Л.1) — 1:1 к утверждённому PDF,
 // самодостаточный HTML для печати/сохранения в PDF браузером (тот же фирменный колонтитул, что и у др. бланков).
 function buildChangeSheetHtml(code, docName, rows) {
@@ -7109,6 +7117,9 @@ async function retroEnsureApprovalCols() { for (const [t, u] of RETRO_APPROVAL_C
 // личное сообщение пользователю Bitrix (best-effort; DIALOG_ID = id пользователя, как у проверяющего ЗнЗ)
 async function retroDm(userId, text) {
   if (!userId || !cfg().BITRIX) return false;
+  // K-162: системное уведомление (колокольчик, «от портала»), а не личное сообщение от владельца вебхука; при отказе метода — ЛС
+  try { await bitrixCall('im.notify.system.add', { USER_ID: Number(userId), MESSAGE: text, TAG: 'ISM_RETRO_' + Date.now() }); return true; }
+  catch (e) { onecLog('NOTIFY-ERR', `${userId}: ${e.message || e}`); }
   try { await bitrixCall('im.message.add', { DIALOG_ID: String(userId), MESSAGE: text }); return true; } catch (e) { onecLog('DM-ERR', `${userId}: ${e.message || e}`); return false; }
 }
 async function retroSetStatus(body, session) {
@@ -7172,7 +7183,7 @@ async function buildCabinet(session) {
   const meId = session && session.userId != null ? String(session.userId) : '';
   const fio = (session && session.fio) || '';
   const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
-  const out = { ok: true, me: { id: meId, fio, isAdmin }, approvals: [], sent: [], recent: [] };
+  const out = { ok: true, me: { id: meId, fio, isAdmin, purchaseHandler: purchaseHandlerIds().includes(Number(meId)) }, approvals: [], sent: [], recent: [], purchases: [] };
   if (!isLive()) return out;
   try {
     const d = await buildRetroLive();
@@ -7183,6 +7194,18 @@ async function buildCabinet(session) {
       else if (a.responsible === fio && ['Отклонён', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С'].includes(a.status) && a.approvedAt && (Date.now() - Date.parse(a.approvedAt)) < 30 * 86400000) out.recent.push(item);
     }
   } catch (e) { out.warning = String(e.message || e); }
+  // K-162: закупщикам — новые ЗнЗ, которые никто не взял в работу (кнопка «Принять в работу», как в разделе «Закупки»)
+  if (out.me.purchaseHandler) {
+    try {
+      const pr = await buildProcurementLive(); const list = (pr && (pr.requests || pr.items)) || [];
+      for (const z of list) {
+        const st = String(z.status || z.statusStored || '').trim();
+        if (!['Новая', 'Согласована', ''].includes(st) || (z.assignee && z.assignee.fio)) continue;
+        out.purchases.push({ kind: 'znz', kindLabel: 'Заявка на закупку', id: z.id, no: z.numZnz, title: z.name, sub: `${z.qty || ''} ${z.unit || ''} · ${z.category || z.type || '—'}${z.urgency ? ' · ' + z.urgency : ''}${z.initiatorDept ? ' · ' + z.initiatorDept : ''}`, status: st || 'Новая', date: z.created, by: z.initiator || '', url: '#purchase/' + encodeURIComponent(z.numZnz || z.id) });
+      }
+    } catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'ЗнЗ: ' + String(e.message || e); }
+    out.purchases.sort((x, y) => String(x.date).localeCompare(String(y.date)));
+  }
   out.approvals.sort((x, y) => String(x.date).localeCompare(String(y.date)));
   return out;
 }
@@ -7234,27 +7257,73 @@ async function retroSaveTypical(body) {
   return { ok: true, canonId: cid, lines: typical.length };
 }
 // печатная форма акта (HTML под печать браузером; PDF через Gotenberg — следующим шагом вместе с кодом формы ИСМ)
-async function retroPrintHtml(id) {
-  const card = await buildRetroCard(id); if (!card) return null;
-  const a = card.act; const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
-  const fmtD = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${m[3]}.${m[2]}.${m[1]}` : esc(d || ''); };
+async function retroPrintHtml(id, opts) {
+  // K-162: бланк в стиле форм ИСМ (колонтитул ПБС, код формы, титул), монохром для ч/б печати; подписи с датами; «что произведено» выделено
+  const blank = !!(opts && opts.blank);
+  const card = blank ? { act: { id: '', no: 'ВП-ГГГГ-NNN', date: '', name: '', designation: '', qty: '', unit: 'шт', whereTo: '', account: '', period: '', mk: '', canonName: '', ismUid: '', status: '', onecDocNo: '', lines: [], cost: 0, note: '', responsible: '', sentBy: '', sentAt: '', approvedBy: '', approvedAt: '' } } : await buildRetroCard(id); if (!card) return null;
+  const a = card.act; const esc = hesc;
+  const fmtD = (d) => ruDate(d) || esc(d || '');
   const n2 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const n3 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
-  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td><td class="r">${n2(l.cost)}</td><td class="r">${n2(l.sum)}</td></tr>`).join('');
+  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td><td class="r">${n2(l.cost)}</td><td class="r">${n2(l.sum)}</td></tr>`).join('');
+  const sig = (role, who, when) => `<div class="sg"><div class="sg-r">${role}</div><div class="sg-l"><span class="sg-n">${esc(who || '')}</span><span class="sg-d">${when ? fmtD(when) : '«___» ________ 20___ г.'}</span></div><div class="sg-h"><span>подпись</span><span>Фамилия И.О.</span><span>дата</span></div></div>`;
+  const logo = pbsLogoMonoDataUri();
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(a.no)} — Акт выпуска</title>
-<style>body{font-family:'Times New Roman',serif;font-size:12pt;color:#000;margin:18mm 15mm}h1{font-size:15pt;margin:0 0 4px}.sub{font-size:10pt;color:#333;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:10.5pt}th,td{border:1px solid #000;padding:4px 6px;vertical-align:top}th{background:#eee;font-weight:700}.c{text-align:center}.r{text-align:right;white-space:nowrap}.mono{font-family:'Courier New',monospace;white-space:nowrap}.sm{font-size:9pt;color:#444}.kv{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin:10px 0 14px;font-size:11pt}.kv b{display:inline-block;min-width:150px;font-weight:400;color:#444}.sign{margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:30px;font-size:11pt}.line{border-bottom:1px solid #000;height:22px}@media print{@page{size:A4 landscape;margin:12mm}body{margin:0}}</style></head><body>
-<div class="sub">ООО «Петробалт Сервис» · Форма Ф.16–Д.1 (проект) · Акт выпуска продукции и оснастки</div>
-<h1>Акт выпуска ${esc(a.no)} от ${fmtD(a.date)}</h1>
-<div class="kv"><div><b>Произведено:</b> ${esc(a.name)}</div><div><b>Обозначение / чертёж:</b> ${esc(a.designation) || '—'}</div>
-<div><b>Количество:</b> ${n3(a.qty)} ${esc(a.unit)}</div><div><b>Куда приходуем:</b> ${esc(a.whereTo) || '—'}${a.account ? ` (счёт ${esc(a.account)})` : ''}</div>
-<div><b>Фактический период:</b> ${esc(a.period) || '—'}</div><div><b>Маршрутная карта:</b> ${esc(a.mk) || '—'}</div>
-<div><b>Ответственный (заполнил):</b> ${esc(a.responsible) || '—'}</div><div><b>Статус:</b> ${esc(a.status)}${a.approverName ? ` · на утверждение: ${esc(a.approverName)}` : ''}${a.onecDocNo ? ` · документ 1С ${esc(a.onecDocNo)} от ${fmtD(a.onecDocDate)}` : ''}</div></div>
-<table><thead><tr><th>№</th><th>Материал (канон)</th><th>Код 1С</th><th>Наименование в 1С</th><th>Склад</th><th>ЕИ</th><th>Кол-во</th><th>Себест., ₽/ед.</th><th>Сумма, ₽</th></tr></thead>
-<tbody>${rows || '<tr><td colspan="9" class="c">Материалы к списанию не указаны (ранее списаны / выпуск без материалов)</td></tr>'}</tbody>
-<tfoot><tr><th colspan="8" class="r">Итого по себестоимости 1С</th><th class="r">${n2(a.cost)}</th></tr></tfoot></table>
-${a.note ? `<p><b>Примечание:</b> ${esc(a.note)}</p>` : ''}
-<div class="sign"><div>Составил (производство): <div class="line"></div><div class="sm">${esc(a.responsible)}</div></div><div>Утвердил: <div class="line"></div><div class="sm">${esc(a.approvedBy)}${a.approvedAt ? ' · ' + fmtD(a.approvedAt) : ''}</div></div>
-<div>Принял к учёту (бухгалтерия): <div class="line"></div></div><div>ИСМ-ид: <span class="mono">${esc(a.ismUid)}</span></div></div>
+<style>
+  @page{size:A4 landscape;margin:10mm}
+  *{box-sizing:border-box} body{font-family:'DejaVu Sans','Arial',sans-serif;color:#111;margin:0;font-size:10.5px}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:6px;margin-bottom:2px;font-size:8px;color:#444;line-height:1.35}
+  .top .en{text-align:right} .top b{font-size:10px;color:#111}
+  .top .logo{flex:0 0 auto;padding:0 10px} .top .logo img{height:56px;width:auto;display:block}
+  .co{text-align:center;font-size:12px;font-weight:700;margin:8px 0 2px}
+  .code{text-align:center;font-size:11px;font-weight:700;letter-spacing:.04em}
+  .title{text-align:center;font-size:15px;font-weight:700;line-height:1.2;margin:3px 0 1px}
+  .sub{text-align:center;font-size:9.5px;color:#444;margin-bottom:8px}
+  .no{display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 8px;font-size:11px} .no b{font-size:13px}
+  .prod{border:2px solid #222;padding:8px 12px;margin:0 0 8px;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+  .prod .k{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:.04em} .prod .v{font-size:16px;font-weight:700} .prod .q{font-size:14px;font-weight:700;white-space:nowrap} .prod .d{font-family:'DejaVu Sans Mono','Consolas',monospace;font-size:11px}
+  table.info{width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed;margin-bottom:8px}
+  table.info td{border:1px solid #999;padding:3px 6px;vertical-align:top}
+  table.info td.k{width:16%;background:#F0F0F0;color:#444;font-size:9px} table.info td.v{width:17.3%;font-weight:600}
+  .sec{margin-top:8px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid #999;padding-bottom:2px;margin-bottom:5px}
+  table.pos{width:100%;border-collapse:collapse;font-size:9.5px;table-layout:fixed}
+  table.pos th{background:#E6E6E6;color:#111;font-weight:700;padding:4px 5px;border:1px solid #666;text-align:center}
+  table.pos td{padding:3px 5px;border:1px solid #999;vertical-align:top;word-wrap:break-word} table.pos tfoot th{background:#F4F4F4;text-align:right}
+  .c{text-align:center} .r{text-align:right;white-space:nowrap} .mono{font-family:'DejaVu Sans Mono','Consolas',monospace} .sm{font-size:8.5px;color:#444}
+  .note{margin-top:6px;font-size:10px} .note b{color:#444;font-weight:600}
+  .signs{display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;margin-top:14px}
+  .sg .sg-r{font-size:9.5px;font-weight:700;margin-bottom:14px} .sg .sg-l{display:flex;justify-content:space-between;border-bottom:1px solid #111;padding:0 4px 2px;font-size:10px} .sg .sg-n{padding-left:34%} .sg .sg-d{white-space:nowrap}
+  .sg .sg-h{display:flex;justify-content:space-between;font-size:7.5px;color:#666;padding:1px 4px 0} .sg .sg-h span:first-child{width:30%} .sg .sg-h span:nth-child(2){flex:1;text-align:center}
+  .req{margin-top:12px;width:48%;border-collapse:collapse;font-size:9px} .req td{padding:2px 6px;border:1px solid #BBB} .req td:first-child{width:42%;color:#555;background:#F7F7F7}
+  .ft{margin-top:10px;padding-top:5px;border-top:1px solid #BBB;text-align:center;font-size:8px;color:#666;line-height:1.4}
+</style></head><body>
+<div class="top">
+  <div class="ru"><b>ООО "ПЕТРОБАЛТ СЕРВИС"</b><br>238315, Российская Федерация, Калининградская область,<br>муниципальный округ Зеленоградский, территория Индустриальный парк Храброво,<br>ул. Инноваций, зд. 1<br>Тел: +7 401 220 11 05 &nbsp; Email: info@petrobalt.com.ru</div>
+  ${logo ? `<div class="logo"><img src="${logo}" alt="ПБС"></div>` : ''}
+  <div class="en"><b>"PETROBALT SERVICE", LLC</b><br>238315, Russia,<br>Kaliningradskaya obl, Zelenogradsk area, Khrabrovo industrial park,<br>Ulitca Innovaciy, zd.1<br>Tel: +7 401 220 11 05 &nbsp; Email: info@petrobalt.com.ru</div>
+</div>
+<div class="co">ООО «ПЕТРОБАЛТ СЕРВИС»</div>
+<div class="code">Ф.16–Д.1</div>
+<div class="title">АКТ ВЫПУСКА ПРОДУКЦИИ И ОСНАСТКИ</div>
+<div class="sub">оприходование произведённого и списание материалов (ДП–Д.1 · ISO 9001:2015 п. 8.5)</div>
+<div class="no"><span>Акт № <b>${esc(a.no)}</b> от ${blank ? '«___» ________ 20___ г.' : fmtD(a.date)}</span><span>${blank ? '' : 'Статус: <b>' + esc(a.status) + '</b>'}${a.onecDocNo ? ` · документ 1С ${esc(a.onecDocNo)} от ${fmtD(a.onecDocDate)}` : ''}</span></div>
+<div class="prod"><span class="k">Произведено</span><span class="v">${esc(a.name) || (blank ? '&nbsp;' : '')}</span>${a.designation ? `<span class="d">${esc(a.designation)}</span>` : ''}<span class="q">${blank ? '________ шт' : n3(a.qty) + ' ' + esc(a.unit)}</span></div>
+<table class="info"><tr><td class="k">Куда приходуем</td><td class="v">${esc(a.whereTo) || '—'}</td><td class="k">Счёт учёта</td><td class="v">${esc(a.account) || '—'}</td><td class="k">Фактический период</td><td class="v">${esc(a.period) || '—'}</td></tr>
+<tr><td class="k">Маршрутная карта</td><td class="v">${esc(a.mk) || '—'}</td><td class="k">Канон-номенклатура</td><td class="v">${esc(a.canonName) || '—'}</td><td class="k">ИСМ-ид</td><td class="v mono" style="font-weight:400;font-size:8.5px">${esc(a.ismUid)}</td></tr></table>
+<div class="sec">Материалы к списанию (по остаткам 1С на дату утверждения)</div>
+<table class="pos"><colgroup><col style="width:3%"><col style="width:23%"><col style="width:10%"><col style="width:23%"><col style="width:13%"><col style="width:5%"><col style="width:7%"><col style="width:8%"><col style="width:8%"></colgroup>
+<thead><tr><th>№</th><th>Материал (канон)</th><th>Код 1С</th><th>Наименование в 1С</th><th>Склад</th><th>ЕИ</th><th>Кол-во</th><th>Себест., ₽/ед.</th><th>Сумма, ₽</th></tr></thead>
+<tbody>${rows || (blank ? '<tr><td class="c">1</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td class="c">2</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td class="c">3</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>' : '<tr><td colspan="9" class="c">Материалы к списанию не указаны (ранее списаны / выпуск без материалов)</td></tr>')}</tbody>
+<tfoot><tr><th colspan="8">Итого по себестоимости 1С, ₽</th><th class="r">${blank ? '' : n2(a.cost)}</th></tr></tfoot></table>
+${a.note ? `<div class="note"><b>Примечание:</b> ${esc(a.note)}</div>` : ''}
+<div class="signs">
+  ${sig('Составил (производство)', a.responsible, a.date)}
+  ${sig('Отправил на утверждение', a.sentBy, a.sentAt)}
+  ${sig('Утвердил', a.approvedBy, a.approvedAt)}
+  ${sig('Принял к учёту (бухгалтерия)', '', '')}
+</div>
+<table class="req"><tr><td>Код документа:</td><td>Ф.16–Д.1</td></tr><tr><td>Версия:</td><td>1.0</td></tr><tr><td>Дата введения:</td><td>05.09.2026</td></tr>${blank ? '' : `<tr><td>Сформировано порталом ИСМ:</td><td>${ruDate(new Date().toISOString())}</td></tr>`}</table>
+<div class="ft">Форма создана порталом ИСМ ПБС · один акт = один документ «Отчёт производства за смену» в 1С · связка по ИСМ-ид в комментарии документа</div>
 <script>if(location.search.includes('print=1'))window.print();</script></body></html>`;
 }
 
@@ -7428,6 +7497,9 @@ const RETRO_CHAT_USERS = [11, 159, 69, 217]; // Кирилюк А.С., Гера�
 const retroChatId = () => String(runtime.BITRIX_ACC_CHAT || process.env.BITRIX_ACC_CHAT || '').trim();
 // K-161: кто может утверждать акты выпуска — id пользователей Bitrix, настраивается в «Настройки → 1С и бухгалтерия» (решение владельца 05.09: сейчас Кирилюк и Герасимов)
 const RETRO_APPROVERS_DEFAULT = [11, 159];
+// K-162: кто принимает заявки на закупку (ЗнЗ) в работу — видят новые ЗнЗ в «Мой кабинет»; настраивается там же, по умолчанию Рисалиева Динара (57)
+const PURCHASE_HANDLERS_DEFAULT = [57];
+const purchaseHandlerIds = () => { const raw = runtime.PURCHASE_HANDLERS != null ? runtime.PURCHASE_HANDLERS : (process.env.PURCHASE_HANDLERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : PURCHASE_HANDLERS_DEFAULT; };
 const retroApproverIds = () => { const raw = runtime.RETRO_APPROVERS != null ? runtime.RETRO_APPROVERS : (process.env.RETRO_APPROVERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : RETRO_APPROVERS_DEFAULT; };
 async function retroApprovers() {
   const ids = retroApproverIds(); let staff = []; try { staff = await getStaffList(); } catch { staff = []; }
@@ -8990,7 +9062,7 @@ function settingsView() {
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
     // K-159: 1С и бухгалтерия
-    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','),
+    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','),
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -9030,6 +9102,7 @@ function saveSettings(body) {
   if (typeof body.onecWarehouse === 'string' && body.onecWarehouse.trim()) next.ONEC_WAREHOUSE = body.onecWarehouse.trim();
   if (body.onecDryRun != null) next.ONEC_DRY_RUN = (body.onecDryRun === true || body.onecDryRun === 'true' || body.onecDryRun === 1 || body.onecDryRun === '1') ? '1' : '0';
   if (typeof body.accChat === 'string') next.BITRIX_ACC_CHAT = body.accChat.trim().replace(/^chat/, '');
+  if (typeof body.purchaseHandlers === 'string') next.PURCHASE_HANDLERS = body.purchaseHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   if (typeof body.retroApprovers === 'string') next.RETRO_APPROVERS = body.retroApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
   // и вернуться к env/дефолту (заодно это штатный способ выключить канонический редирект).
@@ -12330,7 +12403,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/retro/chat-preview') { try { return sendJson(res, 200, await retroChatPreview(url.searchParams.get('id'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/prefill') { try { return sendJson(res, 200, await retroPrefill({ routeId: url.searchParams.get('routeId') || '', canonId: url.searchParams.get('canonId') || '', qty: url.searchParams.get('qty') || '1' })); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/print') {
-      try { const html = await retroPrintHtml(url.searchParams.get('id')); if (!html) return sendJson(res, 404, { error: 'Акт не найден.' });
+      try { const html = await retroPrintHtml(url.searchParams.get('id'), { blank: url.searchParams.get('blank') === '1' }); if (!html) return sendJson(res, 404, { error: 'Акт не найден.' });
         if (url.searchParams.get('pdf') === '1' && cfg().GOTENBERG) { try { const pdf = await htmlToPdf(html, { landscape: true }); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="act-${encodeURIComponent(url.searchParams.get('id'))}.pdf"` }); return res.end(pdf); } catch (e) { console.warn('[retro] PDF не собран, отдаю HTML:', e.message); } }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(html); }
       catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }

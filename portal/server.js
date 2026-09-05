@@ -4425,13 +4425,16 @@ async function officeToPdf(file) {
   return pdf;
 }
 // HTML → PDF через Gotenberg (Chromium-роут) — для печатных форм-реестров
-async function htmlToPdf(html, { landscape = true } = {}) {
+async function htmlToPdf(html, { landscape = true, footerHtml = '', headerHtml = '', marginBottom = '0.4' } = {}) {
   const c = cfg();
   if (!c.GOTENBERG) throw new Error('Не задан адрес Gotenberg («Настройки»).');
   const fd = new FormData();
   fd.append('files', new Blob([Buffer.from(html, 'utf8')], { type: 'text/html' }), 'index.html');
+  // K-163: колонтитулы Chromium (стр. N из M) — файлы header.html/footer.html; классы pageNumber/totalPages подставляет Chromium
+  if (headerHtml) fd.append('files', new Blob([Buffer.from(headerHtml, 'utf8')], { type: 'text/html' }), 'header.html');
+  if (footerHtml) fd.append('files', new Blob([Buffer.from(footerHtml, 'utf8')], { type: 'text/html' }), 'footer.html');
   if (landscape) fd.append('landscape', 'true');
-  for (const [k, v] of [['marginTop', '0.4'], ['marginBottom', '0.4'], ['marginLeft', '0.4'], ['marginRight', '0.4'], ['printBackground', 'true']]) fd.append(k, v);
+  for (const [k, v] of [['marginTop', '0.4'], ['marginBottom', marginBottom], ['marginLeft', '0.4'], ['marginRight', '0.4'], ['printBackground', 'true']]) fd.append(k, v);
   const r = await fetch(`${c.GOTENBERG.replace(/\/+$/, '')}/forms/chromium/convert/html`, { method: 'POST', body: fd });
   if (!r.ok) throw new Error(`Gotenberg ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`);
   return Buffer.from(await r.arrayBuffer());
@@ -7006,6 +7009,7 @@ function retroActShape(r, lines) {
     // K-161: маршрут утверждения — кому отправлен, кем и когда; комментарий утверждающего (при отклонении)
     approverId: r['Утверждающий (id)'] != null && r['Утверждающий (id)'] !== '' ? Number(r['Утверждающий (id)']) : null, approverName: r['Утверждающий'] || '',
     sentBy: r['Отправил на утверждение'] || '', sentAt: r['Дата отправки'] || '', approverComment: r['Комментарий утверждающего'] || '', chatSent: r['В чат бухгалтерии'] || '',
+    acceptedBy: r['Принял к учёту (1С)'] || '', acceptedAt: r['Дата проведения 1С'] || '',
     canonId: r.catalog_canon_id ?? (canon ? (canon.Id ?? canon.id) : null) ?? null, canonName: canon ? (canon['Каноническое наименование'] || '') : '',
     lines: ls, lineCount: ls.length, editable: RETRO_EDITABLE.has(r['Статус'] || 'Черновик'),
   };
@@ -7271,31 +7275,35 @@ async function retroPrintHtml(id, opts) {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(a.no)} — Акт выпуска</title>
 <style>
   @page{size:A4 landscape;margin:10mm}
-  *{box-sizing:border-box} body{font-family:'DejaVu Sans','Arial',sans-serif;color:#111;margin:0;font-size:10.5px}
-  .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:6px;margin-bottom:2px;font-size:8px;color:#444;line-height:1.35}
-  .top .en{text-align:right} .top b{font-size:10px;color:#111}
-  .top .logo{flex:0 0 auto;padding:0 10px} .top .logo img{height:56px;width:auto;display:block}
-  .co{text-align:center;font-size:12px;font-weight:700;margin:8px 0 2px}
-  .code{text-align:center;font-size:11px;font-weight:700;letter-spacing:.04em}
-  .title{text-align:center;font-size:15px;font-weight:700;line-height:1.2;margin:3px 0 1px}
-  .sub{text-align:center;font-size:9.5px;color:#444;margin-bottom:8px}
-  .no{display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 8px;font-size:11px} .no b{font-size:13px}
-  .prod{border:2px solid #222;padding:8px 12px;margin:0 0 8px;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
-  .prod .k{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:.04em} .prod .v{font-size:16px;font-weight:700} .prod .q{font-size:14px;font-weight:700;white-space:nowrap} .prod .d{font-family:'DejaVu Sans Mono','Consolas',monospace;font-size:11px}
+  *{box-sizing:border-box} body{font-family:'DejaVu Sans','Arial',sans-serif;color:#222;margin:0;font-size:10.5px}
+  /* стиль по ДП–Л.1.2: корпоративный #1F4E79, шапка таблиц синяя с белым текстом, как в Ф.3–Л.1 и Ф.15–Д.1 */
+  .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1F4E79;padding-bottom:6px;margin-bottom:2px;font-size:8px;color:#555;line-height:1.35}
+  .top .en{text-align:right} .top b{font-size:10px;color:#1F4E79}
+  .top .logo{flex:0 0 auto;padding:0 10px} .top .logo img{height:60px;width:auto;display:block}
+  .co{text-align:center;font-size:12px;font-weight:700;color:#1F4E79;margin:8px 0 2px}
+  .code{text-align:center;font-size:11px;font-weight:700;color:#1F4E79;letter-spacing:.04em}
+  .title{text-align:center;font-size:15px;font-weight:700;color:#1F4E79;line-height:1.2;margin:3px 0 1px}
+  .sub{text-align:center;font-size:9.5px;color:#555;margin-bottom:8px}
+  .no{display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 8px;font-size:11px} .no b{font-size:13px;color:#1c2b3a}
+  .prod{border:2px solid #1F4E79;background:#F2F6FB;padding:8px 12px;margin:0 0 8px;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+  .prod .k{font-size:9px;color:#41546a;text-transform:uppercase;letter-spacing:.04em} .prod .v{font-size:16px;font-weight:700;color:#1c2b3a} .prod .q{font-size:14px;font-weight:700;white-space:nowrap;color:#1F4E79} .prod .d{font-family:'DejaVu Sans Mono','Consolas',monospace;font-size:11px;color:#1c2b3a}
   table.info{width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed;margin-bottom:8px}
-  table.info td{border:1px solid #999;padding:3px 6px;vertical-align:top}
-  table.info td.k{width:16%;background:#F0F0F0;color:#444;font-size:9px} table.info td.v{width:17.3%;font-weight:600}
-  .sec{margin-top:8px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid #999;padding-bottom:2px;margin-bottom:5px}
+  table.info td{border:1px solid #C4D2E2;padding:3px 6px;vertical-align:top}
+  table.info td.k{width:16%;background:#F2F6FB;color:#41546a;font-size:9px} table.info td.v{width:17.3%;font-weight:600;color:#1c2b3a}
+  .sec{margin-top:8px;font-size:9.5px;font-weight:700;color:#1F4E79;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid #C4D2E2;padding-bottom:2px;margin-bottom:5px}
   table.pos{width:100%;border-collapse:collapse;font-size:9.5px;table-layout:fixed}
-  table.pos th{background:#E6E6E6;color:#111;font-weight:700;padding:4px 5px;border:1px solid #666;text-align:center}
-  table.pos td{padding:3px 5px;border:1px solid #999;vertical-align:top;word-wrap:break-word} table.pos tfoot th{background:#F4F4F4;text-align:right}
+  table.pos thead{display:table-header-group} table.pos tfoot{display:table-row-group} table.pos tr{page-break-inside:avoid}
+  table.pos th{background:#1F4E79;color:#fff;font-weight:600;padding:4px 5px;border:1px solid #1F4E79;text-align:center}
+  table.pos td{padding:3px 5px;border:1px solid #BBB;vertical-align:top;word-wrap:break-word} table.pos tbody tr:nth-child(even){background:#F7FAFD} table.pos tfoot th{background:#F2F6FB;color:#1c2b3a;border-color:#BBB;text-align:right}
   .c{text-align:center} .r{text-align:right;white-space:nowrap} .mono{font-family:'DejaVu Sans Mono','Consolas',monospace} .sm{font-size:8.5px;color:#444}
   .note{margin-top:6px;font-size:10px} .note b{color:#444;font-weight:600}
   .signs{display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;margin-top:14px}
-  .sg .sg-r{font-size:9.5px;font-weight:700;margin-bottom:14px} .sg .sg-l{display:flex;justify-content:space-between;border-bottom:1px solid #111;padding:0 4px 2px;font-size:10px} .sg .sg-n{padding-left:34%} .sg .sg-d{white-space:nowrap}
+  .signs{page-break-inside:avoid}
+  .sg .sg-r{font-size:9.5px;font-weight:700;color:#1F4E79;margin-bottom:14px} .sg .sg-l{display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:0 4px 2px;font-size:10px} .sg .sg-n{padding-left:34%} .sg .sg-d{white-space:nowrap}
   .sg .sg-h{display:flex;justify-content:space-between;font-size:7.5px;color:#666;padding:1px 4px 0} .sg .sg-h span:first-child{width:30%} .sg .sg-h span:nth-child(2){flex:1;text-align:center}
-  .req{margin-top:12px;width:48%;border-collapse:collapse;font-size:9px} .req td{padding:2px 6px;border:1px solid #BBB} .req td:first-child{width:42%;color:#555;background:#F7F7F7}
+  .req{margin-top:12px;width:48%;border-collapse:collapse;font-size:9px;page-break-inside:avoid} .req td{padding:2px 6px;border:1px solid #DDD} .req td:first-child{width:42%;color:#555;background:#F7F9FC}
   .ft{margin-top:10px;padding-top:5px;border-top:1px solid #BBB;text-align:center;font-size:8px;color:#666;line-height:1.4}
+  @media print{.ft{display:none}}
 </style></head><body>
 <div class="top">
   <div class="ru"><b>ООО "ПЕТРОБАЛТ СЕРВИС"</b><br>238315, Российская Федерация, Калининградская область,<br>муниципальный округ Зеленоградский, территория Индустриальный парк Храброво,<br>ул. Инноваций, зд. 1<br>Тел: +7 401 220 11 05 &nbsp; Email: info@petrobalt.com.ru</div>
@@ -7305,7 +7313,7 @@ async function retroPrintHtml(id, opts) {
 <div class="co">ООО «ПЕТРОБАЛТ СЕРВИС»</div>
 <div class="code">Ф.16–Д.1</div>
 <div class="title">АКТ ВЫПУСКА ПРОДУКЦИИ И ОСНАСТКИ</div>
-<div class="sub">оприходование произведённого и списание материалов (ДП–Д.1 · ISO 9001:2015 п. 8.5)</div>
+<div class="sub">оприходование произведённого и списание материалов по ДП–Д.1</div>
 <div class="no"><span>Акт № <b>${esc(a.no)}</b> от ${blank ? '«___» ________ 20___ г.' : fmtD(a.date)}</span><span>${blank ? '' : 'Статус: <b>' + esc(a.status) + '</b>'}${a.onecDocNo ? ` · документ 1С ${esc(a.onecDocNo)} от ${fmtD(a.onecDocDate)}` : ''}</span></div>
 <div class="prod"><span class="k">Произведено</span><span class="v">${esc(a.name) || (blank ? '&nbsp;' : '')}</span>${a.designation ? `<span class="d">${esc(a.designation)}</span>` : ''}<span class="q">${blank ? '________ шт' : n3(a.qty) + ' ' + esc(a.unit)}</span></div>
 <table class="info"><tr><td class="k">Куда приходуем</td><td class="v">${esc(a.whereTo) || '—'}</td><td class="k">Счёт учёта</td><td class="v">${esc(a.account) || '—'}</td><td class="k">Фактический период</td><td class="v">${esc(a.period) || '—'}</td></tr>
@@ -7320,10 +7328,10 @@ ${a.note ? `<div class="note"><b>Примечание:</b> ${esc(a.note)}</div>`
   ${sig('Составил (производство)', a.responsible, a.date)}
   ${sig('Отправил на утверждение', a.sentBy, a.sentAt)}
   ${sig('Утвердил', a.approvedBy, a.approvedAt)}
-  ${sig('Принял к учёту (бухгалтерия)', '', '')}
+  ${sig('Принял к учёту (бухгалтерия)', a.acceptedBy, a.acceptedAt)}
 </div>
 <table class="req"><tr><td>Код документа:</td><td>Ф.16–Д.1</td></tr><tr><td>Версия:</td><td>1.0</td></tr><tr><td>Дата введения:</td><td>05.09.2026</td></tr>${blank ? '' : `<tr><td>Сформировано порталом ИСМ:</td><td>${ruDate(new Date().toISOString())}</td></tr>`}</table>
-<div class="ft">Форма создана порталом ИСМ ПБС · один акт = один документ «Отчёт производства за смену» в 1С · связка по ИСМ-ид в комментарии документа</div>
+<div class="ft">ООО «Петробалт Сервис» · 238315, Калининградская обл., МО Зеленоградский, ИП Храброво, ул. Инноваций, зд. 1 · Ф.16–Д.1</div>
 <script>if(location.search.includes('print=1'))window.print();</script></body></html>`;
 }
 
@@ -7476,15 +7484,23 @@ async function retroTo1c(body, session) {
   return { ok: true, doc, plan: built.plan };
 }
 // опрос проведения: акты «Черновик в 1С» → Posted / DeletionMark
+// K-163: «Принял к учёту (бухгалтерия)» в печатной форме — из проведённого документа 1С: ответственный (Catalog_Пользователи) и дата документа
+async function retroAcceptedFrom1c(d) {
+  const out = {};
+  try { await ncEnsureColumn('retro_outputs', 'Принял к учёту (1С)', 'SingleLineText'); await ncEnsureColumn('retro_outputs', 'Дата проведения 1С', 'Date'); } catch (e) { console.warn('[retro] колонки «принял к учёту» недоступны:', e.message); return out; }
+  if (d.Date) out['Дата проведения 1С'] = String(d.Date).slice(0, 10);
+  if (onecIsGuid(d.Ответственный_Key)) { try { const u = await onecGet(`Catalog_Пользователи(guid'${d.Ответственный_Key}')?$select=Description`); if (u && u.Description) out['Принял к учёту (1С)'] = String(u.Description); } catch (e) { onecLog('POLL-USER', String(e.message || e)); } }
+  return out;
+}
 async function retroPoll1c() {
   if (!onecConfigured()) return { ok: false, note: '1С не настроена' };
   const acts = (await ncListSoft('retro_outputs')).filter((a) => a['Статус'] === 'Черновик в 1С' && onecIsGuid(a['Документ 1С (ключ)']));
   const out = { checked: acts.length, posted: [], rejected: [], errors: [] };
   for (const a of acts) {
     try {
-      const d = await onecGet(`${ONEC_PROD.entity}(guid'${a['Документ 1С (ключ)']}')?$select=Ref_Key,Number,Posted,DeletionMark`);
+      const d = await onecGet(`${ONEC_PROD.entity}(guid'${a['Документ 1С (ключ)']}')?$select=Ref_Key,Number,Posted,DeletionMark,Date,Ответственный_Key`);
       if (d.DeletionMark) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); await retroChatNotify(`✖ ${a['№ акта']} «${a['Наименование']}»: документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. Александр, посмотрите причину.`); }
-      else if (d.Posted) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С' }); out.posted.push(a['№ акта']); await retroChatNotify(`✔ ${a['№ акта']} «${a['Наименование']}»: ${ONEC_PROD.title} №${d.Number || ''} проведён. Спасибо!`); }
+      else if (d.Posted) { const acc = await retroAcceptedFrom1c(d); await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С', ...acc }); out.posted.push(a['№ акта']); await retroChatNotify(`✔ ${a['№ акта']} «${a['Наименование']}»: ${ONEC_PROD.title} №${d.Number || ''} проведён. Спасибо!`); }
     } catch (e) { if (e.status === 502 && /404|не найден/.test(String(e.message))) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); } else out.errors.push(`${a['№ акта']}: ${e.message}`); }
   }
   if (out.posted.length) { try { onecRunSync(); } catch { /* синк — best-effort */ } }
@@ -7497,6 +7513,9 @@ const RETRO_CHAT_USERS = [11, 159, 69, 217]; // Кирилюк А.С., Гера�
 const retroChatId = () => String(runtime.BITRIX_ACC_CHAT || process.env.BITRIX_ACC_CHAT || '').trim();
 // K-161: кто может утверждать акты выпуска — id пользователей Bitrix, настраивается в «Настройки → 1С и бухгалтерия» (решение владельца 05.09: сейчас Кирилюк и Герасимов)
 const RETRO_APPROVERS_DEFAULT = [11, 159];
+// K-163: нижний колонтитул PDF по ДП–Л.1.2 §4 — адрес слева, код формы и «стр. N из M» справа
+const retroPdfFooter = (a) => `<div style="width:100%;font-family:'DejaVu Sans',Arial,sans-serif;font-size:7.5px;color:#666;display:flex;justify-content:space-between;padding:0 10mm"><span>ООО «Петробалт Сервис» · 238315, Калининградская обл., МО Зеленоградский, ИП Храброво, ул. Инноваций, зд. 1</span><span>Ф.16–Д.1${a && a.no ? ' · Акт ' + hesc(a.no) : ''} · стр. <span class="pageNumber"></span> из <span class="totalPages"></span></span></div>`;
+const retroPdfOpts = (a) => ({ landscape: true, footerHtml: retroPdfFooter(a), marginBottom: '0.55' });
 // K-162: кто принимает заявки на закупку (ЗнЗ) в работу — видят новые ЗнЗ в «Мой кабинет»; настраивается там же, по умолчанию Рисалиева Динара (57)
 const PURCHASE_HANDLERS_DEFAULT = [57];
 const purchaseHandlerIds = () => { const raw = runtime.PURCHASE_HANDLERS != null ? runtime.PURCHASE_HANDLERS : (process.env.PURCHASE_HANDLERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : PURCHASE_HANDLERS_DEFAULT; };
@@ -7542,7 +7561,7 @@ async function retroChatSend(body, session) {
   if (!['Утверждён', 'Черновик в 1С', 'Проведён в 1С', 'Закрыт'].includes(a.status)) { const e = new Error(`В чат бухгалтерии уходит утверждённый акт (сейчас «${a.status}»).`); e.status = 400; throw e; }
   const text = String(body.text || '').trim() || (await retroChatPreview(a.id)).text;
   const html = await retroPrintHtml(a.id);
-  let buf, fname; try { buf = await htmlToPdf(html, { landscape: true }); fname = `${a.no}.pdf`; } catch (e) { onecLog('CHAT-PDF-SKIP', String(e.message || e)); buf = Buffer.from(html, 'utf8'); fname = `${a.no}.html`; }
+  let buf, fname; try { buf = await htmlToPdf(html, retroPdfOpts(a)); fname = `${a.no}.pdf`; } catch (e) { onecLog('CHAT-PDF-SKIP', String(e.message || e)); buf = Buffer.from(html, 'utf8'); fname = `${a.no}.html`; }
   let attached = false, warning = '';
   try {
     const folder = await bitrixCall('im.disk.folder.get', { CHAT_ID: Number(chat) });
@@ -12404,7 +12423,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/retro/prefill') { try { return sendJson(res, 200, await retroPrefill({ routeId: url.searchParams.get('routeId') || '', canonId: url.searchParams.get('canonId') || '', qty: url.searchParams.get('qty') || '1' })); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/print') {
       try { const html = await retroPrintHtml(url.searchParams.get('id'), { blank: url.searchParams.get('blank') === '1' }); if (!html) return sendJson(res, 404, { error: 'Акт не найден.' });
-        if (url.searchParams.get('pdf') === '1' && cfg().GOTENBERG) { try { const pdf = await htmlToPdf(html, { landscape: true }); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="act-${encodeURIComponent(url.searchParams.get('id'))}.pdf"` }); return res.end(pdf); } catch (e) { console.warn('[retro] PDF не собран, отдаю HTML:', e.message); } }
+        if (url.searchParams.get('pdf') === '1' && cfg().GOTENBERG) { try { const pdf = await htmlToPdf(html, retroPdfOpts(url.searchParams.get('blank') === '1' ? null : { no: (/Акт № <b>([^<]*)<\/b>/.exec(html) || [])[1] || '' })); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="act-${encodeURIComponent(url.searchParams.get('id'))}.pdf"` }); return res.end(pdf); } catch (e) { console.warn('[retro] PDF не собран, отдаю HTML:', e.message); } }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(html); }
       catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }

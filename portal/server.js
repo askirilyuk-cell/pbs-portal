@@ -1365,6 +1365,7 @@ async function buildRouteCard(id) {
       tooling: op['Оснастка'] || '', setupCard: op['Карта наладки (№)'] || '',
       ncFiles: mkOpFiles(r['№ МК'], opN, 'nc'), setupFiles: mkOpFiles(r['№ МК'], opN, 'setup'),
       coop, coopStatus: coop ? mkCoopStatus(coop) : null, coopText: coop ? mkCoopText(coop) : '',
+      planMaterials: mkPlanParse(op['Материалы (план)']), planText: mkPlanText(mkPlanParse(op['Материалы (план)'])), // K-157
     };
   });
   const components = [];
@@ -1453,6 +1454,7 @@ async function buildRouteEdit(id) {
     return {
       id: oid, n: opN, opTypeId: op.op_types_id ?? null, name: op['Операция'] || '',
       equipment: op['Оборудование'] || '', materials: op['Входящие материалы'] || '',
+      planMaterials: mkPlanParse(op['Материалы (план)']), // K-157
       control: op['Точка контроля'] || 'нет', whatControl: op['Что контролировать'] || '',
       si: op['СИ'] || '', tolerance: op['Допуски'] || '', norm: op['Норма времени (ч)'] ?? '',
       // K-81 редизайн Ф.13: оснастка (справочник) + № карты наладки (migrate-042; degrade-safe)
@@ -1578,7 +1580,12 @@ async function saveRoute(body) {
   // K-81 редизайн Ф.13 (migrate-042): оснастка из справочника + № привязанной карты наладки.
   // СТРОГО АДДИТИВНО и degrade-safe: колонки создаём один раз и только если хоть одна операция их использует
   // (нет churn'а схемы на пустых сохранениях; работает и ДО применения миграции — как «Чертежи КД»).
-  let hasTooling = false, hasSetupNo = false;
+  let hasTooling = false, hasSetupNo = false, hasPlan = false;
+  // K-157: плановые материалы из канона — колонка создаётся при первом сохранении МК с планом
+  if (opsIn.some((o) => Array.isArray(o && o.planMaterials) && mkPlanClean(o.planMaterials).length)) {
+    try { await ncEnsureColumn('operations', 'Материалы (план)', 'LongText'); hasPlan = true; }
+    catch (e) { console.warn('МК: колонка «Материалы (план)» недоступна — план материалов не сохранён:', e.message); }
+  }
   if (opsIn.some((o) => String(o && o.tooling || '').trim())) {
     try { await ncEnsureColumn('operations', 'Оснастка', 'LongText'); hasTooling = true; }
     catch (e) { console.warn('МК: колонка «Оснастка» недоступна — оснастка не сохранена:', e.message); }
@@ -1604,6 +1611,7 @@ async function saveRoute(body) {
     if (o.norm != null && o.norm !== '') opRow['Норма времени (ч)'] = Number(o.norm);
     if (hasTooling && String(o.tooling || '').trim()) opRow['Оснастка'] = String(o.tooling).trim();
     if (hasSetupNo && String(o.setupCardNo || '').trim()) opRow['Карта наладки (№)'] = String(o.setupCardNo).trim();
+    if (hasPlan) { const pm = mkPlanClean(o.planMaterials); if (pm.length) opRow['Материалы (план)'] = JSON.stringify(pm); }
     const cr = await ncCreateMany('operations', [opRow]);
     const co = Array.isArray(cr) ? cr[0] : cr; const opId = co.Id ?? co.id;
     await ncLinkRecords('routes', 'Операции маршрута', routeId, [opId]);
@@ -1631,6 +1639,27 @@ async function saveRoute(body) {
   return { ok: true, id: routeId, mk, operations: opCount, components: compCount, blankReserve };
 }
 
+// ── K-157: плановые материалы операции (из канон-номенклатуры) — отдельная колонка операции
+// «Материалы (план)» (LongText, JSON-массив), degrade-safe: создаётся при первом сохранении МК с планом.
+// НЕ в «Входящие материалы» — там уже живут заготовка (оп. №1) и кооперация (оп. >1). План — намерение
+// технолога; фактический состав акта выпуска (K-158) предзаполняется из плана и может отличаться.
+function mkPlanParse(raw) {
+  const s = String(raw || '').trim();
+  if (!s || s[0] !== '[') return [];
+  try { const j = JSON.parse(s); return Array.isArray(j) ? j.filter((m) => m && (m.canonId != null || String(m.name || '').trim())) : []; } catch { return []; }
+}
+function mkPlanClean(arr) {
+  return (Array.isArray(arr) ? arr : []).map((m) => ({
+    canonId: (m.canonId != null && m.canonId !== '') ? Number(m.canonId) : null,
+    name: String(m.name || '').trim(), unit: String(m.unit || '').trim(),
+    qty: (m.qty != null && m.qty !== '' && !isNaN(Number(String(m.qty).replace(',', '.')))) ? Number(String(m.qty).replace(',', '.')) : null,
+    note: String(m.note || '').trim(),
+  })).filter((m) => m.canonId != null || m.name);
+}
+function mkPlanText(list) {
+  const l = mkPlanParse(JSON.stringify(list || []));
+  return l.map((m) => `${m.name || ('канон #' + m.canonId)}${m.qty != null ? ' — ' + m.qty + (m.unit ? ' ' + m.unit : '') + '/шт' : ''}`).join('; ');
+}
 // ── Заготовка (МК, этап 1) — рекомендация технолога + резерв металла на складе ──────────────
 // Хранение БЕЗ новой колонки: JSON кладём в «Входящие материалы» ПЕРВОЙ операции маршрута — поле
 // изначально заведено под «что взять на операцию» (см. schema.json note на operations/tasks), UI для

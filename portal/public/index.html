@@ -13461,6 +13461,7 @@
           <div><div style="font-size:11px;color:var(--sl-500)">Продукция / линейка</div><div>${esc(r.productType||'—')}</div></div>
           <div><div style="font-size:11px;color:var(--sl-500)">Материал</div><div>${esc(r.material||'—')}</div></div>
           ${r.blankText?`<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500)">Заготовка (рекомендация технолога)</div><div style="color:#1e7d43;font-weight:600">${esc(r.blankText)}</div></div>`:''}
+          ${(()=>{ const agg=rtPlanAggregate(d.operations||[]); return agg.length?`<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500)">Материалы по маршруту (план, из канона · на 1 шт)</div><div style="color:var(--navy);font-weight:600">${agg.map(m=>esc(m.name)+(m.qty!=null?' — '+rtNum(m.qty)+(m.unit?' '+esc(m.unit):''):'')).join('; ')}</div></div>`:''; })()}
         </div>
         ${(r.projectDecNo||(r.kdDrawings&&r.kdDrawings.length))?`<div class="card pad" style="margin-bottom:var(--gap)">
           <div class="sec-h" style="margin-bottom:8px">Чертежи КД (реестр)${r.projectDecNo?` · проект <span class="code" style="color:var(--blue)">ПБС.${esc(r.projectDecNo)}</span>`:''}</div>
@@ -13665,6 +13666,7 @@
       // каталог металла — тот же канон, что и в каскаде ЗнЗ (вид проката → размер → марка)
       if(typeof CAT==='undefined'||!CAT){ try{CAT=await (await fetch('/api/catalog')).json();}catch(e){} }
       const catMetal=((typeof CAT!=='undefined'&&CAT&&CAT.items)||[]).filter(i=>i.category==='Металл');
+      const canonAll=((typeof CAT!=='undefined'&&CAT&&CAT.items)||[]).slice().sort((a,b)=>String(a.category||'').localeCompare(String(b.category||''),'ru')||String(a.name||'').localeCompare(String(b.name||''),'ru')); // K-157: план материалов из канона
       // этап 3 (msg 301): живые карточки склада металла (не канон) — тот же реестр, что грузит раздел
       // «Металл» (см. buildMetalLive/#metal) — переиспользуем /api/metal, новый эндпоинт не заводим.
       let stockList=[];
@@ -13672,11 +13674,11 @@
       let init={route:{type:'КОМ',name:'',designation:'',productType:'',revision:'',material:'',statusMk:'Черновик',projectDecNo:'',mk:''},operations:[]};
       if(routeId!=null){ try{ const d=await (await fetch('/api/route/edit?id='+encodeURIComponent(routeId))).json(); if(d&&d.route)init=d; }catch(e){} }
       const r0=init.route||{};
-      rtWiz={ host, routeId, step:1, cat, catMetal, stockList, contractors:(cat&&cat.contractors)||[],
+      rtWiz={ host, routeId, step:1, cat, catMetal, canonAll, stockList, contractors:(cat&&cat.contractors)||[],
         reg:{projects:(reg&&reg.projects)||[],docs:(reg&&reg.kd)||[]}, eqReg, tools, setup,
         route:{type:r0.type||'КОМ',name:r0.name||'',designation:r0.designation||'',productType:r0.productType||'',revision:r0.revision||'',material:r0.material||'',statusMk:r0.statusMk||'Черновик',projectDecNo:r0.projectDecNo||'',mk:r0.mk||''},
         kdSel:((r0.kdDrawings)||[]).slice(),
-        ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',control:o.control||'нет',norm:o.norm!=null?o.norm:'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,components:o.components||[],_open:i===0})) };
+        ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',control:o.control||'нет',norm:o.norm!=null?o.norm:'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',planMaterials:(Array.isArray(o.planMaterials)?o.planMaterials.map(m=>Object.assign({},m)):[]),blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,components:o.components||[],_open:i===0})) };
       rtWizRender();
     }
     function rtWizRender(){
@@ -13707,7 +13709,7 @@
         if(step===2)op._open=node.classList.contains('open'); });
     }
     function rtAddOp(id){ if(!rtWiz)return; rtReadOps(2); const ot=rtOtById(id)||{}; const becomesFirst=rtWiz.ops.length===0;
-      rtWiz.ops.push({opTypeId:id||'',name:ot.name||'',equipment:'',tooling:'',setupCardNo:'',control:'нет',norm:'',whatControl:'',si:'',tolerance:'',materials:'',blank:becomesFirst?rtBlankDefault():null,coop:becomesFirst?null:rtCoopDefault(),components:[],_open:true}); rtWiz.step=2; rtWizRender(); }
+      rtWiz.ops.push({opTypeId:id||'',name:ot.name||'',equipment:'',tooling:'',setupCardNo:'',planMaterials:[],control:'нет',norm:'',whatControl:'',si:'',tolerance:'',materials:'',blank:becomesFirst?rtBlankDefault():null,coop:becomesFirst?null:rtCoopDefault(),components:[],_open:true}); rtWiz.step=2; rtWizRender(); }
     // ── шаг 1: изделие + привязка чертежей КД (реестр, с просмотром выпущенного PDF) ──
     function rtStep1Html(){
       const rt=rtWiz.route, cat=rtWiz.cat, kdProjects=rtWiz.reg.projects;
@@ -13889,6 +13891,33 @@
       </div>`;
     }
     // ── шаг 2: операции раскрывающимися карточками + палитра типов + живая сводка ──
+    // ── K-157: плановые материалы операции — из канон-номенклатуры (решение владельца 05.09: план в МК,
+    // факт в акте выпуска может отличаться и дополняться). Хранится в op.planMaterials, на сервере —
+    // колонка операции «Материалы (план)». Scoping — data-pm="i", как у кооперации.
+    function rtPlanOptions(cur){
+      const items=rtWiz.canonAll||[]; let lastCat=null, out='<option value="">— канон-позиция —</option>';
+      items.forEach(c=>{ const cat=c.category||'Прочее'; if(cat!==lastCat){ if(lastCat!==null)out+='</optgroup>'; out+=`<optgroup label="${rtEscA(cat)}">`; lastCat=cat; }
+        out+=`<option value="${rtEscA(c.id)}" data-unit="${rtEscA(c.unit||'')}"${String(c.id)===String(cur||'')?' selected':''}>${esc(c.name)}${c.unit?' · '+esc(c.unit):''}</option>`; });
+      if(lastCat!==null)out+='</optgroup>';
+      return out;
+    }
+    function rtPlanRowHtml(m,idx){
+      return `<div class="rt-g2" data-pmrow="${idx}" style="margin-top:6px;grid-template-columns:1fr 200px">
+        <div class="rt-fld"><select class="rt-inp" data-pmf="canonId" data-pmi="${idx}">${rtPlanOptions(m.canonId)}</select></div>
+        <div style="display:flex;gap:6px;align-items:center"><input class="rt-inp" type="number" min="0" step="any" data-pmf="qty" data-pmi="${idx}" value="${rtEscA(m.qty)}" placeholder="норма/шт" style="flex:1"><span class="rt-rt" data-pmunit="${idx}" style="min-width:34px">${esc(m.unit||'')}</span><button type="button" class="tbtn" data-pmrem="${idx}" style="padding:4px 8px;color:var(--red)" title="Убрать">✕</button></div>
+      </div>`;
+    }
+    function rtPlanBlockHtml(op,i){
+      const list=op.planMaterials=op.planMaterials||[];
+      const filled=list.filter(m=>m.canonId||String(m.name||'').trim());
+      const noCanon=!(rtWiz.canonAll||[]).length;
+      return `<div class="rt-fld" data-pm="${i}" style="margin-top:12px;padding:12px 14px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-weight:700">Материалы (план)</span><span class="rt-rt">из канон-номенклатуры · норма на 1 шт · факт в акте выпуска может отличаться</span>${filled.length?`<span class="rt-rt" style="margin-left:auto;color:var(--navy);font-weight:600">${filled.length} поз.</span>`:''}</div>
+        ${noCanon?'<div class="rt-hint" style="margin-top:6px">Каталог канон-номенклатуры пуст — заведите позиции в разделе «Каталог».</div>':''}
+        <div data-pmf="rows">${list.map((m,idx)=>rtPlanRowHtml(m,idx)).join('')}</div>
+        <div style="margin-top:8px"><button type="button" class="tbtn" data-pmf="add" ${noCanon?'disabled':''}>+ Материал</button></div>
+      </div>`;
+    }
     function rtOpCardHtml(op,i){
       const ot=rtOtById(op.opTypeId)||{}; const nm=op.name||ot.name||'Операция';
       const sub=[ot.section,op.equipment,ot.ri].filter(Boolean).join(' · ')||'тип операции не выбран';
@@ -13905,11 +13934,18 @@
           <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование)</label><input class="rt-inp" data-of="name" value="${rtEscA(op.name)}" placeholder="по умолч. = тип"></div></div>
           ${auto}
           ${i===0?rtBlankBlockHtml(op):rtCoopBlockHtml(op,i)}
+          ${rtPlanBlockHtml(op,i)}
           <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment)}</select></div><div class="rt-fld"><label>Норма, ч</label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="0"></div></div>
           ${rtToolChecklist(op,i)}
           ${setupRow}
           <div style="margin-top:11px;text-align:right"><button class="tbtn" data-oprem="${i}" style="color:var(--red)">Удалить операцию</button></div>
         </div></div>`;
+    }
+    // K-157: свод плановых материалов по маршруту (сумма норм по канон-позиции)
+    function rtPlanAggregate(ops){
+      const acc=new Map();
+      (ops||[]).forEach(op=>(op.planMaterials||[]).forEach(m=>{ const key=m.canonId!=null?'c'+m.canonId:('n'+String(m.name||'').trim().toLowerCase()); if(!key||key==='n')return; const q=Number(String(m.qty==null?'':m.qty).replace(',','.')); const a=acc.get(key)||{name:m.name||('канон #'+m.canonId),unit:m.unit||'',qty:null}; if(!isNaN(q)&&m.qty!==''&&m.qty!=null)a.qty=(a.qty||0)+q; acc.set(key,a); }));
+      return [...acc.values()];
     }
     function rtSummaryHtml(){
       const ops=rtWiz.ops; let totalH=0;
@@ -13923,7 +13959,8 @@
       const blankSumm=(ops[0]&&ops[0].blank)?`<div style="font-size:12px;color:#1e7d43;font-weight:600;margin-bottom:8px">${esc(rtBlankPreview(ops[0].blank))}</div>`:'';
       const coopOps=ops.map((op,i)=>({op,i})).filter(x=>x.op.coop&&x.op.coop.enabled);
       const coopSumm=coopOps.length?`<div style="font-size:12px;color:#1d4ed8;font-weight:600;margin-bottom:8px">${coopOps.map(x=>`Оп. ${x.i+1}: ${esc(rtCoopText(x.op.coop))}`).join('<br>')}</div>`:'';
-      return `<div class="rt-summ"><div class="rt-cardh" style="margin-bottom:4px">Маршрут — живая сводка</div>${blankSumm}${coopSumm}${lines}<div class="rt-tot"><span>Итого</span><span>${ops.length} ${rtPlural(ops.length,'операция','операции','операций')} · ${rtNum(totalH)} ч</span></div></div>${warn}`;
+      const planAgg=rtPlanAggregate(ops); const planSumm=planAgg.length?`<div style="font-size:12px;color:var(--navy);margin-bottom:8px"><b>Материалы (план):</b> ${planAgg.map(m=>esc(m.name)+(m.qty!=null?' — '+rtNum(m.qty)+(m.unit?' '+esc(m.unit):''):'')).join('; ')}</div>`:'';
+      return `<div class="rt-summ"><div class="rt-cardh" style="margin-bottom:4px">Маршрут — живая сводка</div>${blankSumm}${coopSumm}${planSumm}${lines}<div class="rt-tot"><span>Итого</span><span>${ops.length} ${rtPlural(ops.length,'операция','операции','операций')} · ${rtNum(totalH)} ч</span></div></div>${warn}`;
     }
     function rtStep2Html(){
       // заготовка живёт на операции №1 (см. rtBlankDefault) — если первая операция сменилась (удаление), донормализуем
@@ -14055,6 +14092,20 @@
           const addBtn=box.querySelector('[data-cf="addpart"]'); if(addBtn)addBtn.onclick=()=>{ c.parts.push({name:'',qty:''});
             const pc=box.querySelector('[data-cf="parts"]'); if(pc){ pc.innerHTML=c.parts.map((p,pIdx)=>rtCoopPartRowHtml(p,pIdx)).join(''); wirePartRows(); } refreshPrev(); };
         });
+        // K-157: план материалов — wiring по каждой карточке операции (scoped data-pm)
+        host.querySelectorAll('.rt-op[data-idx]').forEach(node=>{
+          const idx=+node.dataset.idx, op=rtWiz.ops[idx]; if(!op)return; const box=node.querySelector('[data-pm]'); if(!box)return;
+          const list=op.planMaterials=op.planMaterials||[];
+          const refresh=()=>{ const sb=host.querySelector('#rt-summbox'); if(sb)sb.innerHTML=rtSummaryHtml(); };
+          const repaint=()=>{ const rows=box.querySelector('[data-pmf="rows"]'); if(rows){ rows.innerHTML=list.map((m,k)=>rtPlanRowHtml(m,k)).join(''); wireRows(); } refresh(); };
+          const wireRows=()=>{
+            box.querySelectorAll('[data-pmf="canonId"]').forEach(sel=>sel.onchange=()=>{ const k=+sel.dataset.pmi, m=list[k]; if(!m)return; const o=sel.options[sel.selectedIndex]; m.canonId=sel.value?Number(sel.value):null; m.unit=o?(o.dataset.unit||''):''; m.name=sel.value?String(o.textContent||'').split(' · ')[0].trim():''; const u=box.querySelector('[data-pmunit="'+k+'"]'); if(u)u.textContent=m.unit||''; refresh(); });
+            box.querySelectorAll('[data-pmf="qty"]').forEach(inp=>inp.oninput=()=>{ const k=+inp.dataset.pmi; if(list[k])list[k].qty=inp.value; refresh(); });
+            box.querySelectorAll('[data-pmrem]').forEach(btn=>btn.onclick=()=>{ list.splice(+btn.dataset.pmrem,1); repaint(); });
+          };
+          wireRows();
+          const add=box.querySelector('[data-pmf="add"]'); if(add)add.onclick=()=>{ list.push({canonId:null,name:'',unit:'',qty:'',note:''}); repaint(); };
+        });
         const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(1);
         const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(3);
         const ao=host.querySelector('#rt-addop'); if(ao)ao.onclick=()=>rtAddOp('');
@@ -14068,7 +14119,7 @@
       // МК-резерв металла (этап 1): заготовка операции №1 сериализуется в JSON в «materials» (см. rtBlankSerialize/сервер mkBlankParse).
       // Этап 4: внешняя кооперация — та же схема, JSON в «materials» операции i>0 (см. rtCoopSerialize/сервер mkCoopParse); returned (история
       // приёмок возврата) уже сохранён внутри op.coop с загрузки формы — просто едет обратно, чтобы пересохранение МК его не стёрло.
-      const ops=rtWiz.ops.map((op,i)=>({opTypeId:op.opTypeId||'',name:(op.name||'').trim(),equipment:(op.equipment||'').trim(),tooling:(op.tooling||'').trim(),setupCardNo:(op.setupCardNo||'').trim(),control:op.control||'нет',norm:op.norm,whatControl:(op.whatControl||'').trim(),si:(op.si||'').trim(),tolerance:(op.tolerance||'').trim(),materials:i===0?rtBlankSerialize(op.blank):(op.coop&&op.coop.enabled?rtCoopSerialize(op.coop):(op.materials||'').trim()),components:op.components||[]})).filter(o=>o.name||o.opTypeId);
+      const ops=rtWiz.ops.map((op,i)=>({opTypeId:op.opTypeId||'',name:(op.name||'').trim(),equipment:(op.equipment||'').trim(),tooling:(op.tooling||'').trim(),setupCardNo:(op.setupCardNo||'').trim(),control:op.control||'нет',norm:op.norm,whatControl:(op.whatControl||'').trim(),si:(op.si||'').trim(),tolerance:(op.tolerance||'').trim(),planMaterials:(op.planMaterials||[]).filter(m=>m.canonId||String(m.name||'').trim()).map(m=>({canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',qty:m.qty,note:m.note||''})),materials:i===0?rtBlankSerialize(op.blank):(op.coop&&op.coop.enabled?rtCoopSerialize(op.coop):(op.materials||'').trim()),components:op.components||[]})).filter(o=>o.name||o.opTypeId);
       const body={id:rtWiz.routeId,type:rtWiz.route.type,name:(rtWiz.route.name||'').trim(),designation:(rtWiz.route.designation||'').trim(),productType:rtWiz.route.productType||'',revision:(rtWiz.route.revision||'').trim(),material:(rtWiz.route.material||'').trim(),statusMk:release?'Утверждена':(rtWiz.route.statusMk||'Черновик'),projectDecNo:rtWiz.route.projectDecNo||'',kdDrawings:rtWiz.kdSel,operations:ops};
       const host=rtWiz.host; const btns=host.querySelectorAll('#rt-draft,#rt-release'); btns.forEach(b=>{b.disabled=true;});
       try{ const r=await fetch('/api/routes/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));

@@ -7327,7 +7327,7 @@ async function retroPrintHtml(id, opts) {
 <tfoot><tr><th colspan="8">Итого по себестоимости 1С, ₽</th><th class="r">${blank ? '' : n2(a.cost)}</th></tr></tfoot></table>
 ${a.note ? `<div class="note"><b>Примечание:</b> ${esc(a.note)}</div>` : ''}
 <div class="signs">
-  ${sig('Составил (производство)', a.responsible, a.date)}
+  ${sig('Составил (создал в портале)', a.responsible, a.date)}
   ${sig('Отправил на утверждение', a.sentBy, a.sentAt)}
   ${sig('Утвердил', a.approvedBy, a.approvedAt)}
   ${sig('Принял к учёту (бухгалтерия)', a.acceptedBy, a.acceptedAt)}

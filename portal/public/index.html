@@ -9652,7 +9652,7 @@
           ${F('Куда приходуем',`<select class="rt-inp" data-rf="whereTo"${dis}>${(dict.whereTo||[]).map(x=>opt(x,x,a.whereTo)).join('')}</select>`)}
           ${F('Счёт учёта (можно поправить)',inp('account','10.10'))}
           ${F('Фактический период изготовления',inp('period','напр. март–май 2026'))}${F('Дата акта',inp('date','','date'))}
-          ${F('Ответственный (заполняет)',`<input class="rt-inp" value="${esc(a.responsible||(AUTH&&AUTH.fio)||'')}" disabled title="Подставляется автоматически: кто заполняет акт в портале">`)}
+          ${F('Создал в портале',`<input class="rt-inp" value="${esc(a.responsible||(AUTH&&AUTH.fio)||'')}" disabled title="Автоматически: кто создал/заполняет акт в портале. Ответственный в 1С — отдельное поле документа 1С, его ставит бухгалтерия">`)}
           ${F('Маршрутная карта',retroSearchHtml('mk',a.mk,a.mk?(a.mk+(((retroRoutes||[]).find(r=>r.mk===a.mk)||{}).name?' · '+((retroRoutes||[]).find(r=>r.mk===a.mk)||{}).name:'')):'','поиск: № МК, наименование, обозначение',w))}
           <div class="eqd-f" style="grid-column:span 2">${F('Примечание',`<textarea class="rt-inp" data-rf="note" rows="2"${dis}>${esc(a.note||'')}</textarea>`)}</div>
         </div>

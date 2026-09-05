@@ -1407,6 +1407,7 @@ async function buildRouteCard(id) {
       material: r['Материал'] || '',
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
       blank, blankText: mkBlankText(blank),
+      bom: mkBomParse(r['Спецификация материалов']), bomText: mkBomText(mkBomParse(r['Спецификация материалов'])), // K-160
     },
     operations, components, compReadiness,
   };
@@ -1477,6 +1478,7 @@ async function buildRouteEdit(id) {
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '',
       revision: r['Ревизия'] || '', statusMk: r['Статус МК'] || 'Черновик', material: r['Материал'] || '',
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
+      bom: mkBomParse(r['Спецификация материалов']), // K-160
     },
     operations,
   };
@@ -1533,6 +1535,13 @@ async function saveRoute(body) {
   if ('material' in body) {
     try { await ncEnsureColumn('routes', 'Материал', 'SingleLineText'); routeRow['Материал'] = String(body.material || '').trim(); }
     catch (e) { console.warn('МК: колонка «Материал» недоступна — материал не сохранён:', e.message); }
+  }
+  // K-160: спецификация материалов изделия — колонка МК (degrade-safe); «Материал» текстом — из спецификации, если пуст
+  if ('bom' in body) {
+    const bom = mkBomClean(body.bom);
+    try { await ncEnsureColumn('routes', 'Спецификация материалов', 'LongText'); routeRow['Спецификация материалов'] = bom.length ? JSON.stringify(bom) : ''; }
+    catch (e) { console.warn('МК: колонка «Спецификация материалов» недоступна — спецификация не сохранена:', e.message); }
+    if (bom.length && !String(routeRow['Материал'] || '').trim()) { try { await ncEnsureColumn('routes', 'Материал', 'SingleLineText'); routeRow['Материал'] = bom.filter((m) => m.role !== 'Комплектующее').map((m) => m.name).filter(Boolean).slice(0, 4).join('; '); } catch { /* не критично */ } }
   }
   const smk = String(body.statusMk || 'Черновик').trim();
   if (!MK_STATUS.includes(smk)) throw new Error(`Недопустимый статус МК «${smk}».`);
@@ -1658,6 +1667,25 @@ function mkPlanClean(arr) {
     note: String(m.note || '').trim(),
   })).filter((m) => m.canonId != null || m.name);
 }
+// ── K-160: спецификация материалов изделия (роль / канон / норма на шт / операция входа) — колонка МК
+// «Спецификация материалов» (LongText JSON). Заготовка оп. №1 и «Материалы (план)» операций — производные.
+const MK_BOM_ROLES = ['Заготовка', 'Материал', 'Вспомогательный', 'Комплектующее'];
+function mkBomParse(raw) {
+  const s = String(raw || '').trim(); if (!s || s[0] !== '[') return [];
+  try { const j = JSON.parse(s); return Array.isArray(j) ? j.filter((m) => m && (m.canonId != null || String(m.name || '').trim())) : []; } catch { return []; }
+}
+function mkBomClean(arr) {
+  return (Array.isArray(arr) ? arr : []).map((m) => ({
+    role: MK_BOM_ROLES.includes(m.role) ? m.role : 'Материал',
+    canonId: (m.canonId != null && m.canonId !== '') ? Number(m.canonId) : null, name: String(m.name || '').trim(), unit: String(m.unit || '').trim(),
+    norm: (m.norm != null && m.norm !== '' && !isNaN(Number(String(m.norm).replace(',', '.')))) ? Number(String(m.norm).replace(',', '.')) : null,
+    opNo: (m.opNo != null && m.opNo !== '' && Number(m.opNo) > 0) ? Number(m.opNo) : null,
+    stockId: (m.stockId != null && m.stockId !== '') ? Number(m.stockId) : null,
+    partsPerBlank: (m.partsPerBlank != null && m.partsPerBlank !== '' && Number(m.partsPerBlank) > 0) ? Number(m.partsPerBlank) : null,
+    note: String(m.note || '').trim(),
+  })).filter((m) => m.canonId != null || m.name);
+}
+function mkBomText(list) { return mkBomParse(JSON.stringify(list || [])).map((m) => `${m.role === 'Заготовка' ? 'заготовка ' : ''}${m.name || ('канон #' + m.canonId)}${m.norm != null ? ' — ' + m.norm + (m.unit ? ' ' + m.unit : '') + '/шт' : ''}`).join('; '); }
 function mkPlanText(list) {
   const l = mkPlanParse(JSON.stringify(list || []));
   return l.map((m) => `${m.name || ('канон #' + m.canonId)}${m.qty != null ? ' — ' + m.qty + (m.unit ? ' ' + m.unit : '') + '/шт' : ''}`).join('; ');
@@ -7076,8 +7104,12 @@ async function retroPrefill(q) {
   const qty = Number(String(q.qty || '1').replace(',', '.')) || 1;
   let plan = [];
   if (q.routeId) {
-    const ops = (await ncListSoft('operations')).filter((o) => String(o.routes_id) === String(q.routeId));
-    ops.forEach((o) => mkPlanParse(o['Материалы (план)']).forEach((m) => plan.push({ ...m, source: 'План МК' })));
+    // K-160: сперва спецификация материалов МК (без комплектующих — это изделия других МК), иначе — план операций (K-157)
+    const rr = (await ncListSoft('routes')).find((x) => String(x.Id ?? x.id) === String(q.routeId));
+    const bom = rr ? mkBomParse(rr['Спецификация материалов']).filter((m) => m.role !== 'Комплектующее') : [];
+    if (bom.length) bom.forEach((m) => plan.push({ canonId: m.canonId, name: m.name, unit: m.unit, qty: m.norm, source: 'План МК' }));
+    else { const ops = (await ncListSoft('operations')).filter((o) => String(o.routes_id) === String(q.routeId));
+      ops.forEach((o) => mkPlanParse(o['Материалы (план)']).forEach((m) => plan.push({ ...m, source: 'План МК' }))); }
   } else if (q.canonId) {
     const c = (await ncListSoft('catalog_canon')).find((x) => String(x.Id ?? x.id) === String(q.canonId));
     let t = []; try { t = JSON.parse((c && c['Типовой состав']) || '[]'); } catch { t = []; }

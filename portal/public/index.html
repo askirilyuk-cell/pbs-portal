@@ -13697,7 +13697,7 @@
           <div><div style="font-size:11px;color:var(--sl-500)">Продукция / линейка</div><div>${esc(r.productType||'—')}</div></div>
           <div><div style="font-size:11px;color:var(--sl-500)">Материал</div><div>${esc(r.material||'—')}</div></div>
           ${r.blankText?`<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500)">Заготовка (рекомендация технолога)</div><div style="color:#1e7d43;font-weight:600">${esc(r.blankText)}</div></div>`:''}
-          ${(()=>{ const agg=rtPlanAggregate(d.operations||[]); return agg.length?`<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500)">Материалы по маршруту (план, из канона · на 1 шт)</div><div style="color:var(--navy);font-weight:600">${agg.map(m=>esc(m.name)+(m.qty!=null?' — '+rtNum(m.qty)+(m.unit?' '+esc(m.unit):''):'')).join('; ')}</div></div>`:''; })()}
+          ${(()=>{ const bom=r.bom||[]; if(bom.length) return `<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500);margin-bottom:4px">Спецификация материалов (на 1 шт)</div><table class="dt" style="font-size:12px;width:100%"><thead><tr><th style="width:130px">Роль</th><th>Материал</th><th style="width:140px">Норма</th><th style="width:150px">Входит на</th></tr></thead><tbody>${bom.map(m=>`<tr><td>${esc(m.role)}</td><td>${esc(m.name||('канон #'+m.canonId))}</td><td class="code">${m.norm!=null?rtNum(m.norm)+' '+esc(m.unit||''):'—'}</td><td class="c-gray">${m.opNo?'оп. '+esc(String(m.opNo)):'с первой операции'}</td></tr>`).join('')}</tbody></table></div>`; const agg=rtPlanAggregate(d.operations||[]); return agg.length?`<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--sl-500)">Материалы по маршруту (план, из канона · на 1 шт)</div><div style="color:var(--navy);font-weight:600">${agg.map(m=>esc(m.name)+(m.qty!=null?' — '+rtNum(m.qty)+(m.unit?' '+esc(m.unit):''):'')).join('; ')}</div></div>`:''; })()}
         </div>
         ${(r.projectDecNo||(r.kdDrawings&&r.kdDrawings.length))?`<div class="card pad" style="margin-bottom:var(--gap)">
           <div class="sec-h" style="margin-bottom:8px">Чертежи КД (реестр)${r.projectDecNo?` · проект <span class="code" style="color:var(--blue)">ПБС.${esc(r.projectDecNo)}</span>`:''}</div>
@@ -13914,6 +13914,7 @@
         reg:{projects:(reg&&reg.projects)||[],docs:(reg&&reg.kd)||[]}, eqReg, tools, setup,
         route:{type:r0.type||'КОМ',name:r0.name||'',designation:r0.designation||'',productType:r0.productType||'',revision:r0.revision||'',material:r0.material||'',statusMk:r0.statusMk||'Черновик',projectDecNo:r0.projectDecNo||'',mk:r0.mk||''},
         kdSel:((r0.kdDrawings)||[]).slice(),
+        bom:((r0.bom)||[]).map(m=>rtBomDefault(m)), // K-160: спецификация материалов изделия
         ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',control:o.control||'нет',norm:o.norm!=null?o.norm:'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',planMaterials:(Array.isArray(o.planMaterials)?o.planMaterials.map(m=>Object.assign({},m)):[]),blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,components:o.components||[],_open:i===0})) };
       rtWizRender();
     }
@@ -13934,7 +13935,7 @@
       if(!rtWiz)return; const host=rtWiz.host;
       if(step===1){ const g=(id)=>{const el=host.querySelector('#'+id);return el?el.value:'';};
         rtWiz.route.type=g('rb-type'); rtWiz.route.name=(g('rb-name')||'').trim(); rtWiz.route.designation=(g('rb-desig')||'').trim();
-        rtWiz.route.productType=g('rb-prod'); rtWiz.route.revision=(g('rb-rev')||'').trim(); rtWiz.route.material=(g('rb-material')||'').trim(); rtWiz.route.statusMk=g('rb-status'); rtWiz.route.projectDecNo=g('rb-proj'); }
+        rtWiz.route.productType=g('rb-prod'); rtWiz.route.revision=(g('rb-rev')||'').trim(); rtWiz.route.material=(g('rb-material')||'').trim(); rtWiz.route.statusMk=g('rb-status'); rtWiz.route.projectDecNo=g('rb-proj'); rtBomApply(); }
       else if(step===2||step===3){ rtReadOps(step); }
     }
     function rtReadOps(step){
@@ -13956,11 +13957,12 @@
           <div class="rt-fld" style="grid-column:span 2"><label>Наименование изделия / компонента</label><input class="rt-inp" id="rb-name" value="${rtEscA(rt.name)}" placeholder="напр. Втулка биметаллическая 2ДТ.180"></div>
           <div class="rt-fld"><label>Проект ОКР</label><select class="rt-inp" id="rb-proj"><option value="">— не выбран —</option>${kdProjects.map(p=>`<option value="${rtEscA(p.decNo)}"${p.decNo===(rt.projectDecNo||'')?' selected':''}>ПБС.${esc(p.decNo)} · ${esc(p.name||'')}</option>`).join('')}</select></div>
           <div class="rt-fld"><label>Изделие / обозначение (чертёж)</label><input class="rt-inp" id="rb-desig" value="${rtEscA(rt.designation)}" placeholder="2ДТ.180.00.00"></div>
-          <div class="rt-fld" style="grid-column:span 2"><label>Материал изделия / компонента</label><input class="rt-inp" id="rb-material" value="${rtEscA(rt.material)}" placeholder="напр. Сталь 45 + наплавка ПГ-СР4"></div>
+          <div class="rt-fld" style="grid-column:span 2"><label>Материал изделия (текст для Ф.13; авто из спецификации, можно поправить)</label><input class="rt-inp" id="rb-material" value="${rtEscA(rt.material)}" placeholder="напр. Сталь 45 + наплавка ПГ-СР4"></div>
           <div class="rt-fld"><label>Ревизия</label><input class="rt-inp" id="rb-rev" value="${rtEscA(rt.revision)}" placeholder="A"></div>
           <div class="rt-fld"><label>Тип продукции</label><select class="rt-inp" id="rb-prod"><option value="">— не указан —</option>${opt(cat.productTypes,rt.productType)}</select></div>
           <div class="rt-fld"><label>Статус МК</label><select class="rt-inp" id="rb-status">${opt(cat.statuses,rt.statusMk)}</select></div>
         </div>
+        <div style="margin-top:14px"><div class="sec-h" style="margin-bottom:4px">Спецификация материалов <span class="rt-rt">что входит в изделие · норма на 1 шт · заготовка резервируется на складе · факт — в акте выпуска</span></div><div id="rb-bom"></div></div>
         <div style="margin-top:14px"><div class="sec-h" style="margin-bottom:8px">Чертежи КД (реестр) — с просмотром выпущенного PDF</div><div id="rb-kdlist"></div><div id="rb-kdsel" style="margin-top:10px"></div></div>
         <div class="rt-info" style="margin-top:12px">${RT_SVG_INFO}<span>Чертёж выбирается из реестра КД проекта — с просмотром выпущенного PDF. Раньше обозначение вписывали руками, без связи с выпущенным чертежом.</span></div>
         <div class="tl-wnav"><button class="tbtn" disabled>← Назад</button><button class="tbtn primary" id="rt-next" style="margin-left:auto">Далее: операции →</button></div>
@@ -13968,6 +13970,7 @@
     }
     function rtWireStep1(){
       const host=rtWiz.host; const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(2);
+      rtBomPaint(host); // K-160
       const kdDocs=rtWiz.reg.docs;
       const kdByProj=(dec)=>kdDocs.filter(k=>k.projectNo===dec||(dec&&String(k.docNo).includes(dec)));
       const kdRelOf=(k)=>(k.files&&k.files[0])?k.files[0].rel:'';
@@ -14020,7 +14023,7 @@
     // сериализация в JSON для «Входящие материалы» операции №1 (см. сервер mkBlankParse); пусто — если заготовка не задана
     function rtBlankSerialize(b){
       if(!b)return '';
-      const hasCanon=b.mode==='canon'&&b.kind&&b.size&&b.grade;
+      const hasCanon=b.mode==='canon'&&((b.canonId!=null&&b.canonId!=='')||(b.kind&&b.size&&b.grade)); // K-160: канон достаточен по id
       const hasFree=b.mode==='free'&&String(b.freeText||'').trim();
       const hasStock=b.mode==='stock'&&b.stockId!=null&&b.stockId!=='';
       if(!hasCanon&&!hasFree&&!hasStock)return '';
@@ -14154,6 +14157,68 @@
         <div style="margin-top:8px"><button type="button" class="tbtn" data-pmf="add" ${noCanon?'disabled':''}>+ Материал</button></div>
       </div>`;
     }
+    // ── K-160: СПЕЦИФИКАЦИЯ МАТЕРИАЛОВ ИЗДЕЛИЯ (решение владельца 05.09: «в МК сделать сразу правильно»).
+    // Одно место для всего, что входит в изделие: роль (Заготовка / Материал / Вспомогательный /
+    // Комплектующее), канон-позиция, норма на 1 шт, на какой операции входит. Хранится в МК
+    // (колонка «Спецификация материалов», JSON). Заготовка операции №1 (резерв металла, mkBlankParse)
+    // и «Материалы (план)» операций (K-157) ВЫВОДЯТСЯ из спецификации при сохранении — старые
+    // хранилища живут как производные, чтобы резерв металла и Ф.14 работали без изменений.
+    const RT_BOM_ROLES=['Заготовка','Материал','Вспомогательный','Комплектующее'];
+    function rtBomDefault(m){ m=m||{}; return { role:RT_BOM_ROLES.includes(m.role)?m.role:'Материал', canonId:(m.canonId!=null&&m.canonId!=='')?m.canonId:null, name:m.name||'', unit:m.unit||'', norm:m.norm!=null?m.norm:'', opNo:m.opNo!=null&&m.opNo!==''?String(m.opNo):'', stockId:(m.stockId!=null&&m.stockId!=='')?m.stockId:null, partsPerBlank:m.partsPerBlank!=null?m.partsPerBlank:'', note:m.note||'' }; }
+    function rtBomRowHtml(m,i){
+      const opsOpt='<option value="">— с первой операции —</option>'+(rtWiz.ops||[]).map((op,k)=>{const ot=rtOtById(op.opTypeId)||{};return `<option value="${k+1}"${String(m.opNo)===String(k+1)?' selected':''}>оп. ${k+1} · ${esc(op.name||ot.name||'')}</option>`;}).join('');
+      const isBlank=m.role==='Заготовка';
+      const stockOpt='<option value="">— подобрать по канону —</option>'+(rtWiz.stockList||[]).map(s=>`<option value="${s.id}"${String(s.id)===String(m.stockId)?' selected':''}>${esc(rtStockOptLabel(s))}</option>`).join('');
+      return `<div class="rt-bom" data-bi="${i}" style="padding:8px 10px;border:1px solid var(--bd);border-radius:var(--r-m);margin-top:6px;background:${isBlank?'var(--sk-50)':'#fff'}">
+        <div class="rt-g2" style="grid-template-columns:150px 1fr 120px 64px 200px 34px;gap:8px;align-items:end">
+          <div class="rt-fld"><label>Роль</label><select class="rt-inp" data-bf="role">${RT_BOM_ROLES.map(r=>`<option${r===m.role?' selected':''}>${r}</option>`).join('')}</select></div>
+          <div class="rt-fld"><label>Канон-позиция</label><select class="rt-inp" data-bf="canonId">${rtPlanOptions(m.canonId)}</select>${!m.canonId&&m.name?`<input class="rt-inp" data-bf="name" value="${rtEscA(m.name)}" placeholder="или текстом" style="margin-top:4px">`:''}</div>
+          <div class="rt-fld"><label>Норма на 1 шт</label><input class="rt-inp" type="number" step="any" min="0" data-bf="norm" value="${rtEscA(m.norm)}"></div>
+          <div class="rt-fld"><label>ЕИ</label><input class="rt-inp" data-bf="unit" value="${rtEscA(m.unit)}" placeholder="кг"></div>
+          <div class="rt-fld"><label>Входит на</label><select class="rt-inp" data-bf="opNo">${opsOpt}</select></div>
+          <button type="button" class="tbtn" data-brem="${i}" style="color:var(--red);padding:6px 8px" title="Убрать строку">✕</button>
+        </div>
+        ${isBlank?`<div class="rt-g2" style="grid-template-columns:1fr 180px;gap:8px;margin-top:6px"><div class="rt-fld"><label>Конкретная карточка склада металла (для резерва при «В производстве»)</label><select class="rt-inp" data-bf="stockId">${stockOpt}</select></div><div class="rt-fld"><label>Деталей из одной заготовки</label><input class="rt-inp" type="number" min="0" step="1" data-bf="partsPerBlank" value="${rtEscA(m.partsPerBlank)}" placeholder="1"></div></div>`:''}
+      </div>`;
+    }
+    function rtBomMaterialText(){ const bom=rtWiz.bom||[]; const z=bom.filter(m=>m.role==='Заготовка'&&(m.name||m.canonId)).map(m=>m.name); const rest=bom.filter(m=>m.role==='Материал'&&(m.name||m.canonId)).map(m=>m.name); return [...z,...rest].filter(Boolean).join('; '); }
+    // производные: заготовка операции №1 (резерв металла) и «Материалы (план)» операций (K-157)
+    function rtBomApply(){
+      if(!rtWiz)return; const bom=rtWiz.bom||[], ops=rtWiz.ops||[];
+      const z=bom.find(m=>m.role==='Заготовка'&&(m.canonId||m.stockId||m.name));
+      if(ops.length){ const b=rtBlankDefault(ops[0].blank);
+        if(z){ const c=z.canonId?(rtWiz.canonAll||[]).find(x=>String(x.id)===String(z.canonId)):null;
+          if(z.stockId){ const st=(rtWiz.stockList||[]).find(s=>String(s.id)===String(z.stockId)); b.mode='stock'; b.stockId=z.stockId; b.stockCode=st?(st.code||''):''; b.name=st?[st.rollType,st.grade,st.size].filter(Boolean).join(' '):(z.name||''); b.grade=st?(st.grade||''):''; b.size=st?(st.size||''):''; b.canonId=z.canonId||null; }
+          else if(c){ b.mode='canon'; b.canonId=c.id; b.name=c.name; b.kind=c.kind||''; b.grade=c.grade||''; b.size=c.size||''; b.stockId=null; }
+          else { b.mode='free'; b.freeText=z.name||''; b.stockId=null; b.canonId=null; }
+          b.norm=z.norm; b.unit=String(z.unit||'').toLowerCase()==='мм'?'мм':'кг'; b.partsPerBlank=z.partsPerBlank||''; }
+        else { b.mode='canon'; b.canonId=null; b.name=''; b.kind=''; b.size=''; b.grade=''; b.stockId=null; b.stockCode=''; b.freeText=''; b.norm=''; b.partsPerBlank=''; }
+        ops[0].blank=b; }
+      ops.forEach(op=>{ op.planMaterials=[]; });
+      bom.forEach(m=>{ if(m.role==='Заготовка'||m.role==='Комплектующее'||!(m.canonId||m.name))return; const idx=m.opNo?Number(m.opNo)-1:0; const op=ops[idx]||ops[0]; if(op)op.planMaterials.push({canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',qty:m.norm,note:''}); });
+    }
+    function rtBomPaint(host){
+      const box=host.querySelector('#rb-bom'); if(!box)return; const bom=rtWiz.bom=rtWiz.bom||[];
+      const hasBlank=bom.some(m=>m.role==='Заготовка'); const noCanon=!(rtWiz.canonAll||[]).length;
+      box.innerHTML=`${bom.map((m,i)=>rtBomRowHtml(m,i)).join('')||'<div class="rt-hint">Материалы не указаны. Заготовка нужна для резерва металла, остальные строки — для состава актов выпуска и Ф.14.</div>'}
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="tbtn" data-badd="Заготовка" ${hasBlank||noCanon?'disabled':''}>+ Заготовка</button><button type="button" class="tbtn" data-badd="Материал" ${noCanon?'disabled':''}>+ Материал</button><button type="button" class="tbtn" data-badd="Комплектующее">+ Комплектующее</button>${noCanon?'<span class="rt-hint">Каталог канон-номенклатуры пуст — заведите позиции в разделе «Каталог».</span>':''}</div>`;
+      const sync=()=>{ rtBomApply(); const mf=host.querySelector('#rb-material'); if(mf&&!mf.dataset.touched){ mf.value=rtBomMaterialText(); rtWiz.route.material=mf.value; } };
+      box.querySelectorAll('[data-bf]').forEach(el=>{ el.onchange=el.oninput=()=>{ const row=el.closest('[data-bi]'); const i=+row.dataset.bi, m=bom[i]; if(!m)return; const f=el.dataset.bf;
+          if(f==='canonId'){ m.canonId=el.value?Number(el.value):null; const c=m.canonId?(rtWiz.canonAll||[]).find(x=>String(x.id)===String(m.canonId)):null; m.name=c?c.name:(m.name||''); if(c&&c.unit)m.unit=c.unit; rtBomPaint(host); return; }
+          if(f==='role'){ m.role=el.value; if(m.role==='Заготовка'&&bom.some((x,k)=>k!==i&&x.role==='Заготовка')){ toast('Заготовка в спецификации одна — она резервируется на складе.','warn'); m.role='Материал'; } rtBomPaint(host); return; }
+          if(f==='stockId'){ m.stockId=el.value||null; sync(); return; }
+          m[f]=el.value; if(el.tagName==='INPUT'&&el.type!=='number')return sync(); sync(); }; });
+      box.querySelectorAll('[data-brem]').forEach(b=>b.onclick=()=>{ bom.splice(+b.dataset.brem,1); rtBomPaint(host); sync(); });
+      box.querySelectorAll('[data-badd]').forEach(b=>b.onclick=()=>{ const role=b.dataset.badd; bom.push(rtBomDefault({role,unit:role==='Заготовка'?'кг':(role==='Комплектующее'?'шт':'')})); rtBomPaint(host); });
+      const mf=host.querySelector('#rb-material'); if(mf&&!mf.dataset.touched){ mf.oninput=()=>{ mf.dataset.touched='1'; }; }
+      sync();
+    }
+    // подсказка в карточке операции: что входит на этой операции по спецификации (только чтение)
+    function rtOpMaterialsHint(op,i){
+      const bom=rtWiz.bom||[]; const here=bom.filter(m=>(m.canonId||m.name)&&((m.opNo?Number(m.opNo)-1:0)===i));
+      if(!here.length)return '';
+      return `<div class="rt-hint" style="margin:8px 0 4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span>Материалы на операции:</span>${here.map(m=>`<span class="st st--${m.role==='Заготовка'?'wait':'neutral'}">${esc(m.role==='Заготовка'?'заготовка · ':'')}${esc(m.name||'—')}${m.norm!==''&&m.norm!=null?' · '+rtNum(m.norm)+' '+esc(m.unit||''):''}</span>`).join('')}<span class="c-gray">· правится на шаге 1</span></div>`;
+    }
     function rtOpCardHtml(op,i){
       const ot=rtOtById(op.opTypeId)||{}; const nm=op.name||ot.name||'Операция';
       const sub=[ot.section,op.equipment,ot.ri].filter(Boolean).join(' · ')||'тип операции не выбран';
@@ -14169,8 +14234,8 @@
         <div class="rt-obody">
           <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование)</label><input class="rt-inp" data-of="name" value="${rtEscA(op.name)}" placeholder="по умолч. = тип"></div></div>
           ${auto}
-          ${i===0?rtBlankBlockHtml(op):rtCoopBlockHtml(op,i)}
-          ${rtPlanBlockHtml(op,i)}
+          ${rtOpMaterialsHint(op,i)}
+          ${i>0?rtCoopBlockHtml(op,i):''}
           <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment)}</select></div><div class="rt-fld"><label>Норма, ч</label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="0"></div></div>
           ${rtToolChecklist(op,i)}
           ${setupRow}
@@ -14350,13 +14415,13 @@
       if(step===4){ const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(3); const dr=host.querySelector('#rt-draft'); if(dr)dr.onclick=()=>rtWizSave(false); const rl=host.querySelector('#rt-release'); if(rl)rl.onclick=()=>rtWizSave(true); }
     }
     async function rtWizSave(release){
-      if(!rtWiz)return; rtCollectStep(rtWiz.step);
+      if(!rtWiz)return; rtCollectStep(rtWiz.step); rtBomApply(); // K-160: заготовка и план операций — из спецификации
       if(!(rtWiz.route.name||'').trim()){ toast('Укажите наименование изделия / компонента (шаг 1).','err'); rtWizGo(1); return; }
       // МК-резерв металла (этап 1): заготовка операции №1 сериализуется в JSON в «materials» (см. rtBlankSerialize/сервер mkBlankParse).
       // Этап 4: внешняя кооперация — та же схема, JSON в «materials» операции i>0 (см. rtCoopSerialize/сервер mkCoopParse); returned (история
       // приёмок возврата) уже сохранён внутри op.coop с загрузки формы — просто едет обратно, чтобы пересохранение МК его не стёрло.
       const ops=rtWiz.ops.map((op,i)=>({opTypeId:op.opTypeId||'',name:(op.name||'').trim(),equipment:(op.equipment||'').trim(),tooling:(op.tooling||'').trim(),setupCardNo:(op.setupCardNo||'').trim(),control:op.control||'нет',norm:op.norm,whatControl:(op.whatControl||'').trim(),si:(op.si||'').trim(),tolerance:(op.tolerance||'').trim(),planMaterials:(op.planMaterials||[]).filter(m=>m.canonId||String(m.name||'').trim()).map(m=>({canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',qty:m.qty,note:m.note||''})),materials:i===0?rtBlankSerialize(op.blank):(op.coop&&op.coop.enabled?rtCoopSerialize(op.coop):(op.materials||'').trim()),components:op.components||[]})).filter(o=>o.name||o.opTypeId);
-      const body={id:rtWiz.routeId,type:rtWiz.route.type,name:(rtWiz.route.name||'').trim(),designation:(rtWiz.route.designation||'').trim(),productType:rtWiz.route.productType||'',revision:(rtWiz.route.revision||'').trim(),material:(rtWiz.route.material||'').trim(),statusMk:release?'Утверждена':(rtWiz.route.statusMk||'Черновик'),projectDecNo:rtWiz.route.projectDecNo||'',kdDrawings:rtWiz.kdSel,operations:ops};
+      const body={id:rtWiz.routeId,type:rtWiz.route.type,name:(rtWiz.route.name||'').trim(),designation:(rtWiz.route.designation||'').trim(),productType:rtWiz.route.productType||'',revision:(rtWiz.route.revision||'').trim(),material:(rtWiz.route.material||'').trim()||rtBomMaterialText(),bom:(rtWiz.bom||[]).map(m=>({role:m.role,canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',norm:m.norm,opNo:m.opNo||null,stockId:m.stockId||null,partsPerBlank:m.partsPerBlank||null,note:m.note||''})),statusMk:release?'Утверждена':(rtWiz.route.statusMk||'Черновик'),projectDecNo:rtWiz.route.projectDecNo||'',kdDrawings:rtWiz.kdSel,operations:ops};
       const host=rtWiz.host; const btns=host.querySelectorAll('#rt-draft,#rt-release'); btns.forEach(b=>{b.disabled=true;});
       try{ const r=await fetch('/api/routes/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         RT=null; toast(`МК ${j.mk||''} ${release?'выпущена':'сохранена'} · операций: ${j.operations}${j.components?', компонентов: '+j.components:''}`,'ok');

@@ -116,6 +116,7 @@ const KEY2TITLE = {
   operations: 'Операции маршрута', op_types: 'Типы операций', sections: 'Участки', components_in: 'Входящие компоненты',
   op_params: 'Параметры типов', task_param_values: 'Значения параметров задачи',
   journal: 'Журнал исполнения', employees: 'Сотрудники',
+  material_usage: 'Расход материалов', // K-167: факт расхода материалов по задачам Ф.14
   design_projects: 'Проекты разработки', design_kd: 'Конструкторская документация',
   design_revisions: 'Редакции КД', design_notices: 'Извещения об изменении',
   design_td: 'ТД-библиотека', design_nc: 'Управляющие программы ЧПУ',
@@ -8758,6 +8759,71 @@ async function metalInventoryImpl(body, fio) {
 // ════════════════════════════════════════════════════════════════════════════
 // контекст задачи для панели «Заготовка → факт»: операция/маршрут/позиция/МК + признак «это первая
 // операция маршрута» (только на ней, см. mkBlankParse, может быть JSON заготовки).
+// ============================================================================
+//  K-167: факт расхода материалов на операции (карта задачи Ф.14 → «Материалы на операцию»)
+//  План — из материалов операции МК (K-160b, роли кроме Заготовки и Комплектующего) × единиц в задании;
+//  факт — таблица «Расход материалов» (material_usage). Заготовка оп.1 списывается отдельным блоком (metalBlankIssue).
+//  Партия по умолчанию — 1С-алиас канона с наибольшим доступным остатком (зеркало K-156); НЗП и акты — K-168/169.
+// ============================================================================
+const MAT_SOURCES = ['1С', 'Склад металла', 'Склад ДП–СХ', 'Без партии'];
+function matUsageShape(r) {
+  return { id: r.Id ?? r.id, taskId: r['Задача (id)'] ?? null, taskNum: r['№ задачи'] || '', mk: r['МК'] || '', opNo: r['№ операции'] ?? null, positionId: r['Позиция ПЗ (id)'] ?? null,
+    canonId: r['Канон (id)'] ?? null, name: r['Материал'] || '', role: r['Роль'] || 'Материал', source: r['Источник партии'] || 'Без партии', batchCode: r['Партия (код)'] || '', onecKey: r['Ключ 1С'] || '', batchName: r['Наименование партии'] || '',
+    unit: r['ЕИ'] || '', qtyPlan: r['Кол-во план'] != null ? Number(r['Кол-во план']) : null, qtyFact: r['Кол-во факт'] != null ? Number(r['Кол-во факт']) : null, forUnits: r['На единиц'] ?? null, units: r['Единицы'] || '',
+    reason: r['Причина замены'] || '', who: r['Кто'] || '', date: r['Дата'] || '', note: r['Примечание'] || '' };
+}
+async function taskMaterialsContext(taskId) {
+  const [tasks, operations, routes, positions, journal] = await Promise.all([ncListSoft('tasks'), ncListSoft('operations'), ncListSoft('routes'), ncListSoft('positions'), ncListSoft('journal')]);
+  const t = tasks.find((x) => String(x.Id ?? x.id) === String(taskId));
+  if (!t) { const e = new Error('Задача не найдена.'); e.status = 404; throw e; }
+  const op = operations.find((o) => (o.Id ?? o.id) === t.operations_id) || null;
+  const route = op && op.routes_id != null ? routes.find((r) => (r.Id ?? r.id) === op.routes_id) || {} : {};
+  const position = positions.find((p) => (p.Id ?? p.id) === t.positions_id) || {};
+  const num = String(t['№ задачи'] || '');
+  const jr = journal.filter((j) => String(j['№ задачи'] || '') === num);
+  const unitsTouched = jr.filter((j) => j['Исполнитель'] || j['Дата'] || j['Самоконтроль'] || j['Контроль ОТК']).length;
+  const unitsGood = jr.filter((j) => j['Контроль ОТК'] === 'годен' || (!j['Контроль ОТК'] && j['Самоконтроль'] === 'годен')).length;
+  const qtyPlan = Number(position['Кол-во']) || Number(t['Кол-во по заданию']) || 0;
+  return { task: t, op, route, position, num, qtyPlan, unitsTouched, unitsGood, mk: route['№ МК'] || '', opNo: op ? Number(op['№ операции']) || null : null };
+}
+async function buildTaskMaterials(taskId) {
+  const ctx = await taskMaterialsContext(taskId);
+  const plan = ctx.op ? mkPlanParse(ctx.op['Материалы (план)']).filter((m) => m.role !== 'Заготовка' && m.role !== 'Комплектующее') : [];
+  const rows = (await ncListSoft('material_usage')).filter((r) => String(r['Задача (id)']) === String(ctx.task.Id ?? ctx.task.id)).map(matUsageShape).sort((a, b) => a.id - b.id);
+  // кандидаты партий: 1С-алиасы канона с остатком (зеркало), для каждого канона из плана и факта
+  const canonIds = new Set([...plan.map((m) => m.canonId), ...rows.map((r) => r.canonId)].filter((x) => x != null).map(Number));
+  let byCanon = new Map();
+  if (canonIds.size) {
+    const mirror = await ncListAll('onec_items');
+    for (const m of mirror) { const cid = Number(m.catalog_canon_id); if (!cid || !canonIds.has(cid)) continue; if (!byCanon.has(cid)) byCanon.set(cid, []);
+      byCanon.get(cid).push({ key: m['Ключ 1С'], code: m['Код 1С'], name: m['Наименование'], unit: m['ЕИ'] || '', qty: Number(m['Остаток']) || 0, cost: Number(m['Себестоимость']) || 0 }); }
+    for (const arr of byCanon.values()) arr.sort((a, b) => b.qty - a.qty);
+  }
+  const basis = ctx.unitsTouched || ctx.qtyPlan || 1; // план считаем на единицы, взятые в работу; если журнал пуст — на всё задание
+  const planRows = plan.map((m) => ({ canonId: m.canonId, name: m.name, unit: m.unit, role: m.role || 'Материал', normPerUnit: m.qty, qtyPlan: m.qty != null ? +(Number(m.qty) * basis).toFixed(3) : null, candidates: (byCanon.get(Number(m.canonId)) || []).slice(0, 6) }));
+  return { ok: true, taskId: ctx.task.Id ?? ctx.task.id, taskNum: ctx.num, mk: ctx.mk, opNo: ctx.opNo, qtyPlan: ctx.qtyPlan, unitsTouched: ctx.unitsTouched, unitsGood: ctx.unitsGood, basis,
+    plan: planRows, rows, candidatesByCanon: Object.fromEntries([...byCanon.entries()].map(([k, v]) => [k, v.slice(0, 6)])), sources: MAT_SOURCES, hasPlan: plan.length > 0 };
+}
+async function saveTaskMaterials(body, session) {
+  const ctx = await taskMaterialsContext(body.taskId);
+  const who = (session && session.fio) || 'портал'; const today = whToday();
+  const num = (v) => (v == null || v === '' || isNaN(Number(String(v).replace(',', '.')))) ? null : Number(String(v).replace(',', '.'));
+  const rowsIn = Array.isArray(body.rows) ? body.rows : [];
+  const toRow = (r) => ({
+    'Строка': `${ctx.num} · ${String(r.name || '').trim()}`.slice(0, 200), 'Задача (id)': ctx.task.Id ?? ctx.task.id, '№ задачи': ctx.num, 'МК': ctx.mk, '№ операции': ctx.opNo, 'Позиция ПЗ (id)': ctx.task.positions_id ?? null,
+    'Канон (id)': r.canonId != null && r.canonId !== '' ? Number(r.canonId) : null, 'Материал': String(r.name || '').trim(), 'Роль': ['Материал', 'Вспомогательный', 'Заготовка', 'Комплектующее'].includes(r.role) ? r.role : 'Материал',
+    'Источник партии': MAT_SOURCES.includes(r.source) ? r.source : (r.onecKey ? '1С' : 'Без партии'), 'Партия (код)': String(r.batchCode || '').trim(), 'Ключ 1С': String(r.onecKey || '').trim(), 'Наименование партии': String(r.batchName || '').trim(),
+    'ЕИ': String(r.unit || '').trim(), 'Кол-во план': num(r.qtyPlan), 'Кол-во факт': num(r.qtyFact), 'На единиц': num(r.forUnits) ?? (ctx.unitsTouched || ctx.qtyPlan || null), 'Единицы': String(r.units || '').trim(),
+    'Причина замены': String(r.reason || '').trim(), 'Кто': who, 'Дата': today, 'Примечание': String(r.note || '').trim(),
+  });
+  const creates = rowsIn.filter((r) => (r.id == null || r.id === '') && String(r.name || '').trim()).map(toRow);
+  const updates = rowsIn.filter((r) => r.id != null && r.id !== '').map((r) => ({ Id: Number(r.id), ...toRow(r) }));
+  const removes = (Array.isArray(body.remove) ? body.remove : []).map(Number).filter(Boolean);
+  if (updates.length) await ncUpdateMany('material_usage', updates);
+  if (creates.length) await ncCreateMany('material_usage', creates);
+  if (removes.length) await ncDeleteMany('material_usage', removes);
+  return { ok: true, created: creates.length, updated: updates.length, removed: removes.length };
+}
 async function taskBlankContext(taskId) {
   const [tasks, operations, routes, positions] = await Promise.all([
     ncListSoft('tasks'), ncListSoft('operations'), ncListSoft('routes'), ncListSoft('positions'),
@@ -12276,6 +12342,8 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, chatId, url, taskId });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
+    if (p === '/api/task/materials' && req.method === 'GET') { try { return sendJson(res, 200, await buildTaskMaterials(url.searchParams.get('taskId'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/task/materials' && req.method === 'POST') { if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' }); try { return sendJson(res, 200, await saveTaskMaterials(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/task/update' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);

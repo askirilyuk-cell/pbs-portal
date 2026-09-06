@@ -11794,6 +11794,7 @@
           ${t.ri?`<div class="big"><b>РИ:</b> ${esc(t.ri)}</div>`:''}
           ${ctl?`<div class="ctl"><b>Контроль (§5):</b> ${esc(ctl)}</div>`:''}</div>
         ${ro?'':'<div class="st-sec" id="st-blank-wrap" style="display:none"><div class="lab">Заготовка → факт (списание со склада)</div><div id="st-blank-body" class="c-gray" style="font-size:12px">Загрузка…</div></div>'}
+        ${ro?'':'<div class="st-sec" id="st-mat-wrap" style="display:none"><div class="lab">Материалы на операцию <span class="c-gray" style="font-weight:400;font-size:11px">план из МК × единицы в работе → факт</span></div><div id="st-mat-body" class="c-gray" style="font-size:12px">Загрузка…</div></div>'}
         <div class="st-sec"><div class="lab">Задание (Ф.14 §1–2)</div>
           ${kv('№ ПЗ / срок',`${t.num} · ${fmt(t.plan)}`)}
           ${t.partName?kv('Изделие',t.partName+(t.drawing?` · чертёж ${t.drawing}`:'')+(t.applicability?` · ${t.applicability}`:'')):''}
@@ -11831,7 +11832,7 @@
       const drawBtn=document.getElementById('st-draw');
       if(drawBtn)drawBtn.onclick=()=>{const m=document.getElementById('st-msg');if(m){m.style.color='var(--sl-500)';m.textContent='Просмотр чертежа появится после ввода базы КД (процедура в утверждении).';}};
       if(!ro){
-        stBlankLoad(t);
+        stBlankLoad(t); stMatLoad(t); // K-167
         host.querySelectorAll('#st-status .st-sbtn').forEach(b=>b.onclick=()=>{chosen=b.dataset.st;
           host.querySelectorAll('#st-status .st-sbtn').forEach(x=>x.classList.toggle('on',x===b));});
         // приёмка единицы = контроль «годен»: самоконтроль и, если требуется, ОТК. Браков нет.
@@ -11875,6 +11876,7 @@
           const jHas=journal.some(x=>x.id||x.executor||x.blankNo||x.self||x.otk||x.date);
           if(jHas){const rj=await fetch('/api/task/journal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskNum:t.num,rows:journal})});
             const jj=await rj.json().catch(()=>({}));if(!rj.ok||jj.error)throw new Error('журнал: '+(jj.error||('HTTP '+rj.status)));}
+          try{ await stMatSave(t); }catch(e){ throw new Error('материалы: '+e.message); } // K-167
           msg.style.color='var(--green)';msg.textContent='Сохранено ✓';
           setTimeout(()=>load(),650); // load → route → вернёт очередь участка с обновлённым статусом
         };
@@ -11893,6 +11895,54 @@
     // каждой отрезанной детали. Кандидаты карточек — сервер (/api/metal/blank-candidates), см.
     // buildMetalBlankCandidates на сервере: рекомендация → та же марка размером ≥ нормы → деловые
     // остатки → полный список («другая карточка…»).
+    // ── K-167: материалы на операцию (факт расхода) ────────────────────────────
+    let stMat=null; // {taskId, plan, rows, candidatesByCanon, basis, removed:[]}
+    async function stMatLoad(t){
+      const wrap=document.getElementById('st-mat-wrap'); if(!wrap)return; stMat=null;
+      if(!DATA||DATA.mode!=='live'){ wrap.style.display='none'; return; }
+      let d; try{ d=await (await fetch('/api/task/materials?taskId='+encodeURIComponent(t.id))).json(); }catch(e){ wrap.style.display='none'; return; }
+      if(!d||d.error){ wrap.style.display='none'; return; }
+      if(!d.hasPlan&&!(d.rows||[]).length){ wrap.style.display=''; document.getElementById('st-mat-body').innerHTML='<span class="c-gray">У операции нет плановых материалов в МК (кроме заготовки). Добавить факт: </span><button type="button" class="tbtn" id="st-mat-add">+ Материал</button>'; stMat={taskId:t.id,plan:[],rows:[],candidatesByCanon:{},basis:d.basis||1,removed:[]}; stMatWire(t); return; }
+      wrap.style.display='';
+      // строки: сохранённые факты; если фактов нет — из плана (факт = план)
+      const rows=(d.rows||[]).length?d.rows.map(r=>({...r,_fromPlan:false})):d.plan.map(m=>{ const c=(m.candidates||[])[0]; return {id:null,canonId:m.canonId,name:m.name,unit:m.unit||(c&&c.unit)||'',role:m.role,qtyPlan:m.qtyPlan,qtyFact:m.qtyPlan,source:c?'1С':'Без партии',onecKey:c?c.key:'',batchCode:c?c.code:'',batchName:c?c.name:'',reason:'',note:'',_fromPlan:true}; });
+      stMat={taskId:t.id,plan:d.plan||[],rows,candidatesByCanon:d.candidatesByCanon||{},basis:d.basis||1,unitsTouched:d.unitsTouched,qtyPlan:d.qtyPlan,removed:[]};
+      stMatPaint(t);
+    }
+    function stMatPaint(t){
+      const body=document.getElementById('st-mat-body'); if(!body||!stMat)return; const m=stMat;
+      const cand=(r)=>{ const list=(m.candidatesByCanon[String(r.canonId)]||[]); const opts=['<option value="">— без партии —</option>'].concat(list.map(c=>`<option value="${esc(c.key)}"${c.key===r.onecKey?' selected':''}>${esc(c.code)} · ${esc(c.name)} · ост. ${mtNum(c.qty)} ${esc(c.unit)}</option>`));
+        if(r.onecKey&&!list.some(c=>c.key===r.onecKey))opts.push(`<option value="${esc(r.onecKey)}" selected>${esc(r.batchCode)} · ${esc(r.batchName)}</option>`); return opts.join(''); };
+      const rowsH=m.rows.map((r,i)=>{ const over=r.qtyPlan!=null&&r.qtyFact!=null&&Number(r.qtyFact)>Number(r.qtyPlan)*1.05;
+        return `<tr data-mi="${i}"><td>${esc(r.name)}<div class="c-gray" style="font-size:11px">${esc(r.role||'Материал')}${r.qtyPlan!=null?` · план ${mtNum(r.qtyPlan)} ${esc(r.unit)}`:''}</div></td>
+          <td><select class="rt-inp" data-mf="onecKey" data-mi="${i}" style="max-width:260px">${cand(r)}</select></td>
+          <td style="white-space:nowrap"><input class="rt-inp" type="number" step="any" min="0" data-mf="qtyFact" data-mi="${i}" value="${esc(r.qtyFact==null?'':r.qtyFact)}" style="width:90px${over?';border-color:var(--red)':''}"> ${esc(r.unit||'')}</td>
+          <td><input class="rt-inp" data-mf="reason" data-mi="${i}" value="${esc(r.reason||'')}" placeholder="${r._fromPlan?'':'причина, если не по плану'}" style="min-width:140px"></td>
+          <td><button type="button" class="tbtn" data-mrem="${i}" style="color:var(--red);padding:2px 8px" title="Убрать">✕</button></td></tr>`; }).join('');
+      body.innerHTML=`<div class="c-gray" style="font-size:11px;margin-bottom:6px">План на ${m.basis} ед.${m.unitsTouched?' (в работе по журналу)':' (по заданию)'} · партия — позиция 1С с остатком, можно поменять</div>
+        <div class="tbl-wrap"><table class="dt" style="font-size:12px;width:100%"><thead><tr><th>Материал</th><th>Партия / позиция 1С</th><th>Факт</th><th>Причина замены</th><th></th></tr></thead><tbody>${rowsH||'<tr><td colspan="5" class="c-gray">строк нет</td></tr>'}</tbody></table></div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button type="button" class="tbtn" id="st-mat-plan" ${m.plan.length?'':'disabled'}>Всё как по плану</button><button type="button" class="tbtn" id="st-mat-add">+ Материал</button><span class="c-gray" style="font-size:11px;align-self:center">сохраняется вместе с карточкой (кнопка «Сохранить»)</span></div>`;
+      stMatWire(t);
+    }
+    function stMatWire(t){
+      const body=document.getElementById('st-mat-body'); if(!body||!stMat)return; const m=stMat;
+      body.querySelectorAll('[data-mf]').forEach(el=>{ el.onchange=el.oninput=()=>{ const r=m.rows[+el.dataset.mi]; if(!r)return; const f=el.dataset.mf; r[f]=el.value; r._fromPlan=false;
+        if(f==='onecKey'){ const c=(m.candidatesByCanon[String(r.canonId)]||[]).find(x=>x.key===el.value); r.source=el.value?'1С':'Без партии'; r.batchCode=c?c.code:''; r.batchName=c?c.name:''; if(c&&c.unit&&!r.unit)r.unit=c.unit; } }; });
+      body.querySelectorAll('[data-mrem]').forEach(b=>b.onclick=()=>{ const r=m.rows[+b.dataset.mrem]; if(r&&r.id!=null)m.removed.push(r.id); m.rows.splice(+b.dataset.mrem,1); stMatPaint(t); });
+      const pl=body.querySelector('#st-mat-plan'); if(pl)pl.onclick=()=>{ m.plan.forEach(pm=>{ let r=m.rows.find(x=>String(x.canonId)===String(pm.canonId)); const c=(pm.candidates||[])[0]; if(!r){ r={id:null,canonId:pm.canonId,name:pm.name,unit:pm.unit||(c&&c.unit)||'',role:pm.role,qtyPlan:pm.qtyPlan,qtyFact:pm.qtyPlan,source:c?'1С':'Без партии',onecKey:c?c.key:'',batchCode:c?c.code:'',batchName:c?c.name:'',reason:'',note:''}; m.rows.push(r);} else { r.qtyPlan=pm.qtyPlan; r.qtyFact=pm.qtyPlan; r.reason=''; } }); stMatPaint(t); toast('Факт выставлен по плану. Нажмите «Сохранить».','ok'); };
+      const ad=body.querySelector('#st-mat-add'); if(ad)ad.onclick=async()=>{ if(typeof CAT==='undefined'||!CAT){ try{ CAT=await (await fetch('/api/catalog')).json(); }catch{ CAT={items:[]}; } } const items=(CAT.items||[]); if(!items.length){ toast('Каталог канон-номенклатуры пуст.','warn'); return; }
+        const q=prompt('Материал (часть названия из каталога):',''); if(q===null)return; const qq=q.trim().toLowerCase(); const found=items.filter(c=>String(c.name||'').toLowerCase().includes(qq)).slice(0,1)[0]; if(!found){ toast('Не найдено в каталоге: '+q,'warn'); return; }
+        m.rows.push({id:null,canonId:found.id,name:found.name,unit:found.unit||'',role:'Материал',qtyPlan:null,qtyFact:null,source:'Без партии',onecKey:'',batchCode:'',batchName:'',reason:'добавлен по факту',note:''});
+        try{ const d=await (await fetch('/api/task/materials?taskId='+encodeURIComponent(m.taskId))).json(); if(d&&d.candidatesByCanon)Object.assign(m.candidatesByCanon,d.candidatesByCanon); }catch{}
+        if(!m.candidatesByCanon[String(found.id)]){ try{ if(!ONEC)ONEC=await (await fetch('/api/onec')).json(); const c=((ONEC&&ONEC.items)||[]).filter(x=>String(x.canonId)===String(found.id)&&x.hasStock).map(x=>({key:x.key,code:x.code,name:x.name,unit:x.unit,qty:x.qty,cost:x.cost})); if(c.length)m.candidatesByCanon[String(found.id)]=c; }catch{} }
+        stMatPaint(t); };
+    }
+    async function stMatSave(t){
+      const wrap=document.getElementById('st-mat-wrap'); if(!wrap||wrap.style.display==='none'||!stMat)return;
+      const m=stMat; const rows=m.rows.filter(r=>String(r.name||'').trim()&&(r.qtyFact!==''&&r.qtyFact!=null||r.id!=null)); if(!rows.length&&!m.removed.length)return;
+      const r=await fetch('/api/task/materials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskId:m.taskId,rows:rows.map(x=>({id:x.id,canonId:x.canonId,name:x.name,unit:x.unit,role:x.role,source:x.source,onecKey:x.onecKey,batchCode:x.batchCode,batchName:x.batchName,qtyPlan:x.qtyPlan,qtyFact:x.qtyFact,reason:x.reason,note:x.note})),remove:m.removed})});
+      const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+    }
     async function stBlankLoad(t){
       const wrap=document.getElementById('st-blank-wrap'); if(!wrap)return;
       if(!DATA||DATA.mode!=='live'){ wrap.style.display='none'; return; }

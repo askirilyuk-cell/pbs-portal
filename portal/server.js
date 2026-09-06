@@ -7015,6 +7015,7 @@ function retroActShape(r, lines) {
     approverId: r['Утверждающий (id)'] != null && r['Утверждающий (id)'] !== '' ? Number(r['Утверждающий (id)']) : null, approverName: r['Утверждающий'] || '',
     sentBy: r['Отправил на утверждение'] || '', sentAt: r['Дата отправки'] || '', approverComment: r['Комментарий утверждающего'] || '', chatSent: r['В чат бухгалтерии'] || '',
     acceptedBy: r['Принял к учёту (1С)'] || '', acceptedAt: r['Дата проведения 1С'] || '',
+    kind: r['Вид'] || 'Ретро', positionId: r['Позиция ПЗ (id)'] ?? null, // K-169: производственный акт привязан к позиции ПЗ
     returnedAt: r['Дата возврата'] || '', // K-165: возвращён на доработку утверждающим (комментарий — approverComment)
     canonId: r.catalog_canon_id ?? (canon ? (canon.Id ?? canon.id) : null) ?? null, canonName: canon ? (canon['Каноническое наименование'] || '') : '',
     lines: ls, lineCount: ls.length, editable: RETRO_EDITABLE.has(r['Статус'] || 'Черновик'),
@@ -7205,6 +7206,95 @@ async function retroDelete(body, session) {
   if (lines.length) await ncDeleteMany('retro_lines', lines);
   await ncDeleteMany('retro_outputs', [a.Id ?? a.id]);
   return { ok: true, id: a.Id ?? a.id, no: a['№ акта'] || '', lines: lines.length };
+}
+// ============================================================================
+//  K-168/K-169: НЗП — незавершённое производство по позициям ПЗ и производственные акты выпуска
+//  Сводка вычисляется: единицы по журналам §7 (последняя операция с «годен»), материалы план (спецификация МК × N)
+//  против факта (K-167 + выдача заготовки со склада металла по МК). Акт на k выпущенных единиц — распределение
+//  факта пропорционально по операциям, остаток остаётся в НЗП; последний акт забирает весь остаток.
+// ============================================================================
+const unitGood = (j) => j['Контроль ОТК'] === 'годен' || (!j['Контроль ОТК'] && j['Самоконтроль'] === 'годен');
+const unitTouched = (j) => !!(j['Исполнитель'] || j['Дата'] || j['Самоконтроль'] || j['Контроль ОТК']);
+async function buildWip(opts) {
+  const [orders, positions, routes, operations, tasks, journal, usage, mmov, acts] = await Promise.all([
+    ncListSoft('orders'), ncListSoft('positions'), ncListSoft('routes'), ncListSoft('operations'), ncListSoft('tasks'), ncListSoft('journal'), ncListSoft('material_usage'), ncListSoft('metal_movements'), ncListSoft('retro_outputs')]);
+  let mirrorByKey = new Map(); try { const mirror = await ncListAll('onec_items'); mirrorByKey = new Map(mirror.map((m) => [String(m['Ключ 1С'] || ''), m])); } catch { /* без себестоимости */ }
+  const routeById = new Map(routes.map((r) => [r.Id ?? r.id, r]));
+  const journalByTask = new Map(); for (const j of journal) { const k = String(j['№ задачи'] || ''); if (!journalByTask.has(k)) journalByTask.set(k, []); journalByTask.get(k).push(j); }
+  const usageByTask = new Map(); for (const u of usage) { const k = String(u['Задача (id)']); if (!usageByTask.has(k)) usageByTask.set(k, []); usageByTask.get(k).push(u); }
+  const out = [];
+  for (const p of positions) {
+    const rid = p.routes_id != null ? Number(p.routes_id) : null; if (!rid) continue;
+    const st = String(p['Статус'] || '').trim(); if (opts && opts.all !== true && /отгруж|закрыт|отмен/i.test(st)) continue;
+    const route = routeById.get(rid) || {}; const mk = route['№ МК'] || '';
+    const N = Number(p['Кол-во']) || 0; if (!N) continue;
+    const pid = p.Id ?? p.id;
+    const numPz = String(p['Позиция'] || '').split('/')[0].trim();
+    const order = orders.find((o) => String(o['№ ПЗ'] || '') === numPz) || {};
+    const ops = operations.filter((o) => Number(o.routes_id) === rid).sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
+    if (!ops.length) continue;
+    const ptasks = tasks.filter((t) => Number(t.positions_id) === Number(pid));
+    // единицы: по каждой операции — какие № единиц «годен» / тронуты
+    const perOp = ops.map((o, i) => { const tk = ptasks.filter((t) => Number(t.operations_id) === Number(o.Id ?? o.id)); const jr = tk.flatMap((t) => journalByTask.get(String(t['№ задачи'] || '')) || []);
+      const good = new Set(jr.filter(unitGood).map((j) => Number(j['№ единицы'])).filter(Boolean)); const touched = new Set(jr.filter(unitTouched).map((j) => Number(j['№ единицы'])).filter(Boolean)); const scrap = new Set(jr.filter((j) => j['Контроль ОТК'] === 'брак' || j['Самоконтроль'] === 'брак').map((j) => Number(j['№ единицы'])).filter(Boolean));
+      return { no: Number(o['№ операции']) || i + 1, id: o.Id ?? o.id, name: o['Операция'] || '', tasks: tk.map((t) => ({ id: t.Id ?? t.id, num: t['№ задачи'], status: t['Статус'] || '' })), good, touched, scrap, goodCount: good.size, touchedCount: touched.size }; });
+    const last = perOp[perOp.length - 1];
+    const doneUnits = new Set([...last.good].filter((u) => u >= 1 && u <= N));
+    const scrapUnits = new Set(perOp.flatMap((o) => [...o.scrap]));
+    const touchedUnits = new Set(perOp.flatMap((o) => [...o.touched]));
+    const unitState = []; for (let u = 1; u <= N; u++) { let atOp = 0; perOp.forEach((o, i) => { if (o.good.has(u)) atOp = i + 1; }); unitState.push({ u, done: doneUnits.has(u), scrap: scrapUnits.has(u), started: touchedUnits.has(u), atOp }); }
+    const done = unitState.filter((x) => x.done && !x.scrap).length, scrap = unitState.filter((x) => x.scrap).length, wip = unitState.filter((x) => !x.done && !x.scrap && x.started).length, notStarted = N - done - scrap - wip;
+    // материалы: план из спецификации МК × N, факт из журнала расхода задач позиции + заготовка со склада металла по МК (доля по кол-ву)
+    // план: спецификация МК; если её нет (МК сохранена без сводки) — собираем из материалов операций (K-160b)
+    let bom = mkBomParse(route['Спецификация материалов']).filter((m) => m.role !== 'Комплектующее');
+    if (!bom.length) bom = ops.flatMap((o) => mkPlanParse(o['Материалы (план)']).map((m) => ({ role: m.role || 'Материал', canonId: m.canonId, name: m.name, unit: m.unit, norm: m.qty }))).filter((m) => m.role !== 'Комплектующее');
+    const mat = new Map(); const keyOf = (canonId, name) => canonId != null && canonId !== '' ? 'c' + canonId : 'n' + String(name || '').toLowerCase();
+    for (const m of bom) { const k = keyOf(m.canonId, m.name); mat.set(k, { canonId: m.canonId ?? null, name: m.name, unit: m.unit || '', role: m.role, plan: +((Number(m.norm) || 0) * N).toFixed(3), fact: 0, cost: 0, byOp: {} }); }
+    const urows = ptasks.flatMap((t) => usageByTask.get(String(t.Id ?? t.id)) || []);
+    for (const u of urows) { const k = keyOf(u['Канон (id)'], u['Материал']); if (!mat.has(k)) mat.set(k, { canonId: u['Канон (id)'] ?? null, name: u['Материал'] || '', unit: u['ЕИ'] || '', role: u['Роль'] || 'Материал', plan: 0, fact: 0, cost: 0, byOp: {}, extra: true });
+      const e = mat.get(k); const q = Number(u['Кол-во факт']) || 0; e.fact += q; const mr = mirrorByKey.get(String(u['Ключ 1С'] || '')); if (mr) e.cost += q * (Number(mr['Себестоимость']) || 0); const opn = Number(u['№ операции']) || 0; e.byOp[opn] = (e.byOp[opn] || 0) + q; }
+    // заготовка: выдачи со склада металла по МК (маркер «по МК-…»), делим между позициями МК по кол-ву
+    const qtyRoute = positions.filter((x) => Number(x.routes_id) === rid).reduce((s2, x) => s2 + (Number(x['Кол-во']) || 0), 0) || N;
+    const marker = `по МК-${mk}`; const blankKg = mmov.filter((m) => String(m['Операция'] || '').trim() === 'Расход' && String(m['Основание / комментарий'] || '').includes(marker)).reduce((s2, m) => s2 + (Number(String(m['Кол-во']).replace(',', '.')) || 0), 0) * (N / qtyRoute);
+    const blankLine = bom.find((m) => m.role === 'Заготовка'); if (blankLine) { const e = mat.get(keyOf(blankLine.canonId, blankLine.name)); if (e) { e.fact += +blankKg.toFixed(3); e.byOp[1] = (e.byOp[1] || 0) + blankKg; e.fromMetal = true; } }
+    const materials = [...mat.values()].map((e) => ({ ...e, fact: +e.fact.toFixed(3), cost: +e.cost.toFixed(2), pct: e.plan ? Math.round(e.fact / e.plan * 100) : null }));
+    const released = acts.filter((a) => String(a['Позиция ПЗ (id)'] || '') === String(pid) && !/Отклон/.test(a['Статус'] || '')).map((a) => ({ id: a.Id ?? a.id, no: a['№ акта'], qty: Number(a['Кол-во']) || 0, status: a['Статус'] || '' }));
+    const releasedQty = released.reduce((s2, a) => s2 + a.qty, 0);
+    out.push({ positionId: pid, numPos: p['№ позиции'] || '', pz: numPz, customer: order['Заказчик'] || order['Контрагент'] || '', name: p['Наименование / обозначение'] || route['Наименование'] || '', drawing: p['Чертёж / ТУ'] || '', status: st, dateReady: p['Срок готовности'] || '',
+      mk, routeId: rid, qty: N, unit: p['Ед.'] || 'шт', done, wip, notStarted, scrap, releasedQty, toRelease: Math.max(0, done - releasedQty), units: unitState,
+      ops: perOp.map((o) => ({ no: o.no, name: o.name, good: o.goodCount, touched: o.touchedCount, tasks: o.tasks })), materials, costFact: +materials.reduce((s2, m) => s2 + m.cost, 0).toFixed(2), released });
+  }
+  out.sort((a, b) => String(a.pz).localeCompare(String(b.pz), 'ru', { numeric: true }) || String(a.numPos).localeCompare(String(b.numPos), 'ru', { numeric: true }));
+  return { ok: true, items: out, kpis: { positions: out.length, unitsDone: out.reduce((s2, x) => s2 + x.done, 0), unitsWip: out.reduce((s2, x) => s2 + x.wip, 0), toRelease: out.reduce((s2, x) => s2 + x.toRelease, 0), costFact: +out.reduce((s2, x) => s2 + x.costFact, 0).toFixed(2) } };
+}
+// K-169: производственный акт выпуска на k единиц позиции ПЗ — распределение факта пропорционально по операциям
+async function wipRelease(body, session) {
+  const k = Number(body.qty) || 0; if (!(k > 0)) { const e = new Error('Укажите количество выпускаемых единиц.'); e.status = 400; throw e; }
+  const wip = await buildWip({ all: true }); const w = wip.items.find((x) => String(x.positionId) === String(body.positionId));
+  if (!w) { const e = new Error('Позиция ПЗ не найдена или без маршрута.'); e.status = 404; throw e; }
+  if (k > w.toRelease && !body.force) { const e = new Error(`К выпуску готово ${w.toRelease} ед. (принято ОТК ${w.done}, уже в актах ${w.releasedQty}).`); e.status = 400; throw e; }
+  const lastRelease = (w.releasedQty + k) >= (w.qty - w.scrap);
+  // факт по ключам 1С из журнала расхода задач позиции
+  const [tasks, usage, acts, lines] = await Promise.all([ncListSoft('tasks'), ncListSoft('material_usage'), ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
+  const tids = new Set(tasks.filter((t) => Number(t.positions_id) === Number(w.positionId)).map((t) => String(t.Id ?? t.id)));
+  const urows = usage.filter((u) => tids.has(String(u['Задача (id)'])) && (Number(u['Кол-во факт']) || 0) > 0);
+  let mirrorByKey = new Map(); try { const mirror = await ncListAll('onec_items'); mirrorByKey = new Map(mirror.map((m) => [String(m['Ключ 1С'] || ''), m])); } catch { /* без зеркала */ }
+  const prevActIds = new Set(acts.filter((a) => String(a['Позиция ПЗ (id)'] || '') === String(w.positionId) && !/Отклон/.test(a['Статус'] || '')).map((a) => String(a.Id ?? a.id)));
+  const prevByKey = new Map(); for (const l of lines) { if (!prevActIds.has(String(l.retro_outputs_id))) continue; const key = String(l['Ключ 1С'] || '') || ('n:' + String(l['Наименование'] || '')); prevByKey.set(key, (prevByKey.get(key) || 0) + (Number(l['Кол-во факт']) || 0)); }
+  const agg = new Map();
+  for (const u of urows) { const key = String(u['Ключ 1С'] || '') || ('n:' + String(u['Материал'] || '')); const opn = Number(u['№ операции']) || 0; const op = w.ops.find((o) => o.no === opn); const basisUnits = op && op.good ? op.good : (w.done || 1);
+    const a = agg.get(key) || { key, onecKey: String(u['Ключ 1С'] || ''), canonId: u['Канон (id)'] ?? null, name: u['Материал'] || '', unit: u['ЕИ'] || '', total: 0, share: 0, batchCode: u['Партия (код)'] || '', batchName: u['Наименование партии'] || '' };
+    const q = Number(u['Кол-во факт']) || 0; a.total += q; a.share += q / basisUnits * k; agg.set(key, a); }
+  const outLines = [];
+  for (const a of agg.values()) { const avail = Math.max(0, a.total - (prevByKey.get(a.key) || 0)); let q = lastRelease ? avail : Math.min(avail, a.share); q = +q.toFixed(3); if (q <= 0) continue;
+    const mr = mirrorByKey.get(a.onecKey); let wh = ''; try { const ws = JSON.parse((mr && mr['Остатки по складам']) || '[]'); if (Array.isArray(ws) && ws.length) wh = ws.sort((x, y) => y.qty - x.qty)[0].name; } catch { /* нет складов */ }
+    outLines.push({ canonId: a.canonId, name: a.name, unit: a.unit || (mr ? mr['ЕИ'] : ''), onecKey: a.onecKey, onecCode: mr ? mr['Код 1С'] : a.batchCode, onecName: mr ? mr['Наименование'] : a.batchName, warehouse: wh, qtyPlan: q, qtyFact: q, cost: mr ? (Number(mr['Себестоимость']) || 0) : 0, source: 'План МК', reason: '', note: lastRelease ? 'последний выпуск по позиции — остаток НЗП' : `доля на ${k} из ${w.done} ед.` }); }
+  const saved = await retroSave({ name: w.name, designation: w.drawing, qty: k, unit: w.unit, whereTo: String(body.whereTo || 'Готовая продукция (43)'), account: retroAccountOf(String(body.whereTo || 'Готовая продукция (43)')), period: '', mk: w.mk, note: `Производственный акт по ${w.pz}${w.numPos ? ' поз. ' + w.numPos : ''}: выпущено ${k} из ${w.qty} ${w.unit} (принято ОТК ${w.done}).${lastRelease ? ' Последний выпуск — остаток НЗП списан.' : ''}`, lines: outLines }, session);
+  try { await ncEnsureColumn('retro_outputs', 'Вид', 'SingleLineText'); await ncEnsureColumn('retro_outputs', 'Позиция ПЗ (id)', 'Number'); await ncUpdate('retro_outputs', saved.id, { 'Вид': 'Производство', 'Позиция ПЗ (id)': Number(w.positionId) }); } catch (e) { console.warn('[wip] вид/позиция акта не записаны:', e.message); }
+  // сразу на утверждение — первому из списка утверждающих производственных актов (пока общий список RETRO_APPROVERS)
+  let sent = null; const apId = Number(body.approverId) || retroApproverIds()[0];
+  if (apId && body.send !== false) { try { let name = 'id' + apId; try { const st = await getStaffList(); const u = st.find((x) => Number(x.id) === apId); if (u) name = u.name; } catch { /* имя */ } sent = await retroSetStatus({ id: saved.id, status: 'На утверждении', approverId: apId, approverName: name }, session); } catch (e) { sent = { error: String(e.message || e) }; } }
+  return { ok: true, act: saved, lines: outLines.length, lastRelease, sent };
 }
 // K-161: кабинет сотрудника — документы, ждущие его решения (пока акты выпуска; дальше — ЗнЗ, ЛОВ, КД и т.д.)
 async function buildCabinet(session) {
@@ -12537,6 +12627,8 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await buildRetroLive()); } catch (e) { return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES }, warning: String(e.message || e) }); }
     }
     if (p === '/api/retro/item') { try { const c = await buildRetroCard(url.searchParams.get('id')); return c ? sendJson(res, 200, c) : sendJson(res, 404, { error: 'Акт не найден.' }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/wip') { try { return sendJson(res, 200, await buildWip({ all: url.searchParams.get('all') === '1' })); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/retro/wip/release' && req.method === 'POST') { try { return sendJson(res, 200, await wipRelease(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/approvers') { try { return sendJson(res, 200, { ok: true, approvers: await retroApprovers(), me: (sessionFromReq(req) || {}).userId || null }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/chat-preview') { try { return sendJson(res, 200, await retroChatPreview(url.searchParams.get('id'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/retro/prefill') { try { return sendJson(res, 200, await retroPrefill({ routeId: url.searchParams.get('routeId') || '', canonId: url.searchParams.get('canonId') || '', qty: url.searchParams.get('qty') || '1' })); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }

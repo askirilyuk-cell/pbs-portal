@@ -9545,18 +9545,45 @@
       if(!retroRoutes){ try{ const d=await (await fetch('/api/routes')).json(); retroRoutes=(d&&d.routes)||[]; }catch{ retroRoutes=[]; } }
       await retroLoadApprovers(); // K-161
     }
+    // ── K-168/169: НЗП по позициям ПЗ и выпуск производственного акта ──
+    let retroView='acts';
+    async function renderWip(body,host){
+      body.innerHTML='<div class="card pad" style="color:var(--sub)">Считаю незавершённое производство…</div>';
+      let d; try{ d=await (await fetch('/api/retro/wip')).json(); }catch(e){ d={error:String(e.message||e)}; }
+      if(!d||d.error){ body.innerHTML=emptyCard('НЗП недоступно',{sub:esc((d&&d.error)||'')}); return; }
+      const k=d.kpis||{}; const items=d.items||[];
+      const kpi=(l,v,sub)=>`<div class="card pad" style="min-width:150px"><div style="font-size:11px;color:var(--sl-500);text-transform:uppercase;letter-spacing:.04em">${l}</div><div style="font-size:22px;font-weight:700;color:var(--ink)">${v}${sub?` <span style="font-size:12px;font-weight:500;color:var(--sl-500)">${sub}</span>`:''}</div></div>`;
+      const bar=(w)=>{ const N=w.qty||1; const seg=(n,c)=>n?`<i style="display:block;height:100%;width:${(n/N*100).toFixed(1)}%;background:${c};float:left"></i>`:''; return `<div style="height:8px;border-radius:4px;background:var(--sl-100);overflow:hidden">${seg(w.done,'var(--green)')}${seg(w.wip,'var(--blue,#1d4ed8)')}${seg(w.scrap,'var(--red)')}</div>`; };
+      const units=(w)=>`<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:6px">${(w.units||[]).map(u=>`<span title="ед. №${u.u}${u.scrap?' · брак':u.done?' · выпущена':u.started?' · после оп. '+u.atOp:' · не начата'}" style="width:14px;height:14px;border-radius:3px;display:inline-block;background:${u.scrap?'var(--red)':u.done?'var(--green)':u.started?'var(--blue,#1d4ed8)':'var(--sl-100)'};border:1px solid var(--sl-300)"></span>`).join('')}</div>`;
+      const card=(w)=>`<div class="card pad" data-wip="${w.positionId}" style="margin-top:var(--gap)">
+          <div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap"><b style="font-family:var(--mono);color:var(--navy)">${esc(w.pz)}${w.numPos?' · поз. '+esc(w.numPos):''}</b><span style="font-weight:600;color:var(--ink)">${esc(w.name)}</span>${w.drawing?`<span class="c-gray" style="font-family:var(--mono);font-size:12px">${esc(w.drawing)}</span>`:''}<span class="c-gray" style="font-size:12px">${esc(w.mk)}</span>${w.dateReady?`<span class="c-gray" style="font-size:12px">срок ${fmt(w.dateReady)}</span>`:''}
+            <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${w.toRelease>0&&retroCanWrite()?`<button class="ui-btn ui-btn--primary" data-release="${w.positionId}" data-max="${w.toRelease}">Выпустить ${w.toRelease} ${esc(w.unit)}</button>`:''}<span class="st st--${w.done===w.qty?'done':w.wip||w.done?'work':'neutral'}">${w.done} из ${w.qty} готово</span></span></div>
+          <div style="margin-top:8px">${bar(w)}</div>
+          <div class="c-gray" style="font-size:12px;margin-top:4px">выпущено ${w.done} · в работе ${w.wip} · не начато ${w.notStarted}${w.scrap?` · <span style="color:var(--red)">брак ${w.scrap}</span>`:''} · в актах ${w.releasedQty}${w.released.length?` (${w.released.map(a=>esc(a.no)+' · '+esc(a.status)).join(', ')})`:''}</div>
+          ${units(w)}
+          <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:14px;margin-top:10px" class="wip-grid">
+            <div><div class="eqd-sec" style="margin:0 0 4px">Операции</div><table class="dt" style="font-size:12px;width:100%"><thead><tr><th>№</th><th>Операция</th><th>Годен</th><th>В работе</th><th>Задачи</th></tr></thead><tbody>${w.ops.map(o=>`<tr><td class="code">${o.no}</td><td>${esc(o.name)}</td><td class="code">${o.good}</td><td class="code">${Math.max(0,o.touched-o.good)}</td><td class="c-gray">${o.tasks.length?o.tasks.map(t=>`<span class="mono">${esc(t.num)}</span> <span class="st st--${/Выполнено/.test(t.status)?'done':/работе/.test(t.status)?'work':'neutral'}">${esc(t.status||'—')}</span>`).join('<br>'):'—'}</td></tr>`).join('')}</tbody></table></div>
+            <div><div class="eqd-sec" style="margin:0 0 4px">Материалы · план на ${w.qty} ${esc(w.unit)} → факт</div><table class="dt" style="font-size:12px;width:100%"><thead><tr><th>Материал</th><th>План</th><th>Факт</th><th>%</th><th>Себест., ₽</th></tr></thead><tbody>${w.materials.length?w.materials.map(m=>`<tr><td>${esc(m.name)}<span class="c-gray" style="font-size:11px"> · ${esc(m.role)}${m.fromMetal?' · склад металла':''}${m.extra?' · вне плана':''}</span></td><td class="code">${m.plan?retroN(m.plan)+' '+esc(m.unit):'—'}</td><td class="code">${m.fact?retroN(m.fact)+' '+esc(m.unit):'—'}</td><td class="code" style="${m.pct>105?'color:var(--red)':''}">${m.pct!=null?m.pct+'%':'—'}</td><td class="code">${m.cost?retroN(m.cost,2):'—'}</td></tr>`).join(''):'<tr><td colspan="5" class="c-gray">материалы не заданы и не отмечены</td></tr>'}</tbody></table>${w.costFact?`<div class="c-gray" style="font-size:12px;margin-top:4px">набрано по себестоимости 1С: <b>${retroN(w.costFact,2)} ₽</b></div>`:''}</div>
+          </div></div>`;
+      body.innerHTML=`<div style="display:flex;gap:10px;flex-wrap:wrap">${kpi('Позиций в работе',k.positions||0)}${kpi('Единиц выпущено',k.unitsDone||0)}${kpi('В работе',k.unitsWip||0)}${kpi('К выпуску актом',k.toRelease||0,'ед.')}${kpi('Набрано по себест. 1С',retroN(k.costFact||0,0),'₽')}</div>
+        ${items.length?items.map(card).join(''):emptyCard('Незавершённого производства нет',{sub:'Позиции ПЗ с маршрутной картой и открытыми задачами появятся здесь автоматически.'})}`;
+      body.querySelectorAll('[data-release]').forEach(b=>b.onclick=async()=>{ const max=Number(b.dataset.max)||0; const v=prompt(`Сколько единиц выпустить актом? Готово к выпуску: ${max}`,String(max)); if(v===null)return; const q=Number(v); if(!(q>0)){ toast('Нужно число больше нуля.','warn'); return; }
+        b.disabled=true; try{ const r=await fetch('/api/retro/wip/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({positionId:b.dataset.release,qty:q})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast(`Акт ${j.act.no} на ${q} ед. создан${j.sent&&j.sent.ok?' и отправлен на утверждение':''}.`,'ok'); RETRO=null; retroView='acts'; await renderRetro(host); retroOpen(j.act.id); }catch(e){ toast('Не выпущено: '+e.message,'err'); b.disabled=false; } });
+    }
     async function renderRetro(host,arg){
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка раздела «Акты выпуска»…</div>';
       try{ RETRO=await (await fetch('/api/retro')).json(); }catch(e){ RETRO={mode:'mock',items:[],kpis:{},dict:{},warning:String(e.message||e)}; }
       const live=RETRO.mode==='live', k=RETRO.kpis||{};
       const sum=live?`${retroN(k.total)} актов · черновиков ${retroN(k.draft)} · на утверждении ${retroN(k.pending)} · утверждено ${retroN(k.approved)} · в 1С ${retroN(k.in1c)} · проведено ${retroN(k.posted)}`:'реестр не наполнен';
       host.innerHTML=`<div class="card eq-tabbar">
-          <div class="eq-tabs"><button class="on">Акты выпуска</button></div>
+          <div class="eq-tabs"><button class="${retroView!=='wip'?'on':''}" data-rv="acts">Акты выпуска</button><button class="${retroView==='wip'?'on':''}" data-rv="wip">НЗП · незавершённое производство</button></div>
           <span style="margin-left:auto;display:flex;gap:10px;align-items:center;padding:6px 0;flex-wrap:wrap">${srcChip(live,sum)}${retroCanWrite()?'<button class="ui-btn ui-btn--primary" id="retro-new">+ Акт выпуска</button>':''}</span></div>
         <div id="retrobody" style="margin-top:var(--gap)"></div>`;
       const nb=host.querySelector('#retro-new'); if(nb)nb.onclick=()=>retroOpenNew();
+      host.querySelectorAll('[data-rv]').forEach(b=>b.onclick=()=>{ retroView=b.dataset.rv; renderRetro(host); });
       const body=host.querySelector('#retrobody');
       if(!live){ body.innerHTML=emptyCard('Реестр актов недоступен',{sub:RETRO.warning?esc(RETRO.warning):'Нужно подключение к базе.'}); return; }
+      if(retroView==='wip'){ renderWip(body,host); return; } // K-168
       const opt=(v,l,cur)=>`<option value="${esc(String(v))}"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`;
       body.innerHTML=`<div class="card eq-filters" style="padding:8px 10px">
           <input id="retro-q" type="search" placeholder="Поиск: № акта, наименование, чертёж, МК" value="${esc(retroQ)}" style="min-width:260px" aria-label="Поиск">
@@ -9611,7 +9638,7 @@
       const d=retroDrawerHost(), a=retroDraft, w=retroCanWrite()&&a.editable, isNew=a.id==null;
       const tabs=[['act','Акт'],['lines','Состав'+(a.lines.length?' · '+a.lines.length:'')],['docs','Документы / 1С']];
       d.innerHTML=`<div class="eqd-h">
-          <div class="eqd-title"><span class="eqd-inv">${isNew?'Новый акт':esc(a.no)}</span>${retroStCell(a.status)}${a.cost?`<span class="st st--neutral">${retroN(a.cost,2)} ₽</span>`:''}</div>
+          <div class="eqd-title"><span class="eqd-inv">${isNew?'Новый акт':esc(a.no)}</span>${retroStCell(a.status)}${a.kind==='Производство'?'<span class="st st--work">производство</span>':''}${a.cost?`<span class="st st--neutral">${retroN(a.cost,2)} ₽</span>`:''}</div>
           <button class="x" data-act="close" aria-label="Закрыть">✕</button>
           <div class="eqd-name">${esc(a.name||'что произведено — заполните ниже')}</div>
           <div class="eqd-sub">${esc(a.whereTo||'куда приходуем не выбрано')}${a.mk?' · '+esc(a.mk):''}${a.status==='На утверждении'?' · на утверждении у '+esc(a.approverName||'—')+(a.sentAt?' с '+fmt(a.sentAt):'')+(a.sentBy?' · отправил '+esc(a.sentBy):''):''}${a.approvedBy&&a.status!=='На утверждении'&&a.status!=='Черновик'?' · утвердил '+esc(a.approvedBy)+' '+fmt(a.approvedAt):''}${a.status==='Черновик'&&a.returnedAt?' · <span style="color:var(--red)">возвращено на доработку '+(a.approverName?esc(a.approverName)+' ':'')+fmt(a.returnedAt)+': '+esc(a.approverComment||'')+'</span>':''}${a.status==='Отклонён'&&a.approverComment?' · <span style="color:var(--red)">отклонено: '+esc(a.approverComment)+'</span>':''}</div>

@@ -9623,6 +9623,11 @@
           <input id="retro-q" type="search" placeholder="Поиск: № акта, наименование, чертёж, МК" value="${esc(retroQ)}" style="min-width:260px" aria-label="Поиск">
           <select id="retro-st" aria-label="Статус">${opt('','Все статусы',retroStatus)+((RETRO.dict&&RETRO.dict.statuses)||[]).map(s=>opt(s,s,retroStatus)).join('')}</select>
         </div><div id="retrogrid" style="margin-top:var(--gap);min-width:0"></div>`;
+      const locals=retroLocalList(); if(locals.length&&retroCanWrite()){ const bn=document.createElement('div'); bn.className='card'; bn.style.cssText='margin-top:var(--gap);padding:10px 14px;border:1px dashed var(--amber,#b45309);background:#fff7ed;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+        bn.innerHTML=`<b>Незаконченные акты в этом браузере:</b>`+locals.map((l,i)=>`<span style="display:inline-flex;gap:6px;align-items:center">${esc(l.no||'новый акт')}${l.name?' «'+esc(l.name)+'»':''} <span class="c-gray">${esc(retroWhen(l.savedAt))}${l.lines?' · строк '+l.lines:''}</span><button class="ui-btn" data-lgo="${i}" style="padding:3px 10px">Продолжить</button><button class="ui-btn ui-btn--ghost" data-ldel="${i}" style="padding:3px 8px;color:var(--red)">✕</button></span>`).join('');
+        body.insertBefore(bn,body.querySelector('#retrogrid'));
+        bn.querySelectorAll('[data-lgo]').forEach(b=>b.onclick=()=>{ const l=locals[+b.dataset.lgo]; l.id==null?retroOpenNew():retroOpen(l.id); });
+        bn.querySelectorAll('[data-ldel]').forEach(b=>b.onclick=async()=>{ const l=locals[+b.dataset.ldel]; if(!(await uiConfirm('Удалить незаконченный черновик из браузера?',{ok:'Удалить',danger:true})))return; retroLocalClear(l.id); renderRetro(host); }); }
       body.querySelector('#retro-q').oninput=(e)=>{retroQ=e.target.value;retroGrid();};
       body.querySelector('#retro-st').onchange=(e)=>{retroStatus=e.target.value;retroGrid();};
       retroGrid();
@@ -9657,8 +9662,17 @@
     function retroDrawerHost(){ let d=document.getElementById('retro-drawer'); if(!d){ d=document.createElement('div'); d.id='retro-drawer'; document.body.appendChild(d); } return d; }
     const retroDrawerIsOpen=()=>{const d=document.getElementById('retro-drawer');return !!(d&&d.classList.contains('on'));};
     function retroDrawerClose(resetHash){ const d=document.getElementById('retro-drawer'); if(d){ d.classList.remove('on'); d.innerHTML=''; } retroSel=null; retroCard=null; retroDraft=null; retroGrid(); if(resetHash!==false){ try{history.replaceState(null,'','#retro');}catch{} } }
+    // K-189: черновик акта живёт в браузере (как у МК, K-176): автосохранение при каждом изменении, восстановление при возврате
+    const retroLKey=(id)=>`pbs.retrodraft.${(ME&&ME.id)||'x'}.${id==null||id===''?'new':id}`;
+    let retroLTimer=null;
+    function retroLocalStore(){ if(!retroDraft||!retroDraft.editable)return; clearTimeout(retroLTimer); retroLTimer=setTimeout(()=>{ try{ retroCollect(); localStorage.setItem(retroLKey(retroDraft.id),JSON.stringify({savedAt:new Date().toISOString(),draft:retroDraft})); }catch{} },250); }
+    function retroLocalRead(id){ try{ const v=localStorage.getItem(retroLKey(id)); return v?JSON.parse(v):null; }catch{ return null; } }
+    function retroLocalClear(id){ clearTimeout(retroLTimer); try{ localStorage.removeItem(retroLKey(id)); }catch{} }
+    function retroLocalList(){ const out=[]; try{ const pre=`pbs.retrodraft.${(ME&&ME.id)||'x'}.`; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(!k||!k.startsWith(pre))continue; const d=JSON.parse(localStorage.getItem(k)||'{}'); const id=k.slice(pre.length); out.push({id:id==='new'?null:id,savedAt:d.savedAt||'',name:(d.draft||{}).name||'',no:(d.draft||{}).no||'',lines:((d.draft||{}).lines||[]).length}); } }catch{} return out.sort((a,b)=>String(b.savedAt).localeCompare(String(a.savedAt))); }
+    const retroWhen=(iso)=>{ const d=new Date(iso); return isNaN(d)?'':d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
+    async function retroLocalOffer(id){ const st=retroLocalRead(id); if(!st||!st.draft)return null; const ok=await uiConfirm(`Есть незаконченный ${id==null?'новый акт':'черновик этого акта'}${st.draft.name?' «'+st.draft.name+'»':''}, сохранён в браузере ${retroWhen(st.savedAt)}${(st.draft.lines||[]).length?', строк состава: '+st.draft.lines.length:''}.\nПродолжить с него?`,{title:'Незаконченный акт',ok:'Продолжить',cancel:'Начать заново'}); if(!ok){ retroLocalClear(id); return null; } return st.draft; }
     function retroBlankDraft(){ return { id:null, no:'', date:new Date().toISOString().slice(0,10), name:'', designation:'', canonId:'', qty:1, unit:'шт', whereTo:'Оснастка (10.10)', account:'10.10', period:'', responsible:(AUTH&&AUTH.fio)||'', mk:'', note:'', status:'Черновик', lines:[], editable:true, cost:0 }; }
-    async function retroOpenNew(){ await retroEnsureRefs(); retroSel='new'; retroCard={act:retroBlankDraft(),availability:{}}; retroDraft=JSON.parse(JSON.stringify(retroCard.act)); retroTab='act'; const d=retroDrawerHost(); d.classList.add('on'); retroPaint(); }
+    async function retroOpenNew(){ await retroEnsureRefs(); retroSel='new'; retroCard={act:retroBlankDraft(),availability:{}}; const local=await retroLocalOffer(null); retroDraft=local?Object.assign(retroBlankDraft(),local,{id:null,editable:true}):JSON.parse(JSON.stringify(retroCard.act)); retroTab='act'; const d=retroDrawerHost(); d.classList.add('on'); retroPaint(); }
     async function retroOpen(id,opts){
       await retroEnsureRefs(); const d=retroDrawerHost(); retroSel=id; if(!(opts&&opts.keepTab))retroTab='act';
       try{history.replaceState(null,'','#retro/'+encodeURIComponent(id));}catch{}
@@ -9666,7 +9680,7 @@
       let card=null; try{ card=await (await fetch('/api/retro/item?id='+encodeURIComponent(id))).json(); }catch(e){ card={error:String(e.message||e)}; }
       if(String(retroSel)!==String(id)||!retroDrawerIsOpen())return;
       if(!card||!card.act){ d.innerHTML=`<div class="eqd-h"><div class="eqd-title"><b>Акт недоступен</b></div><button class="x" data-act="close" aria-label="Закрыть">✕</button></div>`+emptyState('Данные акта не получены',{sub:esc((card&&card.error)||'')}); d.querySelector('[data-act="close"]').onclick=()=>retroDrawerClose(); return; }
-      retroCard=card; retroDraft=JSON.parse(JSON.stringify(card.act)); retroPaint();
+      retroCard=card; retroDraft=JSON.parse(JSON.stringify(card.act)); if(card.act.editable&&retroCanWrite()){ const local=await retroLocalOffer(id); if(local)retroDraft=Object.assign(retroDraft,local,{id:card.act.id,no:card.act.no,status:card.act.status,editable:true}); } retroPaint();
     }
     function retroPaint(){
       const d=retroDrawerHost(), a=retroDraft, w=retroCanWrite()&&a.editable, isNew=a.id==null;
@@ -9690,6 +9704,7 @@
         <div class="eq-tabs" id="retro-tabs">${tabs.map(([k,l])=>`<button data-tab="${k}" class="${retroTab===k?'on':''}">${l}</button>`).join('')}</div>
         <div id="retro-body"></div>`;
       d.querySelector('[data-act="close"]').onclick=()=>retroDrawerClose();
+      d.oninput=d.onchange=()=>retroLocalStore(); // K-189
       d.querySelectorAll('#retro-tabs button').forEach(b=>b.onclick=()=>{ retroCollect(); retroTab=b.dataset.tab; retroPaint(); });
       const on=(sel,fn)=>{const el=d.querySelector(sel); if(el)el.onclick=fn;};
       on('[data-act="save"]',()=>retroSave());
@@ -9697,7 +9712,7 @@
       on('[data-act="unapprove"]',()=>retroStatusPost('Черновик',a.status==='На утверждении'?'Акт отозван в черновик.':'Акт возвращён в черновик, резерв снят.'));
       on('[data-act="send"]',()=>retroSendForApproval());
       on('[data-act="reject"]',async ()=>{ const c=(await uiPrompt('Что доработать (увидит создатель акта):','')); if(c===null)return; retroPost('/api/retro/status',{id:a.id,status:'Отклонён',comment:c},'Акт возвращён на доработку, создатель уведомлён.'); });
-      on('[data-act="delete"]',async ()=>{ if(!(await uiConfirm(`Удалить черновик ${a.no||''} вместе с составом? Это необратимо.`)))return; try{ const r=await fetch('/api/retro/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast('Черновик удалён.','ok'); retroDrawerClose(); RETRO=null; renderRetro(document.getElementById('view')); try{cabBadgeRefresh();}catch{} }catch(e){ toast('Не удалено: '+e.message,'err'); } });
+      on('[data-act="delete"]',async ()=>{ if(!(await uiConfirm(`Удалить черновик ${a.no||''} вместе с составом? Это необратимо.`)))return; try{ const r=await fetch('/api/retro/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast('Черновик удалён.','ok'); retroLocalClear(a.id); retroDrawerClose(); RETRO=null; renderRetro(document.getElementById('view')); try{cabBadgeRefresh();}catch{} }catch(e){ toast('Не удалено: '+e.message,'err'); } });
       on('[data-act="typical"]',()=>retroPost('/api/retro/typical',{id:a.id},'Типовой состав сохранён на каноне изделия.'));
       retroTab==='lines'?retroPaintLines():retroTab==='docs'?retroPaintDocs():retroPaintAct();
     }
@@ -9759,7 +9774,7 @@
       const url='/api/retro/prefill?qty='+encodeURIComponent(a.qty||1)+(kind==='mk'?'&routeId='+encodeURIComponent(route?route.id:''):'&canonId='+encodeURIComponent(a.canonId||''));
       try{ const j=await (await fetch(url)).json(); if(j.error)throw new Error(j.error); if(!j.lines.length){ toast(j.note||'Нечего добавить.','warn'); return; }
         j.lines.forEach(l=>a.lines.push({id:null,canonId:l.canonId,name:l.name,unit:l.unit,onecKey:l.onecKey,onecCode:l.onecCode,onecName:l.onecName,warehouse:l.warehouse,qtyPlan:l.qtyPlan,qtyFact:l.qtyFact,cost:l.cost,sum:+(l.qtyFact*l.cost).toFixed(2),source:l.source,reason:'',note:''}));
-        toast(`Добавлено строк: ${j.lines.length}. Проверьте факт и позиции 1С.`,'ok'); retroTab='lines'; retroPaint();
+        toast(`Добавлено строк: ${j.lines.length}. Проверьте факт и позиции 1С.`,'ok'); retroTab='lines'; retroPaint(); retroLocalStore();
       }catch(e){ toast('Не удалось предзаполнить: '+e.message,'err'); }
     }
     function retroAvailFor(key){ const av=(retroCard&&retroCard.availability)||{}; if(av[key])return av[key]; const m=((ONEC&&ONEC.items)||[]).find(x=>x.key===key); return m?{stock:m.qty,reserved:null,available:m.qty,cost:m.cost,unit:m.unit,warehouses:m.warehouses,found:true,fresh:true}:{stock:0,reserved:0,available:0,cost:0,unit:'',warehouses:[],found:false}; }
@@ -9782,7 +9797,7 @@
         ${w?`<div style="margin-top:10px;display:flex;gap:8px"><button class="ui-btn" id="retro-addline">+ Материал из 1С</button><button class="ui-btn ui-btn--ghost" id="retro-addcanon">+ Материал без позиции 1С</button></div>`:''}
         <div id="retro-picker"></div></div>`;
       h.querySelectorAll('[data-lf]').forEach(el=>{ el.onchange=()=>{ const i=+el.dataset.li; if(a.lines[i]){ a.lines[i][el.dataset.lf]=el.value; if(el.dataset.lf==='qtyFact')retroPaintLines(); } }; });
-      h.querySelectorAll('[data-lrem]').forEach(b=>b.onclick=()=>{ a.lines.splice(+b.dataset.lrem,1); retroPaintLines(); });
+      h.querySelectorAll('[data-lrem]').forEach(b=>b.onclick=()=>{ a.lines.splice(+b.dataset.lrem,1); retroPaintLines(); retroLocalStore(); });
       h.querySelectorAll('[data-lpick]').forEach(b=>b.onclick=()=>retroPicker(+b.dataset.lpick));
       const ab=h.querySelector('#retro-addline'); if(ab)ab.onclick=()=>retroPicker(null);
       const ac=h.querySelector('#retro-addcanon'); if(ac)ac.onclick=()=>{ a.lines.push({id:null,canonId:null,name:'',unit:'',onecKey:'',onecCode:'',onecName:'',warehouse:'',qtyPlan:null,qtyFact:null,cost:0,sum:0,source:'Вручную',reason:'',note:''}); retroPaintLines(); const last=h.querySelectorAll('.retro-line'); const el=last[last.length-1]; if(el){ el.querySelector('b').outerHTML=`<input class="rt-inp" data-lf="name" data-li="${a.lines.length-1}" placeholder="наименование материала" style="flex:1">`; el.querySelector('[data-lf="name"]').onchange=(e)=>{ a.lines[a.lines.length-1].name=e.target.value; }; } };
@@ -9790,12 +9805,13 @@
     // выбор позиции 1С для строки (null — новая строка): поиск по зеркалу, только с остатком по умолчанию
     function retroPicker(lineIdx){
       const h=document.getElementById('retro-picker'); if(!h)return; const a=retroDraft; let onlyStock=true; let q=lineIdx!=null&&a.lines[lineIdx]?String(a.lines[lineIdx].name||'').split(' ').slice(0,2).join(' '):'';
-      const paint=()=>{ const qq=q.trim().toLowerCase(); const list=((ONEC&&ONEC.items)||[]).filter(m=>(!onlyStock||m.hasStock)&&(!qq||[m.name,m.code,m.canonName].some(x=>String(x||'').toLowerCase().includes(qq)))).slice(0,15);
+      const paint=()=>{ const words=q.trim().toLowerCase().split(/\s+/).filter(Boolean); const all=((ONEC&&ONEC.items)||[]).filter(m=>(!onlyStock||m.hasStock)&&(!words.length||words.every(wd=>[m.name,m.code,m.canonName,m.article].some(x=>String(x||'').toLowerCase().includes(wd))))); const list=all.slice(0,60); // K-189: было 15 без счётчика
+        const cnt=h.querySelector('#rp-cnt'); if(cnt)cnt.textContent=all.length>list.length?`показано ${list.length} из ${all.length} — уточните поиск`:`найдено ${all.length}`;
         h.querySelector('#rp-res').innerHTML=list.length?list.map(m=>`<div class="eqd-doc" style="cursor:pointer" data-pk="${esc(m.key)}"><span class="mono" style="color:var(--navy)">${esc(m.code)}</span><span class="nm">${esc(m.name)}${m.canonName?` <span class="c-gray">· канон: ${esc(m.canonName)}</span>`:''}</span><span class="sz">${m.hasStock?retroN(m.qty)+' '+esc(m.unit):'нет остатка'}</span></div>`).join(''):'<div class="eqd-sub">Ничего не найдено. Снимите «только с остатком» или обновите зеркало 1С.</div>';
         h.querySelectorAll('[data-pk]').forEach(el=>el.onclick=()=>{ const m=(ONEC.items||[]).find(x=>x.key===el.dataset.pk); if(!m)return; const wh=(m.warehouses||[]).slice().sort((p,r)=>r.qty-p.qty)[0]; const line=lineIdx!=null&&a.lines[lineIdx]?a.lines[lineIdx]:null;
           const patch={onecKey:m.key,onecCode:m.code,onecName:m.name,unit:m.unit||(line&&line.unit)||'',warehouse:wh?wh.name:'',cost:m.cost}; if(!line){ a.lines.push(Object.assign({id:null,canonId:m.canonId||null,name:m.canonName||m.name,qtyPlan:null,qtyFact:null,sum:0,source:'Вручную',reason:'',note:''},patch)); } else { Object.assign(line,patch); if(!line.canonId&&m.canonId)line.canonId=m.canonId; if(!line.name)line.name=m.canonName||m.name; }
-          retroPaintLines(); }); };
-      h.innerHTML=`<div class="card" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--sl-300)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${lineIdx!=null?'Позиция 1С для строки '+(lineIdx+1):'Материал из 1С'}</b><input id="rp-q" class="rt-inp" style="flex:1;min-width:200px" placeholder="поиск: название, код 1С, канон" value="${esc(q)}"><label class="eq-check"><input type="checkbox" id="rp-stock" checked> только с остатком</label><button class="ui-btn ui-btn--ghost" id="rp-close">закрыть</button></div><div id="rp-res" style="margin-top:6px"></div></div>`;
+          retroPaintLines(); retroLocalStore(); }); };
+      h.innerHTML=`<div class="card" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--sl-300)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${lineIdx!=null?'Позиция 1С для строки '+(lineIdx+1):'Материал из 1С'}</b><input id="rp-q" class="rt-inp" style="flex:1;min-width:200px" placeholder="поиск: название, код 1С, канон" value="${esc(q)}"><span class="c-gray" id="rp-cnt" style="font-size:12px"></span><label class="eq-check"><input type="checkbox" id="rp-stock" checked> только с остатком</label><button class="ui-btn ui-btn--ghost" id="rp-close">закрыть</button></div><div id="rp-res" style="margin-top:6px"></div></div>`;
       h.querySelector('#rp-q').oninput=(e)=>{q=e.target.value;paint();}; h.querySelector('#rp-stock').onchange=(e)=>{onlyStock=e.target.checked;paint();}; h.querySelector('#rp-close').onclick=()=>{h.innerHTML='';}; paint(); h.querySelector('#rp-q').focus();
     }
     async function retroPaintDocs(){
@@ -9859,7 +9875,7 @@
       const body={id:a.id,name:a.name,designation:a.designation,canonId:a.canonId||'',qty:a.qty,unit:a.unit,whereTo:a.whereTo,account:a.account,period:a.period,responsible:a.responsible,mk:a.mk,note:a.note,date:a.date,
         lines:a.lines.map(l=>({id:l.id,canonId:l.canonId,name:l.name,onecKey:l.onecKey,onecCode:l.onecCode,onecName:l.onecName,warehouse:l.warehouse,unit:l.unit,qtyPlan:l.qtyPlan,qtyFact:l.qtyFact,cost:l.cost,source:l.source,reason:l.reason,note:l.note}))};
       try{ const r=await fetch('/api/retro/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-        toast(`Акт ${j.no||''} сохранён · строк ${j.lines} · ${retroN(j.cost,2)} ₽`,'ok'); RETRO=null; const v=document.getElementById('view'); retroSel=j.id; await renderRetro(v); retroOpen(j.id,{keepTab:true});
+        toast(`Акт ${j.no||''} сохранён · строк ${j.lines} · ${retroN(j.cost,2)} ₽`,'ok'); retroLocalClear(a.id); if(a.id==null)retroLocalClear(null); RETRO=null; const v=document.getElementById('view'); retroSel=j.id; await renderRetro(v); retroOpen(j.id,{keepTab:true});
       }catch(e){ toast('Не сохранено: '+e.message,'err'); }
     }
     async function retroStatusPost(status,okMsg){ await retroPost('/api/retro/status',{id:retroDraft.id,status},okMsg); }

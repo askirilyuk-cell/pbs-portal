@@ -1371,7 +1371,7 @@ async function buildRouteCard(id) {
       id: op.Id ?? op.id,
       n: opN, name: ot['Наименование'] || op['Операция'] || '', opType: ot['Код типа'] || '',
       section: sec['Код'] ? `${sec['Код']}${sec['Участок'] ? ' · ' + sec['Участок'] : ''}` : '', equip: op['Оборудование'] || '',
-      params: prm.join('; '), paramPlan: mkParamPlanParse(op['Параметры (план)']), control: op['Точка контроля'] || '', ri: ot['РИ'] || '', norm: op['Норма времени (ч)'] ?? '', tasks: tNums,
+      params: prm.join('; '), paramPlan: mkParamPlanParse(op['Параметры (план)']), comment: op['Комментарий оператору'] || '', opTypeCode: ot['Код типа'] || '', control: op['Точка контроля'] || '', ri: ot['РИ'] || '', norm: op['Норма времени (ч)'] ?? '', tasks: tNums,
       // K-81 редизайн Ф.13: оснастка из справочника + № привязанной карты наладки (migrate-042; degrade-safe — поля может ещё не быть)
       tooling: op['Оснастка'] || '', setupCard: op['Карта наладки (№)'] || '',
       ncFiles: mkOpFiles(r['№ МК'], opN, 'nc'), setupFiles: mkOpFiles(r['№ МК'], opN, 'setup'),
@@ -1474,7 +1474,7 @@ async function buildRouteEdit(id) {
       equipment: op['Оборудование'] || '', materials: op['Входящие материалы'] || '',
       planMaterials: mkPlanParse(op['Материалы (план)']), // K-157
       control: op['Точка контроля'] || 'нет', whatControl: op['Что контролировать'] || '',
-      si: op['СИ'] || '', tolerance: op['Допуски'] || '', norm: op['Норма времени (ч)'] ?? '', paramPlan: mkParamPlanParse(op['Параметры (план)']), // K-182
+      si: op['СИ'] || '', tolerance: op['Допуски'] || '', norm: op['Норма времени (ч)'] ?? '', paramPlan: mkParamPlanParse(op['Параметры (план)']), comment: op['Комментарий оператору'] || '', // K-182/186
       // K-81 редизайн Ф.13: оснастка (справочник) + № карты наладки (migrate-042; degrade-safe)
       tooling: op['Оснастка'] || '', setupCardNo: op['Карта наладки (№)'] || '',
       // МК-резерв металла (этап 1): заготовка (JSON) хранится только на ПЕРВОЙ операции — см. mkBlankParse
@@ -1661,7 +1661,8 @@ async function saveRoute(body, session) {
   // K-81 редизайн Ф.13 (migrate-042): оснастка из справочника + № привязанной карты наладки.
   // СТРОГО АДДИТИВНО и degrade-safe: колонки создаём один раз и только если хоть одна операция их использует
   // (нет churn'а схемы на пустых сохранениях; работает и ДО применения миграции — как «Чертежи КД»).
-  let hasTooling = false, hasSetupNo = false, hasPlan = false, hasParamPlan = false;
+  let hasTooling = false, hasSetupNo = false, hasPlan = false, hasParamPlan = false, hasOpComment = false;
+  if (opsIn.some((o) => String((o && o.comment) || '').trim())) { try { await ncEnsureColumn('operations', 'Комментарий оператору', 'LongText'); hasOpComment = true; } catch (e) { console.warn('МК: колонка «Комментарий оператору» недоступна:', e.message); } } // K-186
   if (opsIn.some((o) => Array.isArray(o && o.paramPlan) && mkParamPlanClean(o.paramPlan).length)) { try { await ncEnsureColumn('operations', 'Параметры (план)', 'LongText'); hasParamPlan = true; } catch (e) { console.warn('МК: колонка «Параметры (план)» недоступна:', e.message); } }
   // K-157: плановые материалы из канона — колонка создаётся при первом сохранении МК с планом
   if (opsIn.some((o) => Array.isArray(o && o.planMaterials) && mkPlanClean(o.planMaterials).length)) {
@@ -1695,6 +1696,7 @@ async function saveRoute(body, session) {
     if (hasSetupNo && String(o.setupCardNo || '').trim()) opRow['Карта наладки (№)'] = String(o.setupCardNo).trim();
     if (hasPlan) { const pm = mkPlanClean(o.planMaterials); if (pm.length) opRow['Материалы (план)'] = JSON.stringify(pm); }
     if (hasParamPlan) { const pp = mkParamPlanClean(o.paramPlan); opRow['Параметры (план)'] = pp.length ? JSON.stringify(pp) : ''; } // K-182
+    if (hasOpComment) opRow['Комментарий оператору'] = String(o.comment || '').trim(); // K-186
     const cr = await ncCreateMany('operations', [opRow]);
     const co = Array.isArray(cr) ? cr[0] : cr; const opId = co.Id ?? co.id;
     await ncLinkRecords('routes', 'Операции маршрута', routeId, [opId]);
@@ -2036,6 +2038,7 @@ async function generateTasksFromRoute(routeId) {
   const route = routes.find((x) => (x.Id ?? x.id) === rid);
   if (!route) throw new Error('Маршрут не найден.');
   const mk = route['№ МК'] || 'МК';
+  try { await ncEnsureColumn('tasks', 'Указания технолога', 'LongText'); } catch (e) { console.warn('Ф.14: колонка «Указания технолога»:', e.message); } // K-186
   const stMk = String(route['Статус МК'] || 'Черновик').trim();
   if (!['Утверждена', 'В производстве'].includes(stMk)) throw new Error(`Карты задач формируются по утверждённой МК (сейчас «${stMk}»): отправьте карту на согласование.`);
   const orderById = new Map(orders.map((o) => [o.Id ?? o.id, o]));
@@ -2073,6 +2076,7 @@ async function generateTasksFromRoute(routeId) {
         // МК-резерв металла (этап 1): на первой операции «Входящие материалы» может быть JSON заготовки
         // (см. mkBlankParse) — оператору в карте задания Ф.14 нужен человекочитаемый текст, не сырой JSON
         'Входящие материалы': mkBlankText(mkBlankParse(op['Входящие материалы'])) || op['Входящие материалы'] || '',
+        ...(String(op['Комментарий оператору'] || '').trim() ? { 'Указания технолога': String(op['Комментарий оператору']).trim() } : {}), // K-186
         'Оборудование': op['Оборудование'] || '',
         'Самоконтроль (С)': ctrl === 'С',
         'Контроль ОТК': ctrl === 'ОТК',
@@ -6301,6 +6305,7 @@ async function buildBoardLive() {
       status: t['Статус'] || 'В очереди', priority: t['Приоритет'], plan: t['Дата плановая'],
       equip: t['Оборудование'] || operation['Оборудование'] || '',
       ri: opType['РИ'] || '', normTime: operation['Норма времени (ч)'] ?? '',
+      opTypeCode: opType['Код типа'] || '', instructions: t['Указания технолога'] || operation['Комментарий оператору'] || '', blankText: t['Входящие материалы'] || '', // K-186: экран оператора
       // МК-резерв металла (этап 1): фолбэк на «Входящие материалы» операции может попасть на JSON
       // заготовки (см. mkBlankParse) — рабочему нужен человекочитаемый текст, не сырой JSON
       materials: t['Входящие материалы'] || mkBlankText(mkBlankParse(operation['Входящие материалы'])) || operation['Входящие материалы'] || '',

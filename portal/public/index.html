@@ -14188,7 +14188,9 @@
     // K-178: палитра типов операций — сначала участок, потом типы этого участка (Александр: «сбоку всё в кучке»)
     function rtPalSections(){ const m=new Map(); ((rtWiz.cat&&rtWiz.cat.opTypes)||[]).forEach(t=>{ const sec=String(t.section||'').trim(); const code=sec.split(' · ')[0].trim(); const key=code||'—'; if(!m.has(key))m.set(key,{code:key,name:sec.split(' · ').slice(1).join(' · ')||(code?'':'без участка (общие)'),types:[]}); m.get(key).types.push(t); });
       return [...m.values()].sort((a,b)=>{ const pa=a.code.startsWith('ПБС')?0:a.code.startsWith('ЕНД')?1:2, pb=b.code.startsWith('ПБС')?0:b.code.startsWith('ЕНД')?1:2; return pa-pb||a.code.localeCompare(b.code,'ru',{numeric:true}); }); }
-    function rtPalHtml(){ const secs=rtPalSections(); if(!secs.length)return '<div class="rt-hint">Справочник типов операций пуст.</div>'; const cur=rtWiz.palSec||'';
+    function rtPalHtml(){ const secs=rtPalSections(); if(!secs.length)return '<div class="rt-hint">Справочник типов операций пуст.</div>';
+      // K-185: пока в маршруте нет операций — по умолчанию заготовительный участок (Александр: «чаще всего сначала он»); дальше палитра помнит выбор
+      if(rtWiz.palSec==null){ rtWiz.palSec=(!(rtWiz.ops||[]).length&&secs.some(sx=>sx.code==='ПБС-УЧ-16'))?'ПБС-УЧ-16':''; } const cur=rtWiz.palSec||'';
       const opt=secs.map(sx=>`<option value="${rtEscA(sx.code)}"${sx.code===cur?' selected':''}>${esc(sx.code)}${sx.name?' · '+esc(sx.name):''}</option>`).join('');
       const list=cur?secs.filter(sx=>sx.code===cur):secs;
       const items=list.map(sx=>`${cur?'':`<div class="rt-rt" style="margin:6px 0 2px;font-weight:700;color:var(--sl-500)">${esc(sx.code)}${sx.name?' · '+esc(sx.name):''}</div>`}`+sx.types.map(t=>`<button type="button" class="rt-ptype" data-add="${rtEscA(t.id)}"><div style="min-width:0"><div class="pn">${esc(t.name)}</div><div class="pm">${esc([t.code,t.ri].filter(Boolean).join(' · '))}</div></div><span class="pp">+</span></button>`).join('')).join('');

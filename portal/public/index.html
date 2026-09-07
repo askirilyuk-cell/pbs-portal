@@ -14110,7 +14110,9 @@
       const stepper='<div class="tl-wiz">'+steps.map((s,i)=>{ const n=i+1, cls=n===step?'on':(n<step?'done':''), d=n<step?'✓':String(n); return `<button type="button" class="tl-wstepbtn ${cls}" data-go="${n}"><span class="tl-wd">${d}</span><span class="tl-wt">${esc(s[0])}<small>${esc(s[1])}</small></span></button>`; }).join('')+'</div>';
       const bodyHtml=step===1?rtStep1Html():step===2?rtStep2Html():step===3?rtStep3Html():rtStep4Html();
       const head=`<div class="row" style="margin-bottom:10px"><a class="c-blue" id="rt-exit" style="font-size:12px;text-decoration:none;cursor:pointer">← Маршруты</a><span class="title" style="font-size:16px">${rtWiz.routeId!=null?'Редактирование маршрутной карты':'Новая маршрутная карта (Ф.13)'}</span><span class="c-gray" style="font-size:12px">${rtWiz.routeId!=null&&rt.mk?esc(rt.mk):'№ присвоится при выпуске'}</span><span style="margin-left:auto;font-size:13px;color:var(--ink);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><span class="c-gray" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">${rt.type==='СБР'?'Собираем':'Изготавливаем'}</span><b>${esc(rt.name||'изделие ещё не названо')}</b>${rt.designation?`<span class="code c-gray" style="font-size:12px">${esc(rt.designation)}</span>`:''}${rt.productType?`<span class="c-gray" style="font-size:12px">· ${esc(rt.productType)}</span>`:''}</span></div>`;
+      const _sy=window.scrollY; // K-174: полная перерисовка не должна уводить страницу наверх
       host.innerHTML=head+stepper+'<div id="rt-body">'+bodyHtml+'</div>';
+      if(rtWiz._keepScroll){ rtWiz._keepScroll=false; requestAnimationFrame(()=>window.scrollTo(0,_sy)); }
       host.querySelectorAll('.tl-wstepbtn').forEach(b=>b.onclick=()=>rtWizGo(+b.dataset.go));
       const ex=host.querySelector('#rt-exit'); if(ex)ex.onclick=()=>rtWizExit();
       rtWizWire(step); window.scrollTo(0,0);
@@ -14529,8 +14531,8 @@
       if(step===2){
         host.querySelectorAll('.rt-ohead').forEach(h=>h.onclick=(e)=>{ if(e.target.closest('a,button,select,input'))return; const op=h.closest('.rt-op'); op.classList.toggle('open'); const i=+op.dataset.idx; if(rtWiz.ops[i])rtWiz.ops[i]._open=op.classList.contains('open'); });
         host.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>rtAddOp(b.dataset.add));
-        host.querySelectorAll('[data-oprem]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); rtReadOps(2); rtWiz.ops.splice(+b.dataset.oprem,1); rtWizRender(); });
-        host.querySelectorAll('#rt-oplist [data-of="opTypeId"]').forEach(s=>s.onchange=()=>{ rtReadOps(2); const op=rtWiz.ops[+s.closest('.rt-op').dataset.idx]; if(op){ const ot=rtOtById(op.opTypeId); if(ot&&!(op.name||'').trim())op.name=ot.name; } rtWizRender(); });
+        host.querySelectorAll('[data-oprem]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); rtReadOps(2); rtWiz.ops.splice(+b.dataset.oprem,1); rtWiz._keepScroll=true; rtWizRender(); });
+        host.querySelectorAll('#rt-oplist [data-of="opTypeId"]').forEach(s=>s.onchange=()=>{ rtReadOps(2); const op=rtWiz.ops[+s.closest('.rt-op').dataset.idx]; if(op){ const ot=rtOtById(op.opTypeId); if(ot&&!(op.name||'').trim())op.name=ot.name; } rtWiz._keepScroll=true; rtWizRender(); });
         const refresh=()=>{ rtReadOps(2); const box=host.querySelector('#rt-summbox'); if(box)box.innerHTML=rtSummaryHtml(); };
         host.querySelectorAll('#rt-oplist [data-of]:not([data-of="opTypeId"])').forEach(inp=>{ inp.oninput=refresh; inp.onchange=refresh; });
         // K-81 доводка: множественная оснастка — чек-лист по каждой операции (op.tooling = «; »-список), обновляется в состоянии сразу
@@ -14595,13 +14597,19 @@
           const addBtn=box.querySelector('[data-cf="addpart"]'); if(addBtn)addBtn.onclick=()=>{ c.parts.push({name:'',qty:''});
             const pc=box.querySelector('[data-cf="parts"]'); if(pc){ pc.innerHTML=c.parts.map((p,pIdx)=>rtCoopPartRowHtml(p,pIdx)).join(''); wirePartRows(); } refreshPrev(); };
         });
-        host.querySelectorAll('[data-allsec]').forEach(cb=>cb.onchange=()=>{ const op=rtWiz.ops[+cb.dataset.allsec]; if(!op)return; rtReadOps(2); op._allSec=cb.checked; rtWizRender(); }); // K-172
+        host.querySelectorAll('[data-allsec]').forEach(cb=>cb.onchange=()=>{ const op=rtWiz.ops[+cb.dataset.allsec]; if(!op)return; rtReadOps(2); op._allSec=cb.checked; rtWiz._keepScroll=true; rtWizRender(); }); // K-172
         // K-157/K-160: материалы операции — wiring по каждой карточке (scoped data-pm); спецификация изделия выводится из операций
-        host.querySelectorAll('.rt-op[data-idx]').forEach(node=>{
+        host.querySelectorAll('.rt-op[data-idx]').forEach(node=>rtPlanWireCard(host,node));
+      }
+      rtWizWireTail(host,step);
+    }
+    // K-174: перерисовать только блок материалов одной операции (без прыжка страницы наверх)
+    function rtPlanRepaint(host,idx){ const node=host.querySelector('.rt-op[data-idx="'+idx+'"]'); const box=node&&node.querySelector('[data-pm]'); const op=rtWiz.ops[idx]; if(!node||!box||!op)return; rtReadOps(2); rtBomApply(); box.outerHTML=rtPlanBlockHtml(op,idx); rtPlanWireCard(host,node); const sb=host.querySelector('#rt-summbox'); if(sb)sb.innerHTML=rtSummaryHtml(); }
+    function rtPlanWireCard(host,node){ {
           const idx=+node.dataset.idx, op=rtWiz.ops[idx]; if(!op)return; const box=node.querySelector('[data-pm]'); if(!box)return;
           const list=op.planMaterials=op.planMaterials||[];
           const refresh=()=>{ rtBomApply(); const sb=host.querySelector('#rt-summbox'); if(sb)sb.innerHTML=rtSummaryHtml(); };
-          const rerender=()=>{ rtReadOps(2); rtBomApply(); rtWizRender(); };
+          const rerender=()=>{ rtPlanRepaint(host,idx); };
           box.querySelectorAll('[data-pmf="canonId"]').forEach(sel=>sel.onchange=()=>{ const k=+sel.dataset.pmi, m=list[k]; if(!m)return; const o=sel.options[sel.selectedIndex]; m.canonId=sel.value?Number(sel.value):null; m.unit=rtCanonKgPerM(m.canonId)?'м':(o?(o.dataset.unit||''):''); m.name=sel.value?String(o.textContent||'').split(' · ')[0].trim():''; rerender(); });
           box.querySelectorAll('[data-pmf="unit"]').forEach(sel=>sel.onchange=()=>{ const k=+sel.dataset.pmi, m=list[k]; if(!m)return; m.unit=sel.value; const u=box.querySelector('[data-pmunit="'+k+'"]'); if(u)u.textContent=rtKgHint(m); refresh(); });
           box.querySelectorAll('[data-pmf="qty"]').forEach(inp=>inp.oninput=()=>{ const k=+inp.dataset.pmi; if(list[k]){ list[k].qty=inp.value; const u=box.querySelector('[data-pmunit="'+k+'"]'); if(u&&rtCanonKgPerM(list[k].canonId))u.textContent=rtKgHint(list[k]); } refresh(); });
@@ -14610,7 +14618,9 @@
           box.querySelectorAll('[data-pmf="partsPerBlank"]').forEach(inp=>inp.oninput=()=>{ const k=+inp.dataset.pmi; if(list[k]){ list[k].partsPerBlank=inp.value; refresh(); } });
           box.querySelectorAll('[data-pmrem]').forEach(btn=>btn.onclick=()=>{ list.splice(+btn.dataset.pmrem,1); rerender(); });
           box.querySelectorAll('[data-pmf="add"]').forEach(btn=>btn.onclick=()=>{ const role=btn.dataset.role||'Материал'; if(role==='Заготовка'&&rtHasBlank())return; list.push({role,canonId:null,name:'',unit:role==='Заготовка'?'кг':(role==='Комплектующее'?'шт':''),qty:'',stockId:null,partsPerBlank:'',note:''}); rerender(); });
-        });
+        } }
+    function rtWizWireTail(host,step){
+      if(step===2){
         const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(1);
         const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(3);
         const ao=host.querySelector('#rt-addop'); if(ao)ao.onclick=()=>rtAddOp('');

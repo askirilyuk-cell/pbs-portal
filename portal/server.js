@@ -1371,7 +1371,7 @@ async function buildRouteCard(id) {
       id: op.Id ?? op.id,
       n: opN, name: ot['Наименование'] || op['Операция'] || '', opType: ot['Код типа'] || '',
       section: sec['Код'] ? `${sec['Код']}${sec['Участок'] ? ' · ' + sec['Участок'] : ''}` : '', equip: op['Оборудование'] || '',
-      params: prm.join('; '), control: op['Точка контроля'] || '', ri: ot['РИ'] || '', norm: op['Норма времени (ч)'] ?? '', tasks: tNums,
+      params: prm.join('; '), paramPlan: mkParamPlanParse(op['Параметры (план)']), control: op['Точка контроля'] || '', ri: ot['РИ'] || '', norm: op['Норма времени (ч)'] ?? '', tasks: tNums,
       // K-81 редизайн Ф.13: оснастка из справочника + № привязанной карты наладки (migrate-042; degrade-safe — поля может ещё не быть)
       tooling: op['Оснастка'] || '', setupCard: op['Карта наладки (№)'] || '',
       ncFiles: mkOpFiles(r['№ МК'], opN, 'nc'), setupFiles: mkOpFiles(r['№ МК'], opN, 'setup'),
@@ -1471,7 +1471,7 @@ async function buildRouteEdit(id) {
       equipment: op['Оборудование'] || '', materials: op['Входящие материалы'] || '',
       planMaterials: mkPlanParse(op['Материалы (план)']), // K-157
       control: op['Точка контроля'] || 'нет', whatControl: op['Что контролировать'] || '',
-      si: op['СИ'] || '', tolerance: op['Допуски'] || '', norm: op['Норма времени (ч)'] ?? '',
+      si: op['СИ'] || '', tolerance: op['Допуски'] || '', norm: op['Норма времени (ч)'] ?? '', paramPlan: mkParamPlanParse(op['Параметры (план)']), // K-182
       // K-81 редизайн Ф.13: оснастка (справочник) + № карты наладки (migrate-042; degrade-safe)
       tooling: op['Оснастка'] || '', setupCardNo: op['Карта наладки (№)'] || '',
       // МК-резерв металла (этап 1): заготовка (JSON) хранится только на ПЕРВОЙ операции — см. mkBlankParse
@@ -1658,7 +1658,8 @@ async function saveRoute(body, session) {
   // K-81 редизайн Ф.13 (migrate-042): оснастка из справочника + № привязанной карты наладки.
   // СТРОГО АДДИТИВНО и degrade-safe: колонки создаём один раз и только если хоть одна операция их использует
   // (нет churn'а схемы на пустых сохранениях; работает и ДО применения миграции — как «Чертежи КД»).
-  let hasTooling = false, hasSetupNo = false, hasPlan = false;
+  let hasTooling = false, hasSetupNo = false, hasPlan = false, hasParamPlan = false;
+  if (opsIn.some((o) => Array.isArray(o && o.paramPlan) && mkParamPlanClean(o.paramPlan).length)) { try { await ncEnsureColumn('operations', 'Параметры (план)', 'LongText'); hasParamPlan = true; } catch (e) { console.warn('МК: колонка «Параметры (план)» недоступна:', e.message); } }
   // K-157: плановые материалы из канона — колонка создаётся при первом сохранении МК с планом
   if (opsIn.some((o) => Array.isArray(o && o.planMaterials) && mkPlanClean(o.planMaterials).length)) {
     try { await ncEnsureColumn('operations', 'Материалы (план)', 'LongText'); hasPlan = true; }
@@ -1690,6 +1691,7 @@ async function saveRoute(body, session) {
     if (hasTooling && String(o.tooling || '').trim()) opRow['Оснастка'] = String(o.tooling).trim();
     if (hasSetupNo && String(o.setupCardNo || '').trim()) opRow['Карта наладки (№)'] = String(o.setupCardNo).trim();
     if (hasPlan) { const pm = mkPlanClean(o.planMaterials); if (pm.length) opRow['Материалы (план)'] = JSON.stringify(pm); }
+    if (hasParamPlan) { const pp = mkParamPlanClean(o.paramPlan); opRow['Параметры (план)'] = pp.length ? JSON.stringify(pp) : ''; } // K-182
     const cr = await ncCreateMany('operations', [opRow]);
     const co = Array.isArray(cr) ? cr[0] : cr; const opId = co.Id ?? co.id;
     await ncLinkRecords('routes', 'Операции маршрута', routeId, [opId]);
@@ -1726,6 +1728,9 @@ function mkPlanParse(raw) {
   if (!s || s[0] !== '[') return [];
   try { const j = JSON.parse(s); return Array.isArray(j) ? j.filter((m) => m && (m.canonId != null || String(m.name || '').trim())) : []; } catch { return []; }
 }
+// K-182: режимы/параметры операции ДЛЯ КОНКРЕТНОЙ МК — норматив и допуск по каждому параметру типа (Александр: «тип один, а параметры от изделия к изделию разные — прописываются в МК или по факту»)
+function mkParamPlanParse(raw) { try { const a = JSON.parse(String(raw || '') || '[]'); return Array.isArray(a) ? a.filter((x) => x && x.name).map((x) => ({ name: String(x.name), norm: x.norm == null ? '' : String(x.norm), tol: x.tol == null ? '' : String(x.tol) })) : []; } catch { return []; } }
+function mkParamPlanClean(arr) { return (Array.isArray(arr) ? arr : []).filter((x) => x && String(x.name || '').trim()).map((x) => ({ name: String(x.name).trim(), norm: String(x.norm == null ? '' : x.norm).trim(), tol: String(x.tol == null ? '' : x.tol).trim() })).filter((x) => x.norm || x.tol); }
 function mkPlanClean(arr) {
   return (Array.isArray(arr) ? arr : []).map((m) => ({
     canonId: (m.canonId != null && m.canonId !== '') ? Number(m.canonId) : null,
@@ -2081,11 +2086,13 @@ async function generateTasksFromRoute(routeId) {
         const secId = (_linkIds(ot['Участки'])[0]) ?? ot.sections_id;
         if (secId) await ncLinkRecords('sections', 'Задачи на участки', secId, [taskId]).catch(() => {});
         // копируем параметры типа операции в значения параметров задачи
+        const opPlan = mkParamPlanParse(op['Параметры (план)']); // K-182: значения для этой МК
         for (const pid of _linkIds(ot['Параметры'])) {
           const p = pById.get(pid) || {};
+          const planned = opPlan.find((x) => x.name === String(p['Параметр'] || ''));
           const pvr = await ncCreateMany('task_param_values', [{
             'Параметр': p['Параметр'] || '', 'Единица': p['Единица'] || '',
-            'Обязательный': !!p['Обязательный'], 'Норматив': p['Норматив'] || '', 'Допуск': p['Допуск'] || '', 'Факт': '',
+            'Обязательный': !!p['Обязательный'], 'Норматив': (planned && planned.norm) || p['Норматив'] || '', 'Допуск': (planned && planned.tol) || p['Допуск'] || '', 'Факт': '',
           }]);
           const pv = Array.isArray(pvr) ? pvr[0] : pvr;
           await ncLinkRecords('tasks', 'Значения параметров', taskId, [pv.Id ?? pv.id]).catch(() => {});
@@ -5873,10 +5880,27 @@ async function dictColumns(key) {
     .filter((c) => !c.system && !c.pk && !DICT_SKIP_UIDT.has(c.uidt))
     .map((c) => ({ title: c.title, uidt: c.uidt, pv: !!c.pv, options: (c.colOptions && c.colOptions.options) ? c.colOptions.options.map((o) => o.title) : undefined }));
 }
-// тело строки справочника: оставляем только редактируемые поля (без Id и реляций)
+// K-181: «виртуальные» колонки-связи в редакторе справочников — код вместо FK (Александр: «где настраивается привязка параметра к типу?»)
+const DICT_VIRTUAL = {
+  op_params: [{ title: 'Тип операции (код)', fk: 'op_types_id', table: 'op_types', codeField: 'Код типа' }],
+  op_types: [{ title: 'Участок (код)', fk: 'sections_id', table: 'sections', codeField: 'Код' }],
+};
+async function dictVirtualColumns(key) {
+  const out = [];
+  for (const v of (DICT_VIRTUAL[key] || [])) { let codes = []; try { codes = (await ncListSoft(v.table)).map((r) => String(r[v.codeField] || '').trim()).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ru', { numeric: true })); } catch { /* пусто */ } out.push({ title: v.title, uidt: 'SingleSelect', pv: false, options: codes, virtual: true }); }
+  return out;
+}
+async function dictDecorateRows(key, rows) {
+  for (const v of (DICT_VIRTUAL[key] || [])) { let byId = new Map(); try { byId = new Map((await ncListSoft(v.table)).map((r) => [String(r.Id ?? r.id), String(r[v.codeField] || '').trim()])); } catch { /* пусто */ }
+    for (const r of rows) r[v.title] = r[v.fk] != null ? (byId.get(String(r[v.fk])) || '') : ''; }
+  return rows;
+}
+// тело строки справочника: оставляем только редактируемые поля (без Id и реляций); виртуальные коды → FK
 async function sanitizeDictRow(key, body) {
   const allowed = new Set((await dictColumns(key)).map((c) => c.title));
-  return Object.fromEntries(Object.entries(body).filter(([k]) => allowed.has(k)));
+  const out = Object.fromEntries(Object.entries(body).filter(([k]) => allowed.has(k)));
+  for (const v of (DICT_VIRTUAL[key] || [])) { if (!(v.title in body)) continue; const code = String(body[v.title] || '').trim(); if (!code) { out[v.fk] = null; continue; } const hit = (await ncListSoft(v.table)).find((r) => String(r[v.codeField] || '').trim() === code); if (!hit) throw new Error(`«${v.title}»: код ${code} не найден.`); out[v.fk] = hit.Id ?? hit.id; }
+  return out;
 }
 
 const STATUSES = ['В очереди', 'В работе', 'Выполнено', 'Приостановлено'];
@@ -11185,7 +11209,7 @@ const server = http.createServer(async (req, res) => {
       const key = url.searchParams.get('key') || '';
       if (!isDict(key)) return sendJson(res, 400, { error: 'неизвестный справочник' });
       if (!isLive()) return sendJson(res, 200, { key, columns: [], rows: [], warning: 'LIVE недоступен — задайте токен NocoDB.' });
-      try { const [columns, rows] = await Promise.all([dictColumns(key), ncList(key)]); return sendJson(res, 200, { key, columns, rows }); }
+      try { const [columns, rows] = await Promise.all([dictColumns(key), ncList(key)]); return sendJson(res, 200, { key, columns: columns.concat(await dictVirtualColumns(key)), rows: await dictDecorateRows(key, rows) }); }
       catch (e) { return sendJson(res, 200, { key, columns: [], rows: [], warning: String(e.message || e) }); }
     }
     if (p === '/api/dict/rows' && req.method === 'POST') {

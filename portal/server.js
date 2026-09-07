@@ -1441,6 +1441,7 @@ async function buildRoutesCatalog() {
     return {
       id: ot.Id ?? ot.id, code: ot['Код типа'] || '', name: ot['Наименование'] || '', ri: ot['РИ'] || '',
       section: sec['Код'] ? `${sec['Код']}${sec['Участок'] ? ' · ' + sec['Участок'] : ''}` : '', params: prm,
+      equipment: String(ot['Оборудование (инв. №)'] || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean), // K-180: оборудование типа операции (инв. №), настраивается в Настройки → Справочники → Типы операций
     };
   }).sort((a, b) => String(a.code).localeCompare(String(b.code), 'ru'));
   const contractors = counterparties.map((c) => ({ id: c.Id ?? c.id, name: c['Наименование'] || '' }))

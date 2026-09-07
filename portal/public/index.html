@@ -14168,6 +14168,15 @@
         node.querySelectorAll('[data-of]').forEach(inp=>{ op[inp.dataset.of]=inp.value; });
         if(step===2)op._open=node.classList.contains('open'); });
     }
+    // K-178: палитра типов операций — сначала участок, потом типы этого участка (Александр: «сбоку всё в кучке»)
+    function rtPalSections(){ const m=new Map(); ((rtWiz.cat&&rtWiz.cat.opTypes)||[]).forEach(t=>{ const sec=String(t.section||'').trim(); const code=sec.split(' · ')[0].trim(); const key=code||'—'; if(!m.has(key))m.set(key,{code:key,name:sec.split(' · ').slice(1).join(' · ')||(code?'':'без участка (общие)'),types:[]}); m.get(key).types.push(t); });
+      return [...m.values()].sort((a,b)=>{ const pa=a.code.startsWith('ПБС')?0:a.code.startsWith('ЕНД')?1:2, pb=b.code.startsWith('ПБС')?0:b.code.startsWith('ЕНД')?1:2; return pa-pb||a.code.localeCompare(b.code,'ru',{numeric:true}); }); }
+    function rtPalHtml(){ const secs=rtPalSections(); if(!secs.length)return '<div class="rt-hint">Справочник типов операций пуст.</div>'; const cur=rtWiz.palSec||'';
+      const opt=secs.map(sx=>`<option value="${rtEscA(sx.code)}"${sx.code===cur?' selected':''}>${esc(sx.code)}${sx.name?' · '+esc(sx.name):''} (${sx.types.length})</option>`).join('');
+      const list=cur?secs.filter(sx=>sx.code===cur):secs;
+      const items=list.map(sx=>`${cur?'':`<div class="rt-rt" style="margin:6px 0 2px;font-weight:700;color:var(--sl-500)">${esc(sx.code)}${sx.name?' · '+esc(sx.name):''}</div>`}`+sx.types.map(t=>`<button type="button" class="rt-ptype" data-add="${rtEscA(t.id)}"><div style="min-width:0"><div class="pn">${esc(t.name)}</div><div class="pm">${esc([t.code,t.ri].filter(Boolean).join(' · '))}</div></div><span class="pp">+</span></button>`).join('')).join('');
+      return `<select class="rt-inp" id="rt-palsec" style="margin-bottom:6px"><option value="">Все участки</option>${opt}</select>${items}`; }
+    function rtPalWire(host){ const box=host.querySelector('#rt-palbox'); if(!box)return; box.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>rtAddOp(b.dataset.add)); const sel=box.querySelector('#rt-palsec'); if(sel)sel.onchange=()=>{ rtWiz.palSec=sel.value; box.innerHTML=rtPalHtml(); rtPalWire(host); }; }
     function rtAddOp(id){ if(!rtWiz)return; rtReadOps(2); const ot=rtOtById(id)||{}; const becomesFirst=rtWiz.ops.length===0;
       rtWiz.ops.push({opTypeId:id||'',name:ot.name||'',equipment:'',tooling:'',setupCardNo:'',planMaterials:[],control:'нет',norm:'',whatControl:'',si:'',tolerance:'',materials:'',blank:becomesFirst?rtBlankDefault():null,coop:becomesFirst?null:rtCoopDefault(),components:[],_open:true}); rtWiz.step=2; rtWizRender(); }
     // ── шаг 1: изделие + привязка чертежей КД (реестр, с просмотром выпущенного PDF) ──
@@ -14470,7 +14479,7 @@
       return `<div class="rt-op${op._open?' open':''}" data-idx="${i}">
         <div class="rt-ohead"><span class="rt-onum">${i+1}</span><div style="min-width:0"><div class="rt-oname">${esc(nm)}</div><div class="rt-osub">${esc(sub)}</div></div>${chip}<span class="rt-oarr">${RT_SVG_ARR}</span></div>
         <div class="rt-obody">
-          <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование)</label><input class="rt-inp" data-of="name" value="${rtEscA(op.name)}" placeholder="по умолч. = тип"></div></div>
+          <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование) <span class="rt-rt">по умолчанию = тип; можно уточнить: «обработка со стороны 1»</span></label><input class="rt-inp" data-of="name" value="${rtEscA(op.name)}" placeholder="по умолч. = тип"></div></div>
           ${auto}
           <div class="rt-blk"><div class="rt-blk-h">Оборудование <span class="rt-rt">${rtOpSecCode(op)?'участок '+esc(rtOpSecCode(op)):'участок по типу операции'}</span><label class="rt-rt" style="margin-left:auto;display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" data-allsec="${i}"${op._allSec?' checked':''}> показать все участки</label></div>
           <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment,op)}</select></div><div class="rt-fld"><label>Норма, ч/шт <span class="rt-rt">можно оставить пустой — зафиксируете по факту первого прогона</span></label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="по факту"></div></div></div>
@@ -14509,7 +14518,7 @@
       if(rtWiz.ops.length&&rtWiz.ops[0].coop)rtWiz.ops[0].coop=null;
       rtWiz.ops.forEach((op,i)=>{ if(i>0&&!op.coop)op.coop=rtCoopDefault(); });
       const cards=rtWiz.ops.map((op,i)=>rtOpCardHtml(op,i)).join('')||'<div class="rt-hint" style="padding:10px 0">Операций пока нет — добавьте первую (обычно «Заготовительная»), чтобы указать заготовку.</div>';
-      const pal=((rtWiz.cat.opTypes)||[]).map(t=>`<button type="button" class="rt-ptype" data-add="${rtEscA(t.id)}"><div style="min-width:0"><div class="pn">${esc(t.name)}</div><div class="pm">${esc([t.section,t.ri].filter(Boolean).join(' · '))}</div></div><span class="pp">+</span></button>`).join('')||'<div class="rt-hint">Справочник типов операций пуст.</div>';
+      const pal=rtPalHtml();
       return `<div class="rt-cols">
         <div>
           <div class="card pad"><div class="rt-cardh">Шаг 2 · Операции маршрута <span class="rt-rt">тип операции задаёт участок, РИ и параметры</span></div>
@@ -14519,7 +14528,7 @@
           <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><button class="tbtn primary" id="rt-next" style="margin-left:auto">Далее: контроль и наладка →</button></div>
         </div>
         <div>
-          <div class="card pad"><div class="rt-cardh">Типы операций <span class="rt-rt">добавить в маршрут</span></div><div class="rt-pal">${pal}</div></div>
+          <div class="card pad"><div class="rt-cardh">Типы операций <span class="rt-rt">выберите участок → тип</span></div><div class="rt-pal" id="rt-palbox">${pal}</div></div>
           <div class="card pad" style="margin-top:12px"><div id="rt-summbox">${rtSummaryHtml()}</div></div>
         </div>
       </div>`;
@@ -14565,9 +14574,9 @@
       if(step===1)return rtWireStep1();
       if(step===2){
         host.querySelectorAll('.rt-ohead').forEach(h=>h.onclick=(e)=>{ if(e.target.closest('a,button,select,input'))return; const op=h.closest('.rt-op'); op.classList.toggle('open'); const i=+op.dataset.idx; if(rtWiz.ops[i])rtWiz.ops[i]._open=op.classList.contains('open'); });
-        host.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>rtAddOp(b.dataset.add));
+        rtPalWire(host);
         host.querySelectorAll('[data-oprem]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); rtReadOps(2); rtWiz.ops.splice(+b.dataset.oprem,1); rtWiz._keepScroll=true; rtWizRender(); });
-        host.querySelectorAll('#rt-oplist [data-of="opTypeId"]').forEach(s=>s.onchange=()=>{ rtReadOps(2); const op=rtWiz.ops[+s.closest('.rt-op').dataset.idx]; if(op){ const ot=rtOtById(op.opTypeId); if(ot&&!(op.name||'').trim())op.name=ot.name; } rtWiz._keepScroll=true; rtWizRender(); });
+        host.querySelectorAll('#rt-oplist [data-of="opTypeId"]').forEach(s=>s.onchange=()=>{ rtReadOps(2); const op=rtWiz.ops[+s.closest('.rt-op').dataset.idx]; if(op){ const ot=rtOtById(op.opTypeId); const autoNames=new Set(((rtWiz.cat&&rtWiz.cat.opTypes)||[]).map(t=>t.name)); if(ot&&(!(op.name||'').trim()||autoNames.has(String(op.name).trim())))op.name=ot.name; } rtWiz._keepScroll=true; rtWizRender(); }); // K-177: имя из типа обновляется, пока его не переписали вручную
         const refresh=()=>{ rtReadOps(2); const box=host.querySelector('#rt-summbox'); if(box)box.innerHTML=rtSummaryHtml(); };
         host.querySelectorAll('#rt-oplist [data-of]:not([data-of="opTypeId"])').forEach(inp=>{ inp.oninput=refresh; inp.onchange=refresh; });
         // K-81 доводка: множественная оснастка — чек-лист по каждой операции (op.tooling = «; »-список), обновляется в состоянии сразу

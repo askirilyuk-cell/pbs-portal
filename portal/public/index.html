@@ -13775,6 +13775,9 @@
         info:`${srcChip(RT.mode==='live')}<span>Маршрутов: <b style="color:var(--ink)">${rows.length}</b></span>${RT.warning?'<span class="c-red">'+esc(RT.warning)+'</span>':''}`,
         empty:{text:'Маршрутных карт пока нет',sub:'МК создаются из карточки заказа («Сформировать МК») или конструктором МК.'},
         toolbar:[{label:'+ Новая МК',cls:'primary',onClick:()=>openRouteBuilder(host,null)}]});
+      { const drafts=rtDraftList(); if(drafts.length){ const b=document.createElement('div'); b.className='card pad'; b.style.cssText='margin-bottom:var(--gap);border:1px dashed var(--navy);display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+          b.innerHTML=`<b style="color:var(--ink)">Незаконченные черновики МК в этом браузере</b>`+drafts.map((d,i)=>`<span style="display:flex;gap:6px;align-items:center"><span class="c-gray" style="font-size:12px">${esc(d.mk||'новая МК')} · ${esc(d.name||'без названия')} · ${d.ops} оп. · ${fmtDT(d.savedAt)}</span><button class="ui-btn ui-btn--primary" data-draft-go="${i}">Продолжить</button><button class="ui-btn ui-btn--ghost" data-draft-x="${i}" title="Удалить черновик из браузера">✕</button></span>`).join('');
+          host.prepend(b); b.querySelectorAll('[data-draft-go]').forEach(x=>x.onclick=()=>openRouteBuilder(host,drafts[+x.dataset.draftGo].routeId,{restore:true})); b.querySelectorAll('[data-draft-x]').forEach(x=>x.onclick=()=>{ if(confirm('Удалить черновик из браузера?')){ rtDraftClear(drafts[+x.dataset.draftX].routeId); renderRoutesView(host); } }); } } // K-176
     }
     async function openRouteCard(host,id){
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка карты МК…</div>';
@@ -13855,12 +13858,14 @@
           <div class="sec-h" style="margin-bottom:8px">Чертежи КД (реестр)${r.projectDecNo?` · проект <span class="code" style="color:var(--blue)">ПБС.${esc(r.projectDecNo)}</span>`:''}</div>
           ${(r.kdDrawings&&r.kdDrawings.length)?`<div style="display:flex;flex-direction:column">${r.kdDrawings.map(d=>`<div style="display:flex;align-items:center;gap:10px;font-size:12px;padding:5px 0;border-top:1px solid var(--line2)"><span class="code" style="font-family:var(--mono)">${esc(String(d.doc).replace('ПБС.',''))}</span><span class="ell" style="flex:1;color:var(--ink)">${esc(d.name||'')}</span>${d.vid?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(d.vid)}</span>`:''}<a class="tbtn" href="${d.rel?('/api/design/kd/file?rel='+encodeURIComponent(d.rel)):('/api/design/kd/file?doc='+encodeURIComponent(d.doc))}" target="_blank" rel="noopener" title="Открыть выпущенный PDF из записей 03-КД" style="padding:2px 10px;font-size:12px;text-decoration:none">Просмотр</a></div>`).join('')}</div>`:'<div class="c-gray" style="font-size:12px">Чертежи не привязаны — откройте «✎ Редактировать» и выберите из реестра КД.</div>'}
         </div>`:''}
-        ${isKom?`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Маршрут операций</div>${opsTable}<div style="margin-top:9px;font-size:11px;color:var(--sl-500)"><b>С</b> — самоконтроль · <b style="color:var(--amber,#b45309)">ОТК</b> — контролёр · ✓ выполнено · ⧖ в работе · • в очереди</div></div>`
+        ${isKom?`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Маршрут операций</div>${opsTable}<div style="margin-top:9px;font-size:11px;color:var(--sl-500)"><b>С</b> — самоконтроль · <b style="color:var(--amber,#b45309)">ОТК</b> — контролёр · ✓ выполнено · ⧖ в работе · • в очереди</div></div>
+        <div class="card pad" id="rc-actuals"><div class="sec-h" style="margin-bottom:6px">Нормы по факту прогонов</div><div class="c-gray" style="font-size:12px">загружаю…</div></div>`
           :`<div style="display:flex;flex-direction:column;gap:var(--gap)"><div class="card pad"><div class="sec-h" style="margin-bottom:10px">Входящие компоненты</div>${rdySummary}${compTable}<div style="margin-top:9px;font-size:11px;color:var(--sl-500)">Готовность — по статусу задач подобранного МК-КОМ (индикация; сборку не блокирует).</div></div><div class="card pad"><div class="sec-h" style="margin-bottom:10px">Маршрут сборки</div>${opsTable}</div></div>`}
         ${opFilesCard}`;
       const back=host.querySelector('[href="#routes"]'); if(back)back.onclick=(e)=>{e.preventDefault(); renderRoutesView(host);};
       const eb=host.querySelector('#rc-edit'); if(eb)eb.onclick=()=>openRouteBuilder(host,r.id);
       rtApprovalWire(host,r); // K-171
+      rtActualsLoad(host,r); // K-175
       const gb=host.querySelector('#rc-gen'); if(gb)gb.onclick=()=>genRouteTasks(host,r.id);
       // Доработка Этапа 1: просмотр вложения-PDF/картинки во встроенном вьювере (модалка iframe/img)
       host.querySelectorAll('[data-opview]').forEach(btn=>{ btn.onclick=()=>opFileView(btn.dataset.opview,btn.dataset.opname); });
@@ -13979,6 +13984,23 @@
       on('rc-withdraw',()=>mkStatusPost(host,r,{status:'Черновик'},'МК отозвана в черновик.'));
       const f=host.querySelector('#rc-force'); if(f)f.onchange=()=>{ if(!f.value)return; if(!confirm(`Поставить статус «${f.value}» вручную?`)){ f.value=''; return; } mkStatusPost(host,r,{status:f.value},'Статус исправлен: '+f.value); };
     }
+    // ── K-175: нормы по факту прогонов — блок в карточке МК ──
+    async function rtActualsLoad(host,r){
+      const box=host.querySelector('#rc-actuals'); if(!box)return;
+      let d; try{ d=await (await fetch('/api/route/actuals?id='+encodeURIComponent(r.id))).json(); }catch(e){ d={error:String(e.message||e)}; }
+      if(!d||d.error){ box.innerHTML=`<div class="sec-h" style="margin-bottom:6px">Нормы по факту прогонов</div><div class="c-gray" style="font-size:12px">${esc((d&&d.error)||'недоступно')}</div>`; return; }
+      await mkLoadApprovers(); const may=mkIsApprover();
+      const hasRuns=(d.runs||[]).length>0;
+      const opRows=d.ops.map(o=>`<tr><td class="code">${o.no}</td><td>${esc(o.name)}</td><td class="code">${o.norm!==''&&o.norm!=null?rtNum(o.norm):'<span class="c-gray">—</span>'}</td><td class="code">${o.avgHPerUnit!=null?rtNum(o.avgHPerUnit):'<span class="c-gray">—</span>'}${o.runs.length?` <span class="c-gray">(${o.runs.filter(x=>x.hPerUnit!=null).length} задач)</span>`:''}</td><td>${may&&o.avgHPerUnit!=null?`<input class="rt-inp" type="number" step="any" data-fixn="${o.opId}" value="${o.avgHPerUnit}" style="width:90px">`:'<span class="c-gray">—</span>'}</td></tr>`
+        +o.materials.map(m=>`<tr class="c-gray"><td></td><td style="padding-left:18px">↳ ${esc(m.name)} <span style="font-size:11px">· ${esc(m.role)}</span></td><td class="code">${m.normPlan!=null&&m.normPlan!==''?rtNum(m.normPlan)+' '+esc(m.unitPlan||''):'—'}</td><td class="code">${m.factPerUnit!=null?(m.factPerUnitM!=null?rtNum(m.factPerUnitM)+' м · ':'')+rtNum(m.factPerUnit)+' '+esc(m.factUnit||''):'—'}</td><td>${may&&m.proposedQty!=null?`<span style="display:flex;gap:4px;align-items:center"><input class="rt-inp" type="number" step="any" data-fixm="${o.opId}" data-canon="${m.canonId}" data-unit="${esc(m.proposedUnit||'')}" value="${m.proposedQty}" style="width:90px"> ${esc(m.proposedUnit||'')}</span>`:'—'}</td></tr>`).join('')).join('');
+      box.innerHTML=`<div class="sec-h" style="margin-bottom:6px">Нормы по факту прогонов <span class="c-gray" style="font-weight:400;font-size:12px">${d.fixed?'· зафиксированы '+esc(d.fixed):'· ещё не фиксировались'}</span></div>
+        ${hasRuns?`<div class="c-gray" style="font-size:12px;margin-bottom:6px">Прогоны: ${d.runs.map(x=>esc(x.pz)+' ('+x.done+' из '+x.qty+' шт)').join(', ')}. Факт времени — из карт задач Ф.14, материалы — из отметок операторов; в расчёте на 1 шт.</div>`:'<div class="c-gray" style="font-size:12px;margin-bottom:6px">Прогонов по этой МК ещё не было. Нормы времени можно не задавать при выпуске: после первого полного цикла портал покажет факт на 1 шт, и технолог зафиксирует его как норму.</div>'}
+        <div class="tbl-wrap"><table class="dt" style="font-size:12px;width:100%"><thead><tr><th style="width:30px">№</th><th>Операция / материал</th><th style="width:110px">Норма (план)</th><th style="width:180px">Факт на 1 шт</th><th style="width:160px">Зафиксировать</th></tr></thead><tbody>${opRows}</tbody></table></div>
+        ${may&&hasRuns?`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tbtn" id="rc-fix" style="color:var(--navy);font-weight:700">Зафиксировать факт как норму</button><span class="c-gray" style="font-size:11px">запишет нормы времени и материалов в операции МК; статус карты не меняется, ставится отметка кто и когда</span></div>`:(hasRuns?'<div class="c-gray" style="font-size:11px;margin-top:6px">Фиксируют нормы согласующие МК (технолог) или администратор.</div>':'')}`;
+      const fb=box.querySelector('#rc-fix'); if(fb)fb.onclick=async()=>{ const ops=[...box.querySelectorAll('[data-fixn]')].map(i=>({opId:i.dataset.fixn,norm:i.value})).filter(x=>x.norm!==''); const materials=[...box.querySelectorAll('[data-fixm]')].map(i=>({opId:i.dataset.fixm,canonId:i.dataset.canon,qty:i.value,unit:i.dataset.unit})).filter(x=>x.qty!=='');
+        if(!confirm(`Записать нормы в МК ${r.mk}: операций ${ops.length}, материалов ${materials.length}?`))return; fb.disabled=true;
+        try{ const res=await fetch('/api/route/fix-norms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id,ops,materials,note:'по '+(d.runs||[]).map(x=>x.pz).join(', ')})}); const j=await res.json().catch(()=>({})); if(!res.ok||j.error)throw new Error(j.error||('HTTP '+res.status)); toast(`Нормы зафиксированы (операций: ${j.changed}).`,'ok'); RT=null; openRouteCard(host,r.id); }catch(e){ toast('Не записано: '+e.message,'err'); fb.disabled=false; } };
+    }
     async function genRouteTasks(host,routeId){
       if(!confirm('Сгенерировать карты задач Ф.14 по этому маршруту для всех привязанных позиций ПЗ?\n\nЗадачи с уже существующим № не дублируются.'))return;
       try{ const r=await fetch('/api/routes/generate-tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:routeId})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
@@ -14077,7 +14099,7 @@
       if(st.done)bits.push('возврат завершён'); else if(c.returnPlan)bits.push(`возврат до ${fmt(c.returnPlan)}`);
       return bits.join(' · ');
     }
-    async function openRouteBuilder(host,routeId){
+    async function openRouteBuilder(host,routeId,opts){
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка конструктора МК…</div>';
       const cat=await loadRtCat();
       if(!cat||!cat.opTypes||cat.mode==='mock'){ toast('Конструктор МК доступен только в LIVE-режиме (нужен токен NocoDB в «Настройках»).','err'); renderRoutesView(host); return; }
@@ -14099,6 +14121,7 @@
         kdSel:((r0.kdDrawings)||[]).slice(),
         bom:((r0.bom)||[]).map(m=>rtBomDefault(m)), // K-160: спецификация материалов изделия
         ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',control:o.control||'нет',norm:o.norm!=null?o.norm:'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',planMaterials:(Array.isArray(o.planMaterials)?o.planMaterials.map(m=>Object.assign({},m)):[]),blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,components:o.components||[],_open:i===0})) };
+      { const dr=rtDraftRead(routeId); if(dr&&dr.route&&((opts&&opts.restore)||confirm(`Есть незаконченный черновик этой карты от ${fmtDT(dr.savedAt)} (${(dr.ops||[]).length} операций). Продолжить его?\n\nОтмена — начать заново, черновик будет удалён.`))){ rtWiz.route={...rtWiz.route,...(dr.route||{})}; rtWiz.ops=(dr.ops||[]).map(o=>({...o})); rtWiz.kdSel=Array.isArray(dr.kdSel)?dr.kdSel:rtWiz.kdSel; rtWiz.step=dr.step||1; } else if(dr) rtDraftClear(routeId); } // K-176
       rtBomBackfill(); rtBomApply(); // K-160
       rtWizRender();
     }
@@ -14110,15 +14133,27 @@
       const stepper='<div class="tl-wiz">'+steps.map((s,i)=>{ const n=i+1, cls=n===step?'on':(n<step?'done':''), d=n<step?'✓':String(n); return `<button type="button" class="tl-wstepbtn ${cls}" data-go="${n}"><span class="tl-wd">${d}</span><span class="tl-wt">${esc(s[0])}<small>${esc(s[1])}</small></span></button>`; }).join('')+'</div>';
       const bodyHtml=step===1?rtStep1Html():step===2?rtStep2Html():step===3?rtStep3Html():rtStep4Html();
       const head=`<div class="row" style="margin-bottom:10px"><a class="c-blue" id="rt-exit" style="font-size:12px;text-decoration:none;cursor:pointer">← Маршруты</a><span class="title" style="font-size:16px">${rtWiz.routeId!=null?'Редактирование маршрутной карты':'Новая маршрутная карта (Ф.13)'}</span><span class="c-gray" style="font-size:12px">${rtWiz.routeId!=null&&rt.mk?esc(rt.mk):'№ присвоится при выпуске'}</span><span style="margin-left:auto;font-size:13px;color:var(--ink);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><span class="c-gray" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">${rt.type==='СБР'?'Собираем':'Изготавливаем'}</span><b>${esc(rt.name||'изделие ещё не названо')}</b>${rt.designation?`<span class="code c-gray" style="font-size:12px">${esc(rt.designation)}</span>`:''}${rt.productType?`<span class="c-gray" style="font-size:12px">· ${esc(rt.productType)}</span>`:''}</span></div>`;
+      if(!host._rtDraftWired){ host._rtDraftWired=true; const bump=()=>{ clearTimeout(host._rtDT); host._rtDT=setTimeout(()=>{ if(rtWiz&&rtWiz.host===host)rtDraftStore(); },600); }; host.addEventListener('input',bump); host.addEventListener('change',bump); } // K-176
       const _sy=window.scrollY; // K-174: полная перерисовка не должна уводить страницу наверх
       host.innerHTML=head+stepper+'<div id="rt-body">'+bodyHtml+'</div>';
       if(rtWiz._keepScroll){ rtWiz._keepScroll=false; requestAnimationFrame(()=>window.scrollTo(0,_sy)); }
+      setTimeout(()=>{ if(rtWiz&&rtWiz.host===host&&rtDraftHasContent())rtDraftStore(); },50); // K-176
       host.querySelectorAll('.tl-wstepbtn').forEach(b=>b.onclick=()=>rtWizGo(+b.dataset.go));
       const ex=host.querySelector('#rt-exit'); if(ex)ex.onclick=()=>rtWizExit();
       rtWizWire(step); window.scrollTo(0,0);
     }
     function rtWizGo(step){ if(!rtWiz)return; rtCollectStep(rtWiz.step); rtWiz.step=Math.min(4,Math.max(1,step)); rtWizRender(); }
-    function rtWizExit(){ const h=rtWiz.host, id=rtWiz.routeId; rtWiz=null; if(id!=null)openRouteCard(h,id); else renderRoutesView(h); }
+    // ── K-176: черновик визарда в браузере (не пропадает при уходе со страницы) ──
+    const fmtDT=(iso)=>{ try{ const d=new Date(iso); return isNaN(d)?'':d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch{ return ''; } };
+    const rtDraftKey=(routeId)=>`pbs.mkdraft.${(ME&&ME.id)||'x'}.${routeId!=null?routeId:'new'}`;
+    function rtDraftStore(){ if(!rtWiz)return; try{ rtCollectStep(rtWiz.step); const d={savedAt:new Date().toISOString(),step:rtWiz.step,route:rtWiz.route,kdSel:rtWiz.kdSel||[],ops:(rtWiz.ops||[]).map(o=>{ const c={...o}; delete c._open; return c; })}; localStorage.setItem(rtDraftKey(rtWiz.routeId),JSON.stringify(d)); }catch{} }
+    function rtDraftRead(routeId){ try{ const v=localStorage.getItem(rtDraftKey(routeId)); return v?JSON.parse(v):null; }catch{ return null; } }
+    function rtDraftClear(routeId){ try{ localStorage.removeItem(rtDraftKey(routeId)); }catch{} }
+    function rtDraftList(){ const out=[]; try{ const pre=`pbs.mkdraft.${(ME&&ME.id)||'x'}.`; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(!k||!k.startsWith(pre))continue; const d=JSON.parse(localStorage.getItem(k)||'{}'); const rid=k.slice(pre.length); out.push({routeId:rid==='new'?null:Number(rid),savedAt:d.savedAt||'',name:(d.route||{}).name||'',mk:(d.route||{}).mk||'',ops:(d.ops||[]).length}); } }catch{} return out.sort((a,b)=>String(b.savedAt).localeCompare(String(a.savedAt))); }
+    const rtDraftHasContent=()=>!!(rtWiz&&(String((rtWiz.route||{}).name||'').trim()||(rtWiz.ops||[]).length));
+    function rtWizExit(){ const h=rtWiz.host, id=rtWiz.routeId;
+      if(rtDraftHasContent()){ rtDraftStore(); const ok=confirm('Сохранить как черновик в портале?\n\nОК — сохранить в базу (МК появится в реестре и в «Мои черновики»).\nОтмена — не сохранять в базу; набранное останется в этом браузере, продолжить можно из списка МК.'); if(ok){ rtWizSave(false); return; } }
+      rtWiz=null; if(id!=null)openRouteCard(h,id); else renderRoutesView(h); }
     function rtCollectStep(step){
       if(!rtWiz)return; const host=rtWiz.host;
       if(step===1){ const g=(id)=>{const el=host.querySelector('#'+id);return el?el.value:'';};
@@ -14438,7 +14473,7 @@
           <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование)</label><input class="rt-inp" data-of="name" value="${rtEscA(op.name)}" placeholder="по умолч. = тип"></div></div>
           ${auto}
           <div class="rt-blk"><div class="rt-blk-h">Оборудование <span class="rt-rt">${rtOpSecCode(op)?'участок '+esc(rtOpSecCode(op)):'участок по типу операции'}</span><label class="rt-rt" style="margin-left:auto;display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" data-allsec="${i}"${op._allSec?' checked':''}> показать все участки</label></div>
-          <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment,op)}</select></div><div class="rt-fld"><label>Норма, ч</label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="0"></div></div></div>
+          <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment,op)}</select></div><div class="rt-fld"><label>Норма, ч/шт <span class="rt-rt">можно оставить пустой — зафиксируете по факту первого прогона</span></label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="по факту"></div></div></div>
           <div class="rt-blk"><div class="rt-blk-h">Оснастка и инструмент</div>${rtToolChecklist(op,i)}${setupRow}</div>
           <div class="rt-blk"><div class="rt-blk-h">Режимы и параметры контроля <span class="rt-rt">по типу операции · значения — в карте задачи Ф.14</span></div>${(ot.params&&ot.params.length)?`<div style="display:flex;flex-wrap:wrap;gap:6px">${ot.params.map(pn=>{ const nm=pn&&typeof pn==='object'?(pn.name||pn.title||''):String(pn); const un=pn&&typeof pn==='object'?(pn.unit||''):''; return `<span class="st st--neutral">${esc(nm)}${un?' ('+esc(un)+')':''}</span>`; }).join('')}</div>`:'<div class="rt-hint">У типа операции параметры не заданы (Ф.1–П, лист «Параметры типов»).</div>'}</div>
           <div class="rt-blk"><div class="rt-blk-h">Материалы</div>${rtIoLineHtml(op,i)}${rtPlanBlockHtml(op,i)}${i>0?rtCoopBlockHtml(op,i):''}</div>
@@ -14641,7 +14676,7 @@
         RT=null; toast(`МК ${j.mk||''} ${release?'выпущена':'сохранена'} · операций: ${j.operations}${j.components?', компонентов: '+j.components:''}`,'ok');
         // МК-резерв металла (этап 1): при переходе в «В производстве» — покажем, что произошло с резервом
         const br=j.blankReserve; if(br&&(br.reserved||br.note)){ setTimeout(()=>toast(br.reserved?`Резерв металла: ${br.reserved.code} · ${br.reserved.qty} кг`:br.note, br.reserved?'ok':'err'),300); }
-        const id=j.id; rtWiz=null; openRouteCard(host,id);
+        rtDraftClear(rtWiz.routeId); const id=j.id; rtWiz=null; openRouteCard(host,id);
       }catch(e){ toast('Не удалось сохранить: '+(e.message||e),'err'); btns.forEach(b=>{b.disabled=false;}); }
     }
     // ══ Раздел «Карты наладки» — Конструктор карт наладки (Этап 2b модуля МК) ═══

@@ -1415,6 +1415,7 @@ async function buildRouteCard(id) {
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
       approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
+      normsFixed: r['Нормы зафиксированы'] || '', // K-175
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
       blank, blankText: mkBlankText(blank),
       bom: mkBomParse(r['Спецификация материалов']), bomText: mkBomText(mkBomParse(r['Спецификация материалов'])), // K-160
@@ -7352,6 +7353,60 @@ async function wipRelease(body, session) {
   if (apId && body.send !== false) { try { let name = 'id' + apId; try { const st = await getStaffList(); const u = st.find((x) => Number(x.id) === apId); if (u) name = u.name; } catch { /* имя */ } sent = await retroSetStatus({ id: saved.id, status: 'На утверждении', approverId: apId, approverName: name }, session); } catch (e) { sent = { error: String(e.message || e) }; } }
   return { ok: true, act: saved, lines: outLines.length, lastRelease, sent };
 }
+// ============================================================================
+//  K-175: нормы по факту прогонов (решение владельца 07.09: «нормы при выпуске МК задать невозможно — технолог фиксирует
+//  по результату полного цикла; при повторном производстве нормы уже известны»). Факт времени — «Время факт. (ч)» задач Ф.14,
+//  единицы — журнал §7, материалы — журнал расхода K-167. Фиксация пишет нормы в операции утверждённой МК без смены статуса
+//  и оставляет отметку «Нормы зафиксированы».
+// ============================================================================
+async function buildRouteActuals(routeId) {
+  const rid = Number(routeId);
+  const [routes, operations, tasks, journal, usage, positions] = await Promise.all([ncListSoft('routes'), ncListSoft('operations'), ncListSoft('tasks'), ncListSoft('journal'), ncListSoft('material_usage'), ncListSoft('positions')]);
+  const r = routes.find((x) => (x.Id ?? x.id) === rid); if (!r) { const e = new Error('Маршрут не найден.'); e.status = 404; throw e; }
+  const ops = operations.filter((o) => Number(o.routes_id) === rid).sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
+  const jByTask = new Map(); for (const j of journal) { const k = String(j['№ задачи'] || ''); if (!jByTask.has(k)) jByTask.set(k, []); jByTask.get(k).push(j); }
+  const uByTask = new Map(); for (const u of usage) { const k = String(u['Задача (id)']); if (!uByTask.has(k)) uByTask.set(k, []); uByTask.get(k).push(u); }
+  const posById = new Map(positions.map((p) => [p.Id ?? p.id, p]));
+  const kgMap = await canonKgPerMMap();
+  const runsSet = new Map();
+  const opsOut = ops.map((o, i) => {
+    const oid = o.Id ?? o.id; const tk = tasks.filter((t) => Number(t.operations_id) === Number(oid));
+    const runs = tk.map((t) => { const jr = jByTask.get(String(t['№ задачи'] || '')) || []; const units = jr.filter(unitGood).length || (Number(t['Кол-во факт.']) || 0); const h = Number(t['Время факт. (ч)']) || 0; const pos = posById.get(t.positions_id) || {}; const pz = String(pos['Позиция'] || t['№ задачи'] || '').split('/')[0];
+      if (pz) { const rs = runsSet.get(pz) || { pz, qty: Number(pos['Кол-во']) || 0, done: 0 }; rs.done = Math.max(rs.done, units); runsSet.set(pz, rs); }
+      return { taskId: t.Id ?? t.id, taskNum: t['№ задачи'] || '', pz, status: t['Статус'] || '', hours: h, units, hPerUnit: units > 0 && h > 0 ? +(h / units).toFixed(3) : null }; }).filter((x) => x.hours > 0 || x.units > 0);
+    const valid = runs.filter((x) => x.hPerUnit != null); const sumH = valid.reduce((a, x) => a + x.hours, 0), sumU = valid.reduce((a, x) => a + x.units, 0);
+    const avg = sumU > 0 ? +(sumH / sumU).toFixed(3) : null;
+    // материалы: факт на единицу по канону
+    const plan = mkPlanParse(o['Материалы (план)']);
+    const mat = new Map(); for (const m of plan) { const c = mkToKg(m.qty, m.unit, m.canonId, kgMap); mat.set(String(m.canonId ?? m.name), { canonId: m.canonId ?? null, name: m.name, role: m.role || 'Материал', unitPlan: m.unit || '', normPlan: m.qty, normPlanKg: c.unit === 'кг' ? c.qty : null, factQty: 0, factUnits: 0, factUnit: '' }); }
+    for (const t of tk) { const jr = jByTask.get(String(t['№ задачи'] || '')) || []; const units = jr.filter(unitGood).length || (Number(t['Кол-во факт.']) || 0); for (const u of (uByTask.get(String(t.Id ?? t.id)) || [])) { const key = String(u['Канон (id)'] ?? u['Материал']); const e = mat.get(key) || { canonId: u['Канон (id)'] ?? null, name: u['Материал'] || '', role: u['Роль'] || 'Материал', unitPlan: '', normPlan: null, normPlanKg: null, factQty: 0, factUnits: 0, factUnit: '' , extra: true }; e.factQty += Number(u['Кол-во факт']) || 0; e.factUnits += units; e.factUnit = u['ЕИ'] || e.factUnit; mat.set(key, e); } }
+    const materials = [...mat.values()].map((e) => { const perUnit = e.factUnits > 0 ? +(e.factQty / e.factUnits).toFixed(3) : null; const k = e.canonId != null ? kgMap.get(String(e.canonId)) : null; const perUnitM = perUnit != null && k && (e.factUnit || '').toLowerCase() === 'кг' ? +(perUnit / k).toFixed(3) : null; return { ...e, factPerUnit: perUnit, factPerUnitM: perUnitM, proposedQty: perUnitM != null && (e.unitPlan || 'м') === 'м' ? perUnitM : perUnit, proposedUnit: perUnitM != null && (e.unitPlan || 'м') === 'м' ? 'м' : (e.factUnit || e.unitPlan) }; });
+    return { opId: oid, no: Number(o['№ операции']) || i + 1, name: o['Операция'] || '', norm: o['Норма времени (ч)'] ?? '', runs, avgHPerUnit: avg, proposedNorm: avg, materials };
+  });
+  return { ok: true, routeId: rid, mk: r['№ МК'] || '', statusMk: r['Статус МК'] || 'Черновик', fixed: r['Нормы зафиксированы'] || '', runs: [...runsSet.values()], ops: opsOut, canFix: true };
+}
+async function fixRouteNorms(body, session) {
+  const rid = Number(body.id); const routes = await ncListSoft('routes'); const r = routes.find((x) => (x.Id ?? x.id) === rid);
+  if (!r) { const e = new Error('Маршрут не найден.'); e.status = 404; throw e; }
+  const meId = session && session.userId != null ? Number(session.userId) : 0;
+  if (!mkIsAdmin(session) && !mkApproverIds().includes(meId)) { const e = new Error('Фиксировать нормы могут согласующие МК (технолог) или Администратор.'); e.status = 403; throw e; }
+  const operations = (await ncListSoft('operations')).filter((o) => Number(o.routes_id) === rid);
+  const opsIn = Array.isArray(body.ops) ? body.ops : []; const matsIn = Array.isArray(body.materials) ? body.materials : [];
+  let changed = 0;
+  for (const o of operations) {
+    const oid = o.Id ?? o.id; const patch = {};
+    const oi = opsIn.find((x) => Number(x.opId) === Number(oid)); if (oi && oi.norm != null && oi.norm !== '' && !isNaN(Number(oi.norm))) patch['Норма времени (ч)'] = Number(oi.norm);
+    const mi = matsIn.filter((x) => Number(x.opId) === Number(oid) && x.qty != null && x.qty !== '' && !isNaN(Number(x.qty)));
+    if (mi.length) { const plan = mkPlanParse(o['Материалы (план)']); let touched = false; for (const m of mi) { const row = plan.find((pm) => String(pm.canonId) === String(m.canonId)); if (row) { row.qty = Number(m.qty); if (m.unit) row.unit = m.unit; touched = true; } } if (touched) patch['Материалы (план)'] = JSON.stringify(mkPlanClean(plan)); }
+    if (Object.keys(patch).length) { await ncUpdate('operations', oid, patch); changed++; }
+  }
+  // спецификация изделия — из операций (как в конструкторе)
+  try { const ops2 = (await ncListSoft('operations')).filter((o) => Number(o.routes_id) === rid).sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
+    const bom = ops2.flatMap((o, i) => mkPlanParse(o['Материалы (план)']).map((m) => ({ role: m.role || 'Материал', canonId: m.canonId, name: m.name, unit: m.unit, norm: m.qty, opNo: i + 1, stockId: m.stockId || null, partsPerBlank: m.partsPerBlank || '', note: m.note || '' })));
+    await ncEnsureColumn('routes', 'Нормы зафиксированы', 'SingleLineText');
+    await ncUpdate('routes', rid, { 'Спецификация материалов': JSON.stringify(mkBomClean(bom)), 'Нормы зафиксированы': `${whToday()} · ${(session && session.fio) || 'портал'}${body.note ? ' · ' + String(body.note).trim() : ''}` }); } catch (e) { console.warn('[МК] отметка о фиксации норм:', e.message); }
+  return { ok: true, changed };
+}
 // K-161: кабинет сотрудника — документы, ждущие его решения (пока акты выпуска; дальше — ЗнЗ, ЛОВ, КД и т.д.)
 async function buildCabinet(session) {
   const meId = session && session.userId != null ? String(session.userId) : '';
@@ -12229,6 +12284,8 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // K-18 генерация карт задач Ф.14 из МК
+    if (p === '/api/route/actuals') { try { return sendJson(res, 200, await buildRouteActuals(url.searchParams.get('id'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/route/fix-norms' && req.method === 'POST') { try { return sendJson(res, 200, await fixRouteNorms(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/route/approvers') { try { return sendJson(res, 200, { ok: true, approvers: await mkApprovers(), me: (sessionFromReq(req) || {}).userId || null }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/route/status' && req.method === 'POST') { if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' }); try { return sendJson(res, 200, await mkSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/routes/generate-tasks' && req.method === 'POST') {

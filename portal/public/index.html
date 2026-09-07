@@ -11792,7 +11792,7 @@
     }
     function renderStation(host){
       const secs=sectionsList();
-      if((!stationSel||!secs.some(s=>s.code===stationSel)) && secs.length) stationSel=secs[0].code;
+      if((!stationSel||!secs.some(s=>s.code===stationSel)) && secs.length) stationSel=(secs.find(s=>s.code==='ПБС-УЧ-16')||secs.find(s=>/^ПБС/.test(s.code))||secs[0]).code; // K-187: по умолчанию заготовительный ПБС
       const opts=secs.map(s=>`<option value="${esc(s.code)}" ${s.code===stationSel?'selected':''}>${esc(s.code)}${s.name?' · '+esc(s.name):''}</option>`).join('')||'<option>нет участков</option>';
       const ord={'В работе':0,'В очереди':1,'Приостановлено':2,'Выполнено':3};
       const tasks=stationTasks().sort((a,b)=>(ord[a.status]??9)-(ord[b.status]??9));

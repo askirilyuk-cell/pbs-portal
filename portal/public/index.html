@@ -11986,6 +11986,7 @@
       const jByU=new Map((t.journal||[]).map(j=>[Number(j.unit),j]));
       const units=Array.from({length:qty},(_,i)=>{ const j=jByU.get(i+1)||{}; return {id:j.id,unit:i+1,executor:j.executor||'',blankNo:j.blankNo||'',self:j.self||'',otk:j.otk||'',date:j.date||'',note:j.note||'',measured:j.measured===''||j.measured==null?'':Number(j.measured),matCode:j.matCode||''}; });
       const st={status:t.status,startedAt:t.startedAt||'',mat:null,matList:[],matConfirmed:false,barLen:null,remMode:'do',blankInfo:null,otkCalled:false,busy:false};
+      const blankName=String(t.blankText||t.materials||'').replace(/^Заготовка:\s*/i,'').split(' · норма')[0].trim();
       const eq=(t.equipList||[])[0]; const eqTxt=eq?[eq.name||eq.model,eq.invNo].filter(Boolean).join(' · '):(t.equip||'станок не указан');
       const inTol=(v)=>{ if(v===''||v==null)return null; if(lo==null||hi==null)return true; return v>=lo-1e-9&&v<=hi+1e-9; };
       const unitState=(u)=>u.self==='брак'||u.otk==='брак'?'x':(u.self==='годен'&&(!reqOtk||u.otk==='годен')?'d':(u.self==='годен'&&reqOtk?'q':(u.measured!==''?'w':'')));
@@ -12018,9 +12019,9 @@
           <div class="cut-body">
             <div class="cut-col">
               <div class="cut-card"><div class="h">Задание<span class="n">${t.normTime!==''&&t.normTime!=null?'норма '+esc(String(t.normTime))+' ч':''}${t.ri?' · '+esc(t.ri):''}</span></div><div class="c">
-                <div class="cut-task">Отрезать <span class="cut-mono">${qty} шт</span>${t.blankText||t.materials?' · '+esc(t.blankText||t.materials):''}${L!=null?` · <span class="cut-mono">L = ${esc(String(L))}${tol&&tol.text?' '+esc(tol.text):''} мм</span>`:' · <span class="cut-pill warn">размер реза не задан в МК</span>'}
+                <div class="cut-task">Отрезать <span class="cut-mono">${qty} шт</span>${blankName?' · '+esc(blankName):''}${L!=null?` · <span class="cut-mono">L = ${esc(String(L))}${tol&&tol.text?' '+esc(tol.text):''} мм</span>`:' · <span class="cut-pill warn">размер реза не задан в МК</span>'}
                   <small>${L!=null&&al?`размер реза уже включает припуск ${esc(String(al))} мм${t.nextOp?' под оп. '+esc(String(t.nextOp.num))+' '+esc(t.nextOp.name):''} — отдельно ничего прибавлять не надо`:(L!=null?'припуск не задан — режем в размер':'')}${lo!=null&&hi!=null?` · годная длина ${esc(String(lo))}–${esc(String(hi))} мм`:''}</small></div>
-                ${rtCutFigureSvg({id:'c'+t.id,size:size!=null?size:'',allowance:al||'',tol:pSize.tol||'',qty:qty,blank:t.blankText||t.materials||''})}
+                ${rtCutFigureSvg({id:'c'+t.id,size:size!=null?size:'',allowance:al||'',tol:pSize.tol||'',qty:qty,blank:blankName||''})}
                 ${t.instructions?`<div class="cut-yellow"><b>Указания технолога:</b> ${esc(t.instructions)}</div>`:''}
                 <div class="cut-yellow" style="font-size:13px"><b>Маркировка</b> маркером на каждой заготовке: <span class="cut-mono">${esc(cutMarking(t,'N'))}</span> · карточка металла ${m?esc(m.code):'…'} — так заготовку в цехе можно отследить до заказа и партии металла.</div>
               </div></div>
@@ -12032,12 +12033,12 @@
               </div></div>
             </div>
             <div class="cut-col">
-              <div class="cut-card"><div class="h">Материал<span class="n">${bi.mk?'резерв под МК-'+esc(bi.mk):'склад металла'}</span></div><div class="c">
+              <div class="cut-card"><div class="h">Материал<span class="n">${bi.mk?'резерв под '+esc(bi.mk):'склад металла'}</span></div><div class="c">
                 ${m?`<div class="cut-mat"><div><b>${esc(matLabel(m))}</b><div class="cut-note">${m.lastIncoming?'приёмка '+esc(fmt(m.lastIncoming.date))+' · '+mtNum(m.lastIncoming.qty)+' кг · '+esc(m.lastIncoming.basis||''):''}${m.heatNo?' · плавка '+esc(m.heatNo):''}${m.location?' · '+esc(m.location):''}</div></div>${st.matConfirmed?'<span class="cut-pill ok">бирка подтверждена</span>':'<button class="cut-btn sm" id="cut-confirm">Подтвердить</button>'}</div>`:'<div class="cut-note">Карточка металла не выбрана — отсканируйте бирку прутка или выберите из списка.</div>'}
-                <input class="cut-inp wide" id="cut-scan" placeholder="▣ Сканируйте бирку (МЕТ-… / ДО-…) или введите код и Enter" autocomplete="off">
+                <input class="cut-inp wide" id="cut-scan" placeholder="▣ Сканируйте бирку карточки (МС-… / ДО-…) или введите код и Enter" autocomplete="off">
                 <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center"><select class="cut-inp wide" id="cut-matsel" style="font-size:14px"><option value="">— другой пруток / карточка —</option>${matOpts}</select></div>
                 <div class="cut-kv"><span class="k">Длина прутка в работе</span><span><input class="cut-inp" id="cut-barlen" inputmode="decimal" value="${st.barLen!=null?esc(String(st.barLen)):''}" placeholder="мм"> <span class="cut-note">для расчёта остатка</span></span>
-                  <span class="k">Нужно на ${qty} шт</span><span class="cut-mono">${L!=null?Math.round((L*qty+kerf*qty)*10)/10+' мм (L × '+qty+' + пропил '+kerf+' × '+qty+')':'—'}</span>
+                  <span class="k">Нужно на ${qty} шт</span><span class="cut-mono">${L!=null?Math.round((L*qty+kerf*qty)*10)/10+' мм <span class="cut-note">('+qty+' × L + '+qty+' пропила по '+kerf+')</span>':'—'}</span>
                   ${bi.normTotalKg!=null?`<span class="k">Норма по МК</span><span class="cut-mono">${mtNum(bi.normTotalKg)} кг · списано ${mtNum(bi.issuedKg||0)} кг</span>`:''}
                   ${m&&m.kind==='stock'?`<span class="k">На карточке</span><span class="cut-mono">доступно ${mtNum(m.available)} кг · остаток ${mtNum(m.balance)} кг</span>`:''}</div>
                 <div class="cut-note">Скан подтверждает, из чего режем; если пруток другой — выберите его, списание пойдёт с правильной карточки.${m&&bi.blank&&bi.blank.grade&&m.grade&&String(m.grade).toLowerCase()!==String(bi.blank.grade).toLowerCase()?' <b style="color:#b91c1c">Марка отличается от МК ('+esc(bi.blank.grade)+')!</b>':''}</div>
@@ -12113,7 +12114,7 @@
       (async()=>{ try{ const d=await (await fetch('/api/metal/blank-candidates?taskId='+encodeURIComponent(t.id))).json(); if(!d||d.error)return; st.blankInfo=d;
           const list=[...(d.candidates||[]),...(d.remnants||[])]; st.matList=list;
           const prev=units.map(u=>u.matCode).find(Boolean); const chosen=(prev&&list.find(x=>x.code===prev))||list.find(x=>x.tag==='chosen')||list.find(x=>x.tag==='recommended')||null;
-          readInputs(); pickMat(chosen,!!prev&&!!chosen); paint(); const sc=host.querySelector('#cut-scan'); if(sc&&!st.matConfirmed)sc.focus(); }catch{} })();
+          readInputs(); pickMat(chosen,!!prev&&!!chosen&&chosen.code===prev); paint(); const sc=host.querySelector('#cut-scan'); if(sc&&!st.matConfirmed)sc.focus(); }catch{} })();
       // таймер в шапке
       const tm=setInterval(()=>{ if(!document.body.contains(host)||!host.querySelector('#cut-stpill')){ clearInterval(tm); return; } if(st.status==='В работе'&&st.startedAt){ const p=host.querySelector('#cut-stpill .cut-pill'); if(p)p.textContent='в работе · '+cutElapsed(st.startedAt); } },30000);
     }

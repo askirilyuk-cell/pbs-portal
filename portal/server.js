@@ -1719,7 +1719,14 @@ async function saveRoute(body, session) {
     if (o.norm != null && o.norm !== '') opRow['Норма времени (ч)'] = Number(o.norm);
     if (hasTooling && String(o.tooling || '').trim()) opRow['Оснастка'] = String(o.tooling).trim();
     if (hasSetupNo && String(o.setupCardNo || '').trim()) opRow['Карта наладки (№)'] = String(o.setupCardNo).trim();
-    if (hasPlan) { const pm = mkPlanClean(o.planMaterials); if (pm.length) opRow['Материалы (план)'] = JSON.stringify(pm); }
+    if (hasPlan) { const pm = mkPlanClean(o.planMaterials); if (pm.length) opRow['Материалы (план)'] = JSON.stringify(pm);
+      // K-187: заготовка оп. №1 — из плана материалов (роль «Заготовка»), если JSON заготовки не пришёл отдельно (см. mkBlankParse)
+      if (i === 0 && !mkBlankParse(opRow['Входящие материалы']) ) { const z = pm.find((m) => m.role === 'Заготовка' && (m.canonId != null || m.stockId != null || m.name));
+        if (z) { const bl = { blank: true, mode: z.stockId != null ? 'stock' : (z.canonId != null ? 'canon' : 'free'), unit: z.unit === 'мм' ? 'мм' : 'кг' };
+          const q = Number(z.qty); if (q > 0) bl.norm = z.unit === 'м' ? Math.round(q * 1000) : q; if (z.unit === 'м') bl.unit = 'мм';
+          if (z.partsPerBlank > 1) bl.partsPerBlank = Number(z.partsPerBlank);
+          if (bl.mode === 'stock') { bl.stockId = z.stockId; bl.name = z.name || ''; } else if (bl.mode === 'canon') { bl.canonId = z.canonId; bl.name = z.name || ''; } else bl.freeText = z.name;
+          opRow['Входящие материалы'] = JSON.stringify(bl); } } }
     if (hasParamPlan) { const pp = mkParamPlanClean(o.paramPlan); opRow['Параметры (план)'] = pp.length ? JSON.stringify(pp) : ''; } // K-182
     if (hasOpComment) opRow['Комментарий оператору'] = String(o.comment || '').trim(); // K-186
     const cr = await ncCreateMany('operations', [opRow]);
@@ -6311,7 +6318,7 @@ async function buildBoardLive() {
     const routeOpsAll = (opsByRouteId.get(String(route.Id ?? route.id ?? '')) || []).slice().sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
     const opIdx = routeOpsAll.findIndex((x) => idOf(x) === idOf(operation));
     const nextOpRow = opIdx >= 0 ? routeOpsAll[opIdx + 1] : null;
-    const nextOp = (() => { if (!nextOpRow) return null; const nt = otById.get(nextOpRow.op_types_id) || {}; const nsId = (Array.isArray(nt['Участки']) && nt['Участки'][0] && idOf(nt['Участки'][0])) ?? nt.sections_id; const ns = secById.get(nsId) || {};
+    const nextOp = (() => { if (!nextOpRow) return null; const nt = otById.get(nextOpRow.op_types_id) || {}; const nsId = _linkIds(nt['Участки'])[0] ?? nt.sections_id; const ns = secById.get(nsId) || {};
       return { num: nextOpRow['№ операции'] ?? '', name: nextOpRow['Операция'] || nt['Наименование'] || '', section: ns['Код'] || '' }; })();
     const orderRow = orderByIdB.get(position.orders_id) || orderByIdB.get(t.orders_id) || {};
     const invList = String(t['Оборудование'] || operation['Оборудование'] || opType['Оборудование (инв. №)'] || '').split(/[,;]+/).map((x) => x.trim()).filter(Boolean);

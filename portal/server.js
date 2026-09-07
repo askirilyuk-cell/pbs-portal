@@ -7698,7 +7698,8 @@ async function onecPost(entity, payload) {
   if (!ONEC_POST_ALLOWED.has(entity)) { onecLog('REFUSE', `запись в «${entity}» вне белого списка`); throw onecErr(500, 'Отказ: портал пишет только в разрешённые объекты 1С.'); }
   if (!payload || typeof payload !== 'object' || payload.DeletionMark) throw onecErr(500, 'Отказ: некорректное тело документа.');
   if (entity.startsWith('Document_') && payload.Posted !== false) throw onecErr(500, 'Отказ: портал создаёт только непроведённые черновики.');
-  if (entity.startsWith('Catalog_') && (payload.IsFolder === true || !/Портал ИСМ/.test(String(payload.Комментарий || '')))) throw onecErr(500, 'Отказ: элемент справочника без метки портала не создаётся.');
+  const portalFolder = entity === 'Catalog_Номенклатура' && payload.IsFolder === true && payload.Description === ONEC_NOM_GROUP_PORTAL; // K-188: единственная папка, которую портал вправе завести
+  if (entity.startsWith('Catalog_') && !portalFolder && (payload.IsFolder === true || !/Портал ИСМ/.test(String(payload.Комментарий || '')))) throw onecErr(500, 'Отказ: элемент справочника без метки портала не создаётся.');
   const c = cfg(); const t0 = Date.now();
   let res;
   try {
@@ -7748,11 +7749,14 @@ async function onecRetroProduct(act, mirror) {
   const hit = byCanon.find((m) => String(m['Наименование'] || '').trim().toLowerCase() === String(act.name || '').trim().toLowerCase()) || byCanon[0] || exact[0] || null;
   if (hit) return { key: hit['Ключ 1С'], code: hit['Код 1С'], name: hit['Наименование'], create: null };
   const groups = (await onecGet(`Catalog_Номенклатура?$top=5&$select=Ref_Key,Description&$filter=IsFolder eq true and Description eq '${onecLit(ONEC_NOM_GROUP_PORTAL)}'`)).value || [];
-  const g = groups[0];
-  if (!g) throw onecErr(400, `Для «${act.name}» нет номенклатуры в 1С, а группы «${ONEC_NOM_GROUP_PORTAL}» в справочнике нет — заведите её в 1С или создайте позицию вручную.`);
+  let g = groups[0]; let willCreateGroup = false;
+  if (!g) { // K-188: группы нет — портал заводит её сам (в режиме проверки только сообщает)
+    if (onecDryRun()) { willCreateGroup = true; g = { Ref_Key: ONEC_ZERO_GUID }; }
+    else { g = await onecPost('Catalog_Номенклатура', { Description: ONEC_NOM_GROUP_PORTAL, IsFolder: true, Parent_Key: ONEC_ZERO_GUID, Комментарий: 'Портал ИСМ: группа для номенклатуры, созданной порталом черновиком' }); onecLog('POST-OK', `создана группа номенклатуры «${ONEC_NOM_GROUP_PORTAL}» ${g.Ref_Key}`); }
+  };
   const units = (await onecGet(`Catalog_КлассификаторЕдиницИзмерения?$top=300&$select=Ref_Key,Description`)).value || [];
   const u = units.find((x) => String(x.Description || '').trim().toLowerCase() === String(act.unit || 'шт').trim().toLowerCase()) || units.find((x) => String(x.Description || '').trim() === 'шт');
-  return { key: '', code: '', name: act.name, create: { Description: String(act.name).slice(0, 100), Parent_Key: g.Ref_Key, ЕдиницаИзмерения_Key: (u && u.Ref_Key) || ONEC_ZERO_GUID, Комментарий: `Портал ИСМ: акт выпуска ${act.no}, ${ONEC_UID_TAG}${act.ismUid}. Черновик номенклатуры — требует проверки бухгалтером.` } };
+  return { key: '', code: '', name: act.name, willCreateGroup, create: { Description: String(act.name).slice(0, 100), Parent_Key: g.Ref_Key, ЕдиницаИзмерения_Key: (u && u.Ref_Key) || ONEC_ZERO_GUID, Комментарий: `Портал ИСМ: акт выпуска ${act.no}, ${ONEC_UID_TAG}${act.ismUid}. Черновик номенклатуры — требует проверки бухгалтером.` } };
 }
 // сборка тела документа + план для показа (dry-run) — из акта и его состава
 async function onecRetroBuild(act) {
@@ -7777,7 +7781,7 @@ async function onecRetroBuild(act) {
     Продукция: [{ LineNumber: '1', Номенклатура_Key: product.key || ONEC_ZERO_GUID, Количество: act.qty, КоличествоМест: 0, ЕдиницаИзмерения_Key: prodInfo.ЕдиницаИзмерения_Key || ONEC_ZERO_GUID, Коэффициент: 1, ПлановаяСтоимость: 0, СуммаПлановая: 0, Счет_Key: prodAcc, НоменклатурнаяГруппа_Key: prodInfo.НоменклатурнаяГруппа_Key || tpl.nomGroupKey }],
     Материалы: materials.map(({ _view, ...r }) => r),
   };
-  const plan = { entity: ONEC_PROD.title, warehouse: tpl.warehouseName, org: tpl.orgName, sampleNo: tpl.sampleNo, product: { name: product.name, code: product.code, willCreate: !!product.create, account: act.account, qty: act.qty, unit: act.unit }, materials: materials.map((m) => m._view), skipped, comment };
+  const plan = { entity: ONEC_PROD.title, warehouse: tpl.warehouseName, org: tpl.orgName, sampleNo: tpl.sampleNo, product: { name: product.name, code: product.code, willCreate: !!product.create, willCreateGroup: !!product.willCreateGroup, account: act.account, qty: act.qty, unit: act.unit }, materials: materials.map((m) => m._view), skipped, comment };
   return { doc, plan, product };
 }
 // найти уже созданный документ по uuid (предфильтр 1С + точное сравнение) или по сохранённой ссылке

@@ -8133,6 +8133,7 @@ function toolShape(it) {
     belowMin: min > 0 && balance <= min,
     invNo: it['Инв. №'] || '', accuracyRange: it['Диапазон / класс точности'] || '', status,
     invoiceNo: it['№ СФ'] || '', location: it['Местоположение'] || '', registeredAt: it['Дата регистрации'] || '', rigKind,
+    sectionCode: it['Участок (код)'] || '', // K-172: участок приписки оснастки (фильтр в конструкторе МК)
     calDate, calNext, calCert: it['№ свидетельства о поверке'] || '', calOverdue, calSoon,
     // K-55: справочный код 1С (БП-000NNNN) — идёт в акт списания / выдачу для бухгалтерии
     code1c: it['Код 1С'] || '',
@@ -8203,6 +8204,7 @@ const TOOL_WRITE = {
   'Ячейка': 'cell', 'Примечание': 'note', 'Инв. №': 'invNo', 'Диапазон / класс точности': 'accuracyRange',
   '№ СФ': 'invoiceNo', 'Местоположение': 'location', '№ свидетельства о поверке': 'calCert',
   'Код 1С': 'code1c', // K-55: справочный код 1С (БП-000NNNN)
+  'Участок (код)': 'sectionCode', // K-172
 };
 const TOOL_STATUSES = ['Годен', 'Просрочен', 'В эксплуатации', 'На станке', 'Списан'];
 const TOOL_RIG_KINDS = ['Державка', 'Приспособление', 'Пресс-форма'];

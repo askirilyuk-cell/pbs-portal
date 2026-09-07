@@ -1042,6 +1042,7 @@
     /* K-161: бейдж кабинета в меню и поле-поиск (МК, канон) */
     .navme{padding:4px 0 2px;margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,.06);} /* K-161: пункт без группы — не .navg, иначе initNav ищет заголовок .ngrp */
     .nbadge{margin-left:auto;background:var(--red,#c0392b);color:#fff;font-size:10px;font-weight:700;border-radius:9px;padding:1px 6px;min-width:18px;text-align:center;line-height:16px;}
+    .rt-blk{margin-top:11px;padding:10px 12px;border:1px solid var(--sl-200);border-radius:var(--r-m);background:var(--card,#fff);} .rt-blk-h{display:flex;align-items:center;gap:8px;font-weight:700;font-size:12px;margin-bottom:6px;color:var(--ink);} /* K-172 */
     .rsf{position:relative;} .rsf-list{position:absolute;z-index:30;left:0;right:0;top:100%;background:var(--card,#fff);border:1px solid var(--sl-300);border-radius:var(--r-s);max-height:260px;overflow:auto;box-shadow:0 8px 24px rgba(15,40,70,.14);}
     .rsf-list div{padding:6px 10px;cursor:pointer;font-size:12px;line-height:1.3;} .rsf-list div:hover{background:var(--sl-50);} .rsf-list .rsf-sub{display:block;color:var(--sl-500);font-size:11px;font-family:var(--mono);}
     .cab-item{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--bd);border-radius:var(--r-s);background:var(--card,#fff);margin-top:8px;flex-wrap:wrap;} .cab-item .cab-t{flex:1;min-width:220px;} .cab-item .cab-t b{color:var(--ink);} .cab-item .cab-s{font-size:12px;color:var(--sl-500);margin-top:2px;}
@@ -10911,6 +10912,7 @@
             <div style="grid-column:span 4">${FLAB('Инв. №'+(edit?'':' (авто ОСН-ГГММ-NNN)'))}<input id="te-inv" style="${FINP}" value="${esc(it.invNo||'')}" ${edit?'':'placeholder="присвоится автоматически"'}></div>
             <div style="grid-column:span 4">${FLAB('Код 1С (для списания)')}<input id="te-code1c" style="${FINP}" value="${esc(it.code1c||'')}" placeholder="БП-000NNNN"></div>
             <div style="grid-column:span 4">${FLAB('№ СФ (счёт-фактура)')}<input id="te-invoice" style="${FINP}" value="${esc(it.invoiceNo||'')}"></div>
+            <div style="grid-column:span 4">${FLAB('Участок приписки')}<select id="te-sec" style="${FINP}"><option value="">— не задан —</option>${(sectionsList()||[]).map(sx=>`<option value="${esc(sx.code)}"${sx.code===(it.sectionCode||'')?' selected':''}>${esc(sx.code)}${sx.name?' · '+esc(sx.name):''}</option>`).join('')}</select></div>
             <div style="grid-column:span 4">${FLAB('Местоположение')}<input id="te-loc" list="te-stations" style="${FINP}" value="${esc(it.location||'')}" placeholder="Склад / станок"><datalist id="te-stations">${stationList}</datalist></div>
             <div style="grid-column:span 4">${FLAB('Статус')}<select id="te-status" style="${FINP}">${opt(['В эксплуатации','На станке','Списан'],it.status||'В эксплуатации')}</select></div>
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="te-note" style="${FINP}" value="${esc(it.note||'')}"></div>`; }
@@ -10963,9 +10965,9 @@
         const err=document.getElementById('te-err'); err.textContent='';
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
         const body={ name:V('te-name'), note:V('te-note'), code1c:V('te-code1c') };
-        if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('te-rigkind'); body.category=V('te-cat'); body.invNo=V('te-inv'); body.invoiceNo=V('te-invoice'); body.location=V('te-loc'); body.status=V('te-status'); }
+        if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('te-rigkind'); body.category=V('te-cat'); body.invNo=V('te-inv'); body.invoiceNo=V('te-invoice'); body.location=V('te-loc'); body.status=V('te-status'); body.sectionCode=V('te-sec')||''; }
         else if(sub==='si'){ body.type='Расходный'; body.category='Мерительный/СИ'; body.invNo=V('te-inv'); body.accuracyRange=V('te-acc'); body.unit=V('te-unit'); body.calDate=V('te-cal'); body.calNext=V('te-calnext'); body.calCert=V('te-cert'); body.location=V('te-loc'); body.status=V('te-status'); }
-        else { body.type=V('te-type'); body.category=V('te-cat'); body.subcategory=V('te-subcat'); body.unit=V('te-unit'); body.cell=V('te-cell'); body.minStock=V('te-min'); if(!edit&&V('te-bal'))body.balance=Number(V('te-bal')); }
+        else { body.type=V('te-type'); body.category=V('te-cat'); body.subcategory=V('te-subcat'); body.unit=V('te-unit'); body.cell=V('te-cell'); body.minStock=V('te-min'); if(!edit&&V('te-bal'))body.balance=Number(V('te-bal')); const se=document.getElementById('te-sec'); if(se)body.sectionCode=se.value||''; }
         if(edit)body.id=it.id;
         if(!body.name){ err.textContent='Укажите наименование.'; toast('Укажите наименование.','err'); return; }
         const btn=document.getElementById('te-save'); btn.disabled=true; btn.textContent='Сохранение…';
@@ -14002,13 +14004,16 @@
     const rtOpNeedsSetup=(op)=>{ const ot=rtOtById(op.opTypeId)||{}; if(op.control==='ОТК')return false; return /Токар|Фрез|Сверл|Шлиф|Расточ|ЧПУ/i.test((op.name||'')+' '+(ot.name||'')+' '+(ot.code||'')); };
     // выпадающие списки из справочников (мягкая деградация — пустой список; текущее значение сохраняется)
     function rtOtOptions(cur){ const c=String(cur||''); return '<option value="">— выбрать тип операции —</option>'+((rtWiz.cat.opTypes)||[]).map(t=>`<option value="${rtEscA(t.id)}"${String(t.id)===c?' selected':''}>${esc((t.code?t.code+' · ':'')+t.name)}</option>`).join(''); }
-    function rtEqOptions(cur){ const items=((rtWiz.eqReg&&rtWiz.eqReg.items)||[]); const c=String(cur||'').trim(); const seen=new Set(),opts=[]; items.forEach(it=>{ const v=String(it.model||it.name||'').trim(); if(!v||seen.has(v))return; seen.add(v); opts.push({v,lab:[v,it.invNo?('инв. '+it.invNo):'',it.category].filter(Boolean).join(' · ')}); }); let h='<option value="">— не выбрано —</option>'; if(c&&!seen.has(c))h+=`<option value="${rtEscA(c)}" selected>${esc(c)}</option>`; return h+opts.map(o=>`<option value="${rtEscA(o.v)}"${o.v===c?' selected':''}>${esc(o.lab)}</option>`).join(''); }
+    // K-172: участок операции (код) — по типу операции; оборудование/оснастка по умолчанию только этого участка
+    const rtOpSecCode=(op)=>{ const ot=rtOtById(op&&op.opTypeId)||{}; return String(ot.section||'').split(' · ')[0].trim(); };
+    function rtEqOptions(cur,op){ let items=((rtWiz.eqReg&&rtWiz.eqReg.items)||[]); const secCode=op?rtOpSecCode(op):''; const secName=secCode?String((rtOtById(op.opTypeId)||{}).section||'').split(' · ').slice(1).join(' · ').trim():'';
+      if(secCode&&!(op&&op._allSec)) items=items.filter(it=>String(it.sectionName||'').trim()===secName||String(it.sectionCode||'').trim()===secCode); const c=String(cur||'').trim(); const seen=new Set(),opts=[]; items.forEach(it=>{ const v=String(it.model||it.name||'').trim(); if(!v||seen.has(v))return; seen.add(v); opts.push({v,lab:[v,it.invNo?('инв. '+it.invNo):'',it.category].filter(Boolean).join(' · ')}); }); let h='<option value="">— не выбрано —</option>'; if(c&&!seen.has(c))h+=`<option value="${rtEscA(c)}" selected>${esc(c)}</option>`; return h+opts.map(o=>`<option value="${rtEscA(o.v)}"${o.v===c?' selected':''}>${esc(o.lab)}</option>`).join(''); }
     function rtToolOptions(cur){ const items=((rtWiz.tools&&rtWiz.tools.items)||[]).filter(t=>t.subdivision==='osn'||t.subdivision==='cut'); const c=String(cur||'').trim(); const lab=(t)=>[t.code,t.name].filter(Boolean).join(' · '); const vals=items.map(lab); let h='<option value="">— не требуется —</option>'; if(c&&!vals.includes(c))h+=`<option value="${rtEscA(c)}" selected>${esc(c)}</option>`; return h+items.map(t=>{const v=lab(t);return `<option value="${rtEscA(v)}"${v===c?' selected':''}>${esc(v)}</option>`;}).join(''); }
     // K-81 доводка: МНОЖЕСТВЕННАЯ оснастка на операцию — чек-лист из справочника (по образцу совместимых пластин), хранится в op.tooling списком «; »
-    const rtToolLabels=()=>((rtWiz.tools&&rtWiz.tools.items)||[]).filter(t=>t.subdivision==='osn'||t.subdivision==='cut').map(t=>[t.code,t.name].filter(Boolean).join(' · '));
+    const rtToolLabels=(op)=>{ const secCode=op?rtOpSecCode(op):''; return ((rtWiz.tools&&rtWiz.tools.items)||[]).filter(t=>t.subdivision==='osn'||t.subdivision==='cut').filter(t=>!secCode||(op&&op._allSec)||String(t.sectionCode||'').trim()===secCode||String(t.shopArea||'').includes(secCode)).map(t=>[t.code,t.name].filter(Boolean).join(' · ')+((op&&op._allSec&&t.sectionCode&&t.sectionCode!==secCode)?' · с '+t.sectionCode:'')); };
     const rtToolSet=(op)=>new Set(String(op.tooling||'').split(/\s*;\s*|\n/).map(s=>s.trim()).filter(Boolean));
     function rtToolChecklist(op,i){
-      const sel=rtToolSet(op), labels=rtToolLabels(), extra=[...sel].filter(l=>!labels.includes(l)), all=labels.concat(extra);
+      const sel=rtToolSet(op), labels=rtToolLabels(op), extra=[...sel].filter(l=>!labels.includes(l)), all=labels.concat(extra);
       const rows=all.length?all.map(l=>`<label style="display:flex;align-items:center;gap:8px;padding:3px 4px;font-size:12px;cursor:pointer"><input type="checkbox" data-tool="${rtEscA(l)}"${sel.has(l)?' checked':''}><span>${esc(l)}</span></label>`).join(''):'<div class="rt-hint" style="padding:4px">Справочник оснастки пуст — заведите инструмент/оснастку в разделе «Инструмент».</div>';
       return `<div class="rt-fld" style="margin-top:11px"><label>Оснастка / инструмент (из справочника · можно несколько)</label>
         <input class="rt-inp" data-toolf="${i}" placeholder="фильтр по коду / наименованию…" style="margin:5px 0 6px">
@@ -14326,19 +14331,25 @@
       const isBlank=m.role==='Заготовка';
       const stockOpt='<option value="">— подобрать по канону —</option>'+rtStockPickList(m.stockId).map(s=>`<option value="${s.id}"${String(s.id)===String(m.stockId)?' selected':''}>${esc(rtStockOptLabel(s))}</option>`).join('');
       return `<div class="rt-g2" data-pmrow="${idx}" style="margin-top:6px;grid-template-columns:150px 1fr 200px;gap:8px;align-items:start;${isBlank?'background:var(--sk-50);border-radius:var(--r-s);padding:6px':''}">
-        <div class="rt-fld"><select class="rt-inp" data-pmf="role" data-pmi="${idx}">${RT_BOM_ROLES.map(r=>`<option${(m.role||'Материал')===r?' selected':''}>${r}</option>`).join('')}</select></div>
+        <div class="rt-fld"><select class="rt-inp" data-pmf="role" data-pmi="${idx}" title="${rtEscA(RT_ROLE_LABEL[m.role||'Материал']||'')}">${RT_BOM_ROLES.map(r=>`<option value="${r}"${(m.role||'Материал')===r?' selected':''}>${r}</option>`).join('')}</select></div>
         <div class="rt-fld"><select class="rt-inp" data-pmf="canonId" data-pmi="${idx}">${rtPlanOptions(m.canonId)}</select></div>
         <div style="display:flex;gap:6px;align-items:center"><input class="rt-inp" type="number" min="0" step="any" data-pmf="qty" data-pmi="${idx}" value="${rtEscA(m.qty)}" placeholder="норма/шт" style="flex:1"><span class="rt-rt" data-pmunit="${idx}" style="min-width:34px">${esc(m.unit||'')}</span><button type="button" class="tbtn" data-pmrem="${idx}" style="padding:4px 8px;color:var(--red)" title="Убрать">✕</button></div>
         ${isBlank?`<div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 180px;gap:8px"><div class="rt-fld"><label>Карточка склада металла (резерв при «В производстве»)</label><select class="rt-inp" data-pmf="stockId" data-pmi="${idx}">${stockOpt}</select></div><div class="rt-fld"><label>Деталей из одной заготовки</label><input class="rt-inp" type="number" min="0" step="1" data-pmf="partsPerBlank" data-pmi="${idx}" value="${rtEscA(m.partsPerBlank)}" placeholder="1"></div></div>`:''}
       </div>`;
     }
     const rtHasBlank=()=>(rtWiz.ops||[]).some(op=>(op.planMaterials||[]).some(m=>m.role==='Заготовка'));
+    // K-172: вход/выход операции — заготовка на первой, результат предыдущей на остальных
+    function rtIoLineHtml(op,i){ const ops=rtWiz.ops||[]; const prev=ops[i-1]; const next=ops[i+1]; const nm=(o)=>o?(o.name||(rtOtById(o.opTypeId)||{}).name||('оп. '+(ops.indexOf(o)+1))):'';
+      const inp=i===0?'заготовка со склада (см. «Материалы»)':`результат оп. ${i} «${esc(nm(prev))}»`; const out=next?`полуфабрикат → оп. ${i+2} «${esc(nm(next))}»`:'готовый компонент / изделие';
+      return `<div class="rt-rt" style="margin:2px 0 8px;display:flex;gap:14px;flex-wrap:wrap"><span><b>Вход:</b> ${inp}</span><span><b>Выход:</b> ${out}</span></div>`; }
+    const RT_ROLE_LABEL={'Заготовка':'Заготовка — со склада металла, одна на маршрут, резервируется','Материал':'Материал — расходуется и входит в изделие','Вспомогательный':'Вспомогательный — расходуется, в изделие не входит (СОЖ, абразив, газ)','Комплектующее':'Комплектующее — готовая деталь / покупное, входит в сборку'};
     function rtPlanBlockHtml(op,i){
       const list=op.planMaterials=op.planMaterials||[];
       const filled=list.filter(m=>m.canonId||String(m.name||'').trim());
       const noCanon=!(rtWiz.canonAll||[]).length;
       return `<div class="rt-fld" data-pm="${i}" style="margin-top:12px;padding:12px 14px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-weight:700">Материалы операции</span><span class="rt-rt">роль · канон-позиция · норма на 1 шт изделия · факт — в акте выпуска</span>${filled.length?`<span class="rt-rt" style="margin-left:auto;color:var(--navy);font-weight:600">${filled.length} поз.</span>`:''}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-weight:700">Материалы операции</span><span class="rt-rt">роль · канон-позиция · норма на 1 шт изделия · факт отмечает оператор в карте задачи</span>
+        <details class="rt-rt" style="width:100%"><summary style="cursor:pointer">что есть что</summary><div style="padding:4px 0 0 12px;line-height:1.5">${Object.values(RT_ROLE_LABEL).map(x=>'· '+esc(x)).join('<br>')}<br>· Результат предыдущей операции (например, наплавленная плита) материалом не является — он показан строкой «Вход» выше.</div></details>${filled.length?`<span class="rt-rt" style="margin-left:auto;color:var(--navy);font-weight:600">${filled.length} поз.</span>`:''}</div>
         ${noCanon?'<div class="rt-hint" style="margin-top:6px">Каталог канон-номенклатуры пуст — заведите позиции в разделе «Каталог».</div>':''}
         <div data-pmf="rows">${list.map((m,idx)=>rtPlanRowHtml(m,idx)).join('')}</div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="tbtn" data-pmf="add" data-role="Материал" ${noCanon?'disabled':''}>+ Материал</button><button type="button" class="tbtn" data-pmf="add" data-role="Заготовка" ${noCanon||rtHasBlank()?'disabled':''} title="Заготовка одна на маршрут — резервируется на складе металла">+ Заготовка</button><button type="button" class="tbtn" data-pmf="add" data-role="Вспомогательный" ${noCanon?'disabled':''}>+ Вспомогательный</button><button type="button" class="tbtn" data-pmf="add" data-role="Комплектующее">+ Комплектующее</button></div>
@@ -14419,11 +14430,13 @@
         <div class="rt-obody">
           <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование)</label><input class="rt-inp" data-of="name" value="${rtEscA(op.name)}" placeholder="по умолч. = тип"></div></div>
           ${auto}
-          ${rtPlanBlockHtml(op,i)}
-          ${i>0?rtCoopBlockHtml(op,i):''}
-          <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment)}</select></div><div class="rt-fld"><label>Норма, ч</label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="0"></div></div>
-          ${rtToolChecklist(op,i)}
-          ${setupRow}
+          ${rtIoLineHtml(op,i)}
+          <div class="rt-blk"><div class="rt-blk-h">Оборудование <span class="rt-rt">${rtOpSecCode(op)?'участок '+esc(rtOpSecCode(op)):'участок по типу операции'}</span><label class="rt-rt" style="margin-left:auto;display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" data-allsec="${i}"${op._allSec?' checked':''}> показать все участки</label></div>
+          <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment,op)}</select></div><div class="rt-fld"><label>Норма, ч</label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="0"></div></div></div>
+          <div class="rt-blk"><div class="rt-blk-h">Оснастка и инструмент</div>${rtToolChecklist(op,i)}${setupRow}</div>
+          <div class="rt-blk"><div class="rt-blk-h">Режимы и параметры контроля <span class="rt-rt">по типу операции · значения — в карте задачи Ф.14</span></div>${(ot.params&&ot.params.length)?`<div style="display:flex;flex-wrap:wrap;gap:6px">${ot.params.map(pn=>`<span class="st st--neutral">${esc(pn)}</span>`).join('')}</div>`:'<div class="rt-hint">У типа операции параметры не заданы (Ф.1–П, лист «Параметры типов»).</div>'}</div>
+          <div class="rt-blk"><div class="rt-blk-h">Материалы</div>${rtPlanBlockHtml(op,i)}${i>0?rtCoopBlockHtml(op,i):''}</div>
+          ${rtWiz.route&&rtWiz.route.type==='СБР'?`<div class="rt-blk"><div class="rt-blk-h">Комплектующие</div><div class="rt-hint">Компоненты сборки (детали по своим МК-КОМ и покупные) задаются на шаге «Компоненты» и входят в операцию сборки.</div></div>`:''}
           <div style="margin-top:11px;text-align:right"><button class="tbtn" data-oprem="${i}" style="color:var(--red)">Удалить операцию</button></div>
         </div></div>`;
     }
@@ -14578,6 +14591,7 @@
           const addBtn=box.querySelector('[data-cf="addpart"]'); if(addBtn)addBtn.onclick=()=>{ c.parts.push({name:'',qty:''});
             const pc=box.querySelector('[data-cf="parts"]'); if(pc){ pc.innerHTML=c.parts.map((p,pIdx)=>rtCoopPartRowHtml(p,pIdx)).join(''); wirePartRows(); } refreshPrev(); };
         });
+        host.querySelectorAll('[data-allsec]').forEach(cb=>cb.onchange=()=>{ const op=rtWiz.ops[+cb.dataset.allsec]; if(!op)return; rtReadOps(2); op._allSec=cb.checked; rtWizRender(); }); // K-172
         // K-157/K-160: материалы операции — wiring по каждой карточке (scoped data-pm); спецификация изделия выводится из операций
         host.querySelectorAll('.rt-op[data-idx]').forEach(node=>{
           const idx=+node.dataset.idx, op=rtWiz.ops[idx]; if(!op)return; const box=node.querySelector('[data-pm]'); if(!box)return;

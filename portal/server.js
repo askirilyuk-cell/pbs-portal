@@ -7818,8 +7818,20 @@ async function retroTo1c(body, session) {
   const doc = { ref: created.Ref_Key, number: created.Number || '', date: String(created.Date || '').slice(0, 10) };
   await ncUpdate('retro_outputs', act.id, { 'Статус': 'Черновик в 1С', 'Документ 1С (ключ)': doc.ref, 'Документ 1С (№)': doc.number, 'Документ 1С (дата)': doc.date });
   onecLog('RETRO', `${act.no} → ${ONEC_PROD.title} №${doc.number} (${doc.ref})`);
-  await retroChatNotify(`📄 ${act.no} «${act.name}» — ${act.qty} ${act.unit}, ${act.whereTo || ''}\nЧерновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')}. Материалов: ${built.plan.materials.length}, себестоимость ${(act.cost || 0).toLocaleString('ru-RU')} ₽.${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '» — проверьте реквизиты.' : ''}\nПросьба проверить и провести. Акт в портале: ${cfg().PORTAL_BASE}/#retro/${act.id}`);
-  return { ok: true, doc, plan: built.plan };
+  // K-190 (решение Александра 07.09): «отправка в чат = создание в 1С» — одно действие: черновик в 1С, затем в чат бухгалтерии
+  // уходит печатная форма (PDF) с текстом предпросмотра (можно править) и строкой о созданном черновике. Откат на короткое сообщение, если файл не ушёл.
+  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')}. Материалов: ${built.plan.materials.length}, себестоимость ${(act.cost || 0).toLocaleString('ru-RU')} ₽.${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '» — проверьте реквизиты.' : ''}\nПросьба проверить и провести.`;
+  let chat = null;
+  try {
+    const base = String(body.text || '').trim() || (await retroChatPreview(act.id)).text;
+    const text = base.replace(/\nПечатная форма — во вложении/, `\n${line1c}\nПечатная форма — во вложении`);
+    chat = await retroChatSend({ id: act.id, text: text.includes(line1c) ? text : text + '\n' + line1c }, session);
+  } catch (e) {
+    onecLog('CHAT-ERR', `после черновика ${doc.number}: ${e.message || e}`);
+    const sent = await retroChatNotify(`📄 ${act.no} «${act.name}» — ${act.qty} ${act.unit}, ${act.whereTo || ''}\n${line1c}\nАкт в портале: ${cfg().PORTAL_BASE}/#retro/${act.id}`);
+    chat = { ok: sent, attached: false, warning: String(e.message || e) };
+  }
+  return { ok: true, doc, plan: built.plan, chat };
 }
 // опрос проведения: акты «Черновик в 1С» → Posted / DeletionMark
 // K-163: «Принял к учёту (бухгалтерия)» в печатной форме — из проведённого документа 1С: ответственный (Catalog_Пользователи) и дата документа

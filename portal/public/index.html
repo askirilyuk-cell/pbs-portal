@@ -1042,6 +1042,11 @@
     /* K-161: бейдж кабинета в меню и поле-поиск (МК, канон) */
     .navme{padding:4px 0 2px;margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,.06);} /* K-161: пункт без группы — не .navg, иначе initNav ищет заголовок .ngrp */
     .nbadge{margin-left:auto;background:var(--red,#c0392b);color:#fff;font-size:10px;font-weight:700;border-radius:9px;padding:1px 6px;min-width:18px;text-align:center;line-height:16px;}
+    .ui-dlg{position:fixed;inset:0;z-index:200;background:rgba(12,28,48,.45);display:flex;align-items:center;justify-content:center;padding:16px;animation:uiDlgIn .12s ease-out}
+    @keyframes uiDlgIn{from{opacity:0}to{opacity:1}}
+    .ui-dlg-box{background:var(--card,#fff);color:var(--ink);border-radius:var(--r-m);box-shadow:0 24px 64px rgba(0,0,0,.28);width:min(460px,100%);padding:18px 20px 16px;border:1px solid var(--bd)}
+    .ui-dlg-h{font-size:15px;font-weight:700;color:var(--ink);line-height:1.3} .ui-dlg-t{font-size:13px;color:var(--sub);margin-top:8px;line-height:1.5} .ui-dlg-in{width:100%;margin-top:10px}
+    .ui-dlg-b{display:flex;justify-content:flex-end;gap:8px;margin-top:16px} .ui-btn--danger{background:var(--red)!important;border-color:var(--red)!important;color:#fff!important}
     .rt-blk{margin-top:11px;padding:10px 12px;border:1px solid var(--sl-200);border-radius:var(--r-m);background:var(--card,#fff);} .rt-blk-h{display:flex;align-items:center;gap:8px;font-weight:700;font-size:12px;margin-bottom:6px;color:var(--ink);} /* K-172 */
     .rsf{position:relative;} .rsf-list{position:absolute;z-index:30;left:0;right:0;top:100%;background:var(--card,#fff);border:1px solid var(--sl-300);border-radius:var(--r-s);max-height:260px;overflow:auto;box-shadow:0 8px 24px rgba(15,40,70,.14);}
     .rsf-list div{padding:6px 10px;cursor:pointer;font-size:12px;line-height:1.3;} .rsf-list div:hover{background:var(--sl-50);} .rsf-list .rsf-sub{display:block;color:var(--sl-500);font-size:11px;font-family:var(--mono);}
@@ -1725,14 +1730,14 @@
       if(selEl)selEl.onclick=()=>{ selMode=!selMode; if(!selMode)selected.clear();
         selEl.classList.toggle('on',selMode); selEl.textContent=selMode?'✕ Готово':'<i class=ic-chk></i> Выбрать';
         if(delEl)delEl.style.display=selMode?'inline-flex':'none'; draw(); updDel(); };
-      if(delEl)delEl.onclick=async()=>{
+      if(delEl)delEl.onclick=async ()=>{
         const ids=[...selected]; if(!ids.length)return;
-        if(!confirm(`Удалить выбранные записи: ${ids.length}? Действие необратимо.`))return;
+        if(!(await uiConfirm(`Удалить выбранные записи: ${ids.length}? Действие необратимо.`)))return;
         delEl.disabled=true; delEl.textContent='Удаление…';
         try{ const r=await fetch('/api/records/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:DEL.key,ids})});
           const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
           selected.clear(); if(DEL.reload)DEL.reload();
-        }catch(e){ alert('Не удалось удалить: '+(e.message||e)); updDel(); }
+        }catch(e){ uiAlert('Не удалось удалить: '+(e.message||e)); updDel(); }
       };
       const menu=host.querySelector('.colmenu'), colbtn=host.querySelector('[data-colbtn]');
       colbtn.onclick=(e)=>{e.stopPropagation();menu.hidden=!menu.hidden;};
@@ -2358,8 +2363,8 @@
       </div>`;
       host.querySelector('#logi-edit').onclick=()=>openLogiShipment(s);
       host.querySelector('#logi-pl-add').onclick=()=>openPackingList(s.id,null);
-      host.querySelector('#logi-del').onclick=async()=>{
-        if(!confirm(`Удалить заявку ${s.num}? Действие необратимо.`))return;
+      host.querySelector('#logi-del').onclick=async ()=>{
+        if(!(await uiConfirm(`Удалить заявку ${s.num}? Действие необратимо.`)))return;
         try{ const r=await fetch('/api/logistics/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
           toast('Заявка удалена','ok'); logiSelId=null; LOGI=await (await fetch('/api/logistics')).json(); logiGrid();
         }catch(e){ toast('Не удалено: '+e.message,'err'); }
@@ -2372,9 +2377,9 @@
       });
       host.querySelectorAll('.logi-pl-edit').forEach(b=>b.onclick=()=>openPackingList(s.id,b.dataset.pl));
       host.querySelectorAll('.logi-pl-print').forEach(b=>b.onclick=()=>window.open(`/api/logistics/packing/print?ship=${encodeURIComponent(s.id)}&pl=${encodeURIComponent(b.dataset.pl)}`,'_blank'));
-      host.querySelectorAll('.logi-pl-del').forEach(b=>b.onclick=async()=>{
+      host.querySelectorAll('.logi-pl-del').forEach(b=>b.onclick=async ()=>{
         const cur=logiShipmentById(s.id); if(!cur)return;
-        if(!confirm('Удалить упаковочный лист?'))return;
+        if(!(await uiConfirm('Удалить упаковочный лист?')))return;
         cur.packingLists=(cur.packingLists||[]).filter(u=>String(u.id)!==String(b.dataset.pl));
         try{ await logiSaveShipment(cur); toast('Упаковочный лист удалён','ok'); }catch(e){ toast('Не удалено: '+e.message,'err'); }
       });
@@ -2660,7 +2665,7 @@
     const LOV_RISKS=[['personnel','Персонал'],['tech','Технология производства'],['equip','Оборудование'],['terms','Сроки (ориентировочные)']];
     async function openLovCard(id){
       let j; try{j=await (await fetch('/api/lov/'+encodeURIComponent(id))).json();}catch{j={};}
-      const c=j.card; if(!c){alert('ЛОВ не найден');return;}
+      const c=j.card; if(!c){uiAlert('ЛОВ не найден');return;}
       const can=lovIsDpp(); // заполняет ДпП/админ
       const rc=c.risksCheck||{};
       const trace=`<span class="code" style="color:var(--green);background:#ecfdf5;border:1px solid #a7f3d0;border-radius:var(--r-s);padding:2px 7px">${esc(c.zp||'ЗП')}</span><span style="color:var(--sl-500);padding:0 5px">→</span><span class="code" style="color:var(--navy);background:#eff6ff;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:2px 7px">${esc(c.numLov)}</span><span style="color:var(--sl-500);padding:0 5px">→</span><span class="code" style="color:var(--sl-500);background:#f3f4f6;border:1px solid #e5e7eb;border-radius:var(--r-s);padding:2px 7px">КП</span>`;
@@ -2798,13 +2803,13 @@
       document.getElementById('re-x').onclick=closeModal; document.getElementById('re-cancel').onclick=closeModal;
       document.getElementById('re-go').onclick=async()=>{
         const chosen=[...modal.querySelectorAll('#re-units input:checked')].map(i=>({code:i.dataset.u,name:i.dataset.n}));
-        if(!chosen.length){alert('Выберите хотя бы одно подразделение.');return;}
+        if(!chosen.length){uiAlert('Выберите хотя бы одно подразделение.');return;}
         const go=document.getElementById('re-go'); go.disabled=true; go.textContent='Создание…';
         try{const r=await fetch('/api/lov/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zp,units:chosen,complexity:document.getElementById('re-cx').value,due:document.getElementById('re-due').value})});
           const jr=await r.json(); if(!r.ok)throw new Error(jr.error||'ошибка');
           if(jr.existed)toast('ЛОВ уже создан, открываю','ok');
           closeModal(); location.hash='#lov/'+jr.id;
-        }catch(e){alert('Не удалось создать ЛОВ: '+e.message); go.disabled=false; go.textContent='Запросить';}
+        }catch(e){uiAlert('Не удалось создать ЛОВ: '+e.message); go.disabled=false; go.textContent='Запросить';}
       };
     }
 
@@ -2839,8 +2844,8 @@
         const go=document.getElementById('pr-go'); go.disabled=true; go.textContent='Создание…';
         try{const r=await fetch('/api/design/project-from-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zp:z.numZp,group:grpSel.value,subgroup:subCode,subgroupName:subName||subCode,name:document.getElementById('pr-name').value})});
           const jr=await r.json(); if(!r.ok)throw new Error(jr.error||'ошибка');
-          closeModal(); alert('Создан проект разработки: '+jr.decNo); location.hash='#design';
-        }catch(e){alert('Не удалось создать проект: '+e.message); go.disabled=false; go.textContent='Создать проект';}
+          closeModal(); uiAlert('Создан проект разработки: '+jr.decNo); location.hash='#design';
+        }catch(e){uiAlert('Не удалось создать проект: '+e.message); go.disabled=false; go.textContent='Создать проект';}
       };
     }
 
@@ -2896,8 +2901,8 @@
           zp:document.getElementById('np-zp').value,decNo:document.getElementById('np-dec').value};
         try{const r=await fetch('/api/design/project-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
           const jr=await r.json(); if(!r.ok)throw new Error(jr.error||'ошибка');
-          closeModal(); DESIGN=null; alert('Создан проект разработки: '+jr.decNo); designSel=jr.decNo; location.hash='#design'; if(location.hash==='#design'){const h=document.getElementById('view');if(h)renderDesign(h);}
-        }catch(e){alert('Не удалось создать проект: '+e.message); go.disabled=false; go.textContent='Создать проект';}
+          closeModal(); DESIGN=null; uiAlert('Создан проект разработки: '+jr.decNo); designSel=jr.decNo; location.hash='#design'; if(location.hash==='#design'){const h=document.getElementById('view');if(h)renderDesign(h);}
+        }catch(e){uiAlert('Не удалось создать проект: '+e.message); go.disabled=false; go.textContent='Создать проект';}
       };
     }
 
@@ -3095,7 +3100,7 @@
       const pr=document.getElementById('docs-print'); if(pr)pr.onclick=()=>docsPrint();
     }
     function openDocFile(code){
-      if(!DOCS_STATE.live){alert('Просмотр файла доступен в режиме LIVE (файлы на NAS «Сервер ПБС»).');return;}
+      if(!DOCS_STATE.live){uiAlert('Просмотр файла доступен в режиме LIVE (файлы на NAS «Сервер ПБС»).');return;}
       window.open('/api/docs/file?code='+encodeURIComponent(code),'_blank','noopener');
     }
     const docCardRow=(k,v)=>`<div style="display:flex;gap:8px;font-size:12px;padding:4px 0"><span style="color:var(--sl-500)">${esc(k)}</span><span style="margin-left:auto;color:var(--sl-700);text-align:right">${v}</span></div>`;
@@ -3176,12 +3181,12 @@
       else if(act==='approve'){patch['Статус']='действует';if(!(d.approvedDate||d.date))patch['Дата утверждения']=today;if(!d.approvedBy)patch['Утверждён']=appr;}
       else if(act==='arch')patch['Статус']='архив';
       else return;
-      if(!confirm(`Документ ${d.code}: сменить статус → «${patch['Статус']}»?`))return;
-      if(!DOCS_STATE.live){alert('Смена статуса доступна только в режиме LIVE.');return;}
+      if(!(await uiConfirm(`Документ ${d.code}: сменить статус → «${patch['Статус']}»?`)))return;
+      if(!DOCS_STATE.live){uiAlert('Смена статуса доступна только в режиме LIVE.');return;}
       try{const r=await fetch('/api/docs/lifecycle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
         const j=await r.json().catch(()=>({}));if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         closeModal(); renderDocs(document.getElementById('view'));
-      }catch(e){alert('Не удалось сменить статус: '+(e.message||e));}
+      }catch(e){uiAlert('Не удалось сменить статус: '+(e.message||e));}
     }
     // ── CRUD-модалки (Завести / Новая версия / Правка) ──
     function docFormHtml(o){
@@ -4706,12 +4711,12 @@
       };
     }
     async function extToProduction(id){
-      if(!confirm('Разместить производственный заказ (ПЗ) из этого чертежа?'))return;
+      if(!(await uiConfirm('Разместить производственный заказ (ПЗ) из этого чертежа?')))return;
       try{ const r=await fetch('/api/design/external/to-production',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         try{ await load(); }catch{} // подтянуть настоящий ПЗ в DATA.orders для раздела «Заказы (ПЗ)»
         await ensureExtKd(true); renderExtKdPanel();
-        alert('Заказ размещён в производство: '+j.numPz+'. Откройте раздел «Заказы (ПЗ)».');
-      }catch(e){ alert('Не удалось разместить: '+(e.message||e)); }
+        uiAlert('Заказ размещён в производство: '+j.numPz+'. Откройте раздел «Заказы (ПЗ)».');
+      }catch(e){ uiAlert('Не удалось разместить: '+(e.message||e)); }
     }
     // Печать реестра КД — фирменная шапка по ДП–Л.1.2, учитывает текущий фильтр типа (бриф п.5)
     function kdPrint(){
@@ -4744,13 +4749,13 @@
     // Создать групповой чат проекта в Bitrix24 (нужен входящий вебхук в «Настройках»; участники по умолчанию — оттуда же)
     async function createChat(decNo){
       const p=(DESIGN.projects||[]).find(x=>x.decNo===decNo); if(!p)return;
-      if(!confirm(`Создать в Bitrix24 групповой чат проекта ПБС.${decNo} «${p.name}»?\nУчастники по умолчанию (из «Настроек») добавятся автоматически.`))return;
+      if(!(await uiConfirm(`Создать в Bitrix24 групповой чат проекта ПБС.${decNo} «${p.name}»?\nУчастники по умолчанию (из «Настроек») добавятся автоматически.`)))return;
       try{
         const r=await fetch('/api/design/chat/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decNo,title:`ПБС.${decNo} · ${p.name}`,description:`Чат проекта ОКР ПБС.${decNo}`})});
         const j=await r.json().catch(()=>({}));
         if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-        prompt('Чат создан ✓ Скопируйте ссылку в поле «Ссылка на чат (Bitrix)» проекта в NocoDB:',j.url);
-      }catch(e){alert('Не удалось создать чат: '+e.message);}
+        (await uiPrompt('Чат создан ✓ Скопируйте ссылку в поле «Ссылка на чат (Bitrix)» проекта в NocoDB:',j.url));
+      }catch(e){uiAlert('Не удалось создать чат: '+e.message);}
     }
     // K-?: вкладка «ТД» — сквозной реестр техдокументации (концепт v2): маршрутные карты + карты наладки +
     // УП ЧПУ + старая ТД-библиотека в одной таблице. Источники грузятся лениво (кэши ensureRoutesList()/loadRtSetup(),
@@ -4901,7 +4906,7 @@
     const supplyChip=(s)=>`<span class="badge ${SUPPLY_B[s]||'b-gray'}">${esc(s||'—')}</span>`;
     const moneyVal=(s)=>parseFloat(String(s||'').replace(/[^\d]/g,''))||0;
 
-    // неблокирующее уведомление — замена alert() в потоке продаж (alert вешает вкладку/браузер)
+    // неблокирующее уведомление — замена uiAlert() в потоке продаж (alert вешает вкладку/браузер)
     function toast(msg,kind){
       let host=document.getElementById('pbs-toasts');
       if(!host){host=document.createElement('div');host.id='pbs-toasts';host.style.cssText='position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:min(420px,92vw)';document.body.appendChild(host);}
@@ -5045,7 +5050,7 @@
       const db=host.querySelector('[data-act="del"]'); if(db)db.onclick=()=>delSalesReq(z);
     }
     async function delSalesReq(z){
-      if(!confirm(`Удалить запрос ${z.numZp}? Действие необратимо.`))return;
+      if(!(await uiConfirm(`Удалить запрос ${z.numZp}? Действие необратимо.`)))return;
       try{ const r=await fetch('/api/records/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'sales_requests',ids:[z.id]})});
         const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         toast('Запрос удалён: '+z.numZp,'ok'); salesSelZp=null; SALES=null; renderSales(document.getElementById('view'));
@@ -5169,7 +5174,7 @@
       return { files:()=>arr.slice(), clear:()=>{ arr.forEach(dropUrl); arr=[]; render(); } };
     }
     async function openCreateRequest(){
-      if(!SALES||SALES.mode!=='live'){ alert('Создание запроса доступно только в LIVE-режиме (нужен токен NocoDB в «Настройках»).'); return; }
+      if(!SALES||SALES.mode!=='live'){ uiAlert('Создание запроса доступно только в LIVE-режиме (нужен токен NocoDB в «Настройках»).'); return; }
       const today=new Date().toISOString().slice(0,10);
       // справочник контрагентов для комбобокса (свежий — чтобы видеть только что созданных)
       let cps=[]; try{ const j=await (await fetch('/api/counterparties')).json(); cps=j.counterparties||[]; }catch{}
@@ -5395,7 +5400,7 @@
               chatMsg='\nЧат Bitrix создан.'+(cj.taskId?` Задача на подачу тендера #${cj.taskId}.`:'');
             }catch(e){ chatMsg=`\n⚠ Запрос создан, но чат не создан: ${e.message||e}`; }
           }
-          closeModal(); SALES=null; salesTab='req'; renderSales(document.getElementById('view')); alert('Создан запрос: '+j.numZp+upMsg+chatMsg);
+          closeModal(); SALES=null; salesTab='req'; renderSales(document.getElementById('view')); uiAlert('Создан запрос: '+j.numZp+upMsg+chatMsg);
         }catch(e){ errEl.textContent='Не удалось создать: '+(e.message||e); btn.disabled=false; btn.textContent='Создать запрос'; }
       };
     }
@@ -5453,7 +5458,7 @@
         info:`${srcChip(CPS.mode==='live')}<span>Контрагентов: <b style="color:var(--ink)">${rows.length}</b></span>${CPS.warning?'<span class="c-red">'+esc(CPS.warning)+'</span>':''}`,
         empty:cpNoInn?{text:'Контрагентов без ИНН нет',sub:'Снимите фильтр «Без ИНН», чтобы увидеть весь реестр.'}
           :{text:'Контрагентов пока нет',sub:CPS.mode==='live'?'Реестр заполнится по мере заведения заказчиков и поставщиков.':'Реестр контрагентов появится в LIVE-режиме.'},
-        toolbar:[{label:'+ Контрагент',cls:'primary',onClick:()=>alert('Создание контрагента — дедуп по ИНН, запись в NocoDB (T2).')}]});
+        toolbar:[{label:'+ Контрагент',cls:'primary',onClick:()=>uiAlert('Создание контрагента — дедуп по ИНН, запись в NocoDB (T2).')}]});
     }
 
     async function openCounterpartyCard(host,id){
@@ -5580,7 +5585,7 @@
           el.innerHTML=`<div class="row" style="margin-bottom:4px"><span class="sec-h">Контактные лица</span><span class="spacer"></span><button class="tbtn" id="cp-cadd" style="padding:4px 10px;font-size:12px">+ Контакт</button></div>${rows}<div id="cp-cform"></div>`;
           el.querySelector('#cp-cadd').onclick=()=>contactForm(null);
           el.querySelectorAll('[data-cedit]').forEach(b=>b.onclick=()=>contactForm(list.find(x=>x.id===+b.dataset.cedit)));
-          el.querySelectorAll('[data-cdel]').forEach(b=>b.onclick=async()=>{ if(!confirm('Удалить контакт?'))return; try{ await postJson('/api/records/delete',{key:'contacts',ids:[+b.dataset.cdel]}); reloadCard(); }catch(e){ alert('Не удалось: '+(e.message||e)); } }); }
+          el.querySelectorAll('[data-cdel]').forEach(b=>b.onclick=async ()=>{ if(!(await uiConfirm('Удалить контакт?')))return; try{ await postJson('/api/records/delete',{key:'contacts',ids:[+b.dataset.cdel]}); reloadCard(); }catch(e){ uiAlert('Не удалось: '+(e.message||e)); } }); }
         function contactForm(ct){ const wrap=document.getElementById('cp-cform');
           const I=(id,label,val,span)=>`<div${span?` style="grid-column:span ${span}"`:''}>${FLAB(label)}<input id="${id}" style="${FINP}" value="${esc(val||'')}"></div>`;
           wrap.innerHTML=`<div style="border:1px solid #cfe0f5;background:#f6fbff;border-radius:var(--r-s);padding:11px;margin-top:8px">
@@ -6085,7 +6090,7 @@
       const id=pchInterpData(s.dia); if(!id)return null; const c=pchCostFromSd(p,id.sd); c.interp=true; c.lo=id.lo; c.hi=id.hi; return c; }
     // Открыть конструктор КП — теперь ПОЛНОЭКРАННАЯ страница (не модалка): выставляем маршрут-состояние и перерисовываем раздел «Продажи».
     function openKpConstructor(zp){
-      if(!SALES||SALES.mode!=='live'){ alert('Конструктор КП доступен только в LIVE-режиме (нужен токен NocoDB в «Настройках»).'); return; }
+      if(!SALES||SALES.mode!=='live'){ uiAlert('Конструктор КП доступен только в LIVE-режиме (нужен токен NocoDB в «Настройках»).'); return; }
       closeModal(); // если открыта модалка карточки ЗП — закрыть
       salesKpZp=zp; salesKpMode='build';
       renderSales(document.getElementById('view'));
@@ -6617,7 +6622,7 @@
       catch(e){ return toast('Сеть: '+e.message,'err'); }
       const j=await r.json();
       if(r.status===409){ // Гейт 2 §5.3.5 — требуется подпись по порогу
-        if(confirm(`${j.error}\n\nПодтвердить подписание (${j.signer}) и отправить КП заказчику?`)) return kpSend(true);
+        if((await uiConfirm(`${j.error}\n\nПодтвердить подписание (${j.signer}) и отправить КП заказчику?`))) return kpSend(true);
         return;
       }
       if(!r.ok){ return toast('Не удалось отправить КП: '+(j.error||r.status),'err'); }
@@ -6957,7 +6962,7 @@
           const j=await postJson('/api/procurement/pay/refresh-all',{});
           toast(`Проверено ${j.checked||0} счетов, обновилось ${j.updated||0}`+(j.errors?` (ошибок: ${j.errors})`:''),'ok');
           PROC=null; await renderProcurement(viewHost);
-        }catch(e){ prb.disabled=false; prb.textContent='⟳ Статусы оплат'; alert('Не удалось обновить статусы оплат: '+(e.message||e)); }
+        }catch(e){ prb.disabled=false; prb.textContent='⟳ Статусы оплат'; uiAlert('Не удалось обновить статусы оплат: '+(e.message||e)); }
       };
       const body=h.querySelector('#preqbody');
       procReqView==='kanban'?procKanban(body):procReqView==='kanpos'?procKanbanItems(body):procList(body);
@@ -7592,9 +7597,9 @@
       // K-83 этап 1a: секция «Оплата» (интеграция payment-portal) — статус + отправка/обновление
       loadZnzPayment(r,canAct);
       // K-133: кнопка «Заказ поставщику (PDF)» убрана (решение владельца). Она показывала
-      //  alert() с описанием несуществующей функции: формы заказа поставщику в ИСМ нет —
+      //  uiAlert() с описанием несуществующей функции: формы заказа поставщику в ИСМ нет —
       //  ДП–К §9 её не предусматривает, и Ф.2–К не определён. Заявки на закупку достаточно.
-      //  Заодно снят alert() — канон §9 браузерные диалоги запрещает.
+      //  Заодно снят uiAlert() — канон §9 браузерные диалоги запрещает.
       const doTransition=async(to,btn)=>{
         if(!to)return; if(btn)btn.disabled=true;
         try{
@@ -7603,7 +7608,7 @@
           try{PROC=await (await fetch('/api/procurement')).json();}catch(e){PROC={mode:'mock',requests:[],suppliers:[],orders:[],evaluations:[]};}
           const upd=(PROC.requests||[]).find(x=>x.numZnz===r.numZnz)||{...r,status:to};
           openZnzCard(upd); // перерисовать карточку с новым этапом
-        }catch(e){ if(btn)btn.disabled=false; alert('Не удалось сменить статус: '+(e.message||e)); }
+        }catch(e){ if(btn)btn.disabled=false; uiAlert('Не удалось сменить статус: '+(e.message||e)); }
       };
       const nb=document.getElementById('znz-next'); if(nb)nb.onclick=()=>doTransition(nb.dataset.to,nb);
       const pb=document.getElementById('znz-prev'); if(pb)pb.onclick=()=>doTransition(pb.dataset.to,pb);
@@ -8432,10 +8437,10 @@
       }else{
         listEl.innerHTML='<div style="display:flex;flex-direction:column;gap:8px">'+items.map(x=>itemRowHtml(x,canAct)).join('')+'</div>';
         if(canAct){
-          listEl.querySelectorAll('[data-item-del]').forEach(el=>el.onclick=async()=>{
-            if(!confirm('Удалить позицию?'))return; const id=Number(el.dataset.itemDel);
+          listEl.querySelectorAll('[data-item-del]').forEach(el=>el.onclick=async ()=>{
+            if(!(await uiConfirm('Удалить позицию?')))return; const id=Number(el.dataset.itemDel);
             try{ await postJson('/api/procurement/znz/items','DELETE',{id}); toast('Позиция удалена','ok'); PROC=null; try{PROC=await (await fetch('/api/procurement')).json();}catch(e){} await loadZnzItems(r,canAct); }
-            catch(e){ alert('Не удалось удалить: '+(e.message||e)); }
+            catch(e){ uiAlert('Не удалось удалить: '+(e.message||e)); }
           });
           listEl.querySelectorAll('[data-item-edit]').forEach(el=>el.onclick=()=>{ const id=Number(el.dataset.itemEdit); openItemFormInline(r,canAct,items.find(x=>x.id===id)||null); });
           // K-145: статус / поставщик / срок правятся прямо в строке — без захода в форму.
@@ -8564,7 +8569,7 @@
             const upd=(PROC&&PROC.requests||[]).find(x=>x.id===r.id)||r;
             toast('Статус оплаты: '+((j.payment&&j.payment.status)||'—'),'ok');
             loadZnzPayment(upd,canAct);
-          }catch(e){ rb.disabled=false; rb.textContent='Обновить статус'; alert('Не удалось обновить статус: '+(e.message||e)); }
+          }catch(e){ rb.disabled=false; rb.textContent='Обновить статус'; uiAlert('Не удалось обновить статус: '+(e.message||e)); }
         };
       }
       const ab=document.getElementById('znz-pay-add'); if(ab){ ab.textContent=has?'Отправить повторно':'Отправить на оплату'; ab.onclick=()=>openPayFormInline(r,canAct); }
@@ -9568,7 +9573,7 @@
           </div></div>`;
       body.innerHTML=`<div style="display:flex;gap:10px;flex-wrap:wrap">${kpi('Позиций в работе',k.positions||0)}${kpi('Единиц выпущено',k.unitsDone||0)}${kpi('В работе',k.unitsWip||0)}${kpi('К выпуску актом',k.toRelease||0,'ед.')}${kpi('Набрано по себест. 1С',retroN(k.costFact||0,0),'₽')}</div>
         ${items.length?items.map(card).join(''):emptyCard('Незавершённого производства нет',{sub:'Позиции ПЗ с маршрутной картой и открытыми задачами появятся здесь автоматически.'})}`;
-      body.querySelectorAll('[data-release]').forEach(b=>b.onclick=async()=>{ const max=Number(b.dataset.max)||0; const v=prompt(`Сколько единиц выпустить актом? Готово к выпуску: ${max}`,String(max)); if(v===null)return; const q=Number(v); if(!(q>0)){ toast('Нужно число больше нуля.','warn'); return; }
+      body.querySelectorAll('[data-release]').forEach(b=>b.onclick=async ()=>{ const max=Number(b.dataset.max)||0; const v=(await uiPrompt(`Сколько единиц выпустить актом? Готово к выпуску: ${max}`,String(max))); if(v===null)return; const q=Number(v); if(!(q>0)){ toast('Нужно число больше нуля.','warn'); return; }
         b.disabled=true; try{ const r=await fetch('/api/retro/wip/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({positionId:b.dataset.release,qty:q})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast(`Акт ${j.act.no} на ${q} ед. создан${j.sent&&j.sent.ok?' и отправлен на утверждение':''}.`,'ok'); RETRO=null; retroView='acts'; await renderRetro(host); retroOpen(j.act.id); }catch(e){ toast('Не выпущено: '+e.message,'err'); b.disabled=false; } });
     }
     async function renderRetro(host,arg){
@@ -9663,8 +9668,8 @@
       on('[data-act="approve"]',()=>retroStatusPost('Утверждён','Акт утверждён, материалы зарезервированы.'));
       on('[data-act="unapprove"]',()=>retroStatusPost('Черновик',a.status==='На утверждении'?'Акт отозван в черновик.':'Акт возвращён в черновик, резерв снят.'));
       on('[data-act="send"]',()=>retroSendForApproval());
-      on('[data-act="reject"]',()=>{ const c=prompt('Что доработать (увидит создатель акта):',''); if(c===null)return; retroPost('/api/retro/status',{id:a.id,status:'Отклонён',comment:c},'Акт возвращён на доработку, создатель уведомлён.'); });
-      on('[data-act="delete"]',async()=>{ if(!confirm(`Удалить черновик ${a.no||''} вместе с составом? Это необратимо.`))return; try{ const r=await fetch('/api/retro/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast('Черновик удалён.','ok'); retroDrawerClose(); RETRO=null; renderRetro(document.getElementById('view')); try{cabBadgeRefresh();}catch{} }catch(e){ toast('Не удалено: '+e.message,'err'); } });
+      on('[data-act="reject"]',async ()=>{ const c=(await uiPrompt('Что доработать (увидит создатель акта):','')); if(c===null)return; retroPost('/api/retro/status',{id:a.id,status:'Отклонён',comment:c},'Акт возвращён на доработку, создатель уведомлён.'); });
+      on('[data-act="delete"]',async ()=>{ if(!(await uiConfirm(`Удалить черновик ${a.no||''} вместе с составом? Это необратимо.`)))return; try{ const r=await fetch('/api/retro/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); toast('Черновик удалён.','ok'); retroDrawerClose(); RETRO=null; renderRetro(document.getElementById('view')); try{cabBadgeRefresh();}catch{} }catch(e){ toast('Не удалено: '+e.message,'err'); } });
       on('[data-act="typical"]',()=>retroPost('/api/retro/typical',{id:a.id},'Типовой состав сохранён на каноне изделия.'));
       retroTab==='lines'?retroPaintLines():retroTab==='docs'?retroPaintDocs():retroPaintAct();
     }
@@ -9815,10 +9820,10 @@
         <div class="card pad" style="margin-top:var(--gap)"><div style="font-size:14px;font-weight:700;color:var(--ink)">Мои черновики${(j.drafts||[]).length?` <span class="c-gray" style="font-weight:400">· ${(j.drafts||[]).length}</span>`:''}</div>${(j.drafts||[]).length?(j.drafts||[]).map(draft).join(''):'<div class="eqd-sub" style="margin-top:6px">Незавершённых документов нет.</div>'}</div>
         ${sec('Отправлено мной на утверждение',j.sent||[],false,'Нет документов на утверждении у других.')}
         ${sec('Недавние решения по моим документам (30 дней)',j.recent||[],false,'Пока пусто.')}`;
-      host.querySelectorAll('[data-cab]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.id, act=b.dataset.cab;
-        if(act==='mk-approve'||act==='mk-return'){ let body={id,status:act==='mk-approve'?'Утверждена':'Черновик'}; if(act==='mk-return'){ const c=prompt('Что доработать (увидит автор МК):',''); if(c===null)return; body.comment=c; } b.disabled=true; try{ const r=await fetch('/api/route/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='mk-approve'?'МК утверждена.':'МК возвращена автору.','ok'); renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); b.disabled=false; } return; }
+      host.querySelectorAll('[data-cab]').forEach(b=>b.onclick=async ()=>{ const id=b.dataset.id, act=b.dataset.cab;
+        if(act==='mk-approve'||act==='mk-return'){ let body={id,status:act==='mk-approve'?'Утверждена':'Черновик'}; if(act==='mk-return'){ const c=(await uiPrompt('Что доработать (увидит автор МК):','')); if(c===null)return; body.comment=c; } b.disabled=true; try{ const r=await fetch('/api/route/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='mk-approve'?'МК утверждена.':'МК возвращена автору.','ok'); renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); b.disabled=false; } return; }
         if(act==='take'){ b.disabled=true; try{ const r=await fetch('/api/procurement/znz/take',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast('Заявка принята в работу.','ok'); renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не принято: '+e.message,'err'); b.disabled=false; } return; }
-        let body={id,status:act==='approve'?'Утверждён':'Отклонён'}; if(act==='reject'){ const c=prompt('Что доработать (увидит создатель акта):',''); if(c===null)return; body.comment=c; }
+        let body={id,status:act==='approve'?'Утверждён':'Отклонён'}; if(act==='reject'){ const c=(await uiPrompt('Что доработать (увидит создатель акта):','')); if(c===null)return; body.comment=c; }
         try{ const r=await fetch('/api/retro/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='approve'?'Акт утверждён, материалы зарезервированы.':'Акт возвращён на доработку, создатель уведомлён.','ok'); RETRO=null; renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); } });
     }
     async function retroSave(){
@@ -11960,8 +11965,8 @@
         if(f==='onecKey'){ const c=(m.candidatesByCanon[String(r.canonId)]||[]).find(x=>x.key===el.value); r.source=el.value?'1С':'Без партии'; r.batchCode=c?c.code:''; r.batchName=c?c.name:''; if(c&&c.unit&&!r.unit)r.unit=c.unit; } }; });
       body.querySelectorAll('[data-mrem]').forEach(b=>b.onclick=()=>{ const r=m.rows[+b.dataset.mrem]; if(r&&r.id!=null)m.removed.push(r.id); m.rows.splice(+b.dataset.mrem,1); stMatPaint(t); });
       const pl=body.querySelector('#st-mat-plan'); if(pl)pl.onclick=()=>{ m.plan.forEach(pm=>{ let r=m.rows.find(x=>String(x.canonId)===String(pm.canonId)); const c=(pm.candidates||[])[0]; if(!r){ r={id:null,canonId:pm.canonId,name:pm.name,unit:pm.unit||(c&&c.unit)||'',role:pm.role,qtyPlan:pm.qtyPlan,qtyFact:pm.qtyPlan,source:c?'1С':'Без партии',onecKey:c?c.key:'',batchCode:c?c.code:'',batchName:c?c.name:'',reason:'',note:''}; m.rows.push(r);} else { r.qtyPlan=pm.qtyPlan; r.qtyFact=pm.qtyPlan; r.reason=''; } }); stMatPaint(t); toast('Факт выставлен по плану. Нажмите «Сохранить».','ok'); };
-      const ad=body.querySelector('#st-mat-add'); if(ad)ad.onclick=async()=>{ if(typeof CAT==='undefined'||!CAT){ try{ CAT=await (await fetch('/api/catalog')).json(); }catch{ CAT={items:[]}; } } const items=(CAT.items||[]); if(!items.length){ toast('Каталог канон-номенклатуры пуст.','warn'); return; }
-        const q=prompt('Материал (часть названия из каталога):',''); if(q===null)return; const qq=q.trim().toLowerCase(); const found=items.filter(c=>String(c.name||'').toLowerCase().includes(qq)).slice(0,1)[0]; if(!found){ toast('Не найдено в каталоге: '+q,'warn'); return; }
+      const ad=body.querySelector('#st-mat-add'); if(ad)ad.onclick=async ()=>{ if(typeof CAT==='undefined'||!CAT){ try{ CAT=await (await fetch('/api/catalog')).json(); }catch{ CAT={items:[]}; } } const items=(CAT.items||[]); if(!items.length){ toast('Каталог канон-номенклатуры пуст.','warn'); return; }
+        const q=(await uiPrompt('Материал (часть названия из каталога):','')); if(q===null)return; const qq=q.trim().toLowerCase(); const found=items.filter(c=>String(c.name||'').toLowerCase().includes(qq)).slice(0,1)[0]; if(!found){ toast('Не найдено в каталоге: '+q,'warn'); return; }
         m.rows.push({id:null,canonId:found.id,name:found.name,unit:found.unit||'',role:'Материал',qtyPlan:null,qtyFact:null,source:'Без партии',onecKey:'',batchCode:'',batchName:'',reason:'добавлен по факту',note:''});
         try{ const d=await (await fetch('/api/task/materials?taskId='+encodeURIComponent(m.taskId))).json(); if(d&&d.candidatesByCanon)Object.assign(m.candidatesByCanon,d.candidatesByCanon); }catch{}
         if(!m.candidatesByCanon[String(found.id)]){ try{ if(!ONEC)ONEC=await (await fetch('/api/onec')).json(); const c=((ONEC&&ONEC.items)||[]).filter(x=>String(x.canonId)===String(found.id)&&x.hasStock).map(x=>({key:x.key,code:x.code,name:x.name,unit:x.unit,qty:x.qty,cost:x.cost})); if(c.length)m.candidatesByCanon[String(found.id)]=c; }catch{} }
@@ -12307,7 +12312,7 @@
       const o=(DATA.orders||[]).find(x=>x.numPz===numPz); if(!o)return;
       const rids=[...new Set((o.positions||[]).map(p=>p.routeId).filter(x=>x!=null))];
       if(!rids.length){ toast('Сначала привяжите позиции к маршрутным картам (МК).','err'); return; }
-      if(!confirm('Сгенерировать карты задач Ф.14 по '+rids.length+' маршрут(ам) этого ПЗ?\n\nЗадачи с уже существующим № не дублируются.'))return;
+      if(!(await uiConfirm('Сгенерировать карты задач Ф.14 по '+rids.length+' маршрут(ам) этого ПЗ?\n\nЗадачи с уже существующим № не дублируются.')))return;
       let created=0,skipped=0,err=0;
       for(const rid of rids){ try{ const r=await fetch('/api/routes/generate-tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:rid})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); created+=j.created||0; skipped+=j.skipped||0; }catch(e){ err++; } }
       toast('Ф.14: создано '+created+', пропущено '+skipped+(err?(' · ошибок: '+err):''), err?'err':'ok');
@@ -13777,7 +13782,7 @@
         toolbar:[{label:'+ Новая МК',cls:'primary',onClick:()=>openRouteBuilder(host,null)}]});
       { const drafts=rtDraftList(); if(drafts.length){ const b=document.createElement('div'); b.className='card pad'; b.style.cssText='margin-bottom:var(--gap);border:1px dashed var(--navy);display:flex;gap:10px;align-items:center;flex-wrap:wrap';
           b.innerHTML=`<b style="color:var(--ink)">Незаконченные черновики МК в этом браузере</b>`+drafts.map((d,i)=>`<span style="display:flex;gap:6px;align-items:center"><span class="c-gray" style="font-size:12px">${esc(d.mk||'новая МК')} · ${esc(d.name||'без названия')} · ${d.ops} оп. · ${fmtDT(d.savedAt)}</span><button class="ui-btn ui-btn--primary" data-draft-go="${i}">Продолжить</button><button class="ui-btn ui-btn--ghost" data-draft-x="${i}" title="Удалить черновик из браузера">✕</button></span>`).join('');
-          host.prepend(b); b.querySelectorAll('[data-draft-go]').forEach(x=>x.onclick=()=>openRouteBuilder(host,drafts[+x.dataset.draftGo].routeId,{restore:true})); b.querySelectorAll('[data-draft-x]').forEach(x=>x.onclick=()=>{ if(confirm('Удалить черновик из браузера?')){ rtDraftClear(drafts[+x.dataset.draftX].routeId); renderRoutesView(host); } }); } } // K-176
+          host.prepend(b); b.querySelectorAll('[data-draft-go]').forEach(x=>x.onclick=()=>openRouteBuilder(host,drafts[+x.dataset.draftGo].routeId,{restore:true})); b.querySelectorAll('[data-draft-x]').forEach(x=>x.onclick=async ()=>{ if((await uiConfirm('Удалить черновик из браузера?'))){ rtDraftClear(drafts[+x.dataset.draftX].routeId); renderRoutesView(host); } }); } } // K-176
     }
     async function openRouteCard(host,id){
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка карты МК…</div>';
@@ -13980,9 +13985,9 @@
         box.querySelector('#rc-apx').onclick=()=>{ box.innerHTML=''; };
         box.querySelector('#rc-apgo').onclick=()=>{ const sel=box.querySelector('#rc-apsel'); const u=list.find(x=>String(x.id)===sel.value); if(!u)return; try{ localStorage.setItem('mk.approver',sel.value); }catch{} mkStatusPost(host,r,{status:'На согласовании',approverId:u.id,approverName:u.name},'МК отправлена на согласование: '+u.name); }; });
       on('rc-approve',()=>mkStatusPost(host,r,{status:'Утверждена'},'МК утверждена.'));
-      on('rc-return',()=>{ const c=prompt('Что доработать (увидит автор):',''); if(c===null)return; mkStatusPost(host,r,{status:'Черновик',comment:c},'МК возвращена в черновик.'); });
+      on('rc-return',async ()=>{ const c=(await uiPrompt('Что доработать (увидит автор):','')); if(c===null)return; mkStatusPost(host,r,{status:'Черновик',comment:c},'МК возвращена в черновик.'); });
       on('rc-withdraw',()=>mkStatusPost(host,r,{status:'Черновик'},'МК отозвана в черновик.'));
-      const f=host.querySelector('#rc-force'); if(f)f.onchange=()=>{ if(!f.value)return; if(!confirm(`Поставить статус «${f.value}» вручную?`)){ f.value=''; return; } mkStatusPost(host,r,{status:f.value},'Статус исправлен: '+f.value); };
+      const f=host.querySelector('#rc-force'); if(f)f.onchange=async ()=>{ if(!f.value)return; if(!(await uiConfirm(`Поставить статус «${f.value}» вручную?`))){ f.value=''; return; } mkStatusPost(host,r,{status:f.value},'Статус исправлен: '+f.value); };
     }
     // ── K-175: нормы по факту прогонов — блок в карточке МК ──
     async function rtActualsLoad(host,r){
@@ -13997,12 +14002,12 @@
         ${hasRuns?`<div class="c-gray" style="font-size:12px;margin-bottom:6px">Прогоны: ${d.runs.map(x=>esc(x.pz)+' ('+x.done+' из '+x.qty+' шт)').join(', ')}. Факт времени — из карт задач Ф.14, материалы — из отметок операторов; в расчёте на 1 шт.</div>`:'<div class="c-gray" style="font-size:12px;margin-bottom:6px">Прогонов по этой МК ещё не было. Нормы времени можно не задавать при выпуске: после первого полного цикла портал покажет факт на 1 шт, и технолог зафиксирует его как норму.</div>'}
         <div class="tbl-wrap"><table class="dt" style="font-size:12px;width:100%"><thead><tr><th style="width:30px">№</th><th>Операция / материал</th><th style="width:110px">Норма (план)</th><th style="width:180px">Факт на 1 шт</th><th style="width:160px">Зафиксировать</th></tr></thead><tbody>${opRows}</tbody></table></div>
         ${may&&hasRuns?`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tbtn" id="rc-fix" style="color:var(--navy);font-weight:700">Зафиксировать факт как норму</button><span class="c-gray" style="font-size:11px">запишет нормы времени и материалов в операции МК; статус карты не меняется, ставится отметка кто и когда</span></div>`:(hasRuns?'<div class="c-gray" style="font-size:11px;margin-top:6px">Фиксируют нормы согласующие МК (технолог) или администратор.</div>':'')}`;
-      const fb=box.querySelector('#rc-fix'); if(fb)fb.onclick=async()=>{ const ops=[...box.querySelectorAll('[data-fixn]')].map(i=>({opId:i.dataset.fixn,norm:i.value})).filter(x=>x.norm!==''); const materials=[...box.querySelectorAll('[data-fixm]')].map(i=>({opId:i.dataset.fixm,canonId:i.dataset.canon,qty:i.value,unit:i.dataset.unit})).filter(x=>x.qty!=='');
-        if(!confirm(`Записать нормы в МК ${r.mk}: операций ${ops.length}, материалов ${materials.length}?`))return; fb.disabled=true;
+      const fb=box.querySelector('#rc-fix'); if(fb)fb.onclick=async()=>{ const ops=[...box.querySelectorAll('[data-fixn]')].map(i=>({opId:i.dataset.fixn,norm:i.value})).filter(x=>x.norm!==''); const materials=[...box.querySelectorAll('[data-fixm]')].map(i=>({opId:i.dataset.fixm,canonId:i.dataset.canon,qty:i.value,unit:i.dataset.unit})).filter(async x=>x.qty!=='');
+        if(!(await uiConfirm(`Записать нормы в МК ${r.mk}: операций ${ops.length}, материалов ${materials.length}?`)))return; fb.disabled=true;
         try{ const res=await fetch('/api/route/fix-norms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id,ops,materials,note:'по '+(d.runs||[]).map(x=>x.pz).join(', ')})}); const j=await res.json().catch(()=>({})); if(!res.ok||j.error)throw new Error(j.error||('HTTP '+res.status)); toast(`Нормы зафиксированы (операций: ${j.changed}).`,'ok'); RT=null; openRouteCard(host,r.id); }catch(e){ toast('Не записано: '+e.message,'err'); fb.disabled=false; } };
     }
     async function genRouteTasks(host,routeId){
-      if(!confirm('Сгенерировать карты задач Ф.14 по этому маршруту для всех привязанных позиций ПЗ?\n\nЗадачи с уже существующим № не дублируются.'))return;
+      if(!(await uiConfirm('Сгенерировать карты задач Ф.14 по этому маршруту для всех привязанных позиций ПЗ?\n\nЗадачи с уже существующим № не дублируются.')))return;
       try{ const r=await fetch('/api/routes/generate-tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:routeId})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         const det=(j.positions||[]).map(p=>`${p.pz}/${p.pos}: +${p.created}`).join('; ');
         toast(`Ф.14: создано ${j.created}, пропущено ${j.skipped}${det?' · '+det:''}${j.statusChange&&j.statusChange.to?' · МК → '+j.statusChange.to:''}`,'ok');
@@ -14121,7 +14126,7 @@
         kdSel:((r0.kdDrawings)||[]).slice(),
         bom:((r0.bom)||[]).map(m=>rtBomDefault(m)), // K-160: спецификация материалов изделия
         ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',control:o.control||'нет',norm:o.norm!=null?o.norm:'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',planMaterials:(Array.isArray(o.planMaterials)?o.planMaterials.map(m=>Object.assign({},m)):[]),blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,components:o.components||[],_open:i===0})) };
-      { const dr=rtDraftRead(routeId); if(dr&&dr.route&&((opts&&opts.restore)||confirm(`Есть незаконченный черновик этой карты от ${fmtDT(dr.savedAt)} (${(dr.ops||[]).length} операций). Продолжить его?\n\nОтмена — начать заново, черновик будет удалён.`))){ rtWiz.route={...rtWiz.route,...(dr.route||{})}; rtWiz.ops=(dr.ops||[]).map(o=>({...o})); rtWiz.kdSel=Array.isArray(dr.kdSel)?dr.kdSel:rtWiz.kdSel; rtWiz.step=dr.step||1; } else if(dr) rtDraftClear(routeId); } // K-176
+      { const dr=rtDraftRead(routeId); if(dr&&dr.route&&((opts&&opts.restore)||(await uiConfirm(`Есть незаконченный черновик этой карты от ${fmtDT(dr.savedAt)} (${(dr.ops||[]).length} операций). Продолжить его?\n\nОтмена — начать заново, черновик будет удалён.`)))){ rtWiz.route={...rtWiz.route,...(dr.route||{})}; rtWiz.ops=(dr.ops||[]).map(o=>({...o})); rtWiz.kdSel=Array.isArray(dr.kdSel)?dr.kdSel:rtWiz.kdSel; rtWiz.step=dr.step||1; } else if(dr) rtDraftClear(routeId); } // K-176
       rtBomBackfill(); rtBomApply(); // K-160
       rtWizRender();
     }
@@ -14143,6 +14148,16 @@
       rtWizWire(step); window.scrollTo(0,0);
     }
     function rtWizGo(step){ if(!rtWiz)return; rtCollectStep(rtWiz.step); rtWiz.step=Math.min(4,Math.max(1,step)); rtWizRender(); }
+    // ── K-179: единые диалоги портала вместо системных confirm / prompt / alert (Александр: «а покрасивее нельзя?») ──
+    function uiDialog(o){ return new Promise(res=>{ const old=document.getElementById('ui-dlg'); if(old)old.remove(); const w=document.createElement('div'); w.id='ui-dlg'; w.className='ui-dlg';
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" aria-modal="true"><div class="ui-dlg-h">${esc(o.title||'Подтвердите действие')}</div>${o.text?`<div class="ui-dlg-t">${esc(o.text).replace(/\n/g,'<br>')}</div>`:''}${o.input?`<input class="rt-inp ui-dlg-in" value="${esc(o.value||'')}" placeholder="${esc(o.placeholder||'')}">`:''}<div class="ui-dlg-b">${o.cancel!==null?`<button class="ui-btn" data-d="cancel">${esc(o.cancel||'Отмена')}</button>`:''}<button class="ui-btn ui-btn--primary${o.danger?' ui-btn--danger':''}" data-d="ok">${esc(o.ok||'ОК')}</button></div></div>`;
+      document.body.appendChild(w); const inp=w.querySelector('.ui-dlg-in'); let closed=false; const done=(v)=>{ if(closed)return; closed=true; w.remove(); document.removeEventListener('keydown',kd); res(v); };
+      const kd=(e)=>{ if(e.key==='Escape'){ e.preventDefault(); done(o.input?null:false); } else if(e.key==='Enter'&&(!inp||document.activeElement===inp)){ e.preventDefault(); done(o.input?inp.value:true); } };
+      document.addEventListener('keydown',kd); w.querySelector('[data-d="ok"]').onclick=()=>done(o.input?inp.value:true); const c=w.querySelector('[data-d="cancel"]'); if(c)c.onclick=()=>done(o.input?null:false); w.onclick=(e)=>{ if(e.target===w)done(o.input?null:false); };
+      setTimeout(()=>{ const f=inp||w.querySelector('[data-d="ok"]'); if(f){ f.focus(); if(inp)inp.select(); } },30); }); }
+    const uiConfirm=(a,b)=>uiDialog(typeof a==='string'?Object.assign({title:'Подтвердите действие',text:a},(b||{})):a);
+    const uiPrompt=(text,value,o)=>uiDialog(Object.assign({title:text,input:true,value:value||'',placeholder:''},(o||{})));
+    const uiAlert=(text,o)=>uiDialog(Object.assign({title:(o&&o.title)||'Портал ИСМ',text,cancel:null,ok:'Понятно'},(o||{})));
     // ── K-176: черновик визарда в браузере (не пропадает при уходе со страницы) ──
     const fmtDT=(iso)=>{ try{ const d=new Date(iso); return isNaN(d)?'':d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch{ return ''; } };
     const rtDraftKey=(routeId)=>`pbs.mkdraft.${(ME&&ME.id)||'x'}.${routeId!=null?routeId:'new'}`;
@@ -14151,8 +14166,8 @@
     function rtDraftClear(routeId){ try{ localStorage.removeItem(rtDraftKey(routeId)); }catch{} }
     function rtDraftList(){ const out=[]; try{ const pre=`pbs.mkdraft.${(ME&&ME.id)||'x'}.`; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(!k||!k.startsWith(pre))continue; const d=JSON.parse(localStorage.getItem(k)||'{}'); const rid=k.slice(pre.length); out.push({routeId:rid==='new'?null:Number(rid),savedAt:d.savedAt||'',name:(d.route||{}).name||'',mk:(d.route||{}).mk||'',ops:(d.ops||[]).length}); } }catch{} return out.sort((a,b)=>String(b.savedAt).localeCompare(String(a.savedAt))); }
     const rtDraftHasContent=()=>!!(rtWiz&&(String((rtWiz.route||{}).name||'').trim()||(rtWiz.ops||[]).length));
-    function rtWizExit(){ const h=rtWiz.host, id=rtWiz.routeId;
-      if(rtDraftHasContent()){ rtDraftStore(); const ok=confirm('Сохранить как черновик в портале?\n\nОК — сохранить в базу (МК появится в реестре и в «Мои черновики»).\nОтмена — не сохранять в базу; набранное останется в этом браузере, продолжить можно из списка МК.'); if(ok){ rtWizSave(false); return; } }
+    async function rtWizExit(){ if(!rtWiz||rtWiz._saving)return; const h=rtWiz.host, id=rtWiz.routeId;
+      if(rtDraftHasContent()){ rtDraftStore(); const ok=await uiConfirm({title:'Сохранить как черновик в портале?',text:'МК появится в реестре и в «Мои черновики». Если не сохранять, набранное останется в этом браузере — продолжить можно из списка МК.',ok:'Сохранить в портале',cancel:'Не сохранять'}); if(!rtWiz)return; if(ok){ rtWiz._saving=true; const ex=h.querySelector('#rt-exit'); if(ex){ ex.style.pointerEvents='none'; ex.textContent='сохраняю…'; } try{ await rtWizSave(false); }finally{ if(rtWiz)rtWiz._saving=false; } return; } }
       rtWiz=null; if(id!=null)openRouteCard(h,id); else renderRoutesView(h); }
     function rtCollectStep(step){
       if(!rtWiz)return; const host=rtWiz.host;
@@ -15204,7 +15219,7 @@
     }
     function stgCollect(rid){const o={};$s('s_dbody').querySelectorAll(`[data-id="${rid}"]`).forEach(el=>{let v=el.value;if(el.type==='number')v=v===''?'':Number(v);o[el.dataset.f]=v;});return o;}
     async function stgSaveDict(rid){ const f=stgCollect(rid),isNew=rid==='new'; const opt={method:isNew?'POST':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(isNew?f:{Id:Number(rid),...f})}; let r; try{ r=await (await fetch('/api/dict/rows?key='+encodeURIComponent(stgDictKey),opt)).json(); }catch(e){ return stgMsg('s_dmsg',false,'Сеть: '+e.message); } if(r.ok||r.row){ stgMsg('s_dmsg',true,isNew?'Добавлено':'Сохранено'); stgOpenDict(stgDictKey); } else stgMsg('s_dmsg',false,'Ошибка: '+(r.error||'?')); }
-    async function stgDelDict(rid){ if(!confirm('Удалить запись из справочника? Действие необратимо.'))return; let r; try{ r=await (await fetch('/api/dict/rows?key='+encodeURIComponent(stgDictKey)+'&id='+encodeURIComponent(rid),{method:'DELETE'})).json(); }catch(e){ return stgMsg('s_dmsg',false,'Сеть: '+e.message); } if(r.ok){ stgMsg('s_dmsg',true,'Удалено'); stgOpenDict(stgDictKey); } else stgMsg('s_dmsg',false,'Ошибка: '+(r.error||'?')); }
+    async function stgDelDict(rid){ if(!(await uiConfirm('Удалить запись из справочника? Действие необратимо.')))return; let r; try{ r=await (await fetch('/api/dict/rows?key='+encodeURIComponent(stgDictKey)+'&id='+encodeURIComponent(rid),{method:'DELETE'})).json(); }catch(e){ return stgMsg('s_dmsg',false,'Сеть: '+e.message); } if(r.ok){ stgMsg('s_dmsg',true,'Удалено'); stgOpenDict(stgDictKey); } else stgMsg('s_dmsg',false,'Ошибка: '+(r.error||'?')); }
     function stgAccess(){ $s('stgPane').innerHTML=`<span style="font-size:16px;font-weight:700;color:var(--ink)">Доступ и безопасность</span>
       <p style="font-size:12px;color:var(--sub);margin:6px 0 0">Вход через Bitrix24 SSO. Роль определяется автоматически по отделу Битрикса; ниже — ручные назначения (приоритетнее отдела).</p>
       <div id="s_rolesWrap"></div>`;
@@ -15500,14 +15515,14 @@
       const CTL_KEY={incoming:'incoming_control',acceptance:'acceptance_control',nonconformity:'nonconformity'};
       const updCtlDel=(form)=>{const b=wrap.querySelector(`[data-ctldel="${form}"]`);if(b){const n=ctlSel[form].size;b.innerHTML=`${aico('trash',13)} Удалить (${n})`;b.disabled=!n;}};
       wrap.querySelectorAll('.ctlsel').forEach(cb=>cb.onclick=(e)=>{e.stopPropagation();const f=cb.dataset.form,id=Number(cb.dataset.id);cb.checked?ctlSel[f].add(id):ctlSel[f].delete(id);updCtlDel(f);});
-      wrap.querySelectorAll('[data-ctldel]').forEach(b=>b.onclick=async()=>{
+      wrap.querySelectorAll('[data-ctldel]').forEach(b=>b.onclick=async ()=>{
         const f=b.dataset.ctldel, ids=[...ctlSel[f]]; if(!ids.length)return;
-        if(!confirm(`Удалить выбранные акты (${ids.length})? Действие необратимо.`))return;
+        if(!(await uiConfirm(`Удалить выбранные акты (${ids.length})? Действие необратимо.`)))return;
         b.disabled=true; b.textContent='Удаление…';
         try{ const r=await fetch('/api/records/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:CTL_KEY[f],ids})});
           const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
           ctlSel[f].clear(); load();
-        }catch(e){ alert('Не удалось удалить: '+(e.message||e)); updCtlDel(f); }
+        }catch(e){ uiAlert('Не удалось удалить: '+(e.message||e)); updCtlDel(f); }
       });
     }
 

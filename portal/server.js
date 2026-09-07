@@ -7304,7 +7304,8 @@ async function buildWip(opts) {
     let bom = mkBomParse(route['Спецификация материалов']).filter((m) => m.role !== 'Комплектующее');
     if (!bom.length) bom = ops.flatMap((o) => mkPlanParse(o['Материалы (план)']).map((m) => ({ role: m.role || 'Материал', canonId: m.canonId, name: m.name, unit: m.unit, norm: m.qty }))).filter((m) => m.role !== 'Комплектующее');
     const mat = new Map(); const keyOf = (canonId, name) => canonId != null && canonId !== '' ? 'c' + canonId : 'n' + String(name || '').toLowerCase();
-    for (const m of bom) { const k = keyOf(m.canonId, m.name); mat.set(k, { canonId: m.canonId ?? null, name: m.name, unit: m.unit || '', role: m.role, plan: +((Number(m.norm) || 0) * N).toFixed(3), fact: 0, cost: 0, byOp: {} }); }
+    const kgMap = await canonKgPerMMap();
+    for (const m of bom) { const k = keyOf(m.canonId, m.name); const c = mkToKg(m.norm, m.unit, m.canonId, kgMap); mat.set(k, { canonId: m.canonId ?? null, name: m.name, unit: c.unit || '', role: m.role, plan: +((Number(c.qty) || 0) * N).toFixed(3), planText: c.text ? c.text + ' × ' + N : '', fact: 0, cost: 0, byOp: {} }); }
     const urows = ptasks.flatMap((t) => usageByTask.get(String(t.Id ?? t.id)) || []);
     for (const u of urows) { const k = keyOf(u['Канон (id)'], u['Материал']); if (!mat.has(k)) mat.set(k, { canonId: u['Канон (id)'] ?? null, name: u['Материал'] || '', unit: u['ЕИ'] || '', role: u['Роль'] || 'Материал', plan: 0, fact: 0, cost: 0, byOp: {}, extra: true });
       const e = mat.get(k); const q = Number(u['Кол-во факт']) || 0; e.fact += q; const mr = mirrorByKey.get(String(u['Ключ 1С'] || '')); if (mr) e.cost += q * (Number(mr['Себестоимость']) || 0); const opn = Number(u['№ операции']) || 0; e.byOp[opn] = (e.byOp[opn] || 0) + q; }
@@ -7397,6 +7398,10 @@ async function buildCabinet(session) {
   return out;
 }
 // предзаполнение состава: из плана МК (planMaterials операций × кол-во) или из типового состава канона
+// K-173: норма в метрах (прокат) → кг по канону; возвращает {qty, unit, text}
+let _canonKgCache = null;
+async function canonKgPerMMap() { if (_canonKgCache && Date.now() - _canonKgCache.at < 60000) return _canonKgCache.map; const rows = await ncListSoft('catalog_canon'); const map = new Map(); for (const r of rows) { try { const k = metalKgPerMeter(r['Тип'] || '', r['Типоразмер'] || ''); if (k > 0) map.set(String(r.Id ?? r.id), k); } catch { /* нет */ } } _canonKgCache = { at: Date.now(), map }; return map; }
+function mkToKg(qty, unit, canonId, kgMap) { const u = String(unit || '').trim().toLowerCase(); const q = Number(String(qty == null ? '' : qty).replace(',', '.')); if (!(q >= 0) || isNaN(q)) return { qty: qty, unit: unit || '', text: '' }; if (u === 'м' || u === 'm') { const k = kgMap && kgMap.get(String(canonId)); if (k) return { qty: +(q * k).toFixed(3), unit: 'кг', text: `${q} м ≈ ${(q * k).toFixed(2)} кг` }; } if (u === 'мм') { const k = kgMap && kgMap.get(String(canonId)); if (k) return { qty: +(q / 1000 * k).toFixed(3), unit: 'кг', text: `${q} мм ≈ ${(q / 1000 * k).toFixed(2)} кг` }; } return { qty: q, unit: unit || '', text: '' }; }
 async function retroPrefill(q) {
   const qty = Number(String(q.qty || '1').replace(',', '.')) || 1;
   let plan = [];
@@ -7404,7 +7409,8 @@ async function retroPrefill(q) {
     // K-160: сперва спецификация материалов МК (без комплектующих — это изделия других МК), иначе — план операций (K-157)
     const rr = (await ncListSoft('routes')).find((x) => String(x.Id ?? x.id) === String(q.routeId));
     const bom = rr ? mkBomParse(rr['Спецификация материалов']).filter((m) => m.role !== 'Комплектующее') : [];
-    if (bom.length) bom.forEach((m) => plan.push({ canonId: m.canonId, name: m.name, unit: m.unit, qty: m.norm, source: 'План МК' }));
+    const kgMap = await canonKgPerMMap();
+    if (bom.length) bom.forEach((m) => { const c = mkToKg(m.norm, m.unit, m.canonId, kgMap); plan.push({ canonId: m.canonId, name: m.name, unit: c.unit, qty: c.qty, source: 'План МК' }); });
     else { const ops = (await ncListSoft('operations')).filter((o) => String(o.routes_id) === String(q.routeId));
       ops.forEach((o) => mkPlanParse(o['Материалы (план)']).forEach((m) => plan.push({ ...m, source: 'План МК' }))); }
   } else if (q.canonId) {
@@ -8557,12 +8563,23 @@ const METAL_RHO = METAL_DENSITY * 1000; // 7850 кг/м³
 // сторону, «сколько кг весит N мм заготовки», для резерва металла по норме МК в мм — см. mkBlankKgPerPart).
 function metalKgPerMeter(rollType, size) {
   const s = String(size || '').replace(/,/g, '.');
+  if (/^Круг/i.test(rollType)) rollType = 'Круг'; else if (/^Труба/i.test(rollType)) rollType = 'Труба'; // K-173: «Круг г/к», «Труба б/ш» из канона
   if (rollType === 'Круг') {
     const md = s.match(/[Ø⌀ø]\s*(\d+(?:\.\d+)?)/) || s.match(/(\d+(?:\.\d+)?)/);
     const d = md ? parseFloat(md[1]) : 0;               // диаметр, мм
     if (!(d > 0)) return null;
     const dm = d / 1000;
     return METAL_RHO * Math.PI * dm * dm / 4;
+  } else if (/^Шестигранник/i.test(rollType)) {          // K-173: размер «под ключ» s, мм → площадь (√3/2)·s²
+    const m6 = s.match(/(\d+(?:\.\d+)?)/); const sw = m6 ? parseFloat(m6[1]) / 1000 : 0; if (!(sw > 0)) return null;
+    return METAL_RHO * (Math.sqrt(3) / 2) * sw * sw;
+  } else if (/^Квадрат/i.test(rollType)) {
+    const mq = s.match(/(\d+(?:\.\d+)?)/); const a = mq ? parseFloat(mq[1]) / 1000 : 0; if (!(a > 0)) return null;
+    return METAL_RHO * a * a;
+  } else if (/^Полоса/i.test(rollType)) {
+    const mp = s.match(/(\d+(?:\.\d+)?)\s*[×xXхХ*]\s*(\d+(?:\.\d+)?)/); if (!mp) return null;
+    const b = parseFloat(mp[1]) / 1000, t = parseFloat(mp[2]) / 1000; if (!(b > 0) || !(t > 0)) return null;
+    return METAL_RHO * b * t;
   } else if (rollType === 'Труба') {
     const mt = s.match(/(\d+(?:\.\d+)?)\s*[×xXхХ*]\s*(\d+(?:\.\d+)?)/); // Ø57×3.5 → D, t (мм)
     if (!mt) return null;                               // нет стенки → метры не выдумываем
@@ -8949,7 +8966,8 @@ async function buildTaskMaterials(taskId) {
     for (const arr of byCanon.values()) arr.sort((a, b) => b.qty - a.qty);
   }
   const basis = ctx.unitsTouched || ctx.qtyPlan || 1; // план считаем на единицы, взятые в работу; если журнал пуст — на всё задание
-  const planRows = plan.map((m) => ({ canonId: m.canonId, name: m.name, unit: m.unit, role: m.role || 'Материал', normPerUnit: m.qty, qtyPlan: m.qty != null ? +(Number(m.qty) * basis).toFixed(3) : null, candidates: (byCanon.get(Number(m.canonId)) || []).slice(0, 6) }));
+  const kgMap = await canonKgPerMMap();
+  const planRows = plan.map((m) => { const c = mkToKg(m.qty, m.unit, m.canonId, kgMap); return { canonId: m.canonId, name: m.name, unit: c.unit, role: m.role || 'Материал', normPerUnit: c.qty, normText: c.text, qtyPlan: c.qty != null ? +(Number(c.qty) * basis).toFixed(3) : null, candidates: (byCanon.get(Number(m.canonId)) || []).slice(0, 6) }; });
   return { ok: true, taskId: ctx.task.Id ?? ctx.task.id, taskNum: ctx.num, mk: ctx.mk, opNo: ctx.opNo, qtyPlan: ctx.qtyPlan, unitsTouched: ctx.unitsTouched, unitsGood: ctx.unitsGood, basis,
     plan: planRows, rows, candidatesByCanon: Object.fromEntries([...byCanon.entries()].map(([k, v]) => [k, v.slice(0, 6)])), sources: MAT_SOURCES, hasPlan: plan.length > 0 };
 }
@@ -10833,6 +10851,7 @@ function catCanonRow(r) {
     kind: r['Тип'] || '', grade: r['Марка / материал'] || '', size: r['Типоразмер'] || '',
     iso: r['ISO-обозначение'] || '', category: r['Категория'] || '',
     unit: whLinkVal(r['Единицы измерения']), note: r['Примечание'] || '',
+    kgPerM: (() => { try { const k = metalKgPerMeter(r['Тип'] || '', r['Типоразмер'] || ''); return k > 0 ? +k.toFixed(4) : null; } catch { return null; } })(), // K-173: прокат — норма в метрах, учёт в кг
   };
 }
 function catAliasRow(r) {

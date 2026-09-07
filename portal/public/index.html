@@ -447,6 +447,34 @@
     .st-card .meta{font-size:12px;color:#52606d;margin-top:8px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;}
     .st-empty{grid-column:1/-1;color:var(--sl-500);font-size:14px;padding:28px;text-align:center;}
     .st-panel{display:flex;flex-direction:column;gap:14px;max-width:760px;}
+    /* K-187: экран оператора отрезки (планшет 1280×800, ПК участка) */
+    .cut-wrap{display:flex;flex-direction:column;gap:12px;max-width:1320px;}
+    .cut-top{background:#0f2238;color:#fff;border-radius:12px;padding:10px 16px;display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;}
+    .cut-top .k{font-size:11px;opacity:.7;text-transform:uppercase;letter-spacing:.05em;} .cut-top b{font-size:15px;} .cut-top .sm{font-size:12px;opacity:.85;}
+    .cut-top .mid{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;} .cut-top .mid>div{white-space:nowrap;}
+    .cut-body{display:grid;grid-template-columns:1.55fr 1fr;gap:12px;align-items:start;}
+    @media (max-width:980px){.cut-body{grid-template-columns:1fr;} .cut-top{grid-template-columns:1fr;}}
+    .cut-col{display:grid;gap:12px;}
+    .cut-card{background:#fff;border:1px solid var(--bd);border-radius:12px;}
+    .cut-card>.h{padding:9px 14px;border-bottom:1px solid #eef2f6;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;} .cut-card>.h .n{margin-left:auto;font-weight:500;color:var(--sl-500);font-size:12px;}
+    .cut-card>.c{padding:12px 14px;display:grid;gap:10px;}
+    .cut-task{font-size:21px;font-weight:700;line-height:1.25;color:#0f2540;} .cut-task small{font-size:13px;font-weight:500;color:var(--sl-500);display:block;margin-top:4px;}
+    .cut-yellow{border-left:4px solid #b45309;background:#fff7ed;padding:10px 14px;border-radius:0 8px 8px 0;font-size:15px;white-space:pre-wrap;} .cut-yellow b{color:#b45309;}
+    .cut-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;}
+    .cut-pill.ok{background:#e7f5ec;color:#1a7f4b;} .cut-pill.warn{background:#fdf1e3;color:#b45309;} .cut-pill.bad{background:#fbe9e9;color:#b91c1c;} .cut-pill.wip{background:#e8eefc;color:#1d4ed8;} .cut-pill.gray{background:#eef2f6;color:#5b6b7c;}
+    .cut-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--bd);background:#fff;color:#1b2a3a;border-radius:8px;padding:11px 16px;font:inherit;font-size:15px;font-weight:700;min-height:46px;cursor:pointer;}
+    .cut-btn:disabled{opacity:.45;cursor:not-allowed;} .cut-btn.pri{background:var(--navy);border-color:var(--navy);color:#fff;} .cut-btn.ok{background:#1a7f4b;border-color:#1a7f4b;color:#fff;} .cut-btn.warn{background:#fff7ed;border-color:#f0c9a0;color:#b45309;} .cut-btn.ghost{background:transparent;} .cut-btn.big{font-size:17px;min-height:54px;padding:13px 22px;}
+    .cut-btn.sm{min-height:38px;padding:7px 12px;font-size:14px;}
+    .cut-btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+    .cut-t{width:100%;border-collapse:collapse;font-size:14px;} .cut-t th{text-align:left;color:var(--sl-500);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;border-bottom:1px solid #eef2f6;} .cut-t td{padding:7px 8px;border-bottom:1px solid #eef2f6;vertical-align:middle;} .cut-t tr:last-child td{border-bottom:0;}
+    .cut-inp{border:1px solid var(--bd);border-radius:8px;padding:9px 10px;font:inherit;font-size:16px;background:#fff;color:#1b2a3a;width:110px;text-align:center;} .cut-inp.wide{width:100%;text-align:left;}
+    .cut-units{display:flex;gap:6px;flex-wrap:wrap;align-items:center;} .cut-units b{width:36px;height:36px;border-radius:7px;background:#eef2f6;border:1px solid var(--bd);display:inline-flex;align-items:center;justify-content:center;font-size:13px;} .cut-units b.d{background:#1a7f4b;border-color:#1a7f4b;color:#fff;} .cut-units b.w{background:#1d4ed8;border-color:#1d4ed8;color:#fff;} .cut-units b.x{background:#b91c1c;border-color:#b91c1c;color:#fff;} .cut-units b.q{background:#fdf1e3;border-color:#f0c9a0;color:#b45309;}
+    .cut-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;} .cut-kv .k{color:var(--sl-500);}
+    .cut-note{font-size:12px;color:var(--sl-500);line-height:1.45;}
+    .cut-mono{font-variant-numeric:tabular-nums;}
+    .cut-bar{height:8px;background:#eef2f6;border-radius:4px;overflow:hidden;} .cut-bar i{display:block;height:100%;background:var(--navy);}
+    .cut-mat{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;}
+    @media print{body>*{display:none!important;}}
     .st-back{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--navy);background:#fff;border:1px solid var(--bd);border-radius:var(--r-m);padding:10px 16px;cursor:pointer;align-self:flex-start;}
     .st-h{font-size:20px;font-weight:700;color:var(--navy);}
     .st-sub{font-size:14px;color:#52606d;margin-top:2px;}
@@ -11782,6 +11810,7 @@
     function renderStationTask(host,key){
       const t=stationTasks().find(x=>String(x.id??x.num)===String(key)); if(!t)return;
       const ro=DATA.mode!=='live';
+      if(!ro&&RT_CUT_TYPES.has(t.opTypeCode||'')&&!cutClassic){ renderCutTask(host,t); return; } // K-187
       const C=t.control||{};
       const ctl=(C.point&&C.point!=='нет')?([C.what,C.tol,C.si].filter(Boolean).join(' · ')+(C.point?` (${esc(C.point)})`:'')):'';
       // «Выполнено» рабочий вручную не ставит — оно производное от приёмки журнала (кнопка «Закрыть задачу»)
@@ -11831,7 +11860,7 @@
         ${ro?'':'<div class="st-sec" id="st-blank-wrap" style="display:none"><div class="lab">Заготовка → факт (списание со склада)</div><div id="st-blank-body" class="c-gray" style="font-size:12px">Загрузка…</div></div>'}
         ${ro?'':'<div class="st-sec" id="st-mat-wrap" style="display:none"><div class="lab">Материалы на операцию <span class="c-gray" style="font-weight:400;font-size:11px">план из МК × единицы в работе → факт</span></div><div id="st-mat-body" class="c-gray" style="font-size:12px">Загрузка…</div></div>'}
         ${t.instructions?`<div class="st-sec" style="border-left:3px solid var(--amber,#b45309);background:#fff7ed"><div class="lab">Указания технолога</div><div style="font-size:14px;white-space:pre-wrap">${esc(t.instructions)}</div></div>`:''}
-        ${RT_CUT_TYPES.has(t.opTypeCode||'')?`<div class="st-sec"><div class="lab">Схема отрезки</div>${rtCutFigureSvg({id:'t'+t.id,L:((t.params||[]).find(p=>/^размер/i.test(p.name||''))||{}).norm||'',allowance:((t.params||[]).find(p=>/^припуск/i.test(p.name||''))||{}).norm||'',qty:((t.params||[]).find(p=>/^количество/i.test(p.name||''))||{}).norm||t.qtyPlan||'',blank:t.blankText||''})}</div>`:''}
+        ${RT_CUT_TYPES.has(t.opTypeCode||'')?`<div class="st-sec"><div class="lab">Схема отрезки</div>${rtCutFigureSvg({id:'t'+t.id,size:((t.params||[]).find(p=>/^размер/i.test(p.name||''))||{}).norm||'',tol:((t.params||[]).find(p=>/^размер/i.test(p.name||''))||{}).tol||'',allowance:((t.params||[]).find(p=>/^припуск/i.test(p.name||''))||{}).norm||'',qty:((t.params||[]).find(p=>/^количество/i.test(p.name||''))||{}).norm||t.qtyPlan||'',blank:t.blankText||''})}</div>`:''}
         <div class="st-sec"><div class="lab">Задание (Ф.14 §1–2)</div>
           ${kv('№ ПЗ / срок',`${t.num} · ${fmt(t.plan)}`)}
           ${t.partName?kv('Изделие',t.partName+(t.drawing?` · чертёж ${t.drawing}`:'')+(t.applicability?` · ${t.applicability}`:'')):''}
@@ -11926,6 +11955,167 @@
         if(reopenBtn)reopenBtn.onclick=async()=>{chosen='В работе';reopenBtn.disabled=true;
           try{await doSave();}catch(e){reopenBtn.disabled=false;const m=document.getElementById('st-msg');m.style.color='var(--red)';m.textContent='Ошибка: '+e.message;}};
       }
+    }
+
+    // ── K-187: экран оператора «Отрезка заготовки» (концепт 07.09) ─────────────
+    //  Одно задание, три решения (что резать / из чего / как проверять), две кнопки на единицу.
+    //  Материал подтверждается биркой карточки склада (USB-сканер = клавиатура), каждая заготовка
+    //  замеряется (списание по факту), остаток прутка → деловой остаток ДО или обрезь.
+    let cutClassic=false; // «классическая карта Ф.14» по ссылке внизу экрана
+    const CUT_KERF={'ОП-ЗАГ':1.5,'ОП-МПЛ':3,'ОП-УШМ':3,'ОП-ПЛ':0}; // ширина пропила, мм
+    const CUT_PAUSE=['нет материала','неисправность станка','ждёт ОТК','нет инструмента / полотна','другое'];
+    function cutNow(){ return new Date().toISOString(); }
+    function cutElapsed(iso){ if(!iso)return ''; const ms=Date.now()-new Date(iso).getTime(); if(!(ms>0))return ''; const m=Math.floor(ms/60000); return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
+    function cutMarking(t,unit){ return `${t.numPz||t.num.split('/')[0]}/${t.posNo||''} №${unit}`; }
+    function cutLabelsPrint(t,units,mat){
+      const rows=units.filter(u=>u.self==='годен').map(u=>`<div class="lb"><div class="a">${esc(cutMarking(t,u.unit))}</div><div class="b">${esc(t.partName||'')}${t.drawing?' · '+esc(t.drawing):''}</div><div class="c">${esc(t.mk||'')} оп.${esc(String(t.opNum||''))} → ${t.nextOp?'оп.'+esc(String(t.nextOp.num))+' '+esc(t.nextOp.name)+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'готово'}</div><div class="c">${mat?esc(mat.code)+' · '+esc(mat.grade||'')+(mat.size||mat.sizes?' '+esc(mat.size||mat.sizes):''):'материал не указан'}${mat&&mat.heatNo?' · пл. '+esc(mat.heatNo):''}</div><div class="d">L ${esc(String(u.measured||''))} мм · ${esc(fmt(u.date||new Date().toISOString().slice(0,10)))} · ${esc(u.executor||'')}</div></div>`).join('');
+      const w=window.open('','_blank'); if(!w){ toast('Разрешите всплывающие окна для печати бирок.','err'); return; }
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Бирки ${esc(t.num)}</title><style>@page{size:100mm 50mm;margin:3mm}body{margin:0;font-family:system-ui,Arial,sans-serif}.lb{width:94mm;height:44mm;box-sizing:border-box;padding:2mm 3mm;page-break-after:always;border:.2mm dashed #999;display:flex;flex-direction:column;justify-content:space-between}.a{font-size:22pt;font-weight:800;letter-spacing:.02em}.b{font-size:11pt;font-weight:600}.c{font-size:9pt}.d{font-size:8pt;color:#333}@media screen{body{background:#eee;padding:10px}.lb{background:#fff;margin:0 0 8px}}</style></head><body>${rows||'<p>Нет принятых заготовок.</p>'}<scr'+'ipt>setTimeout(function(){window.print()},300)</scr'+'ipt></body></html>`);
+      w.document.close();
+    }
+    async function cutFetchBoardTask(id){ try{ const r=await fetch('/api/board'); if(!r.ok)return null; const d=await r.json(); DATA=d; return d.orders.flatMap(o=>o.tasks.map(t=>({...t,pz:o.numPz}))).find(x=>String(x.id)===String(id))||null; }catch{ return null; } }
+    function renderCutTask(host,t){
+      const P=(re)=>(t.params||[]).find(p=>re.test(String(p.name||'').toLowerCase()))||{};
+      const pSize=P(/^размер/), pAl=P(/^припуск/), pQty=P(/^количество/);
+      const size=cutNum(pSize.norm), al=cutNum(pAl.norm)||0; const L=size!=null?size+al:null; const tol=cutParseTol(pSize.tol);
+      const lo=(L!=null&&tol&&tol.lo!=null)?L+tol.lo:null, hi=(L!=null&&tol&&tol.hi!=null)?L+tol.hi:null;
+      const qty=Math.max(1,Math.round(cutNum(pQty.norm)||Number(t.qtyPlan)||(t.journal||[]).length||1));
+      const kerf=CUT_KERF[t.opTypeCode]??1.5;
+      const reqOtk=t.controlPoint==='ОТК'||!!t.otk; const reqSelf=!reqOtk||t.controlPoint==='С'||!!t.selfControl;
+      const meName=(ME&&ME.name)||(ME&&ME.fio)||'';
+      const jByU=new Map((t.journal||[]).map(j=>[Number(j.unit),j]));
+      const units=Array.from({length:qty},(_,i)=>{ const j=jByU.get(i+1)||{}; return {id:j.id,unit:i+1,executor:j.executor||'',blankNo:j.blankNo||'',self:j.self||'',otk:j.otk||'',date:j.date||'',note:j.note||'',measured:j.measured===''||j.measured==null?'':Number(j.measured),matCode:j.matCode||''}; });
+      const st={status:t.status,startedAt:t.startedAt||'',mat:null,matList:[],matConfirmed:false,barLen:null,remMode:'do',blankInfo:null,otkCalled:false,busy:false};
+      const eq=(t.equipList||[])[0]; const eqTxt=eq?[eq.name||eq.model,eq.invNo].filter(Boolean).join(' · '):(t.equip||'станок не указан');
+      const inTol=(v)=>{ if(v===''||v==null)return null; if(lo==null||hi==null)return true; return v>=lo-1e-9&&v<=hi+1e-9; };
+      const unitState=(u)=>u.self==='брак'||u.otk==='брак'?'x':(u.self==='годен'&&(!reqOtk||u.otk==='годен')?'d':(u.self==='годен'&&reqOtk?'q':(u.measured!==''?'w':'')));
+      const accepted=()=>units.filter(u=>unitState(u)==='d').length;
+      const allDone=()=>units.every(u=>unitState(u)==='d'||unitState(u)==='x')&&accepted()>0;
+      const consumedMm=()=>units.filter(u=>u.measured!==''&&(u.self||u.measured!=='')).reduce((s,u)=>s+(Number(u.measured)||0),0)+kerf*units.filter(u=>u.measured!=='').length;
+      const matLabel=(m)=>m?`${m.kind==='remnant'?'ДО ':''}${m.code} · ${m.grade||''}${m.rollType?' '+m.rollType:''}${(m.size||m.sizes)?' '+(m.size||m.sizes):''}`:'';
+      const paint=()=>{
+        const acc=accepted(); const done=allDone();
+        const stPill=st.status==='В работе'?`<span class="cut-pill wip">в работе${st.startedAt?' · '+cutElapsed(st.startedAt):''}</span>`:st.status==='Приостановлено'?`<span class="cut-pill warn">приостановлено${t.pauseReason?' · '+esc(t.pauseReason):''}</span>`:st.status==='Выполнено'?`<span class="cut-pill ok">выполнено</span>`:`<span class="cut-pill gray">в очереди</span>`;
+        const tiles=units.map(u=>`<b class="${unitState(u)}" title="№${u.unit}">${u.unit}</b>`).join('');
+        const rows=units.map(u=>{ const ok=inTol(u.measured===''?null:Number(u.measured)); const stx=unitState(u);
+          const verdict=u.self==='брак'?'<span class="cut-pill bad">брак</span>':(stx==='d'?'<span class="cut-pill ok">годен</span>':(u.self==='годен'&&reqOtk?'<span class="cut-pill warn">ждёт ОТК</span>':(u.measured===''?'<span class="cut-pill gray">измерить</span>':(ok?'<span class="cut-pill wip">в допуске</span>':'<span class="cut-pill bad">вне допуска</span>'))));
+          const canOk=u.measured!==''&&ok!==false&&st.matConfirmed&&!u.self;
+          const act=u.self?'' : (u.measured!==''&&ok===false?`<button class="cut-btn sm warn" data-act="scrap" data-u="${u.unit}">Брак</button>`:`<button class="cut-btn sm ok" data-act="ok" data-u="${u.unit}" ${canOk?'':'disabled'}>✓ Годна</button>`);
+          const otkCell=reqOtk?(u.self==='годен'?`<select class="cut-inp" data-otk="${u.unit}" style="width:auto;font-size:14px;padding:6px 8px"><option value="">— ОТК —</option><option value="годен" ${u.otk==='годен'?'selected':''}>годен</option><option value="брак" ${u.otk==='брак'?'selected':''}>брак</option></select>`:'<span class="cut-note">после самоконтроля</span>'):'';
+          return `<tr><td class="cut-mono"><b>${u.unit}</b></td><td><input class="cut-inp" data-meas="${u.unit}" inputmode="decimal" value="${esc(u.measured===''?'':String(u.measured))}" placeholder="${L!=null?esc(String(L)):'мм'}" ${u.self?'disabled':''}></td><td>${verdict}</td>${reqOtk?`<td>${otkCell}</td>`:''}<td class="cut-mono" style="font-size:13px">${esc(u.blankNo||cutMarking(t,u.unit))}</td><td>${act}${u.self&&u.date?`<span class="cut-note">${esc(fmt(u.date))}</span>`:''}</td></tr>`; }).join('');
+        const m=st.mat; const rem=(st.barLen!=null&&st.barLen>0)?Math.round((st.barLen-consumedMm())*10)/10:null;
+        const bi=st.blankInfo||{};
+        const matOpts=st.matList.map(x=>`<option value="${x.kind}:${x.id}" ${m&&m.kind===x.kind&&String(m.id)===String(x.id)?'selected':''}>${esc(matLabel(x))}${x.kind==='stock'?' · доступно '+mtNum(x.available)+' кг':' · '+mtNum(x.weight)+' кг'}</option>`).join('');
+        host.innerHTML=`<div class="cut-wrap">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="st-back" id="cut-back">← К задачам участка</button><span class="cut-note">Экран оператора · <a href="#" id="cut-classic" style="color:var(--navy)">классическая карта Ф.14</a></span></div>
+          <div class="cut-top">
+            <div><div class="k">Заказ · позиция</div><b class="cut-mono">${esc(t.numPz||'')}${t.posNo!==''&&t.posNo!=null?' / '+esc(String(t.posNo)):''}</b><div class="sm">${t.orderDue?'срок '+esc(fmt(t.orderDue)):''}${t.customer?' · '+esc(t.customer):''}</div></div>
+            <div class="mid"><div><div class="k">Изделие</div><b>${esc(t.partName||'—')}</b>${t.drawing?`<div class="sm">чертёж ${esc(t.drawing)}</div>`:''}</div>
+              <div><div class="k">Маршрут</div><b class="cut-mono">${esc(t.mk||'')}${t.opIndex?' · оп. '+t.opIndex+' из '+t.opTotal:''}</b><div class="sm">${t.nextOp?'далее: оп. '+esc(String(t.nextOp.num))+' '+esc(t.nextOp.name)+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'последняя операция'}</div></div>
+              <div><div class="k">Станок</div><b>${esc(eqTxt)}</b><div class="sm">${esc(t.section||'')}</div></div></div>
+            <div style="text-align:right"><div class="k">Оператор</div><b>${esc(meName||'—')}</b><div style="margin-top:4px" id="cut-stpill">${stPill}</div></div>
+          </div>
+          <div class="cut-body">
+            <div class="cut-col">
+              <div class="cut-card"><div class="h">Задание<span class="n">${t.normTime!==''&&t.normTime!=null?'норма '+esc(String(t.normTime))+' ч':''}${t.ri?' · '+esc(t.ri):''}</span></div><div class="c">
+                <div class="cut-task">Отрезать <span class="cut-mono">${qty} шт</span>${t.blankText||t.materials?' · '+esc(t.blankText||t.materials):''}${L!=null?` · <span class="cut-mono">L = ${esc(String(L))}${tol&&tol.text?' '+esc(tol.text):''} мм</span>`:' · <span class="cut-pill warn">размер реза не задан в МК</span>'}
+                  <small>${L!=null&&al?`размер реза уже включает припуск ${esc(String(al))} мм${t.nextOp?' под оп. '+esc(String(t.nextOp.num))+' '+esc(t.nextOp.name):''} — отдельно ничего прибавлять не надо`:(L!=null?'припуск не задан — режем в размер':'')}${lo!=null&&hi!=null?` · годная длина ${esc(String(lo))}–${esc(String(hi))} мм`:''}</small></div>
+                ${rtCutFigureSvg({id:'c'+t.id,size:size!=null?size:'',allowance:al||'',tol:pSize.tol||'',qty:qty,blank:t.blankText||t.materials||''})}
+                ${t.instructions?`<div class="cut-yellow"><b>Указания технолога:</b> ${esc(t.instructions)}</div>`:''}
+                <div class="cut-yellow" style="font-size:13px"><b>Маркировка</b> маркером на каждой заготовке: <span class="cut-mono">${esc(cutMarking(t,'N'))}</span> · карточка металла ${m?esc(m.code):'…'} — так заготовку в цехе можно отследить до заказа и партии металла.</div>
+              </div></div>
+              <div class="cut-card"><div class="h">Контроль<span class="n">${reqOtk?'контроль ОТК':'самоконтроль'}${t.control&&t.control.si?' · СИ: '+esc(t.control.si):''}${t.control&&t.control.what?' · '+esc(t.control.what):''}</span></div><div class="c">
+                <div class="cut-units">${tiles}<span class="cut-note" style="margin-left:6px">принято ${acc} из ${qty}${reqOtk&&units.some(u=>unitState(u)==='q')?' · ждёт ОТК '+units.filter(u=>unitState(u)==='q').length:''}</span></div>
+                <div class="tbl-wrap"><table class="cut-t"><thead><tr><th>№</th><th>Измерено, мм</th><th>${lo!=null&&hi!=null?'допуск '+esc(String(lo))+'–'+esc(String(hi)):'результат'}</th>${reqOtk?'<th>ОТК</th>':''}<th>Маркировка</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+                <div class="cut-btns">${reqOtk?`<button class="cut-btn" id="cut-otk" ${units.some(u=>unitState(u)==='q')?'':'disabled'}>${st.otkCalled?'Контролёр вызван ✓':'Вызвать контролёра'}</button>`:''}<button class="cut-btn ghost" id="cut-tech">Сообщить технологу</button></div>
+                <div class="cut-note">Длина вне допуска не принимается как «годен»: «Брак» уходит в журнал как брак (материал списывается вместе с годными). ${reqOtk?'Контролёр ставит отметку в колонке «ОТК» на этом экране.':'Без подтверждённой карточки металла кнопка «Годна» неактивна.'}</div>
+              </div></div>
+            </div>
+            <div class="cut-col">
+              <div class="cut-card"><div class="h">Материал<span class="n">${bi.mk?'резерв под МК-'+esc(bi.mk):'склад металла'}</span></div><div class="c">
+                ${m?`<div class="cut-mat"><div><b>${esc(matLabel(m))}</b><div class="cut-note">${m.lastIncoming?'приёмка '+esc(fmt(m.lastIncoming.date))+' · '+mtNum(m.lastIncoming.qty)+' кг · '+esc(m.lastIncoming.basis||''):''}${m.heatNo?' · плавка '+esc(m.heatNo):''}${m.location?' · '+esc(m.location):''}</div></div>${st.matConfirmed?'<span class="cut-pill ok">бирка подтверждена</span>':'<button class="cut-btn sm" id="cut-confirm">Подтвердить</button>'}</div>`:'<div class="cut-note">Карточка металла не выбрана — отсканируйте бирку прутка или выберите из списка.</div>'}
+                <input class="cut-inp wide" id="cut-scan" placeholder="▣ Сканируйте бирку (МЕТ-… / ДО-…) или введите код и Enter" autocomplete="off">
+                <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center"><select class="cut-inp wide" id="cut-matsel" style="font-size:14px"><option value="">— другой пруток / карточка —</option>${matOpts}</select></div>
+                <div class="cut-kv"><span class="k">Длина прутка в работе</span><span><input class="cut-inp" id="cut-barlen" inputmode="decimal" value="${st.barLen!=null?esc(String(st.barLen)):''}" placeholder="мм"> <span class="cut-note">для расчёта остатка</span></span>
+                  <span class="k">Нужно на ${qty} шт</span><span class="cut-mono">${L!=null?Math.round((L*qty+kerf*qty)*10)/10+' мм (L × '+qty+' + пропил '+kerf+' × '+qty+')':'—'}</span>
+                  ${bi.normTotalKg!=null?`<span class="k">Норма по МК</span><span class="cut-mono">${mtNum(bi.normTotalKg)} кг · списано ${mtNum(bi.issuedKg||0)} кг</span>`:''}
+                  ${m&&m.kind==='stock'?`<span class="k">На карточке</span><span class="cut-mono">доступно ${mtNum(m.available)} кг · остаток ${mtNum(m.balance)} кг</span>`:''}</div>
+                <div class="cut-note">Скан подтверждает, из чего режем; если пруток другой — выберите его, списание пойдёт с правильной карточки.${m&&bi.blank&&bi.blank.grade&&m.grade&&String(m.grade).toLowerCase()!==String(bi.blank.grade).toLowerCase()?' <b style="color:#b91c1c">Марка отличается от МК ('+esc(bi.blank.grade)+')!</b>':''}</div>
+              </div></div>
+              <div class="cut-card"><div class="h">Остаток после резки</div><div class="c">
+                <div class="cut-kv"><span class="k">Отрезано (по замерам)</span><span class="cut-mono">${Math.round(consumedMm()*10)/10} мм, ${units.filter(u=>u.measured!=='').length} шт с пропилами</span><span class="k">Расчётный остаток</span><span class="cut-mono">${rem!=null?(rem>=0?'<b>'+rem+' мм</b>':'<b style="color:#b91c1c">'+rem+' мм — длина прутка меньше отрезанного</b>'):'укажите длину прутка'}</span></div>
+                <div class="cut-btns"><label class="cut-btn sm ${st.remMode==='do'?'pri':''}"><input type="radio" name="cut-rem" value="do" ${st.remMode==='do'?'checked':''} hidden>Деловой остаток → бирка</label><label class="cut-btn sm ${st.remMode==='scrap'?'pri':''}"><input type="radio" name="cut-rem" value="scrap" ${st.remMode==='scrap'?'checked':''} hidden>В обрезь</label><label class="cut-btn sm ghost ${st.remMode==='none'?'pri':''}"><input type="radio" name="cut-rem" value="none" ${st.remMode==='none'?'checked':''} hidden>Пруток остаётся</label></div>
+                <div class="cut-note">«Деловой остаток» создаст запись ДО на складе металла с длиной остатка. «В обрезь» — остаток списывается в отход. «Пруток остаётся» — списываются только отрезанные заготовки.</div>
+              </div></div>
+              <div class="cut-card"><div class="h">Ход операции</div><div class="c">
+                <div class="cut-kv"><span class="k">Начата</span><span>${st.startedAt?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+cutElapsed(st.startedAt):'—'}</span><span class="k">Норма / факт</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'} / ${st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10+' ч':'—'}</span></div>
+                <div class="cut-btns">
+                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?`<button class="cut-btn" id="cut-pause">⏸ Приостановить…</button>`:`<button class="cut-btn big pri" id="cut-start">▶ ${st.status==='Приостановлено'?'Продолжить':'Начать'}</button>`)}
+                  <button class="cut-btn big ok" id="cut-finish" ${done&&st.status!=='Выполнено'?'':'disabled'}>Завершить → ${t.nextOp?'передать на оп. '+esc(String(t.nextOp.num))+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'на склад/сборку'}</button>
+                </div>
+                <div class="cut-btns"><button class="cut-btn ghost sm" id="cut-labels" ${acc?'':'disabled'}>🖨 Бирки на заготовки</button><button class="cut-btn ghost sm" id="cut-save">Сохранить</button><span class="cut-note" id="cut-msg"></span></div>
+                <div class="cut-note">Завершение списывает отрезанный металл с карточки по замерам, оформляет остаток, закрывает задачу и ставит следующую операцию в очередь участка.</div>
+              </div></div>
+            </div>
+          </div></div>`;
+        wire();
+      };
+      const setMsg=(txt,err)=>{ const m=document.getElementById('cut-msg'); if(m){ m.style.color=err?'var(--red)':'var(--sl-500)'; m.textContent=txt; } };
+      const saveJournal=async()=>{ const rows=units.map(u=>({id:u.id,unit:u.unit,executor:u.executor,blankNo:u.blankNo,self:u.self,otk:u.otk,date:u.date,note:u.note,measured:u.measured,matCode:u.matCode}));
+        await postJson('/api/task/journal',{taskNum:t.num,rows}); const fresh=await cutFetchBoardTask(t.id); if(fresh){ (fresh.journal||[]).forEach(j=>{ const u=units[Number(j.unit)-1]; if(u)u.id=j.id; }); } };
+      const saveTask=async(body)=>postJson('/api/task/update',Object.assign({id:t.id},body));
+      const readInputs=()=>{ units.forEach(u=>{ const i=host.querySelector(`[data-meas="${u.unit}"]`); if(i&&!i.disabled){ const v=cutNum(i.value); u.measured=v==null?'':v; } const o=host.querySelector(`[data-otk="${u.unit}"]`); if(o)u.otk=o.value; }); const bl=host.querySelector('#cut-barlen'); if(bl){ const v=cutNum(bl.value); st.barLen=v==null?null:v; } const rm=host.querySelector('input[name="cut-rem"]:checked'); if(rm)st.remMode=rm.value; };
+      const pickMat=(m,confirmed)=>{ st.mat=m; st.matConfirmed=!!confirmed; if(m&&m.kind==='remnant'&&st.barLen==null){ const mm=/(\d{3,5})\s*мм/i.exec(String(m.sizes||'')); if(mm)st.barLen=Number(mm[1]); } };
+      const wire=()=>{
+        host.querySelector('#cut-back').onclick=()=>renderStation(host);
+        host.querySelector('#cut-classic').onclick=(e)=>{ e.preventDefault(); cutClassic=true; renderStationTask(host,t.id); cutClassic=false; };
+        const scan=host.querySelector('#cut-scan'); if(scan){ scan.onkeydown=(e)=>{ if(e.key!=='Enter')return; e.preventDefault(); const code=scan.value.trim().toUpperCase(); if(!code)return; const m=st.matList.find(x=>String(x.code||'').toUpperCase()===code)||st.matList.find(x=>code.includes(String(x.code||'').toUpperCase())); if(!m){ toast('Карточка '+code+' не найдена среди карточек склада металла.','err'); scan.select(); return; } readInputs(); pickMat(m,true); toast('Материал подтверждён: '+m.code,'ok'); paint(); }; }
+        const ms=host.querySelector('#cut-matsel'); if(ms)ms.onchange=()=>{ const [k,id]=ms.value.split(':'); const m=st.matList.find(x=>x.kind===k&&String(x.id)===String(id)); readInputs(); pickMat(m||null,false); paint(); };
+        const cf=host.querySelector('#cut-confirm'); if(cf)cf.onclick=()=>{ readInputs(); st.matConfirmed=true; paint(); };
+        host.querySelectorAll('[data-meas]').forEach(i=>i.addEventListener('change',()=>{ readInputs(); paint(); }));
+        host.querySelectorAll('[data-otk]').forEach(o=>o.addEventListener('change',async()=>{ readInputs(); const u=units[Number(o.dataset.otk)-1]; if(u&&u.otk){ u.note=(u.note?u.note+'; ':'')+'ОТК '+u.otk+' '+(meName||'')+' '+new Date().toLocaleString('ru-RU'); } paint(); try{ await saveJournal(); }catch(e){ setMsg('Ошибка: '+e.message,true); } }));
+        host.querySelectorAll('input[name="cut-rem"]').forEach(r=>r.addEventListener('change',()=>{ readInputs(); paint(); }));
+        const bl=host.querySelector('#cut-barlen'); if(bl)bl.addEventListener('change',()=>{ readInputs(); paint(); });
+        host.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{ readInputs(); const u=units[Number(b.dataset.u)-1]; if(!u)return;
+          if(b.dataset.act==='ok'){ if(!st.matConfirmed){ toast('Сначала подтвердите карточку металла (скан бирки).','err'); return; } u.self='годен'; }
+          else { const ok=await uiConfirm(`Заготовка №${u.unit}: длина ${u.measured} мм вне допуска. Отметить как брак?`,{ok:'Брак',danger:true}); if(!ok)return; u.self='брак'; }
+          u.date=new Date().toISOString().slice(0,10); u.executor=u.executor||meName; u.blankNo=cutMarking(t,u.unit); u.matCode=st.mat?st.mat.code:'';
+          if(st.status!=='В работе'&&st.status!=='Выполнено'){ st.status='В работе'; if(!st.startedAt)st.startedAt=cutNow(); try{ await saveTask({status:'В работе',startedAt:st.startedAt}); }catch{} }
+          paint(); setMsg('Сохранение…'); try{ await saveJournal(); setMsg('Сохранено ✓'); }catch(e){ setMsg('Ошибка: '+e.message,true); } });
+        const start=host.querySelector('#cut-start'); if(start)start.onclick=async()=>{ readInputs(); st.status='В работе'; if(!st.startedAt)st.startedAt=cutNow(); try{ await saveTask({status:'В работе',startedAt:st.startedAt,pauseReason:''}); t.pauseReason=''; }catch(e){ toast('Не сохранено: '+e.message,'err'); } paint(); };
+        const pause=host.querySelector('#cut-pause'); if(pause)pause.onclick=async()=>{ readInputs(); const w=document.createElement('div'); w.className='ui-dlg'; w.innerHTML=`<div class="ui-dlg-box" role="dialog"><div class="ui-dlg-h">Почему приостанавливаем?</div><div class="ui-dlg-t" style="display:grid;gap:8px">${CUT_PAUSE.map(r=>`<button class="cut-btn" data-r="${esc(r)}">${esc(r)}</button>`).join('')}</div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button></div></div>`; document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+          w.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{ let reason=b.dataset.r; w.remove(); if(reason==='другое'){ reason=await uiPrompt('Причина приостановки','',{placeholder:'коротко'}); if(!reason)return; } st.status='Приостановлено'; t.pauseReason=reason; try{ await saveTask({status:'Приостановлено',pauseReason:reason}); toast('Приостановлено: '+reason+' — мастер увидит на обзоре.','ok'); }catch(e){ toast('Не сохранено: '+e.message,'err'); } paint(); }); };
+        const otk=host.querySelector('#cut-otk'); if(otk)otk.onclick=async()=>{ otk.disabled=true; try{ const j=await postJson('/api/task/notify',{taskId:t.id,kind:'otk',text:`Готово к контролю ${units.filter(u=>unitState(u)==='q').length} шт, ${t.section||''}, ${eqTxt}`}); st.otkCalled=true; toast(j.sent?'Контролёр вызван (уведомление в Bitrix).':'Не удалось отправить уведомление.',j.sent?'ok':'err'); }catch(e){ toast('Ошибка: '+e.message,'err'); } paint(); };
+        const tech=host.querySelector('#cut-tech'); if(tech)tech.onclick=async()=>{ const txt=await uiPrompt('Вопрос технологу','',{placeholder:'что не так / что уточнить'}); if(!txt)return; try{ const j=await postJson('/api/task/notify',{taskId:t.id,kind:'tech',text:txt}); toast(j.sent?'Отправлено технологу.':'Не удалось отправить.',j.sent?'ok':'err'); }catch(e){ toast('Ошибка: '+e.message,'err'); } };
+        const lab=host.querySelector('#cut-labels'); if(lab)lab.onclick=()=>{ readInputs(); cutLabelsPrint(t,units,st.mat); };
+        const sv=host.querySelector('#cut-save'); if(sv)sv.onclick=async()=>{ readInputs(); setMsg('Сохранение…'); try{ await saveJournal(); setMsg('Сохранено ✓'); }catch(e){ setMsg('Ошибка: '+e.message,true); } };
+        const fin=host.querySelector('#cut-finish'); if(fin)fin.onclick=async()=>{ readInputs(); if(st.busy)return;
+          const n=units.filter(u=>u.measured!==''&&u.self).length; const mm=Math.round(consumedMm()*10)/10; const rem=(st.barLen!=null&&st.barLen>0)?Math.round((st.barLen-mm)*10)/10:null;
+          const m=st.mat; const lines=[`Принято ${accepted()} шт${units.some(u=>unitState(u)==='x')?', брак '+units.filter(u=>unitState(u)==='x').length+' шт':''}.`];
+          if(m&&st.blankInfo&&st.blankInfo.isBlankOp){ lines.push(`Списать ${mm} мм (${n} шт с пропилами) с карточки ${m.code}.`); if(st.remMode==='do'&&rem!=null&&rem>0)lines.push(`Остаток ${rem} мм оприходовать как деловой остаток (ДО).`); else if(st.remMode==='scrap'&&rem!=null&&rem>0)lines.push(`Остаток ${rem} мм — в обрезь.`); else lines.push('Остаток прутка остаётся на карточке.'); }
+          else lines.push('Списание металла: карточка не выбрана или операция не первая по МК — списания не будет.');
+          lines.push(t.nextOp?`Задача закроется, оп. ${t.nextOp.num} ${t.nextOp.name} встанет в очередь${t.nextOp.section?' на '+t.nextOp.section:''}.`:'Задача закроется.');
+          const ok=await uiConfirm(lines.join('\n'),{title:'Завершить операцию',ok:'Завершить'}); if(!ok)return; st.busy=true; fin.disabled=true; setMsg('Завершение…');
+          try{ await saveJournal();
+            if(m&&st.blankInfo&&st.blankInfo.isBlankOp&&mm>0){ const body={taskId:t.id,itemKind:m.kind,itemId:Number(m.id),partsCount:n,perPart:false,unit:m.kind==='remnant'?'кг':'мм',qtyValue:mm,author:meName};
+              if(m.kind==='remnant'){ const w=Number(m.weight)||0; const bl=st.barLen||0; body.qtyValue=bl>0?Math.round(w*mm/bl*1000)/1000:w; if(st.remMode==='do'&&rem!=null&&rem>0&&bl>0){ body.scrapValue=Math.round(w*rem/bl*1000)/1000; body.scrapUnit='кг'; } }
+              else if(st.remMode==='do'&&rem!=null&&rem>0){ body.scrapValue=rem; body.scrapUnit='мм'; }
+              const j=await postJson('/api/metal/blank/issue',body); toast(`Списано ${mtNum(j.qtyKg)} кг (${j.code||m.code})${j.remnant?' · деловой остаток '+j.remnant.code:''}`,'ok'); }
+            const hours=st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10:null;
+            await saveTask({status:'Выполнено',factQty:accepted(),factTime:(t.factTime!==''&&t.factTime!=null)?t.factTime:(hours||''),finishedAt:cutNow(),note:(t.note||'')+(units.some(u=>unitState(u)==='x')?' брак: '+units.filter(u=>unitState(u)==='x').map(u=>'№'+u.unit).join(', '):'')});
+            st.status='Выполнено'; setMsg('Операция завершена ✓'); paint();
+            if(await uiConfirm('Напечатать бирки на принятые заготовки?',{ok:'Печать',cancel:'Позже'}))cutLabelsPrint(t,units,st.mat);
+            setTimeout(()=>load(),400);
+          }catch(e){ st.busy=false; setMsg('Ошибка: '+e.message,true); toast('Не завершено: '+e.message,'err'); paint(); } };
+      };
+      paint();
+      // материал: кандидаты карточек склада (та же выдача, что у «Заготовка → факт»)
+      (async()=>{ try{ const d=await (await fetch('/api/metal/blank-candidates?taskId='+encodeURIComponent(t.id))).json(); if(!d||d.error)return; st.blankInfo=d;
+          const list=[...(d.candidates||[]),...(d.remnants||[])]; st.matList=list;
+          const prev=units.map(u=>u.matCode).find(Boolean); const chosen=(prev&&list.find(x=>x.code===prev))||list.find(x=>x.tag==='chosen')||list.find(x=>x.tag==='recommended')||null;
+          readInputs(); pickMat(chosen,!!prev&&!!chosen); paint(); const sc=host.querySelector('#cut-scan'); if(sc&&!st.matConfirmed)sc.focus(); }catch{} })();
+      // таймер в шапке
+      const tm=setInterval(()=>{ if(!document.body.contains(host)||!host.querySelector('#cut-stpill')){ clearInterval(tm); return; } if(st.status==='В работе'&&st.startedAt){ const p=host.querySelector('#cut-stpill .cut-pill'); if(p)p.textContent='в работе · '+cutElapsed(st.startedAt); } },30000);
     }
     // МК-резерв металла, этап 2 (утв. владельцем 21.07): панель «Заготовка → факт» у задачи первой
     // операции МК — оператор видит рекомендацию технолога (этап 1) и списывает со склад факт по
@@ -14491,20 +14681,27 @@
     }
     // ── K-186: автофигура для операций резки и предпросмотр экрана оператора ──
     const RT_CUT_TYPES=new Set(['ОП-ЗАГ','ОП-МПЛ','ОП-УШМ','ОП-ПЛ']);
-    function rtCutFigureSvg(o){ const L=o.L||'', al=o.allowance||'', qty=o.qty||'', blank=o.blank||'заготовка', dia=o.dia||''; const W=560,H=150, x0=40, barY=52, barH=44, barW=380; const alW=al?54:0;
+    // K-187: технолог задаёт размер по чертежу и припуск, оператор видит итоговую длину реза L = размер + припуск (припуск — внутри L, штриховкой)
+    function cutNum(v){ const n=parseFloat(String(v??'').replace(',','.').replace(/[^\d.\-]/g,'')); return Number.isFinite(n)?n:null; }
+    function cutParseTol(t){ const s=String(t||'').trim().replace(',','.'); if(!s)return null; let m=/^±\s*([\d.]+)$/.exec(s)||/^\+\/-\s*([\d.]+)$/.exec(s)||/^\+-\s*([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[1]),hi:Number(m[1]),text:'±'+m[1]};
+      m=/^\+\s*([\d.]+)\s*[\/ ]\s*-\s*([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[2]),hi:Number(m[1]),text:'+'+m[1]+'/−'+m[2]};
+      m=/^-\s*([\d.]+)\s*[\/ ]\s*\+\s*([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[1]),hi:Number(m[2]),text:'+'+m[2]+'/−'+m[1]};
+      m=/^\+\s*([\d.]+)$/.exec(s); if(m)return {lo:0,hi:Number(m[1]),text:'+'+m[1]}; m=/^-\s*([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[1]),hi:0,text:'−'+m[1]};
+      m=/^([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[1]),hi:Number(m[1]),text:'±'+m[1]}; return {lo:null,hi:null,text:s}; }
+    function rtCutFigureSvg(o){ const size=cutNum(o.size), al=cutNum(o.allowance)||0; const L=o.L!=null&&o.L!==''?cutNum(o.L):(size!=null?size+al:null); const tol=o.tol?cutParseTol(o.tol):null; const qty=o.qty||'', blank=o.blank||'заготовка', dia=o.dia||''; const W=560,H=150, x0=40, barY=52, barH=44, barW=380; const alW=al?54:0;
       return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:560px;display:block;font-family:system-ui,sans-serif">
         <rect x="${x0}" y="${barY}" width="${barW}" height="${barH}" rx="${dia?barH/2:4}" fill="#e8eef7" stroke="#1F4E79" stroke-width="2"/>
         ${alW?`<defs><pattern id="hatch${o.id||''}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#b45309" stroke-width="2"/></pattern></defs><rect x="${x0+barW-alW}" y="${barY}" width="${alW}" height="${barH}" rx="${dia?barH/2:4}" fill="url(#hatch${o.id||''})" stroke="#b45309" stroke-width="1.5"/>`:''}
-        <line x1="${x0+barW-alW}" y1="${barY-6}" x2="${x0+barW-alW}" y2="${barY+barH+6}" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/>
-        <text x="${x0+barW-alW}" y="${barY-12}" font-size="12" fill="#b91c1c" text-anchor="middle">рез</text>
-        <line x1="${x0}" y1="${barY+barH+26}" x2="${x0+barW-alW}" y2="${barY+barH+26}" stroke="#1F4E79" stroke-width="1.5" marker-start="url(#arrL)" marker-end="url(#arrR)"/>
+        <line x1="${x0+barW}" y1="${barY-6}" x2="${x0+barW}" y2="${barY+barH+6}" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/>
+        <text x="${x0+barW}" y="${barY-12}" font-size="12" fill="#b91c1c" text-anchor="middle">рез</text>
+        <line x1="${x0}" y1="${barY+barH+26}" x2="${x0+barW}" y2="${barY+barH+26}" stroke="#1F4E79" stroke-width="1.5" marker-start="url(#arrL)" marker-end="url(#arrR)"/>
         <defs><marker id="arrL" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8" fill="none" stroke="#1F4E79" stroke-width="1.5"/></marker><marker id="arrR" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#1F4E79" stroke-width="1.5"/></marker></defs>
-        <text x="${x0+(barW-alW)/2}" y="${barY+barH+44}" font-size="15" font-weight="700" fill="#1F4E79" text-anchor="middle">L = ${esc(L||'?')} мм</text>
-        ${alW?`<text x="${x0+barW-alW/2}" y="${barY+barH+44}" font-size="11" fill="#b45309" text-anchor="middle">припуск ${esc(al)}</text>`:''}
-        <text x="${x0}" y="${barY-12}" font-size="12" fill="#41546a">${esc(blank)}${dia?' · '+esc(dia):''}</text>
+        <text x="${x0+(barW-alW)/2}" y="${barY+barH+44}" font-size="15" font-weight="700" fill="#1F4E79" text-anchor="middle">L = ${L!=null?esc(String(L)):'?'}${tol&&tol.text?' '+esc(tol.text):''} мм</text>
+        ${alW?`<text x="${x0+barW-alW/2+6}" y="${barY+barH+44}" font-size="11" fill="#b45309" text-anchor="middle">в т.ч. припуск ${esc(String(al))}</text>`:''}
+        <text x="${x0}" y="${barY-12}" font-size="12" fill="#41546a">${esc(blank)}${dia?' · '+esc(dia):''}${size!=null&&al?' · по чертежу '+esc(String(size)):''}</text>
         ${qty?`<text x="${W-16}" y="${barY+barH/2+5}" font-size="16" font-weight="700" fill="#1c2b3a" text-anchor="end">× ${esc(qty)}</text>`:''}
       </svg>`; }
-    function rtCutFigureFromOp(op,ot){ const pp=(op.paramPlan||[]); const g=(n)=>{ const x=pp.find(p=>String(p.name).toLowerCase().startsWith(n)); return x?x.norm:''; }; const blank=(op.planMaterials||[]).find(m=>m.role==='Заготовка'); const bl=blank?blank.name:(rtWiz.route&&rtWiz.route.material)||''; return rtCutFigureSvg({id:'w'+(op._idx||''),L:g('размер'),allowance:g('припуск'),qty:g('количество'),blank:bl,dia:''}); }
+    function rtCutFigureFromOp(op,ot){ const pp=(op.paramPlan||[]); const g=(n)=>{ const x=pp.find(p=>String(p.name).toLowerCase().startsWith(n)); return x?x.norm:''; }; const blank=(op.planMaterials||[]).find(m=>m.role==='Заготовка'); const bl=blank?blank.name:(rtWiz.route&&rtWiz.route.material)||''; const gt=(n)=>{ const x=pp.find(p=>String(p.name).toLowerCase().startsWith(n)); return x?x.tol:''; }; return rtCutFigureSvg({id:'w'+(op._idx||''),size:g('размер'),tol:gt('размер'),allowance:g('припуск'),qty:g('количество'),blank:bl,dia:''}); }
     function rtOperatorPreviewHtml(op,i){ const ot=rtOtById(op.opTypeId)||{}; const rt=rtWiz.route||{}; const isCut=RT_CUT_TYPES.has(ot.code||''); const pp=op.paramPlan||[]; const mats=(op.planMaterials||[]).filter(m=>m.canonId||m.name); const tools=String(op.tooling||'').split(/\s*;\s*/).filter(Boolean);
       return `<div style="border:1px solid var(--sl-300);border-radius:var(--r-m);overflow:hidden;background:#fff">
         <div style="background:#0f2238;color:#fff;padding:8px 12px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><b style="font-size:14px">${esc(op.name||ot.name||'Операция')}</b><span style="opacity:.8;font-size:12px">${esc(rt.name||'изделие')}${rt.designation?' · '+esc(rt.designation):''}</span><span style="margin-left:auto;font-size:12px;opacity:.8">${esc(ot.section||'')}${op.equipment?' · '+esc(op.equipment):''}</span></div>
@@ -15196,10 +15393,11 @@
           <div style="margin-top:10px"><label class="stg-flab">Чат «Производство ↔ Бухгалтерия ПБС» (id чата Bitrix)</label><div class="stg-hint">один общий чат: живое общение с бухгалтерией + уведомления портала (печатные формы утверждённых актов, черновики в 1С, проводки, сводка по понедельникам). Создаётся один раз кнопкой (участники: Кирилюк, Герасимов, Лещенок, Ветелкина) или укажите id существующего</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_accchat" value="${esc(STG.accChat||'')}" placeholder="напр. 9123" style="flex:1">${STG.accChat?'':'<button class="ui-btn" id="s_accchat_create" type="button">Создать чат</button>'}</div></div>
           <div style="margin-top:10px"><label class="stg-flab">Кто утверждает акты выпуска</label><div class="stg-hint">только эти сотрудники видят акты в «Мой кабинет» и могут утверждать; id пользователей Bitrix через запятую (сейчас: ${esc(STG.retroApprovers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_apr" value="${esc(STG.retroApprovers||'')}" placeholder="11,159" style="flex:1"><select class="stg-inp" id="s_apr_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_apr_names"></div></div>
           <div style="margin-top:10px"><label class="stg-flab">Кто согласует маршрутные карты (МК)</label><div class="stg-hint">видят МК на согласовании в «Мой кабинет», утверждают или возвращают автору; пусто — как у актов выпуска (сейчас: ${esc(STG.mkApprovers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_mka" value="${esc(STG.mkApprovers||'')}" placeholder="11,159" style="flex:1"><select class="stg-inp" id="s_mka_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_mka_names"></div></div>
+          <div style="margin-top:10px"><label class="stg-flab">Контролёры ОТК (кнопка «Вызвать контролёра» на экране оператора)</label><div class="stg-hint">получают уведомление Bitrix, когда партия готова к контролю; пусто — как согласующие МК (сейчас: ${esc(STG.otkUsers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_otk" value="${esc(STG.otkUsers||'')}" placeholder="11,159" style="flex:1"><select class="stg-inp" id="s_otk_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_otk_names"></div></div>
           <div style="margin-top:10px"><label class="stg-flab">Кто принимает заявки на закупку (ЗнЗ) в «Мой кабинет»</label><div class="stg-hint">эти сотрудники видят новые заявки с кнопкой «Принять в работу»; id пользователей Bitrix через запятую (сейчас: ${esc(STG.purchaseHandlers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_ph" value="${esc(STG.purchaseHandlers||'')}" placeholder="57" style="flex:1"><select class="stg-inp" id="s_ph_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_ph_names"></div></div>`)}
         ${card(aico('folder',18),'NAS — записи и файлы','Папка «06-Записи-ПБС» для просмотра файлов запросов.', !!STG.recordsRoot, `<div style="margin-top:12px"><label class="stg-flab">Путь к записям</label><div class="stg-hint">На NAS — примонтированная папка, напр. <code>/records</code></div><input class="stg-inp" id="s_records" value="${esc(STG.recordsRoot||'')}" placeholder="/records"></div>`)}
         <div style="margin-top:14px"><button class="stg-btn primary" id="s_saveInteg">Сохранить</button></div><div class="stg-msg" id="s_integMsg"></div>`;
-      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,onecWarehouse:$s('s_onecwh').value,onecDryRun:$s('s_onecdry').checked,accChat:$s('s_accchat').value,retroApprovers:$s('s_apr').value,purchaseHandlers:$s('s_ph').value,mkApprovers:$s('s_mka').value},'s_integMsg');
+      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,onecWarehouse:$s('s_onecwh').value,onecDryRun:$s('s_onecdry').checked,accChat:$s('s_accchat').value,retroApprovers:$s('s_apr').value,purchaseHandlers:$s('s_ph').value,mkApprovers:$s('s_mka').value,otkUsers:$s('s_otk').value},'s_integMsg');
       // K-161: чат бухгалтерии создаётся отсюда (один раз); список утверждающих — подбор из сотрудников ПБС
       const cc=$s('s_accchat_create'); if(cc)cc.onclick=async()=>{ cc.disabled=true; try{ const r=await fetch('/api/retro/chat-create',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); const j=await r.json(); if(j.error)throw new Error(j.error); stgMsg('s_integMsg',true,`Чат создан: chat${j.chat}, участники добавлены.`); STG.accChat=String(j.chat); renderSettings(stgHost); }catch(e){ stgMsg('s_integMsg',false,'Чат не создан: '+e.message); cc.disabled=false; } };
       (async()=>{ let staff=[]; try{ const sj=await (await fetch('/api/staff')).json(); staff=(sj&&sj.staff)||[]; }catch{}
@@ -15207,7 +15405,7 @@
           const paintNames=()=>{ const ids=ap.value.split(/[,;\s]+/).filter(Boolean); names.textContent=ids.length?ids.map(id=>{ const u=staff.find(x=>String(x.id)===id); return u?u.name:('id'+id); }).join(', '):emptyText; };
           pick.innerHTML='<option value="">— добавить сотрудника —</option>'+staff.map(u=>`<option value="${u.id}">${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join('');
           pick.onchange=()=>{ if(!pick.value)return; const ids=ap.value.split(/[,;\s]+/).filter(Boolean); if(!ids.includes(pick.value))ids.push(pick.value); ap.value=ids.join(','); pick.value=''; paintNames(); }; ap.oninput=paintNames; paintNames(); };
-        wire('s_apr','s_apr_pick','s_apr_names','список пуст — по умолчанию Кирилюк и Герасимов'); wire('s_ph','s_ph_pick','s_ph_names','список пуст — по умолчанию Рисалиева Динара'); wire('s_mka','s_mka_pick','s_mka_names','список пуст — как у актов выпуска'); })();
+        wire('s_apr','s_apr_pick','s_apr_names','список пуст — по умолчанию Кирилюк и Герасимов'); wire('s_ph','s_ph_pick','s_ph_names','список пуст — по умолчанию Рисалиева Динара'); wire('s_mka','s_mka_pick','s_mka_names','список пуст — как у актов выпуска'); wire('s_otk','s_otk_pick','s_otk_names','список пуст — как согласующие МК'); })();
     }
     // Параметры продаж/КП (K-05 §5.3) — «магические числа» ДП–З.1 вынесены сюда: порог подписи,
     // ставка НДС, плановая прибыль, SLA. Правятся без деплоя кода (server: settingsView/saveSettings).

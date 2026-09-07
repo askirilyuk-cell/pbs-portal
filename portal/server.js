@@ -1527,6 +1527,31 @@ const MK_PRODUCT_TYPES = ['РТИ', 'Биметалл', 'Оснастка ОК',
 //  ручной выбор — только Администратору («исправить статус»). Согласующие — Настройки → MK_APPROVERS (по умолчанию как у актов выпуска).
 const MK_STATUS = ['Черновик', 'На согласовании', 'Утверждена', 'В производстве', 'Выполнена'];
 const MK_EDITABLE = new Set(['Черновик']);
+// K-187: кого зовёт оператор кнопкой «Вызвать контролёра» — Настройки → OTK_USERS (по умолчанию как согласующие МК)
+const otkUserIds = () => { const raw = runtime.OTK_USERS != null ? runtime.OTK_USERS : (process.env.OTK_USERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : mkApproverIds(); };
+async function taskNotify(body, session) {
+  const kind = String(body.kind || '').trim();
+  if (!['otk', 'tech'].includes(kind)) { const e = new Error('kind должен быть otk или tech.'); e.status = 400; throw e; }
+  const tasks = await ncListSoft('tasks');
+  const t = tasks.find((x) => String(x.Id ?? x.id) === String(body.taskId));
+  if (!t) { const e = new Error('Задача не найдена.'); e.status = 404; throw e; }
+  const num = String(t['№ задачи'] || ''); const opRef = String(t['Операция (№ МК / № оп.)'] || ''); const mk = opRef.split(' оп.')[0] || '';
+  let ids = [];
+  if (kind === 'otk') ids = otkUserIds();
+  else {
+    const route = (await ncListSoft('routes')).find((r) => String(r['№ МК'] || '') === mk);
+    const aid = route && route['Автор (id)'] != null && route['Автор (id)'] !== '' ? Number(route['Автор (id)']) : 0;
+    ids = aid ? [aid] : mkApproverIds();
+  }
+  const who = (session && session.fio) || 'оператор';
+  const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+  const head = kind === 'otk' ? 'Вызов контролёра' : 'Вопрос технологу';
+  const text = `[Портал] ${head}: задача ${num} (${opRef}). ${String(body.text || '').trim() || (kind === 'otk' ? 'Партия готова к контролю.' : 'Нужна консультация по операции.')} — ${who}${portal ? `\n${portal}/#station` : ''}`;
+  let sent = 0; const dry = body.dryRun === true;
+  for (const id of ids) { if (dry) { sent++; continue; } if (await retroDm(id, text)) sent++; }
+  logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: num.split('/')[0], who, details: `${head} по задаче ${num}: ${String(body.text || '').trim() || '—'}` });
+  return { ok: true, sent, recipients: ids, dryRun: dry };
+}
 const mkApproverIds = () => { const raw = runtime.MK_APPROVERS != null ? runtime.MK_APPROVERS : (process.env.MK_APPROVERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : retroApproverIds(); };
 const MK_APPROVAL_COLS = [['Согласующий (id)', 'Number'], ['Согласующий', 'SingleLineText'], ['Отправил на согласование', 'SingleLineText'], ['Дата отправки', 'Date'], ['Утвердил', 'SingleLineText'], ['Дата утверждения', 'Date'], ['Комментарий согласующего', 'LongText'], ['Дата возврата', 'Date']];
 async function mkEnsureApprovalCols() { for (const [t, u] of MK_APPROVAL_COLS) { try { await ncEnsureColumn('routes', t, u); } catch (e) { console.warn('[МК] колонка «' + t + '» недоступна:', e.message); } } for (const st of MK_STATUS) { try { await ncEnsureSelectOption('routes', 'Статус МК', st); } catch (e) { console.warn('[МК] статус «' + st + '»:', e.message); } } }
@@ -1632,7 +1657,7 @@ async function saveRoute(body, session) {
   let routeId = (body.id != null && body.id !== '') ? Number(body.id) : null;
   // K-166: автор МК — кто создал в портале (для «Мои черновики» и Ф.13); у старых МК без автора — тот, кто сохраняет
   try { await ncEnsureColumn('routes', 'Автор', 'SingleLineText'); const fio = (session && session.fio) || '';
-    if (fio) { const prev = routeId != null ? (await ncListSoft('routes')).find((x) => (x.Id ?? x.id) === routeId) : null; if (!prev || !String(prev['Автор'] || '').trim()) routeRow['Автор'] = fio; } }
+    if (fio) { const prev = routeId != null ? (await ncListSoft('routes')).find((x) => (x.Id ?? x.id) === routeId) : null; if (!prev || !String(prev['Автор'] || '').trim()) { routeRow['Автор'] = fio; if (session && session.userId) { await ncEnsureColumn('routes', 'Автор (id)', 'SingleLineText'); routeRow['Автор (id)'] = String(session.userId); } } } } // K-187: id автора — для «Сообщить технологу»
   catch (e) { console.warn('МК: колонка «Автор» недоступна:', e.message); }
   let mk = '';
   let oldStatusMk = null; // МК-резерв металла (этап 1): нужен статус ДО этого сохранения — иначе не увидеть переход «→ В производстве»
@@ -6235,6 +6260,9 @@ function buildTaskPatch(body) {
   if ('selfControl' in body) patch['Самоконтроль (С)'] = !!body.selfControl;
   if ('otk' in body) patch['Контроль ОТК'] = !!body.otk;
   if ('note' in body) patch['Примечание'] = String(body.note || '');
+  if ('pauseReason' in body) patch['Причина приостановки'] = String(body.pauseReason || ''); // K-187
+  if ('startedAt' in body) patch['Начато (факт)'] = body.startedAt ? String(body.startedAt) : null;
+  if ('finishedAt' in body) patch['Завершено (факт)'] = body.finishedAt ? String(body.finishedAt) : null;
   if (patch['Статус'] === 'Выполнено' && !patch['Дата факт.'] && !body.factDate) {
     patch['Дата факт.'] = new Date().toISOString().slice(0, 10);
   }
@@ -6252,6 +6280,11 @@ async function buildBoardLive() {
     ncListSoft('journal'),
   ]);
   const employees = await ncListSoft('employees');
+  const equipmentRows = await ncListSoft('equipment'); // K-187: станок на экране оператора
+  const eqByInv = new Map(equipmentRows.map((r) => [String(r['Инв. №'] || '').trim(), r]));
+  const orderByIdB = indexById(orders);
+  const opsByRouteId = new Map();
+  for (const op of operations) { const k = String(op.routes_id ?? ''); if (!k) continue; if (!opsByRouteId.has(k)) opsByRouteId.set(k, []); opsByRouteId.get(k).push(op); }
   const routeByMk = new Map(routes.map((r) => [String(r['№ МК']), r]));
   const routeById = new Map(routes.map((r) => [r.Id ?? r.id, r]));
   const opById = indexById(operations), otById = indexById(opTypes), secById = indexById(sections);
@@ -6274,6 +6307,15 @@ async function buildBoardLive() {
     const mk = op.split(' оп.')[0] || '';
     const route = routeByMk.get(mk) || {};
     const secCode = section['Код'] || '', secName = section['Участок'] || '';
+    // K-187: контекст экрана оператора — операция N из M, следующая операция, заказ, станок
+    const routeOpsAll = (opsByRouteId.get(String(route.Id ?? route.id ?? '')) || []).slice().sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
+    const opIdx = routeOpsAll.findIndex((x) => idOf(x) === idOf(operation));
+    const nextOpRow = opIdx >= 0 ? routeOpsAll[opIdx + 1] : null;
+    const nextOp = (() => { if (!nextOpRow) return null; const nt = otById.get(nextOpRow.op_types_id) || {}; const nsId = (Array.isArray(nt['Участки']) && nt['Участки'][0] && idOf(nt['Участки'][0])) ?? nt.sections_id; const ns = secById.get(nsId) || {};
+      return { num: nextOpRow['№ операции'] ?? '', name: nextOpRow['Операция'] || nt['Наименование'] || '', section: ns['Код'] || '' }; })();
+    const orderRow = orderByIdB.get(position.orders_id) || orderByIdB.get(t.orders_id) || {};
+    const invList = String(t['Оборудование'] || operation['Оборудование'] || opType['Оборудование (инв. №)'] || '').split(/[,;]+/).map((x) => x.trim()).filter(Boolean);
+    const equipList = invList.map((inv) => { const m = /ПБС-ОБ-\d+/i.exec(inv); const key = m ? m[0].toUpperCase() : inv; const e = eqByInv.get(key); return e ? { invNo: key, name: e['Наименование'] || '', model: e['Модель'] || '' } : { invNo: key, name: '', model: '' }; });
     // допущенные исполнители участка (связь «Сотрудники участка»): для выпадающего списка в журнале §7
     const executors = (section['Сотрудники участка'] || [])
       .map((x) => { const f = empById.get(idOf(x)); return (f && f['ФИО']) || x['ФИО'] || ''; })
@@ -6281,7 +6323,8 @@ async function buildBoardLive() {
     const jrowsT = (journalByTask.get(String(t['№ задачи'] || '')) || [])
       .map((j) => ({ id: idOf(j), unit: j['№ единицы'] ?? '', executor: j['Исполнитель'] || '',
         blankNo: j['№ заготовки / приёмки'] || '', self: j['Самоконтроль'] || '', otk: j['Контроль ОТК'] || '',
-        date: j['Дата'] || '', note: j['Примечание'] || '' }))
+        date: j['Дата'] || '', note: j['Примечание'] || '',
+        measured: j['Измерено'] ?? '', matCode: j['Карточка металла'] || '' })) // K-187
       .sort((a, b) => (Number(a.unit) || 0) - (Number(b.unit) || 0));
     // параметры: значения задачи (если есть), иначе набор из типа операции (без значения)
     //  норматив/допуск — план (read-only для рабочего), факт — то, что забил рабочий.
@@ -6322,6 +6365,12 @@ async function buildBoardLive() {
       journal: jrowsT,
       factDate: t['Дата факт.'] || '', factQty: t['Кол-во факт.'] ?? '', factTime: t['Время факт. (ч)'] ?? '',
       selfControl: !!t['Самоконтроль (С)'], otk: !!t['Контроль ОТК'], note: t['Примечание'] || '',
+      // K-187: экран оператора
+      opTotal: routeOpsAll.length, opIndex: opIdx >= 0 ? opIdx + 1 : null, nextOp,
+      numPz: String(t['№ задачи'] || '').split('/')[0] || '', posNo: position['№ позиции'] ?? '',
+      customer: orderRow['Заказчик / Инициатор'] || '', orderDue: position['Срок готовности'] || orderRow['Плановый срок'] || '',
+      startedAt: t['Начато (факт)'] || '', finishedAt: t['Завершено (факт)'] || '', pauseReason: t['Причина приостановки'] || '',
+      controlPoint: operation['Точка контроля'] || '', equipList, mk, routeAuthor: route['Автор'] || '',
     };
   }
 
@@ -9453,7 +9502,7 @@ function settingsView() {
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
     // K-159: 1С и бухгалтерия
-    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','), mkApprovers: mkApproverIds().join(','),
+    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','), mkApprovers: mkApproverIds().join(','), otkUsers: otkUserIds().join(','),
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -9494,6 +9543,7 @@ function saveSettings(body) {
   if (body.onecDryRun != null) next.ONEC_DRY_RUN = (body.onecDryRun === true || body.onecDryRun === 'true' || body.onecDryRun === 1 || body.onecDryRun === '1') ? '1' : '0';
   if (typeof body.accChat === 'string') next.BITRIX_ACC_CHAT = body.accChat.trim().replace(/^chat/, '');
   if (typeof body.mkApprovers === 'string') next.MK_APPROVERS = body.mkApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
+  if (typeof body.otkUsers === 'string') next.OTK_USERS = body.otkUsers.split(/[,;\s]+/).map(Number).filter(Boolean).join(','); // K-187
   if (typeof body.purchaseHandlers === 'string') next.PURCHASE_HANDLERS = body.purchaseHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   if (typeof body.retroApprovers === 'string') next.RETRO_APPROVERS = body.retroApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
@@ -12611,6 +12661,7 @@ const server = http.createServer(async (req, res) => {
       if (body.id == null || body.id === '') return sendJson(res, 400, { error: 'Не указан id задачи.' });
       let patch;
       try { patch = buildTaskPatch(body); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+      if ('pauseReason' in body) { try { await ncEnsureColumn('tasks', 'Причина приостановки', 'SingleLineText'); } catch (e) { console.warn('K-187: колонка «Причина приостановки»:', e.message); } }
       const params = Array.isArray(body.params) ? body.params.filter((p) => p && p.pid != null) : [];
       if (!Object.keys(patch).length && !params.length) return sendJson(res, 400, { error: 'Нет полей для изменения.' });
       try {
@@ -12638,6 +12689,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, patch, params: params.length });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
+    if (p === '/api/task/notify' && req.method === 'POST') { // K-187: «Вызвать контролёра» / «Сообщить технологу»
+      if (!isLive()) return sendJson(res, 501, { error: 'Только в LIVE-режиме.' });
+      try { return sendJson(res, 200, await taskNotify(await readBody(req), sessionFromReq(req))); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/task/journal' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' });
       const body = await readBody(req);
@@ -12650,8 +12706,11 @@ const server = http.createServer(async (req, res) => {
         'Исполнитель': String(r.executor || ''), '№ заготовки / приёмки': String(r.blankNo || ''),
         'Самоконтроль': ssel(r.self), 'Контроль ОТК': ssel(r.otk),
         'Дата': r.date ? String(r.date).slice(0, 10) : null, 'Примечание': String(r.note || ''),
+        'Измерено': (r.measured === '' || r.measured == null || !Number.isFinite(Number(r.measured))) ? null : Number(r.measured), // K-187
+        'Карточка металла': String(r.matCode || ''),
       });
-      const hasData = (r) => r.executor || r.blankNo || r.self || r.otk || r.date || r.note;
+      const hasData = (r) => r.executor || r.blankNo || r.self || r.otk || r.date || r.note || r.measured || r.matCode;
+      try { await ncEnsureColumn('journal', 'Измерено', 'Decimal'); await ncEnsureColumn('journal', 'Карточка металла', 'SingleLineText'); } catch (e) { console.warn('K-187: колонки журнала:', e.message); }
       const rows = Array.isArray(body.rows) ? body.rows : [];
       const updates = [], creates = [];
       for (const r of rows) { if (r.id != null) updates.push({ Id: r.id, ...jval(r) }); else if (hasData(r)) creates.push(jval(r)); }

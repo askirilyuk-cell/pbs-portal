@@ -14200,7 +14200,7 @@
       const opt=(arr,def)=>(arr||[]).map(o=>`<option${String(o)===String(def)?' selected':''}>${esc(o)}</option>`).join('');
       return `<div class="card pad"><div class="rt-cardh">Шаг 1 · Изделие</div>
         <div class="rt-g3">
-          <div class="rt-fld"><label>Тип МК</label><select class="rt-inp" id="rb-type">${opt(cat.mkTypes,rt.type)}</select><div class="rt-rt" style="margin-top:4px" id="rb-type-hint"></div></div>
+          <div class="rt-fld"><label>Тип МК</label><select class="rt-inp" id="rb-type">${opt(cat.mkTypes,rt.type)}</select><div id="rb-type-hint" style="margin-top:4px;font-size:11px;color:var(--sub);line-height:1.4"></div></div>
           <div class="rt-fld" style="grid-column:span 2"><label>Наименование изделия / компонента</label><input class="rt-inp" id="rb-name" value="${rtEscA(rt.name)}" placeholder="напр. Втулка биметаллическая 2ДТ.180"></div>
           <div class="rt-fld"><label>Проект ОКР</label><select class="rt-inp" id="rb-proj"><option value="">— не выбран —</option>${kdProjects.map(p=>`<option value="${rtEscA(p.decNo)}"${p.decNo===(rt.projectDecNo||'')?' selected':''}>ПБС.${esc(p.decNo)} · ${esc(p.name||'')}</option>`).join('')}</select></div>
           <div class="rt-fld"><label>Изделие / обозначение (чертёж)</label><input class="rt-inp" id="rb-desig" value="${rtEscA(rt.designation)}" placeholder="2ДТ.180.00.00"></div>

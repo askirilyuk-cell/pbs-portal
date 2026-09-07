@@ -1338,7 +1338,7 @@ async function buildRoutesLive() {
     return {
       id: rid, mk: r['№ МК'] || '', type: r['Тип МК'] || '', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '',
-      revision: r['Ревизия'] || '', status: r['Статус'] || '', statusMk: r['Статус МК'] || 'Черновик', author: r['Автор'] || '', opCount: _linkIds(r['Операции маршрута']).length,
+      revision: r['Ревизия'] || '', status: r['Статус'] || '', statusMk: r['Статус МК'] || 'Черновик', author: r['Автор'] || '', approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', opCount: _linkIds(r['Операции маршрута']).length,
       hasCoop, coopDone: hasCoop ? coopDone : null, coopOverdueDays,
     };
   }).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
@@ -1414,6 +1414,7 @@ async function buildRouteCard(id) {
       id: r.Id ?? r.id, mk: r['№ МК'] || '', type: r['Тип МК'] || '', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
+      approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
       blank, blankText: mkBlankText(blank),
       bom: mkBomParse(r['Спецификация материалов']), bomText: mkBomText(mkBomParse(r['Спецификация материалов'])), // K-160
@@ -1517,7 +1518,55 @@ function mkOpFiles(mk, opNum, kind) {
 
 // опции select МК (совпадают с ORDER_OPTS['Тип продукции'], но объявлены раньше него — литералом)
 const MK_PRODUCT_TYPES = ['РТИ', 'Биметалл', 'Оснастка ОК', 'ЗИП ПВО', 'Механообработка', 'Металлоконструкции'];
-const MK_STATUS = ['Черновик', 'Утверждена', 'В производстве'];
+// K-171 (решение владельца 07.09): статусы МК ставит портал — Черновик → На согласовании → Утверждена → В производстве (при генерации задач) → Выполнена;
+//  ручной выбор — только Администратору («исправить статус»). Согласующие — Настройки → MK_APPROVERS (по умолчанию как у актов выпуска).
+const MK_STATUS = ['Черновик', 'На согласовании', 'Утверждена', 'В производстве', 'Выполнена'];
+const MK_EDITABLE = new Set(['Черновик']);
+const mkApproverIds = () => { const raw = runtime.MK_APPROVERS != null ? runtime.MK_APPROVERS : (process.env.MK_APPROVERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : retroApproverIds(); };
+const MK_APPROVAL_COLS = [['Согласующий (id)', 'Number'], ['Согласующий', 'SingleLineText'], ['Отправил на согласование', 'SingleLineText'], ['Дата отправки', 'Date'], ['Утвердил', 'SingleLineText'], ['Дата утверждения', 'Date'], ['Комментарий согласующего', 'LongText'], ['Дата возврата', 'Date']];
+async function mkEnsureApprovalCols() { for (const [t, u] of MK_APPROVAL_COLS) { try { await ncEnsureColumn('routes', t, u); } catch (e) { console.warn('[МК] колонка «' + t + '» недоступна:', e.message); } } for (const st of MK_STATUS) { try { await ncEnsureSelectOption('routes', 'Статус МК', st); } catch (e) { console.warn('[МК] статус «' + st + '»:', e.message); } } }
+const mkIsAdmin = (session) => !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
+// смена статуса МК с синхронизацией резерва металла (заготовка оп. №1)
+async function setMkStatus(routeId, newStatus, patchExtra) {
+  const [routes, operations] = await Promise.all([ncListSoft('routes'), ncListSoft('operations')]);
+  const r = routes.find((x) => (x.Id ?? x.id) === Number(routeId)); if (!r) { const e = new Error('Маршрут не найден.'); e.status = 404; throw e; }
+  const oldStatusMk = String(r['Статус МК'] || 'Черновик').trim();
+  await ncUpdate('routes', Number(routeId), { 'Статус МК': newStatus, ...(patchExtra || {}) });
+  let blankReserve = null;
+  if (oldStatusMk !== newStatus) { try { const first = operations.filter((o) => Number(o.routes_id) === Number(routeId)).sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0))[0];
+    blankReserve = await syncMkMetalReserve({ routeId: Number(routeId), mk: r['№ МК'] || '', oldStatusMk, newStatusMk: newStatus, blankRaw: (first && first['Входящие материалы']) || '' }); } catch (e) { console.warn(`МК ${r['№ МК']}: резерв при смене статуса:`, e.message); } }
+  return { ok: true, id: Number(routeId), mk: r['№ МК'] || '', from: oldStatusMk, to: newStatus, blankReserve };
+}
+async function mkApprovers() { const ids = mkApproverIds(); let staff = []; try { staff = await getStaffList(); } catch { staff = []; } return ids.map((id) => { const u = staff.find((x) => Number(x.id) === id); return { id, name: u ? u.name : ('id' + id), position: u ? u.position : '' }; }); }
+// маршрут согласования МК: Черновик → На согласовании → Утверждена | назад в Черновик (на доработку с комментарием)
+async function mkSetStatus(body, session) {
+  const routes = await ncListSoft('routes'); const r = routes.find((x) => String(x.Id ?? x.id) === String(body.id));
+  if (!r) { const e = new Error('Маршрут не найден.'); e.status = 404; throw e; }
+  const from = String(r['Статус МК'] || 'Черновик').trim(); const to = String(body.status || '').trim(); const admin = mkIsAdmin(session);
+  const meId = session && session.userId != null ? String(session.userId) : ''; const fio = (session && session.fio) || 'портал';
+  const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, ''); const link = `${portal}/#routes/${encodeURIComponent(r['№ МК'] || r.Id)}`;
+  const allowed = { 'Черновик': ['На согласовании', 'Утверждена'], 'На согласовании': ['Утверждена', 'Черновик'], 'Утверждена': ['Черновик', 'В производстве', 'Выполнена'], 'В производстве': ['Выполнена', 'Утверждена'], 'Выполнена': ['В производстве'] };
+  if (!admin && !(allowed[from] || []).includes(to)) { const e = new Error(`Переход «${from}» → «${to}» не разрешён.`); e.status = 400; throw e; }
+  await mkEnsureApprovalCols();
+  const patch = {};
+  if (to === 'На согласовании') {
+    const apId = Number(body.approverId); if (!apId) { const e = new Error('Выберите согласующего.'); e.status = 400; throw e; }
+    if (!mkApproverIds().includes(apId)) { const e = new Error('Этот сотрудник не в списке согласующих МК (Настройки).'); e.status = 400; throw e; }
+    patch['Согласующий (id)'] = apId; patch['Согласующий'] = String(body.approverName || '').trim() || ('id' + apId); patch['Отправил на согласование'] = fio; patch['Дата отправки'] = whToday(); patch['Комментарий согласующего'] = ''; patch['Дата возврата'] = null;
+    const res = await setMkStatus(r.Id ?? r.id, to, patch);
+    const opsN = (await ncListSoft('operations')).filter((o) => Number(o.routes_id) === Number(r.Id ?? r.id)).length;
+    const dm = await retroDm(apId, `Маршрутная карта ${r['№ МК']} ждёт вашего согласования: ${r['Наименование'] || ''}${r['Изделие / обозначение'] ? ' (' + r['Изделие / обозначение'] + ')' : ''}, операций ${opsN}. Отправил: ${fio}. Кабинет: ${portal}/#cabinet · МК: ${link}`);
+    return { ...res, notified: dm };
+  }
+  const approverId = r['Согласующий (id)'] != null && r['Согласующий (id)'] !== '' ? String(r['Согласующий (id)']) : '';
+  if (from === 'На согласовании' && (to === 'Утверждена' || to === 'Черновик') && !admin && approverId && meId !== approverId && !(to === 'Черновик' && r['Отправил на согласование'] === fio)) { const e = new Error(`Согласовать или вернуть эту МК может ${r['Согласующий'] || 'назначенный согласующий'} (или Администратор).`); e.status = 403; throw e; }
+  if (to === 'Утверждена' && from === 'Черновик' && !admin && !mkApproverIds().includes(Number(meId))) { const e = new Error('Утверждать МК могут только согласующие — отправьте карту на согласование.'); e.status = 403; throw e; }
+  if (to === 'Утверждена') { patch['Утвердил'] = fio; patch['Дата утверждения'] = whToday(); }
+  if (to === 'Черновик' && from === 'На согласовании' && meId === approverId) { patch['Комментарий согласующего'] = String(body.comment || '').trim() || 'без комментария'; patch['Дата возврата'] = whToday(); }
+  const res = await setMkStatus(r.Id ?? r.id, to, patch);
+  if (from === 'На согласовании') { const sender = r['Отправил на согласование'] || ''; try { const st = await getStaffList(); const u = st.find((x) => x.name === sender); if (u && String(u.id) !== meId) await retroDm(u.id, to === 'Утверждена' ? `МК ${r['№ МК']} (${r['Наименование'] || ''}) утверждена: ${fio}. ${link}` : `МК ${r['№ МК']} возвращена на доработку: ${fio}.${body.comment ? ' Комментарий: ' + String(body.comment).trim() : ''} ${link}`); } catch { /* без ЛС */ } }
+  return res;
+}
 // автонумер № МК: МК-{КОМ|СБР}-ГГГГ-NNN (сквозной по типу+году; см. assign-mk-number.mjs)
 async function nextMkNumber(type, year) {
   const rows = await ncListSoft('routes');
@@ -1529,6 +1578,9 @@ async function nextMkNumber(type, year) {
 
 // создать/обновить маршрутную карту вместе с операциями и входящими компонентами
 async function saveRoute(body, session) {
+  // K-171: сохранённую МК не в статусе «Черновик» редактирует только Администратор (статус при этом не меняется)
+  if (body.id != null && body.id !== '') { const prev = (await ncListSoft('routes')).find((x) => (x.Id ?? x.id) === Number(body.id)); const stPrev = prev ? String(prev['Статус МК'] || 'Черновик').trim() : 'Черновик'; if (prev && !MK_EDITABLE.has(stPrev) && !mkIsAdmin(session)) { const e = new Error(`МК в статусе «${stPrev}» не редактируется — верните её в черновик через согласующего.`); e.status = 403; throw e; } body.statusMk = stPrev; }
+  else body.statusMk = 'Черновик';
   const type = String(body.type || '').trim();
   if (!['КОМ', 'СБР'].includes(type)) throw new Error('Тип МК должен быть КОМ или СБР.');
   const name = String(body.name || '').trim();
@@ -1974,6 +2026,8 @@ async function generateTasksFromRoute(routeId) {
   const route = routes.find((x) => (x.Id ?? x.id) === rid);
   if (!route) throw new Error('Маршрут не найден.');
   const mk = route['№ МК'] || 'МК';
+  const stMk = String(route['Статус МК'] || 'Черновик').trim();
+  if (!['Утверждена', 'В производстве'].includes(stMk)) throw new Error(`Карты задач формируются по утверждённой МК (сейчас «${stMk}»): отправьте карту на согласование.`);
   const orderById = new Map(orders.map((o) => [o.Id ?? o.id, o]));
   const otById = new Map(opTypes.map((t) => [t.Id ?? t.id, t]));
   const pById = new Map(params.map((p) => [p.Id ?? p.id, p]));
@@ -2039,7 +2093,8 @@ async function generateTasksFromRoute(routeId) {
     }
     perPos.push({ pz: numPz, pos: posNum, created: posCreated });
   }
-  return { ok: true, mk, created, skipped, positions: perPos };
+  let statusChange = null; if (created > 0 && stMk !== 'В производстве') { try { statusChange = await setMkStatus(rid, 'В производстве'); } catch (e) { console.warn('МК: статус «В производстве» не поставлен:', e.message); } }
+  return { ok: true, mk, created, skipped, positions: perPos, statusChange };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -7325,9 +7380,11 @@ async function buildCabinet(session) {
     } catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'ЗнЗ: ' + String(e.message || e); }
     out.purchases.sort((x, y) => String(x.date).localeCompare(String(y.date)));
   }
-  // K-166: черновики МК (статус МК «Черновик»), где я автор
-  try { const rl = await buildRoutesLive(); for (const r of ((rl && rl.routes) || [])) { if (r.statusMk !== 'Черновик' || String(r.author || '').trim() !== fio) continue;
-      out.drafts.push({ kind: 'mk', kindLabel: 'Маршрутная карта', section: 'Маршруты (Ф.13)', id: r.id, no: r.mk, title: r.name, sub: `${r.type || ''}${r.designation ? ' · ' + r.designation : ''}${r.productType ? ' · ' + r.productType : ''} · операций ${r.opCount || 0}`, status: 'Черновик', date: '', url: '#routes/' + encodeURIComponent(r.mk || r.id), returned: null }); } }
+  // K-166/K-171: черновики МК автора (с пометкой возврата) и МК на согласовании у меня
+  try { const rl = await buildRoutesLive(); for (const r of ((rl && rl.routes) || [])) { const item = { kind: 'mk', kindLabel: 'Маршрутная карта', section: 'Маршруты (Ф.13)', id: r.id, no: r.mk, title: r.name, sub: `${r.type || ''}${r.designation ? ' · ' + r.designation : ''}${r.productType ? ' · ' + r.productType : ''} · операций ${r.opCount || 0}`, status: r.statusMk, date: '', by: r.sentBy || r.author || '', approver: r.approverName || '', url: '#routes/' + encodeURIComponent(r.mk || r.id), returned: r.returnedAt ? { by: r.approverName, at: r.returnedAt, comment: r.approverComment } : null };
+      if (r.statusMk === 'Черновик' && String(r.author || '').trim() === fio) out.drafts.push(item);
+      if (r.statusMk === 'На согласовании' && (String(r.approverId ?? '') === meId || (isAdmin && !r.approverId))) out.approvals.push(item);
+      else if (r.statusMk === 'На согласовании' && r.sentBy === fio) out.sent.push(item); } }
   catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'черновики МК: ' + String(e.message || e); }
   // K-165: мои черновики в других разделах — ЗнЗ «Новая», где я инициатор
   try {
@@ -9288,7 +9345,7 @@ function settingsView() {
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
     // K-159: 1С и бухгалтерия
-    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','),
+    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','), mkApprovers: mkApproverIds().join(','),
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -9328,6 +9385,7 @@ function saveSettings(body) {
   if (typeof body.onecWarehouse === 'string' && body.onecWarehouse.trim()) next.ONEC_WAREHOUSE = body.onecWarehouse.trim();
   if (body.onecDryRun != null) next.ONEC_DRY_RUN = (body.onecDryRun === true || body.onecDryRun === 'true' || body.onecDryRun === 1 || body.onecDryRun === '1') ? '1' : '0';
   if (typeof body.accChat === 'string') next.BITRIX_ACC_CHAT = body.accChat.trim().replace(/^chat/, '');
+  if (typeof body.mkApprovers === 'string') next.MK_APPROVERS = body.mkApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   if (typeof body.purchaseHandlers === 'string') next.PURCHASE_HANDLERS = body.purchaseHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   if (typeof body.retroApprovers === 'string') next.RETRO_APPROVERS = body.retroApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
@@ -12150,6 +12208,8 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // K-18 генерация карт задач Ф.14 из МК
+    if (p === '/api/route/approvers') { try { return sendJson(res, 200, { ok: true, approvers: await mkApprovers(), me: (sessionFromReq(req) || {}).userId || null }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/route/status' && req.method === 'POST') { if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' }); try { return sendJson(res, 200, await mkSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/routes/generate-tasks' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 400, { error: 'Генерация доступна только в режиме LIVE (NocoDB).' });
       try { const b = await readBody(req); return sendJson(res, 200, await generateTasksFromRoute(b.id ?? b.routeId)); }

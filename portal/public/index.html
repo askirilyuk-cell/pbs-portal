@@ -9804,7 +9804,7 @@
     async function renderCabinet(host){
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка кабинета…</div>';
       let j; try{ j=await (await fetch('/api/cabinet')).json(); }catch(e){ j={approvals:[],sent:[],recent:[],warning:String(e.message||e)}; }
-      const btnsOf=(it,btns)=>!btns?'':it.kind==='znz'?`<button class="ui-btn ui-btn--primary" data-cab="take" data-id="${it.id}">Принять в работу</button>`:`<button class="ui-btn ui-btn--primary" data-cab="approve" data-id="${it.id}">Утвердить</button><button class="ui-btn" data-cab="reject" data-id="${it.id}">На доработку</button>`;
+      const btnsOf=(it,btns)=>!btns?'':it.kind==='znz'?`<button class="ui-btn ui-btn--primary" data-cab="take" data-id="${it.id}">Принять в работу</button>`:it.kind==='mk'?`<button class="ui-btn ui-btn--primary" data-cab="mk-approve" data-id="${it.id}">Утвердить МК</button><button class="ui-btn" data-cab="mk-return" data-id="${it.id}">На доработку</button>`:`<button class="ui-btn ui-btn--primary" data-cab="approve" data-id="${it.id}">Утвердить</button><button class="ui-btn" data-cab="reject" data-id="${it.id}">На доработку</button>`;
       const draft=(it)=>`<div class="cab-item"><span class="st st--neutral">${esc(it.section||it.kindLabel)}</span><div class="cab-t"><b>${esc(it.no)}</b> · ${esc(it.title)}<div class="cab-s">${esc(it.sub)}${it.date?' · '+fmt(it.date):''}${it.returned?`<div style="color:var(--red);margin-top:2px">Возвращено на доработку${it.returned.by?' · '+esc(it.returned.by):''}${it.returned.at?' '+fmt(it.returned.at):''}: ${esc(it.returned.comment||'')}</div>`:''}</div></div>${retroStCell(it.status)}<div style="display:flex;gap:6px"><a class="ui-btn ui-btn--primary" href="${esc(it.url)}">Доработать</a></div></div>`;
       const item=(it,btns)=>`<div class="cab-item"><span class="st st--neutral">${esc(it.kindLabel)}</span><div class="cab-t"><b>${esc(it.no)}</b> · ${esc(it.title)}<div class="cab-s">${esc(it.sub)}${it.by?(it.kind==='znz'?' · инициатор ':' · отправил ')+esc(it.by):''}${it.date?' · '+fmt(it.date):''}${it.approver&&!btns?' · у '+esc(it.approver):''}</div></div>${retroStCell(it.status)}<div style="display:flex;gap:6px">${btnsOf(it,btns)}<a class="ui-btn ui-btn--ghost" href="${esc(it.url)}">Открыть</a></div></div>`;
       const sec=(t,arr,btns,empty)=>`<div class="card pad" style="margin-top:var(--gap)"><div style="font-size:14px;font-weight:700;color:var(--ink)">${t}${arr.length?` <span class="c-gray" style="font-weight:400">· ${arr.length}</span>`:''}</div>${arr.length?arr.map(it=>item(it,btns)).join(''):`<div class="eqd-sub" style="margin-top:6px">${empty}</div>`}</div>`;
@@ -9815,6 +9815,7 @@
         ${sec('Отправлено мной на утверждение',j.sent||[],false,'Нет документов на утверждении у других.')}
         ${sec('Недавние решения по моим документам (30 дней)',j.recent||[],false,'Пока пусто.')}`;
       host.querySelectorAll('[data-cab]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.id, act=b.dataset.cab;
+        if(act==='mk-approve'||act==='mk-return'){ let body={id,status:act==='mk-approve'?'Утверждена':'Черновик'}; if(act==='mk-return'){ const c=prompt('Что доработать (увидит автор МК):',''); if(c===null)return; body.comment=c; } b.disabled=true; try{ const r=await fetch('/api/route/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='mk-approve'?'МК утверждена.':'МК возвращена автору.','ok'); renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); b.disabled=false; } return; }
         if(act==='take'){ b.disabled=true; try{ const r=await fetch('/api/procurement/znz/take',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast('Заявка принята в работу.','ok'); renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не принято: '+e.message,'err'); b.disabled=false; } return; }
         let body={id,status:act==='approve'?'Утверждён':'Отклонён'}; if(act==='reject'){ const c=prompt('Что доработать (увидит создатель акта):',''); if(c===null)return; body.comment=c; }
         try{ const r=await fetch('/api/retro/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='approve'?'Акт утверждён, материалы зарезервированы.':'Акт возвращён на доработку, создатель уведомлён.','ok'); RETRO=null; renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); } });
@@ -13732,7 +13733,7 @@
     // Раздел «Маршрутные карты» (Ф.13–Д.1) — реестр МК + карта МК-КОМ/МК-СБР (эталон redesign-routing)
     let RT=null, rtType='all';
     const rtTypeChip=(t)=>t==='КОМ'?'<span class="badge b-navy">КОМ</span>':t==='СБР'?'<span class="badge" style="color:var(--green);background:#ecfdf5;border:1px solid #a7f3d0">СБР</span>':'<span class="muted">—</span>';
-    const rtStatus=(s)=>{const v=String(s||'');const col=v==='Утверждена'?'var(--green)':v==='В работе'?'var(--blue)':/Архив/i.test(v)?'var(--sl-500)':v==='Черновик'?'var(--sl-500)':'var(--ink)';return `<span class="nw" style="color:${col}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};margin-right:5px"></span>${esc(v||'—')}</span>`;};
+    const rtStatus=(s)=>{const v=String(s||'');const col=v==='Утверждена'?'var(--green)':v==='В работе'||v==='В производстве'?'var(--blue)':v==='На согласовании'?'var(--amber,#b45309)':v==='Выполнена'?'var(--sl-500)':/Архив/i.test(v)?'var(--sl-500)':v==='Черновик'?'var(--sl-500)':'var(--ink)';return `<span class="nw" style="color:${col}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};margin-right:5px"></span>${esc(v||'—')}</span>`;};
     // Этап 4 (внешняя кооперация): бейдж в реестре маршрутов — просрочен возврат / возврат завершён / просто кооперация (сервер buildRoutesLive считает per-route по всем операциям).
     const rtCoopBadge=(r)=>{ if(!r.hasCoop)return ''; const st=r.coopOverdueDays>0?['#b91c1c','#fef2f2','#fecaca',`⚠ возврат просрочен ${r.coopOverdueDays} дн`]:r.coopDone?['#15803d','#ecfdf5','#a7f3d0','🤝 возврат завершён']:['#1d4ed8','#eff6ff','#bfdbfe','🤝 кооперация'];
       return `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:var(--r-m);font-size:10px;font-weight:700;color:${st[0]};background:${st[1]};border:1px solid ${st[2]}">${st[3]}</span>`; };
@@ -13765,7 +13766,7 @@
         {key:'prod',label:'Продукция',w:140,cls:'nw c-gray',cell:r=>esc(r.productType||'—'),sortVal:r=>r.productType},
         {key:'ops',label:'Опер.',w:72,align:'center',cls:'nw ct',cell:r=>r.type==='СБР'?'<span class="c-gray">сборка</span>':String(r.opCount||0),sortVal:r=>r.opCount||0},
         {key:'author',label:'Автор',w:150,cls:'nw ell c-gray',cell:r=>esc(r.author||'—'),sortVal:r=>r.author},
-        {key:'status',label:'Статус',w:180,cls:'nw',cell:r=>rtStatus(r.status)+rtCoopBadge(r),sortVal:r=>r.status},
+        {key:'status',label:'Статус МК',w:180,cls:'nw',cell:r=>rtStatus(r.statusMk||'Черновик')+rtCoopBadge(r),sortVal:r=>r.statusMk},
       ];
       erpGrid(document.getElementById('rtgrid'),{key:'routes',cols,rows,onRow:r=>openRouteCard(host,r.id),
         del:RT.mode==='live'?{key:'routes',idOf:r=>r.id,reload:()=>{RT=null;renderRoutesView(host);}}:undefined,
@@ -13835,9 +13836,10 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px">${attSlot(r.mk,o.n,'nc','Программа обработки (ЧПУ)',o.ncFiles)}${attSlot(r.mk,o.n,'setup','Карта наладки (PDF)',o.setupFiles)}</div></div>`).join(''):'<div class="c-gray" style="font-size:12px">Операции не заведены.</div>'}</div></div>`:'';
       host.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
           <a href="#routes" class="c-blue" style="font-size:12px;text-decoration:none">← Маршруты</a>
-          <span class="code" style="font-size:16px">${esc(r.mk)}</span>${rtTypeChip(r.type)}${rtStatus(r.status)}${coopCardBadge}
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${d.mode==='live'?`<button class="tbtn" id="rc-edit">✎ Редактировать</button><button class="tbtn" id="rc-gen">⚙ Карты задач Ф.14</button>`:''}${pbtn('route',r.mk,'Печать Ф.13')}</span>
-        </div>
+          <span class="code" style="font-size:16px">${esc(r.mk)}</span>${rtTypeChip(r.type)}${rtStatus(r.statusMk||'Черновик')}${coopCardBadge}
+          <span class="c-gray" style="font-size:12px">${r.statusMk==='На согласовании'?'у '+esc(r.approverName||'—')+(r.sentAt?' с '+fmt(r.sentAt):'')+(r.sentBy?' · отправил '+esc(r.sentBy):''):r.approvedBy&&['Утверждена','В производстве','Выполнена'].includes(r.statusMk)?'утвердил '+esc(r.approvedBy)+' '+fmt(r.approvedAt):''}${r.statusMk==='Черновик'&&r.returnedAt?'<span style="color:var(--red)">возвращено на доработку '+esc(r.approverName||'')+' '+fmt(r.returnedAt)+': '+esc(r.approverComment||'')+'</span>':''}</span>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${d.mode==='live'?rtApprovalButtons(r):''}${d.mode==='live'?`<button class="tbtn" id="rc-edit" ${(r.statusMk||'Черновик')==='Черновик'||(AUTH&&AUTH.isAdmin)?'':'disabled title="Редактировать можно только черновик"'}>✎ Редактировать</button><button class="tbtn" id="rc-gen" ${['Утверждена','В производстве'].includes(r.statusMk)?'':'disabled title="Карты задач — по утверждённой МК"'}>⚙ Карты задач Ф.14</button>`:''}${pbtn('route',r.mk,'Печать Ф.13')}</span>
+        </div><div id="rc-sendbox"></div>
         <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:12px;margin-bottom:var(--gap)">
           <div><div style="font-size:11px;color:var(--sl-500)">Изделие / компонент</div><div style="color:var(--ink);font-weight:600">${esc(r.name||'—')}</div></div>
           <div><div style="font-size:11px;color:var(--sl-500)">Чертёж / обозначение</div><div style="font-family:var(--mono)">${esc(r.designation||'—')}</div></div>
@@ -13856,6 +13858,7 @@
         ${opFilesCard}`;
       const back=host.querySelector('[href="#routes"]'); if(back)back.onclick=(e)=>{e.preventDefault(); renderRoutesView(host);};
       const eb=host.querySelector('#rc-edit'); if(eb)eb.onclick=()=>openRouteBuilder(host,r.id);
+      rtApprovalWire(host,r); // K-171
       const gb=host.querySelector('#rc-gen'); if(gb)gb.onclick=()=>genRouteTasks(host,r.id);
       // Доработка Этапа 1: просмотр вложения-PDF/картинки во встроенном вьювере (модалка iframe/img)
       host.querySelectorAll('[data-opview]').forEach(btn=>{ btn.onclick=()=>opFileView(btn.dataset.opview,btn.dataset.opname); });
@@ -13949,11 +13952,36 @@
     async function loadEquipReg(){ if(!EQ){ try{EQ=await (await fetch('/api/equipment')).json();}catch(e){EQ={mode:'mock',items:[]};} } return EQ; }
     // URL просмотра чертежа КД — тот же вьюер, что в реестре КД (выпущенный PDF из записей 03-КД)
     const kdViewUrl=(d)=>d&&d.rel?`/api/design/kd/file?rel=${encodeURIComponent(d.rel)}`:`/api/design/kd/file?doc=${encodeURIComponent(d&&d.doc||'')}`;
+    // ── K-171: согласование МК (как у актов выпуска) ──
+    let MK_APPROVERS=null;
+    async function mkLoadApprovers(){ if(MK_APPROVERS)return MK_APPROVERS; try{ const j=await (await fetch('/api/route/approvers')).json(); MK_APPROVERS=(j&&j.approvers)||[]; }catch{ MK_APPROVERS=[]; } return MK_APPROVERS; }
+    const mkIsApprover=()=>{ try{ return !!(AUTH&&AUTH.isAdmin)||((MK_APPROVERS||[]).some(u=>String(u.id)===String(ME&&ME.id))); }catch{ return false; } };
+    const mkMayDecide=(r)=>{ const me=String((ME&&ME.id)||''); return !!(AUTH&&AUTH.isAdmin)||(!!me&&String(r.approverId||'')===me); };
+    function rtApprovalButtons(r){ const st=r.statusMk||'Черновик'; const me=(AUTH&&AUTH.fio)||''; let h='';
+      if(st==='Черновик'){ h+='<button class="tbtn" id="rc-send" style="color:var(--navy);font-weight:700">Отправить на согласование</button>'; if(mkIsApprover())h+='<button class="tbtn" id="rc-approve" title="Вы в списке согласующих — утвердить сразу">Утвердить</button>'; }
+      if(st==='На согласовании'){ if(mkMayDecide(r))h+='<button class="tbtn" id="rc-approve" style="color:var(--green);font-weight:700">Утвердить</button><button class="tbtn" id="rc-return">На доработку</button>'; if(mkMayDecide(r)||r.sentBy===me)h+='<button class="tbtn" id="rc-withdraw">Отозвать</button>'; }
+      if(st==='Утверждена'&&mkIsApprover())h+='<button class="tbtn" id="rc-return" title="Вернуть в черновик для правок">Вернуть в черновик</button>';
+      if(AUTH&&AUTH.isAdmin)h+=`<select class="rt-inp" id="rc-force" title="Исправить статус (только администратор)" style="max-width:170px"><option value="">исправить статус…</option>${['Черновик','На согласовании','Утверждена','В производстве','Выполнена'].filter(x=>x!==st).map(x=>`<option>${x}</option>`).join('')}</select>`;
+      return h; }
+    async function mkStatusPost(host,r,body,okMsg){ try{ const res=await fetch('/api/route/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id,...body})}); const j=await res.json().catch(()=>({})); if(!res.ok||j.error)throw new Error(j.error||('HTTP '+res.status)); toast(okMsg,'ok'); if(j.blankReserve&&(j.blankReserve.reserved||j.blankReserve.note))setTimeout(()=>toast(j.blankReserve.reserved?`Резерв металла: ${j.blankReserve.reserved.code} · ${j.blankReserve.reserved.qty} кг`:j.blankReserve.note,'ok'),300); RT=null; openRouteCard(host,r.id); try{cabBadgeRefresh();}catch{} }catch(e){ toast('Не выполнено: '+e.message,'err'); } }
+    async function rtApprovalWire(host,r){
+      await mkLoadApprovers();
+      const on=(id,fn)=>{ const el=host.querySelector('#'+id); if(el)el.onclick=fn; };
+      on('rc-send',async()=>{ const list=await mkLoadApprovers(); if(!list.length){ toast('Список согласующих МК пуст — Настройки → «1С и бухгалтерия».','err'); return; } const box=host.querySelector('#rc-sendbox'); if(!box)return; if(box.innerHTML){ box.innerHTML=''; return; }
+        let last=''; try{ last=localStorage.getItem('mk.approver')||''; }catch{}
+        box.innerHTML=`<div class="card pad" style="margin-bottom:var(--gap);border:1px dashed var(--sl-300);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Кому на согласование</b><select class="rt-inp" id="rc-apsel" style="min-width:240px">${list.map(u=>`<option value="${u.id}"${String(u.id)===last?' selected':''}>${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join('')}</select><button class="ui-btn ui-btn--primary" id="rc-apgo">Отправить</button><button class="ui-btn ui-btn--ghost" id="rc-apx">отмена</button><span class="eqd-sub">Согласующий получит уведомление Bitrix и увидит МК в «Мой кабинет». После отправки карта не редактируется.</span></div>`;
+        box.querySelector('#rc-apx').onclick=()=>{ box.innerHTML=''; };
+        box.querySelector('#rc-apgo').onclick=()=>{ const sel=box.querySelector('#rc-apsel'); const u=list.find(x=>String(x.id)===sel.value); if(!u)return; try{ localStorage.setItem('mk.approver',sel.value); }catch{} mkStatusPost(host,r,{status:'На согласовании',approverId:u.id,approverName:u.name},'МК отправлена на согласование: '+u.name); }; });
+      on('rc-approve',()=>mkStatusPost(host,r,{status:'Утверждена'},'МК утверждена.'));
+      on('rc-return',()=>{ const c=prompt('Что доработать (увидит автор):',''); if(c===null)return; mkStatusPost(host,r,{status:'Черновик',comment:c},'МК возвращена в черновик.'); });
+      on('rc-withdraw',()=>mkStatusPost(host,r,{status:'Черновик'},'МК отозвана в черновик.'));
+      const f=host.querySelector('#rc-force'); if(f)f.onchange=()=>{ if(!f.value)return; if(!confirm(`Поставить статус «${f.value}» вручную?`)){ f.value=''; return; } mkStatusPost(host,r,{status:f.value},'Статус исправлен: '+f.value); };
+    }
     async function genRouteTasks(host,routeId){
       if(!confirm('Сгенерировать карты задач Ф.14 по этому маршруту для всех привязанных позиций ПЗ?\n\nЗадачи с уже существующим № не дублируются.'))return;
       try{ const r=await fetch('/api/routes/generate-tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:routeId})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         const det=(j.positions||[]).map(p=>`${p.pz}/${p.pos}: +${p.created}`).join('; ');
-        toast(`Ф.14: создано ${j.created}, пропущено ${j.skipped}${det?' · '+det:''}`,'ok');
+        toast(`Ф.14: создано ${j.created}, пропущено ${j.skipped}${det?' · '+det:''}${j.statusChange&&j.statusChange.to?' · МК → '+j.statusChange.to:''}`,'ok');
         openRouteCard(host,routeId);
       }catch(e){ toast('Генерация не удалась: '+(e.message||e),'err'); }
     }
@@ -14067,6 +14095,8 @@
       rtBomBackfill(); rtBomApply(); // K-160
       rtWizRender();
     }
+    const RT_TYPE_HINT={'КОМ':'КОМ — маршрут детали или полуфабриката: из заготовки со склада через операции до готового компонента.','СБР':'СБР — сборочный маршрут: на вход идут готовые компоненты (детали по своим МК-КОМ и покупные), на выходе — изделие.'};
+    function rtTypeHintWire(host){ const sel=host.querySelector('#rb-type'), h=host.querySelector('#rb-type-hint'); if(!sel||!h)return; const paint=()=>{ h.textContent=RT_TYPE_HINT[sel.value]||''; }; sel.addEventListener('change',paint); paint(); }
     function rtWizRender(){
       if(!rtWiz)return; const host=rtWiz.host, step=rtWiz.step, rt=rtWiz.route;
       const steps=[['Изделие','что и по какому чертежу'],['Операции маршрута','из типов · участок авто'],['Контроль и наладка','ОТК · карты наладки'],['Проверка и выпуск','предпросмотр Ф.13']];
@@ -14084,7 +14114,7 @@
       if(!rtWiz)return; const host=rtWiz.host;
       if(step===1){ const g=(id)=>{const el=host.querySelector('#'+id);return el?el.value:'';};
         rtWiz.route.type=g('rb-type'); rtWiz.route.name=(g('rb-name')||'').trim(); rtWiz.route.designation=(g('rb-desig')||'').trim();
-        rtWiz.route.productType=g('rb-prod'); rtWiz.route.revision=(g('rb-rev')||'').trim(); rtWiz.route.material=(g('rb-material')||'').trim(); rtWiz.route.statusMk=g('rb-status'); rtWiz.route.projectDecNo=g('rb-proj'); rtBomApply(); }
+        rtWiz.route.productType=g('rb-prod');  rtWiz.route.material=(g('rb-material')||'').trim();  rtWiz.route.projectDecNo=g('rb-proj'); rtBomApply(); }
       else if(step===2||step===3){ rtReadOps(step); }
     }
     function rtReadOps(step){
@@ -14102,15 +14132,14 @@
       const opt=(arr,def)=>(arr||[]).map(o=>`<option${String(o)===String(def)?' selected':''}>${esc(o)}</option>`).join('');
       return `<div class="card pad"><div class="rt-cardh">Шаг 1 · Изделие</div>
         <div class="rt-g3">
-          <div class="rt-fld"><label>Тип МК</label><select class="rt-inp" id="rb-type">${opt(cat.mkTypes,rt.type)}</select></div>
+          <div class="rt-fld"><label>Тип МК</label><select class="rt-inp" id="rb-type">${opt(cat.mkTypes,rt.type)}</select><div class="rt-rt" style="margin-top:4px" id="rb-type-hint"></div></div>
           <div class="rt-fld" style="grid-column:span 2"><label>Наименование изделия / компонента</label><input class="rt-inp" id="rb-name" value="${rtEscA(rt.name)}" placeholder="напр. Втулка биметаллическая 2ДТ.180"></div>
           <div class="rt-fld"><label>Проект ОКР</label><select class="rt-inp" id="rb-proj"><option value="">— не выбран —</option>${kdProjects.map(p=>`<option value="${rtEscA(p.decNo)}"${p.decNo===(rt.projectDecNo||'')?' selected':''}>ПБС.${esc(p.decNo)} · ${esc(p.name||'')}</option>`).join('')}</select></div>
           <div class="rt-fld"><label>Изделие / обозначение (чертёж)</label><input class="rt-inp" id="rb-desig" value="${rtEscA(rt.designation)}" placeholder="2ДТ.180.00.00"></div>
           <div class="rt-fld" style="grid-column:span 2"><label>Материал изделия (текст для Ф.13; авто из спецификации, можно поправить)</label><input class="rt-inp" id="rb-material" value="${rtEscA(rt.material)}" placeholder="напр. Сталь 45 + наплавка ПГ-СР4"></div>
-          <div class="rt-fld"><label>Ревизия</label><input class="rt-inp" id="rb-rev" value="${rtEscA(rt.revision)}" placeholder="A"></div>
           <div class="rt-fld"><label>Автор</label><input class="rt-inp" value="${rtEscA(rt.author||(AUTH&&AUTH.fio)||'')}" disabled title="Кто создал МК в портале; подставляется автоматически"></div>
           <div class="rt-fld"><label>Тип продукции</label><select class="rt-inp" id="rb-prod"><option value="">— не указан —</option>${opt(cat.productTypes,rt.productType)}</select></div>
-          <div class="rt-fld"><label>Статус МК</label><select class="rt-inp" id="rb-status">${opt(cat.statuses,rt.statusMk)}</select></div>
+          <div class="rt-fld"><label>Статус МК</label><input class="rt-inp" value="${rtEscA(rt.statusMk||'Черновик')}" disabled title="Статус ставит портал: согласование — в карточке МК, «В производстве» — при формировании карт задач"></div>
         </div>
         <div style="margin-top:14px"><div class="sec-h" style="margin-bottom:4px">Материалы изделия <span class="rt-rt">сводка по операциям · норма на 1 шт · задаются на шаге 2</span></div><div id="rb-bom"></div></div>
         <div style="margin-top:14px"><div class="sec-h" style="margin-bottom:8px">Чертежи КД (реестр) — с просмотром выпущенного PDF</div><div id="rb-kdlist"></div><div id="rb-kdsel" style="margin-top:10px"></div></div>
@@ -14121,6 +14150,7 @@
     function rtWireStep1(){
       const host=rtWiz.host; const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(2);
       rtBomPaint(host); // K-160
+      rtTypeHintWire(host); // K-171
       const kdDocs=rtWiz.reg.docs;
       const kdByProj=(dec)=>kdDocs.filter(k=>k.projectNo===dec||(dec&&String(k.docNo).includes(dec)));
       const kdRelOf=(k)=>(k.files&&k.files[0])?k.files[0].rel:'';
@@ -15038,10 +15068,11 @@
           <div style="margin-top:10px"><label class="stg-flab">Запись в 1С</label><label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="s_onecdry" ${STG.onecDryRun?'checked':''}> Режим проверки (ONEC_DRY_RUN): черновики в 1С не создаются, портал показывает план документа</label></div>
           <div style="margin-top:10px"><label class="stg-flab">Чат «Производство ↔ Бухгалтерия ПБС» (id чата Bitrix)</label><div class="stg-hint">один общий чат: живое общение с бухгалтерией + уведомления портала (печатные формы утверждённых актов, черновики в 1С, проводки, сводка по понедельникам). Создаётся один раз кнопкой (участники: Кирилюк, Герасимов, Лещенок, Ветелкина) или укажите id существующего</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_accchat" value="${esc(STG.accChat||'')}" placeholder="напр. 9123" style="flex:1">${STG.accChat?'':'<button class="ui-btn" id="s_accchat_create" type="button">Создать чат</button>'}</div></div>
           <div style="margin-top:10px"><label class="stg-flab">Кто утверждает акты выпуска</label><div class="stg-hint">только эти сотрудники видят акты в «Мой кабинет» и могут утверждать; id пользователей Bitrix через запятую (сейчас: ${esc(STG.retroApprovers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_apr" value="${esc(STG.retroApprovers||'')}" placeholder="11,159" style="flex:1"><select class="stg-inp" id="s_apr_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_apr_names"></div></div>
+          <div style="margin-top:10px"><label class="stg-flab">Кто согласует маршрутные карты (МК)</label><div class="stg-hint">видят МК на согласовании в «Мой кабинет», утверждают или возвращают автору; пусто — как у актов выпуска (сейчас: ${esc(STG.mkApprovers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_mka" value="${esc(STG.mkApprovers||'')}" placeholder="11,159" style="flex:1"><select class="stg-inp" id="s_mka_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_mka_names"></div></div>
           <div style="margin-top:10px"><label class="stg-flab">Кто принимает заявки на закупку (ЗнЗ) в «Мой кабинет»</label><div class="stg-hint">эти сотрудники видят новые заявки с кнопкой «Принять в работу»; id пользователей Bitrix через запятую (сейчас: ${esc(STG.purchaseHandlers||'')})</div><div style="display:flex;gap:8px;align-items:center"><input class="stg-inp" id="s_ph" value="${esc(STG.purchaseHandlers||'')}" placeholder="57" style="flex:1"><select class="stg-inp" id="s_ph_pick" style="max-width:260px"><option value="">— добавить сотрудника —</option></select></div><div class="stg-hint" id="s_ph_names"></div></div>`)}
         ${card(aico('folder',18),'NAS — записи и файлы','Папка «06-Записи-ПБС» для просмотра файлов запросов.', !!STG.recordsRoot, `<div style="margin-top:12px"><label class="stg-flab">Путь к записям</label><div class="stg-hint">На NAS — примонтированная папка, напр. <code>/records</code></div><input class="stg-inp" id="s_records" value="${esc(STG.recordsRoot||'')}" placeholder="/records"></div>`)}
         <div style="margin-top:14px"><button class="stg-btn primary" id="s_saveInteg">Сохранить</button></div><div class="stg-msg" id="s_integMsg"></div>`;
-      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,onecWarehouse:$s('s_onecwh').value,onecDryRun:$s('s_onecdry').checked,accChat:$s('s_accchat').value,retroApprovers:$s('s_apr').value,purchaseHandlers:$s('s_ph').value},'s_integMsg');
+      $s('s_saveInteg').onclick=()=>stgSave({gotenbergUrl:$s('s_goten').value,bitrixWebhook:$s('s_bxhook').value,bitrixUsers:$s('s_bxusers').value,salesDept:$s('s_bxdept').value,hubChat:$s('s_bxhub').value,recordsRoot:$s('s_records').value,onecWarehouse:$s('s_onecwh').value,onecDryRun:$s('s_onecdry').checked,accChat:$s('s_accchat').value,retroApprovers:$s('s_apr').value,purchaseHandlers:$s('s_ph').value,mkApprovers:$s('s_mka').value},'s_integMsg');
       // K-161: чат бухгалтерии создаётся отсюда (один раз); список утверждающих — подбор из сотрудников ПБС
       const cc=$s('s_accchat_create'); if(cc)cc.onclick=async()=>{ cc.disabled=true; try{ const r=await fetch('/api/retro/chat-create',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); const j=await r.json(); if(j.error)throw new Error(j.error); stgMsg('s_integMsg',true,`Чат создан: chat${j.chat}, участники добавлены.`); STG.accChat=String(j.chat); renderSettings(stgHost); }catch(e){ stgMsg('s_integMsg',false,'Чат не создан: '+e.message); cc.disabled=false; } };
       (async()=>{ let staff=[]; try{ const sj=await (await fetch('/api/staff')).json(); staff=(sj&&sj.staff)||[]; }catch{}
@@ -15049,7 +15080,7 @@
           const paintNames=()=>{ const ids=ap.value.split(/[,;\s]+/).filter(Boolean); names.textContent=ids.length?ids.map(id=>{ const u=staff.find(x=>String(x.id)===id); return u?u.name:('id'+id); }).join(', '):emptyText; };
           pick.innerHTML='<option value="">— добавить сотрудника —</option>'+staff.map(u=>`<option value="${u.id}">${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join('');
           pick.onchange=()=>{ if(!pick.value)return; const ids=ap.value.split(/[,;\s]+/).filter(Boolean); if(!ids.includes(pick.value))ids.push(pick.value); ap.value=ids.join(','); pick.value=''; paintNames(); }; ap.oninput=paintNames; paintNames(); };
-        wire('s_apr','s_apr_pick','s_apr_names','список пуст — по умолчанию Кирилюк и Герасимов'); wire('s_ph','s_ph_pick','s_ph_names','список пуст — по умолчанию Рисалиева Динара'); })();
+        wire('s_apr','s_apr_pick','s_apr_names','список пуст — по умолчанию Кирилюк и Герасимов'); wire('s_ph','s_ph_pick','s_ph_names','список пуст — по умолчанию Рисалиева Динара'); wire('s_mka','s_mka_pick','s_mka_names','список пуст — как у актов выпуска'); })();
     }
     // Параметры продаж/КП (K-05 §5.3) — «магические числа» ДП–З.1 вынесены сюда: порог подписи,
     // ставка НДС, плановая прибыль, SLA. Правятся без деплоя кода (server: settingsView/saveSettings).

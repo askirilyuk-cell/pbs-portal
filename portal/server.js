@@ -6410,6 +6410,7 @@ async function buildBoardLive() {
   });
   return {
     mode: 'live', base: _tm?.base, statuses: STATUSES, orders: ordersOut,
+    sections: sections.map((sc) => ({ code: sc['Код'] || '', name: sc['Участок'] || '', site: sc['Площадка'] || '' })).filter((x) => x.code).sort((x, y) => x.code.localeCompare(y.code)), // K-187: рабочее место — участки из справочника, а не только из задач
     controls: {
       // pz/date — точные имена колонок NocoDB (сверены по meta 2026-06-24)
       incoming: inc.map((r) => ({ id: r.Id ?? r.id, num: r['№ акта'], material: r['Наименование материала'], verdict: r['Заключение'], pz: r['Договор / Заказ №'] || '', date: r['Дата'] || '' })),

@@ -11783,6 +11783,7 @@
     let boardMode = (()=>{try{return localStorage.getItem('pbs-board-mode')||'status';}catch{return 'status';}})();
     function sectionsList(){
       const m=new Map();
+      (DATA.sections||[]).forEach(s=>{ if(s.code&&!m.has(s.code)) m.set(s.code,s.name||''); }); // K-187: справочник участков, задачи дополняют
       DATA.orders.flatMap(o=>o.tasks).forEach(t=>{ if(t.sectionCode && !m.has(t.sectionCode)) m.set(t.sectionCode, t.sectionName||''); });
       return [...m.entries()].map(([code,name])=>({code,name})).sort((a,b)=>a.code.localeCompare(b.code));
     }

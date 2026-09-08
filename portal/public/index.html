@@ -9673,11 +9673,19 @@
     async function retroLocalOffer(id){ const st=retroLocalRead(id); if(!st||!st.draft)return null; const ok=await uiConfirm(`Есть незаконченный ${id==null?'новый акт':'черновик этого акта'}${st.draft.name?' «'+st.draft.name+'»':''}, сохранён в браузере ${retroWhen(st.savedAt)}${(st.draft.lines||[]).length?', строк состава: '+st.draft.lines.length:''}.\nПродолжить с него?`,{title:'Незаконченный акт',ok:'Продолжить',cancel:'Начать заново'}); if(!ok){ retroLocalClear(id); return null; } return st.draft; }
     function retroBlankDraft(){ return { id:null, no:'', date:new Date().toISOString().slice(0,10), name:'', designation:'', canonId:'', qty:1, unit:'шт', whereTo:'Оснастка (10.10)', account:'10.10', period:'', responsible:(AUTH&&AUTH.fio)||'', mk:'', note:'', status:'Черновик', lines:[], editable:true, cost:0 }; }
     async function retroOpenNew(){ await retroEnsureRefs(); retroSel='new'; retroCard={act:retroBlankDraft(),availability:{}}; const local=await retroLocalOffer(null); retroDraft=local?Object.assign(retroBlankDraft(),local,{id:null,editable:true}):JSON.parse(JSON.stringify(retroCard.act)); retroTab='act'; const d=retroDrawerHost(); d.classList.add('on'); retroPaint(); }
+    // K-193: видимый ход загрузки (1С может отвечать 10+ с) и защита от повторных кликов по тому же акту
+    let retroLoadingId=null, retroLoadTimer=null;
+    function retroLoadingHtml(sec){ return `<div class="card pad" style="display:flex;gap:12px;align-items:center;color:var(--sub)"><span class="ui-spin"></span><div><div style="font-weight:600;color:var(--ink)">Открываю акт…</div><div style="font-size:12px">${sec>=2?'проверяю проведение в 1С — она отвечает до 10–15 с, подождите':'загружаю состав и остатки'}${sec?' · '+sec+' с':''}</div></div></div>`; }
     async function retroOpen(id,opts){
+      if(retroLoadingId!=null&&String(retroLoadingId)===String(id))return; // уже грузится — повторный клик игнорируем
       await retroEnsureRefs(); const d=retroDrawerHost(); retroSel=id; if(!(opts&&opts.keepTab))retroTab='act';
       try{history.replaceState(null,'','#retro/'+encodeURIComponent(id));}catch{}
-      d.classList.add('on'); if(!(opts&&opts.keepTab))d.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка акта…</div>'; retroGrid();
+      d.classList.add('on'); retroLoadingId=id; const t0=Date.now();
+      if(!(opts&&opts.keepTab)){ d.innerHTML=retroLoadingHtml(0); clearInterval(retroLoadTimer); retroLoadTimer=setInterval(()=>{ if(retroLoadingId==null||String(retroSel)!==String(id)){ clearInterval(retroLoadTimer); return; } const el=d.querySelector('.ui-spin'); if(el)d.innerHTML=retroLoadingHtml(Math.round((Date.now()-t0)/1000)); },1000); }
+      else { const hb=d.querySelector('.eqd-h'); if(hb&&!hb.querySelector('.retro-reload')){ const sp=document.createElement('span'); sp.className='retro-reload ui-spin'; sp.title='обновляю…'; sp.style.cssText='position:absolute;right:52px;top:14px'; hb.style.position='relative'; hb.appendChild(sp); } }
+      retroGrid();
       let card=null; try{ card=await (await fetch('/api/retro/item?id='+encodeURIComponent(id))).json(); }catch(e){ card={error:String(e.message||e)}; }
+      finally{ if(String(retroLoadingId)===String(id))retroLoadingId=null; clearInterval(retroLoadTimer); }
       if(String(retroSel)!==String(id)||!retroDrawerIsOpen())return;
       if(!card||!card.act){ d.innerHTML=`<div class="eqd-h"><div class="eqd-title"><b>Акт недоступен</b></div><button class="x" data-act="close" aria-label="Закрыть">✕</button></div>`+emptyState('Данные акта не получены',{sub:esc((card&&card.error)||'')}); d.querySelector('[data-act="close"]').onclick=()=>retroDrawerClose(); return; }
       retroCard=card; retroDraft=JSON.parse(JSON.stringify(card.act)); if(card.act.editable&&retroCanWrite()){ const local=await retroLocalOffer(id); if(local)retroDraft=Object.assign(retroDraft,local,{id:card.act.id,no:card.act.no,status:card.act.status,editable:true}); } retroPaint();
@@ -9882,9 +9890,12 @@
     }
     async function retroStatusPost(status,okMsg){ await retroPost('/api/retro/status',{id:retroDraft.id,status},okMsg); }
     async function retroPost(url,body,okMsg){
+      const dh=retroDrawerHost(); const btns=[...dh.querySelectorAll('.eqd-actions button,.eqd-actions a')]; btns.forEach(b=>{ b.dataset.wasDisabled=b.disabled?'1':''; b.disabled=true; b.style.pointerEvents='none'; });
+      let busy=dh.querySelector('#retro-busy'); if(!busy){ busy=document.createElement('div'); busy.id='retro-busy'; busy.className='card pad'; busy.style.cssText='margin:8px 14px 0;display:flex;gap:10px;align-items:center;color:var(--sub);border:1px dashed var(--sl-300)'; const hdr=dh.querySelector('.eqd-h'); if(hdr)hdr.insertAdjacentElement('afterend',busy); else dh.prepend(busy); }
+      busy.innerHTML='<span class="ui-spin"></span><span>Выполняю… уведомления в Bitrix и проверка 1С могут занять до 10–15 с</span>';
       try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         toast(okMsg,'ok'); RETRO=null; const id=retroDraft.id; const v=document.getElementById('view'); await renderRetro(v); retroOpen(id,{keepTab:true});
-      }catch(e){ toast('Не выполнено: '+e.message,'err'); }
+      }catch(e){ toast('Не выполнено: '+e.message,'err'); const b2=dh.querySelector('#retro-busy'); if(b2)b2.remove(); btns.forEach(b=>{ b.disabled=b.dataset.wasDisabled==='1'; b.style.pointerEvents=''; }); }
     }
 
     // ══ Раздел «Материалы по 1С» — K-156 (этап 0 ретро-учёта): зеркало номенклатуры и остатков 1С ПБС ══

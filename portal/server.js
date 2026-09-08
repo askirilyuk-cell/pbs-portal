@@ -7196,7 +7196,7 @@ async function buildRetroCard(id) {
   // K-164: при открытии/печати акта в статусе «Черновик в 1С» — точечная проверка проведения (не чаще раза в 10 мин)
   // K-193: 1С отвечает и по 11 с — опрос не должен держать открытие акта: ждём не дольше 2,5 с, дальше он дозавершается в фоне
   try { const pre = (await ncListSoft('retro_outputs')).find((x) => String(x.Id ?? x.id) === String(id));
-    if (pre && ['Черновик в 1С', 'Проведён в 1С'].includes(pre['Статус']) && onecConfigured()) await Promise.race([retroPollOne(id).catch(() => null), new Promise((r) => setTimeout(r, 2500))]); } catch { /* best-effort */ }
+    if (pre && ['Черновик в 1С', 'Проведён в 1С'].includes(pre['Статус']) && onecConfigured()) await Promise.race([retroPollOne(id).catch(() => null), new Promise((r) => setTimeout(r, 15000))]); } catch { /* best-effort */ } // Александр: «даже 11 с — ок, лишь бы было видно, что грузит»
   const [acts, lines] = await Promise.all([ncListSoft('retro_outputs'), ncListSoft('retro_lines')]);
   const a = acts.find((x) => String(x.Id ?? x.id) === String(id));
   if (!a) return null;

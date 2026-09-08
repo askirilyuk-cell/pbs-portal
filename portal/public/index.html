@@ -9721,7 +9721,7 @@
       d.querySelectorAll('#retro-tabs button').forEach(b=>b.onclick=()=>{ retroCollect(); retroTab=b.dataset.tab; retroPaint(); });
       const on=(sel,fn)=>{const el=d.querySelector(sel); if(el)el.onclick=fn;};
       on('[data-act="save"]',()=>retroSave());
-      on('[data-act="approve"]',()=>retroStatusPost('Утверждён','Акт утверждён, материалы зарезервированы.'));
+      on('[data-act="approve"]',async()=>{ try{ await retroSaveSilent(); }catch(e){ toast('Сначала не удалось сохранить акт: '+e.message,'err'); return; } retroStatusPost('Утверждён','Акт сохранён и утверждён, материалы зарезервированы.'); });
       on('[data-act="unapprove"]',()=>retroStatusPost('Черновик',a.status==='На утверждении'?'Акт отозван в черновик.':'Акт возвращён в черновик, резерв снят.'));
       on('[data-act="send"]',()=>retroSendForApproval());
       on('[data-act="rework"]',async ()=>{ const c=await uiPrompt('Что доработать (уйдёт в чат бухгалтерии с просьбой пока не проводить черновик):','',{placeholder:'напр. добавить расходники'}); if(c===null)return; retroPost('/api/retro/status',{id:a.id,status:'Черновик',comment:c},'Акт возвращён в черновик; бухгалтерия предупреждена.'); });
@@ -9786,7 +9786,7 @@
       box.innerHTML=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Кому на утверждение</b><select class="rt-inp" id="retro-apsel" style="min-width:240px">${list.map(u=>`<option value="${u.id}"${String(u.id)===last?' selected':''}>${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join('')}</select><button class="ui-btn ui-btn--primary" id="retro-apgo">Отправить</button><button class="ui-btn ui-btn--ghost" id="retro-apx">отмена</button></div><div class="eqd-sub" style="margin-top:6px">Утверждающий получит личное сообщение в Bitrix и увидит акт в «Мой кабинет». Несохранённые правки сохраните до отправки.</div>`;
       const hdr=d.querySelector('.eqd-h'); hdr.insertAdjacentElement('afterend',box);
       box.querySelector('#retro-apx').onclick=()=>box.remove();
-      box.querySelector('#retro-apgo').onclick=async()=>{ const sel=box.querySelector('#retro-apsel'); const u=list.find(x=>String(x.id)===sel.value); if(!u)return; try{ localStorage.setItem('retro.approver',sel.value); }catch{} await retroPost('/api/retro/status',{id:a.id,status:'На утверждении',approverId:u.id,approverName:u.name},'Отправлено на утверждение: '+u.name); try{cabBadgeRefresh();}catch{} };
+      box.querySelector('#retro-apgo').onclick=async()=>{ const sel=box.querySelector('#retro-apsel'); const u=list.find(x=>String(x.id)===sel.value); if(!u)return; try{ localStorage.setItem('retro.approver',sel.value); }catch{} try{ await retroSaveSilent(); }catch(e){ toast('Сначала не удалось сохранить акт: '+e.message,'err'); return; } await retroPost('/api/retro/status',{id:a.id,status:'На утверждении',approverId:u.id,approverName:u.name},'Сохранено и отправлено на утверждение: '+u.name); try{cabBadgeRefresh();}catch{} };
     }
     function retroCollect(){ const h=document.getElementById('retro-body'); if(!h||!retroDraft)return; h.querySelectorAll('[data-rf]').forEach(el=>{ retroDraft[el.dataset.rf]=el.value; }); h.querySelectorAll('[data-lf]').forEach(el=>{ const i=+el.dataset.li, f=el.dataset.lf; if(retroDraft.lines[i])retroDraft.lines[i][f]=el.value; }); }
     async function retroPrefill(kind){
@@ -9893,6 +9893,11 @@
         let body={id,status:act==='approve'?'Утверждён':'Отклонён'}; if(act==='reject'){ const c=(await uiPrompt('Что доработать (увидит создатель акта):','')); if(c===null)return; body.comment=c; }
         try{ const r=await fetch('/api/retro/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='approve'?'Акт утверждён, материалы зарезервированы.':'Акт возвращён на доработку, создатель уведомлён.','ok'); RETRO=null; renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); } });
     }
+    // K-198: тело сохранения — одно на «Сохранить» и на тихое сохранение перед отправкой/утверждением
+    function retroSaveBody(){ retroCollect(); const a=retroDraft; return {id:a.id,kind:a.kind||'',name:a.name,designation:a.designation,canonId:a.canonId||'',qty:a.qty,unit:a.unit,whereTo:a.whereTo,account:a.account,period:a.period,responsible:a.responsible,mk:a.mk,note:a.note,date:a.date,
+        lines:a.lines.map(l=>({id:l.id,canonId:l.canonId,name:l.name,onecKey:l.onecKey,onecCode:l.onecCode,onecName:l.onecName,warehouse:l.warehouse,unit:l.unit,qtyPlan:l.qtyPlan,qtyFact:l.qtyFact,cost:l.cost,source:l.source,reason:l.reason,note:l.note,role:l.role||'В изделии'}))}; }
+    // K-198 (08.09: Александр отправил на утверждение, не нажав «Сохранить» — расходники пропали): перед сменой статуса редактируемый акт сохраняется сам
+    async function retroSaveSilent(){ const a=retroDraft; if(!a||!a.editable||!retroCanWrite())return; const body=retroSaveBody(); if(!body.id&&body.kind!=='Списание'&&!String(body.name||'').trim())return; const j=await postJson('/api/retro/save',body); const wasNew=a.id==null; a.id=j.id; a.no=j.no||a.no; retroLocalClear(a.id); if(wasNew)retroLocalClear(null); }
     async function retroSave(){
       retroCollect(); const a=retroDraft; if(a.kind!=='Списание'&&!String(a.name||'').trim()){ toast('Укажите, что произведено.','err'); retroTab='act'; retroPaint(); return; }
       const body={id:a.id,kind:a.kind||'',name:a.name,designation:a.designation,canonId:a.canonId||'',qty:a.qty,unit:a.unit,whereTo:a.whereTo,account:a.account,period:a.period,responsible:a.responsible,mk:a.mk,note:a.note,date:a.date,

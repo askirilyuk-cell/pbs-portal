@@ -7192,6 +7192,7 @@ function retroLineShape(l) {
     unit: l['ЕИ'] || '', qtyPlan: l['Кол-во план'] != null ? Number(l['Кол-во план']) : null, qtyFact: l['Кол-во факт'] != null ? Number(l['Кол-во факт']) : null,
     cost: Number(l['Себестоимость']) || 0, sum: Number(l['Сумма']) || 0, source: l['Источник'] || 'Вручную', reason: l['Причина замены'] || '', note: l['Примечание'] || '',
     role: RETRO_ROLES.includes(l['Назначение']) ? l['Назначение'] : 'В изделии', // K-195
+    addedBy: l['Добавил'] || '', editedBy: l['Изменил'] || '', // K-201
     order: Number(l['Порядок']) || 0, actId: l.retro_outputs_id ?? null,
   };
 }
@@ -7255,7 +7256,7 @@ async function buildRetroCard(id) {
 }
 // создание/правка акта и его состава (только в редактируемых статусах)
 async function retroSave(body, session) {
-  try { await ncEnsureColumn('retro_lines', 'Назначение', 'SingleLineText'); } catch (e) { console.warn('[retro] колонка «Назначение»:', e.message); } // K-195
+  try { await ncEnsureColumn('retro_lines', 'Назначение', 'SingleLineText'); await ncEnsureColumn('retro_lines', 'Добавил', 'SingleLineText'); await ncEnsureColumn('retro_lines', 'Изменил', 'SingleLineText'); } catch (e) { console.warn('[retro] колонки строк:', e.message); } // K-195 / K-201
   const id = (body.id != null && body.id !== '') ? Number(body.id) : null;
   const acts = await ncListSoft('retro_outputs');
   const existing = id != null ? acts.find((x) => String(x.Id ?? x.id) === String(id)) : null;
@@ -7326,9 +7327,11 @@ async function retroSave(body, session) {
   const keep = new Set(cleanLines.map((x) => x.id).filter((x) => x != null));
   const del = oldLines.map((l) => l.Id ?? l.id).filter((lid) => !keep.has(lid));
   if (del.length) await ncDeleteMany('retro_lines', del);
-  const upd = cleanLines.filter((x) => x.id != null && oldLines.some((l) => (l.Id ?? l.id) === x.id)).map((x) => ({ Id: x.id, ...x.row }));
+  const who = `${(session && session.fio) || 'портал'} ${whToday().split('-').reverse().join('.')}`; // K-201
+  const changed = (o, r) => ['Ключ 1С', 'Склад', 'Кол-во факт', 'Назначение', 'Наименование', 'Примечание'].some((k) => String(o[k] ?? '') !== String(r[k] ?? ''));
+  const upd = cleanLines.filter((x) => x.id != null && oldLines.some((l) => (l.Id ?? l.id) === x.id)).map((x) => { const o = oldLines.find((l) => (l.Id ?? l.id) === x.id); const r = { Id: x.id, ...x.row }; if (changed(o, x.row)) r['Изменил'] = who; return r; });
   if (upd.length) await ncUpdateMany('retro_lines', upd);
-  const crt = cleanLines.filter((x) => x.id == null || !oldLines.some((l) => (l.Id ?? l.id) === x.id)).map((x) => x.row);
+  const crt = cleanLines.filter((x) => x.id == null || !oldLines.some((l) => (l.Id ?? l.id) === x.id)).map((x) => ({ ...x.row, 'Добавил': who }));
   if (crt.length) { const created = await ncCreateMany('retro_lines', crt); const ids = (Array.isArray(created) ? created : [created]).map((c) => c.Id ?? c.id); await ncLinkRecords('retro_outputs', 'Состав', actId, ids); }
   return { ok: true, id: actId, no: row['№ акта'] || (existing && existing['№ акта']) || '', cost: row['Себестоимость'], lines: cleanLines.length };
 }
@@ -7685,7 +7688,7 @@ async function retroPrintHtml(id, opts) {
   const n2 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const n3 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
   const grp = (title, arr, off) => arr.length ? `<tr><td colspan="7" style="background:#eef3f8;font-weight:700;text-align:left">${title}</td></tr>` + arr.map((l, i) => rowOf(l, off + i)).join('') : '';
-  const rowOf = (l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td></tr>`; // K-191 / Ф.16–Д.1 v1.1: без себестоимости (решение чата 07.09)
+  const rowOf = (l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}${l.addedBy ? `<div class="sm">добавил: ${esc(l.addedBy)}${l.editedBy ? ' · изменил: ' + esc(l.editedBy) : ''}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td></tr>`; // K-191 / Ф.16–Д.1 v1.1: без себестоимости (решение чата 07.09)
   const inProd = a.lines.filter((l) => l.role !== 'Расходник'), cons = a.lines.filter((l) => l.role === 'Расходник');
   const rows = (inProd.length && cons.length) ? grp('В состав изделия', inProd, 0) + grp('Расходные материалы (израсходовано при изготовлении)', cons, inProd.length) : a.lines.map((l, i) => rowOf(l, i)).join(''); // K-195 / v1.2: группы по назначению
   const sig = (role, who, when) => `<div class="sg"><div class="sg-r">${role}</div><div class="sg-l"><span class="sg-n">${esc(who || '')}</span><span class="sg-d">${when ? fmtD(when) : '«___» ________ 20___ г.'}</span></div><div class="sg-h"><span>подпись</span><span>Фамилия И.О.</span><span>дата</span></div></div>`;

@@ -9839,12 +9839,12 @@
     async function retroPaintDocs(){
       const h=document.getElementById('retro-body'), a=retroDraft, w=retroCanWrite();
       const F=(l,v,mono)=>`<div class="eqd-f"><div class="l">${l}</div><div class="v${mono?' mono':''}">${v||eqDash}</div></div>`;
-      let st={configured:false,dryRun:true,warehouse:'',chat:''}; try{ st=await (await fetch('/api/retro/onec-status')).json(); }catch{}
+      let st={configured:false,dryRun:true,warehouse:'',chat:''}; try{ const r=await fetch('/api/retro/onec-status',{cache:'no-store'}); const j=await r.json(); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); st=j; }catch(e){ st.err=String(e&&e.message||e); } // K-200b: причина, если статус не получен
       const isAdmin=!!(AUTH&&AUTH.isAdmin);
       h.innerHTML=`<div class="eqd-grid" style="padding-top:12px">${F('Статус',retroStCell(a.status))}${F('Утвердил',esc(a.approvedBy))}${F('Дата утверждения',a.approvedAt?fmt(a.approvedAt):'',true)}
           ${F('Документ 1С',a.onecDocNo?esc(a.onecDocNo)+(a.onecDocDate?' от '+fmt(a.onecDocDate):''):'',true)}${F('Ключ документа 1С',esc(a.onecDocKey),true)}${F('ИСМ-ид',esc(a.ismUid),true)}${a.onecDocReplaced?F('Заменённые черновики 1С',esc(a.onecDocReplaced).replace(/\n/g,'<br>')):''}</div>
         <div class="eqd-sec">Связь с 1С и бухгалтерией</div>
-        <div class="eqd-grid" style="padding-top:4px">${F('Интеграция с 1С',st.configured?'<span class="st st--done">настроена</span>':'<span class="st st--problem">не настроена</span>')}${F('Запись в 1С',st.dryRun?'<span class="st st--work">режим проверки</span>':'<span class="st st--done">включена</span>')}${F('Склад выпуска',esc(st.warehouse))}${F('Чат бухгалтерии',st.chat?'<span class="st st--done">chat'+esc(st.chat)+'</span>':'<span class="st st--neutral">не создан</span>')}</div>
+        <div class="eqd-grid" style="padding-top:4px">${F('Интеграция с 1С',st.configured?'<span class="st st--done">настроена</span>':(st.err?'<span class="st st--problem" title="'+esc(st.err)+'">статус не получен: '+esc(st.err)+'</span>':'<span class="st st--problem">не настроена</span>'))}${F('Запись в 1С',st.dryRun?'<span class="st st--work">режим проверки</span>':'<span class="st st--done">включена</span>')}${F('Склад выпуска',esc(st.warehouse))}${F('Чат бухгалтерии',st.chat?'<span class="st st--done">chat'+esc(st.chat)+'</span>':'<span class="st st--neutral">не создан</span>')}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
           ${(w&&a.id!=null&&(a.status==='Утверждён'||a.status==='Черновик в 1С'))?`<button class="ui-btn ui-btn--primary" data-act="to1c">${a.status==='Черновик в 1С'?'Проверить документ в 1С':(st.dryRun?'Показать план документа 1С':(a.onecDocKey?'Обновить черновик в 1С и отправить в чат':'Создать черновик в 1С и отправить в чат'))}</button>`:''}
           ${(w&&a.status==='Черновик в 1С')?'<button class="ui-btn" data-act="poll">Проверить проведение</button>':''}

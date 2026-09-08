@@ -7333,16 +7333,14 @@ async function retroSetStatus(body, session) {
     await retroEnsureApprovalCols();
     try { await ncEnsureColumn('retro_outputs', 'Документ 1С (заменён)', 'LongText'); } catch (e) { console.warn('[retro] колонка «Документ 1С (заменён)»:', e.message); }
     replacedNo = a['Документ 1С (№)'] || '';
-    const prev = String(a['Документ 1С (заменён)'] || '').trim();
-    patch['Документ 1С (заменён)'] = (prev ? prev + '\n' : '') + `${replacedNo || '—'} от ${a['Документ 1С (дата)'] || '—'} (${a['Документ 1С (ключ)'] || ''}) — возвращён ${whToday()}: ${String(body.comment || '').trim() || 'без комментария'}`;
-    patch['Документ 1С (ключ)'] = ''; patch['Документ 1С (№)'] = ''; patch['Документ 1С (дата)'] = null; patch['В чат бухгалтерии'] = '';
-    patch['ИСМ-ид'] = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2)); // новый uid — иначе поиск дубля найдёт старый черновик
+    // K-194: связь с документом 1С и ИСМ-ид сохраняем — после повторного утверждения портал обновит состав того же черновика
+    patch['В чат бухгалтерии'] = '';
     patch['Комментарий утверждающего'] = String(body.comment || '').trim() || 'доработка по замечаниям бухгалтерии'; patch['Дата возврата'] = whToday();
   }
   await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
   if (rework1c) {
     const who = (session && session.fio) || 'портал';
-    await retroChatNotify(`↩ ${no} «${title}» возвращён на доработку (${who}): ${String(body.comment || '').trim() || 'по замечаниям бухгалтерии'}.\nЧерновик ${ONEC_PROD.title} №${replacedNo || '—'} в 1С прошу пометить на удаление — после доработки портал создаст новый документ. ${link}`);
+    await retroChatNotify(`↩ ${no} «${title}» возвращён на доработку (${who}): ${String(body.comment || '').trim() || 'по замечаниям бухгалтерии'}.\nЧерновик ${ONEC_PROD.title} №${replacedNo || '—'} в 1С пока не проводите — после доработки портал обновит его состав. ${link}`);
     logEvent({ type: 'статус изменён', obj: 'Акт выпуска', objNum: no, from, to: 'Черновик', who, details: `доработка после черновика 1С №${replacedNo}: ${String(body.comment || '').trim()}` });
   }
   // K-161: обратное уведомление отправителю (ЛС) — утверждён / отклонён / отозван
@@ -7730,6 +7728,31 @@ async function onecPost(entity, payload) {
   if (!res.ok) throw onecErr(502, `1С отклонила создание (${res.status}). Подробности — в серверном логе portal/.data/1c/requests.log.`);
   try { return JSON.parse(txt); } catch { throw onecErr(502, '1С вернула не JSON на создание.'); }
 }
+// K-194 (решение Александра 08.09: «просто черновик обновится, документ пусть тот же будет»): PATCH разрешён ТОЛЬКО для
+// непроведённого, не помеченного на удаление документа из белого списка, созданного порталом (в комментарии ИСМ-ид),
+// и только для табличных частей и комментария — шапку (счета, подразделение, ответственный), которую правит бухгалтер, не трогаем.
+async function onecPatch(entity, key, payload) {
+  if (!onecConfigured()) throw onecErr(501, 'Интеграция с 1С не настроена.');
+  if (onecDryRun()) { onecLog('REFUSE', `PATCH ${entity} заблокирован флагом ONEC_DRY_RUN`); throw onecErr(409, 'Запись в 1С выключена (режим проверки).'); }
+  if (!ONEC_POST_ALLOWED.has(entity) || !entity.startsWith('Document_')) throw onecErr(500, 'Отказ: обновлять можно только документы из белого списка.');
+  if (!onecIsGuid(key)) throw onecErr(500, 'Отказ: нет ключа документа.');
+  const allowedKeys = new Set(['Продукция', 'Материалы', 'ВозвратныеОтходы', 'Комментарий']);
+  const bad = Object.keys(payload || {}).filter((k) => !allowedKeys.has(k));
+  if (bad.length) throw onecErr(500, `Отказ: портал не правит реквизиты шапки (${bad.join(', ')}).`);
+  const cur = await onecGet(`${entity}(guid'${key}')?$select=Ref_Key,Number,Posted,DeletionMark,Комментарий`);
+  if (!cur || !cur.Ref_Key) throw onecErr(404, 'Документ в 1С не найден.');
+  if (cur.Posted) throw onecErr(409, `Документ №${cur.Number} уже проведён — обновлять нельзя; попросите бухгалтерию распровести или создайте новый акт.`);
+  if (cur.DeletionMark) throw onecErr(409, `Документ №${cur.Number} помечен на удаление.`);
+  if (!String(cur.Комментарий || '').includes(ONEC_UID_TAG)) throw onecErr(500, 'Отказ: документ создан не порталом — портал его не правит.');
+  const c = cfg(); const t0 = Date.now(); let res;
+  try {
+    res = await fetch(`${c.ONEC_URL}/${entity}(guid'${key}')?$format=json`, { method: 'PATCH', headers: { Authorization: 'Basic ' + Buffer.from(`${c.ONEC_LOGIN}:${c.ONEC_PASSWORD}`).toString('base64'), Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  } catch (e) { onecLog('FAIL', `PATCH ${entity} → ${e.name}: ${e.message}`); throw onecErr(504, '1С не ответила на обновление документа.'); }
+  const txt = await res.text();
+  onecLog(res.ok ? 'PATCH-OK' : 'PATCH-ERR', `${res.status} ${Date.now() - t0}мс ${entity}(${key}) №${cur.Number}${res.ok ? '' : ' :: ' + txt.slice(0, 500).replace(/\s+/g, ' ')}`);
+  if (!res.ok) throw onecErr(502, `1С отклонила обновление документа №${cur.Number} (${res.status}). Подробности — в серверном логе portal/.data/1c/requests.log.`);
+  try { return JSON.parse(txt); } catch { return cur; }
+}
 // реквизиты по образцу свежего документа + план счетов + склад (кэш 10 мин по базе/логину/складу)
 let _onecTpl = null, _onecTplKey = '', _onecTplExp = 0;
 async function onecRetroTemplate() {
@@ -7822,13 +7845,26 @@ async function retroTo1c(body, session) {
   if (!['Утверждён', 'Черновик в 1С'].includes(act.status)) throw onecErr(400, `Черновик в 1С создаётся из акта в статусе «Утверждён» (сейчас «${act.status}»).`);
   if (!onecConfigured()) throw onecErr(501, 'Интеграция с 1С не настроена.');
   const existing = await onecRetroFindExisting(act);
-  if (existing) {
+  if (existing && (existing.Posted || act.status === 'Черновик в 1С')) {
     const patch = { 'Документ 1С (ключ)': existing.Ref_Key, 'Документ 1С (№)': existing.Number || '', 'Документ 1С (дата)': String(existing.Date || '').slice(0, 10) };
     if (act.status !== 'Черновик в 1С') patch['Статус'] = existing.Posted ? 'Проведён в 1С' : 'Черновик в 1С';
     await ncUpdate('retro_outputs', act.id, patch);
     return { ok: true, already: true, doc: { ref: existing.Ref_Key, number: existing.Number, date: String(existing.Date || '').slice(0, 10), posted: !!existing.Posted } };
   }
   const built = await onecRetroBuild(act);
+  if (existing) { // K-194: акт доработан (Утверждён повторно), черновик в 1С не проведён — обновляем состав того же документа
+    if (onecDryRun()) return { ok: true, dryRun: true, plan: built.plan, note: `Режим проверки: документ №${existing.Number} не обновлён. Так будет выглядеть состав.` };
+    if (built.product.create) { const nom = await onecPost('Catalog_Номенклатура', built.product.create); built.doc.Продукция[0].Номенклатура_Key = nom.Ref_Key; built.plan.product.code = nom.Code || ''; built.plan.product.created = true; }
+    await onecPatch(ONEC_PROD.entity, existing.Ref_Key, { Продукция: built.doc.Продукция, Материалы: built.doc.Материалы, Комментарий: built.doc.Комментарий });
+    const doc = { ref: existing.Ref_Key, number: existing.Number || '', date: String(existing.Date || '').slice(0, 10), updated: true };
+    await ncUpdate('retro_outputs', act.id, { 'Статус': 'Черновик в 1С', 'Документ 1С (ключ)': doc.ref, 'Документ 1С (№)': doc.number, 'Документ 1С (дата)': doc.date });
+    onecLog('RETRO', `${act.no} → обновлён ${ONEC_PROD.title} №${doc.number} (${doc.ref}), материалов ${built.plan.materials.length}`);
+    const line1c = `Черновик в 1С обновлён: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — состав заменён (${built.plan.materials.length} поз.), просьба проверить и провести.`;
+    let chat = null;
+    try { const base = String(body.text || '').trim() || (await retroChatPreview(act.id)).text; const text = base.replace(/\nУтвердил: /, `\n${line1c}\nУтвердил: `); chat = await retroChatSend({ id: act.id, text: text.includes(line1c) ? text : text + '\n' + line1c }, session); }
+    catch (e) { onecLog('CHAT-ERR', `после обновления ${doc.number}: ${e.message || e}`); const sent = await retroChatNotify(`📄 ${act.no} «${act.name}»\n${line1c}\nАкт в портале: ${cfg().PORTAL_BASE}/#retro/${act.id}`); chat = { ok: sent, attached: false, warning: String(e.message || e) }; }
+    return { ok: true, doc, plan: built.plan, chat, updated: true };
+  }
   if (onecDryRun()) return { ok: true, dryRun: true, plan: built.plan, note: 'Режим проверки: в 1С ничего не записано. Так будет выглядеть документ.' };
   if (built.product.create) {
     const nom = await onecPost('Catalog_Номенклатура', built.product.create);
@@ -7836,12 +7872,14 @@ async function retroTo1c(body, session) {
   }
   const created = await onecPost(ONEC_PROD.entity, built.doc);
   const doc = { ref: created.Ref_Key, number: created.Number || '', date: String(created.Date || '').slice(0, 10) };
-  await ncUpdate('retro_outputs', act.id, { 'Статус': 'Черновик в 1С', 'Документ 1С (ключ)': doc.ref, 'Документ 1С (№)': doc.number, 'Документ 1С (дата)': doc.date });
+  const upd = { 'Статус': 'Черновик в 1С', 'Документ 1С (ключ)': doc.ref, 'Документ 1С (№)': doc.number, 'Документ 1С (дата)': doc.date };
+  if (act.onecDocKey && act.onecDocKey !== doc.ref) { try { await ncEnsureColumn('retro_outputs', 'Документ 1С (заменён)', 'LongText'); } catch { /* soft */ } upd['Документ 1С (заменён)'] = (String(act.onecDocReplaced || '').trim() ? act.onecDocReplaced + '\n' : '') + `${act.onecDocNo || '—'} от ${act.onecDocDate || '—'} (${act.onecDocKey}) — исчез/удалён в 1С, заменён ${whToday()}`; } // K-194
+  await ncUpdate('retro_outputs', act.id, upd);
   onecLog('RETRO', `${act.no} → ${ONEC_PROD.title} №${doc.number} (${doc.ref})`);
   // K-190 (решение Александра 07.09): «отправка в чат = создание в 1С» — одно действие: черновик в 1С, затем в чат бухгалтерии
   // уходит печатная форма (PDF) с текстом предпросмотра (можно править) и строкой о созданном черновике. Откат на короткое сообщение, если файл не ушёл.
-  const replaced = String(act.onecDocReplaced || '').trim().split('\n').filter(Boolean).pop() || ''; const replacedNo = (/^(\S+) от/.exec(replaced) || [])[1] || '';
-  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — просьба проверить и провести.${replacedNo && replacedNo !== '—' ? ' Заменяет черновик №' + replacedNo + ' (его — пометить на удаление).' : ''}${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '»' + (act.designation ? ', обозначение ' + act.designation + ' — в комментарии позиции' : '') + '.' : ''}`;
+  const replacedNo = (act.onecDocKey && act.onecDocKey !== doc.ref) ? (act.onecDocNo || '') : '';
+  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — просьба проверить и провести.${replacedNo && replacedNo !== '—' ? ' Заменяет черновик №' + replacedNo + ', которого больше нет в 1С.' : ''}${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '»' + (act.designation ? ', обозначение ' + act.designation + ' — в комментарии позиции' : '') + '.' : ''}`;
   let chat = null;
   try {
     const base = String(body.text || '').trim() || (await retroChatPreview(act.id)).text;

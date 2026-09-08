@@ -7154,7 +7154,7 @@ function retroActShape(r, lines) {
     id: r.Id ?? r.id, no: r['№ акта'] || '', date: r['Дата'] || '', name: r['Наименование'] || '', designation: r['Обозначение / чертёж'] || '',
     qty: Number(r['Кол-во']) || 0, unit: r['ЕИ'] || 'шт', whereTo: r['Куда приходуем'] || '', account: r['Счёт учёта'] || retroAccountOf(r['Куда приходуем']),
     period: r['Фактический период'] || '', responsible: r['Ответственный'] || '', mk: r['МК (№)'] || '', status: r['Статус'] || 'Черновик',
-    cost: Number(r['Себестоимость']) || 0, note: r['Примечание'] || '', ismUid: r['ИСМ-ид'] || '',
+    cost: Number(r['Себестоимость']) || 0, note: r['Примечание'] || '', ismUid: r['ИСМ-ид'] || '', onecDocReplaced: r['Документ 1С (заменён)'] || '', // K-192
     onecDocKey: r['Документ 1С (ключ)'] || '', onecDocNo: r['Документ 1С (№)'] || '', onecDocDate: r['Документ 1С (дата)'] || '',
     approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '',
     // K-161: маршрут утверждения — кому отправлен, кем и когда; комментарий утверждающего (при отклонении)
@@ -7288,8 +7288,9 @@ async function retroSetStatus(body, session) {
   const to = String(body.status || '').trim(); const from = a['Статус'] || 'Черновик';
   // K-161: Черновик/Отклонён → На утверждении (выбранному сотруднику) → Утверждён | Отклонён (утверждающим) | Черновик (отозвать)
   // K-165 (решение владельца): отклонение утверждающим = возврат в «Черновик» на доработку с комментарием, ничего не удаляется; «Отклонён» — только когда документ удалили в 1С
-  const allowed = { 'Черновик': ['На утверждении', 'Утверждён'], 'Отклонён': ['Черновик', 'На утверждении', 'Утверждён'], 'На утверждении': ['Утверждён', 'Отклонён', 'Черновик'], 'Утверждён': ['Черновик', 'Закрыт'], 'Проведён в 1С': ['Закрыт'] };
+  const allowed = { 'Черновик': ['На утверждении', 'Утверждён'], 'Отклонён': ['Черновик', 'На утверждении', 'Утверждён'], 'На утверждении': ['Утверждён', 'Отклонён', 'Черновик'], 'Утверждён': ['Черновик', 'Закрыт'], 'Черновик в 1С': ['Черновик'], 'Проведён в 1С': ['Закрыт'] }; // K-192: доработка после черновика в 1С
   const returning = from === 'На утверждении' && to === 'Отклонён'; // «отклонить» → возврат на доработку
+  const rework1c = from === 'Черновик в 1С' && to === 'Черновик'; // K-192: бухгалтерия попросила доработать — новый черновик в 1С, старый она помечает на удаление
   if (!(allowed[from] || []).includes(to)) { const e = new Error(`Переход «${from}» → «${to}» не разрешён.`); e.status = 400; throw e; }
   const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
   const meId = session && session.userId != null ? String(session.userId) : '';
@@ -7324,7 +7325,24 @@ async function retroSetStatus(body, session) {
     patch['Утвердил'] = (session && session.fio) || 'портал'; patch['Дата утверждения'] = whToday();
   }
   if (returning) { await retroEnsureApprovalCols(); patch['Статус'] = 'Черновик'; patch['Комментарий утверждающего'] = String(body.comment || '').trim() || 'без комментария'; patch['Дата возврата'] = whToday(); }
+  let replacedNo = '';
+  if (rework1c) {
+    if (!isAdmin && !retroApproverIds().includes(Number(meId)) && String(a['Ответственный'] || '') !== ((session && session.fio) || '')) { const e = new Error('Вернуть акт на доработку может его создатель, утверждающий или Администратор.'); e.status = 403; throw e; }
+    await retroEnsureApprovalCols();
+    try { await ncEnsureColumn('retro_outputs', 'Документ 1С (заменён)', 'LongText'); } catch (e) { console.warn('[retro] колонка «Документ 1С (заменён)»:', e.message); }
+    replacedNo = a['Документ 1С (№)'] || '';
+    const prev = String(a['Документ 1С (заменён)'] || '').trim();
+    patch['Документ 1С (заменён)'] = (prev ? prev + '\n' : '') + `${replacedNo || '—'} от ${a['Документ 1С (дата)'] || '—'} (${a['Документ 1С (ключ)'] || ''}) — возвращён ${whToday()}: ${String(body.comment || '').trim() || 'без комментария'}`;
+    patch['Документ 1С (ключ)'] = ''; patch['Документ 1С (№)'] = ''; patch['Документ 1С (дата)'] = null; patch['В чат бухгалтерии'] = '';
+    patch['ИСМ-ид'] = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2)); // новый uid — иначе поиск дубля найдёт старый черновик
+    patch['Комментарий утверждающего'] = String(body.comment || '').trim() || 'доработка по замечаниям бухгалтерии'; patch['Дата возврата'] = whToday();
+  }
   await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
+  if (rework1c) {
+    const who = (session && session.fio) || 'портал';
+    await retroChatNotify(`↩ ${no} «${title}» возвращён на доработку (${who}): ${String(body.comment || '').trim() || 'по замечаниям бухгалтерии'}.\nЧерновик ${ONEC_PROD.title} №${replacedNo || '—'} в 1С прошу пометить на удаление — после доработки портал создаст новый документ. ${link}`);
+    logEvent({ type: 'статус изменён', obj: 'Акт выпуска', objNum: no, from, to: 'Черновик', who, details: `доработка после черновика 1С №${replacedNo}: ${String(body.comment || '').trim()}` });
+  }
   // K-161: обратное уведомление отправителю (ЛС) — утверждён / отклонён / отозван
   if (from === 'На утверждении') {
     const senderName = a['Отправил на утверждение'] || '';
@@ -7337,7 +7355,7 @@ async function retroSetStatus(body, session) {
       await retroDm(senderId, msg);
     }
   }
-  return { ok: true, id: a.Id ?? a.id, status: returning ? 'Черновик' : to, returned: returning };
+  return { ok: true, id: a.Id ?? a.id, status: returning ? 'Черновик' : to, returned: returning, rework1c, replacedNo };
 }
 // K-165: удаление черновика акта (создатель, утверждающий или админ) — только «Черновик»
 async function retroDelete(body, session) {
@@ -7820,7 +7838,8 @@ async function retroTo1c(body, session) {
   onecLog('RETRO', `${act.no} → ${ONEC_PROD.title} №${doc.number} (${doc.ref})`);
   // K-190 (решение Александра 07.09): «отправка в чат = создание в 1С» — одно действие: черновик в 1С, затем в чат бухгалтерии
   // уходит печатная форма (PDF) с текстом предпросмотра (можно править) и строкой о созданном черновике. Откат на короткое сообщение, если файл не ушёл.
-  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — просьба проверить и провести.${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '»' + (act.designation ? ', обозначение ' + act.designation + ' — в комментарии позиции' : '') + '.' : ''}`;
+  const replaced = String(act.onecDocReplaced || '').trim().split('\n').filter(Boolean).pop() || ''; const replacedNo = (/^(\S+) от/.exec(replaced) || [])[1] || '';
+  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — просьба проверить и провести.${replacedNo && replacedNo !== '—' ? ' Заменяет черновик №' + replacedNo + ' (его — пометить на удаление).' : ''}${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '»' + (act.designation ? ', обозначение ' + act.designation + ' — в комментарии позиции' : '') + '.' : ''}`;
   let chat = null;
   try {
     const base = String(body.text || '').trim() || (await retroChatPreview(act.id)).text;

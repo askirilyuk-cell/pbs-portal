@@ -7339,7 +7339,8 @@ async function retroEnsureApprovalCols() { for (const [t, u] of RETRO_APPROVAL_C
 // личное сообщение пользователю Bitrix (best-effort; DIALOG_ID = id пользователя, как у проверяющего ЗнЗ)
 async function retroDm(userId, text) {
   if (!userId || !cfg().BITRIX) return false;
-  // K-162: системное уведомление (колокольчик, «от портала»), а не личное сообщение от владельца вебхука; при отказе метода — ЛС
+  // K-199: бот «Портал ИСМ» через входящий вебхук невозможен (нужен Client ID приложения) — решение Александра 08.09: уведомление в колокольчик ок
+  // K-162: системное уведомление (колокольчик), при отказе метода — ЛС от владельца вебхука
   try { await bitrixCall('im.notify.system.add', { USER_ID: Number(userId), MESSAGE: text, TAG: 'ISM_RETRO_' + Date.now() }); return true; }
   catch (e) { onecLog('NOTIFY-ERR', `${userId}: ${e.message || e}`); }
   try { await bitrixCall('im.message.add', { DIALOG_ID: String(userId), MESSAGE: text }); return true; } catch (e) { onecLog('DM-ERR', `${userId}: ${e.message || e}`); return false; }

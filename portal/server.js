@@ -7603,7 +7603,7 @@ async function retroPrintHtml(id, opts) {
   const fmtD = (d) => ruDate(d) || esc(d || '');
   const n2 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const n3 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
-  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td><td class="r">${n2(l.cost)}</td><td class="r">${n2(l.sum)}</td></tr>`).join('');
+  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td></tr>`).join(''); // K-191 / Ф.16–Д.1 v1.1: без себестоимости (решение чата 07.09)
   const sig = (role, who, when) => `<div class="sg"><div class="sg-r">${role}</div><div class="sg-l"><span class="sg-n">${esc(who || '')}</span><span class="sg-d">${when ? fmtD(when) : '«___» ________ 20___ г.'}</span></div><div class="sg-h"><span>подпись</span><span>Фамилия И.О.</span><span>дата</span></div></div>`;
   const logo = pbsLogoMonoDataUri();
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(a.no)} — Акт выпуска</title>
@@ -7654,9 +7654,9 @@ async function retroPrintHtml(id, opts) {
 <tr><td class="k">Маршрутная карта</td><td class="v">${esc(a.mk) || '—'}</td><td class="k">Канон-номенклатура</td><td class="v">${esc(a.canonName) || '—'}</td><td class="k">ИСМ-ид</td><td class="v mono" style="font-weight:400;font-size:8.5px">${esc(a.ismUid)}</td></tr></table>
 <div class="sec">Материалы к списанию (по остаткам 1С на дату утверждения)</div>
 <table class="pos"><colgroup><col style="width:3%"><col style="width:23%"><col style="width:10%"><col style="width:23%"><col style="width:13%"><col style="width:5%"><col style="width:7%"><col style="width:8%"><col style="width:8%"></colgroup>
-<thead><tr><th>№</th><th>Материал (канон)</th><th>Код 1С</th><th>Наименование в 1С</th><th>Склад</th><th>ЕИ</th><th>Кол-во</th><th>Себест., ₽/ед.</th><th>Сумма, ₽</th></tr></thead>
-<tbody>${rows || (blank ? '<tr><td class="c">1</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td class="c">2</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td class="c">3</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>' : '<tr><td colspan="9" class="c">Материалы к списанию не указаны (ранее списаны / выпуск без материалов)</td></tr>')}</tbody>
-<tfoot><tr><th colspan="8">Итого по себестоимости 1С, ₽</th><th class="r">${blank ? '' : n2(a.cost)}</th></tr></tfoot></table>
+<thead><tr><th>№</th><th>Материал (канон)</th><th>Код 1С</th><th>Наименование в 1С</th><th>Склад</th><th>ЕИ</th><th>Кол-во</th></tr></thead>
+<tbody>${rows || (blank ? '<tr><td class="c">1</td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td class="c">2</td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td class="c">3</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>' : '<tr><td colspan="7" class="c">Материалы к списанию не указаны (ранее списаны / выпуск без материалов)</td></tr>')}</tbody>
+</table>
 ${a.note ? `<div class="note"><b>Примечание:</b> ${esc(a.note)}</div>` : ''}
 <div class="signs">
   ${sig('Составил (создал в портале)', a.responsible, a.date)}
@@ -7664,7 +7664,7 @@ ${a.note ? `<div class="note"><b>Примечание:</b> ${esc(a.note)}</div>`
   ${sig('Утвердил', a.approvedBy, a.approvedAt)}
   ${sig('Принял к учёту (бухгалтерия)', a.acceptedBy, a.acceptedAt)}
 </div>
-<table class="req"><tr><td>Код документа:</td><td>Ф.16–Д.1</td></tr><tr><td>Версия:</td><td>1.0</td></tr><tr><td>Дата введения:</td><td>05.09.2026</td></tr>${blank ? '' : `<tr><td>Сформировано порталом ИСМ:</td><td>${ruDate(new Date().toISOString())}</td></tr>`}</table>
+<table class="req"><tr><td>Код документа:</td><td>Ф.16–Д.1</td></tr><tr><td>Версия:</td><td>1.1</td></tr><tr><td>Дата введения:</td><td>08.09.2026</td></tr>${blank ? '' : `<tr><td>Сформировано порталом ИСМ:</td><td>${ruDate(new Date().toISOString())}</td></tr>`}</table>
 <div class="ft">ООО «Петробалт Сервис» · 238315, Калининградская обл., МО Зеленоградский, ИП Храброво, ул. Инноваций, зд. 1 · Ф.16–Д.1</div>
 <script>if(location.search.includes('print=1'))window.print();</script></body></html>`;
 }
@@ -7756,7 +7756,7 @@ async function onecRetroProduct(act, mirror) {
   };
   const units = (await onecGet(`Catalog_КлассификаторЕдиницИзмерения?$top=300&$select=Ref_Key,Description`)).value || [];
   const u = units.find((x) => String(x.Description || '').trim().toLowerCase() === String(act.unit || 'шт').trim().toLowerCase()) || units.find((x) => String(x.Description || '').trim() === 'шт');
-  return { key: '', code: '', name: act.name, willCreateGroup, create: { Description: String(act.name).slice(0, 100), Parent_Key: g.Ref_Key, ЕдиницаИзмерения_Key: (u && u.Ref_Key) || ONEC_ZERO_GUID, Комментарий: `Портал ИСМ: акт выпуска ${act.no}, ${ONEC_UID_TAG}${act.ismUid}. Черновик номенклатуры — требует проверки бухгалтером.` } };
+  return { key: '', code: '', name: act.name, willCreateGroup, create: { Description: String(act.name).slice(0, 100), Parent_Key: g.Ref_Key, ЕдиницаИзмерения_Key: (u && u.Ref_Key) || ONEC_ZERO_GUID, Комментарий: `${act.designation ? act.designation + ' · ' : ''}Портал ИСМ: акт выпуска ${act.no}${act.mk ? ', ' + act.mk : ''}. Обозначение/чертёж: ${act.designation || '—'}` } };
 }
 // сборка тела документа + план для показа (dry-run) — из акта и его состава
 async function onecRetroBuild(act) {
@@ -7820,11 +7820,11 @@ async function retroTo1c(body, session) {
   onecLog('RETRO', `${act.no} → ${ONEC_PROD.title} №${doc.number} (${doc.ref})`);
   // K-190 (решение Александра 07.09): «отправка в чат = создание в 1С» — одно действие: черновик в 1С, затем в чат бухгалтерии
   // уходит печатная форма (PDF) с текстом предпросмотра (можно править) и строкой о созданном черновике. Откат на короткое сообщение, если файл не ушёл.
-  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')}. Материалов: ${built.plan.materials.length}, себестоимость ${(act.cost || 0).toLocaleString('ru-RU')} ₽.${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '» — проверьте реквизиты.' : ''}\nПросьба проверить и провести.`;
+  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — просьба проверить и провести.${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '»' + (act.designation ? ', обозначение ' + act.designation + ' — в комментарии позиции' : '') + '.' : ''}`;
   let chat = null;
   try {
     const base = String(body.text || '').trim() || (await retroChatPreview(act.id)).text;
-    const text = base.replace(/\nПечатная форма — во вложении/, `\n${line1c}\nПечатная форма — во вложении`);
+    const text = base.replace(/\nУтвердил: /, `\n${line1c}\nУтвердил: `);
     chat = await retroChatSend({ id: act.id, text: text.includes(line1c) ? text : text + '\n' + line1c }, session);
   } catch (e) {
     onecLog('CHAT-ERR', `после черновика ${doc.number}: ${e.message || e}`);
@@ -7858,14 +7858,15 @@ async function retroPollOne(id) {
 async function retroPoll1c(opts) {
   if (!onecConfigured()) return { ok: false, note: '1С не настроена' };
   const only = opts && opts.id != null ? String(opts.id) : null;
-  const acts = (await ncListSoft('retro_outputs')).filter((a) => a['Статус'] === 'Черновик в 1С' && onecIsGuid(a['Документ 1С (ключ)']) && (!only || String(a.Id ?? a.id) === only));
-  const out = { checked: acts.length, posted: [], rejected: [], errors: [] };
+  const acts = (await ncListSoft('retro_outputs')).filter((a) => ['Черновик в 1С', 'Проведён в 1С'].includes(a['Статус']) && onecIsGuid(a['Документ 1С (ключ)']) && (!only || String(a.Id ?? a.id) === only)); // K-191: следим и за распроведением
+  const out = { checked: acts.length, posted: [], rejected: [], unposted: [], errors: [] };
   for (const a of acts) {
     try {
       const d = await onecGet(`${ONEC_PROD.entity}(guid'${a['Документ 1С (ключ)']}')?$select=Ref_Key,Number,Posted,DeletionMark,Date,Ответственный_Key`);
       const link = `${String(cfg().PORTAL_BASE || '').replace(/\/+$/, '')}/#retro/${a.Id ?? a.id}`;
       if (d.DeletionMark) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}): документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. ${link}`); await retroChatNotify(`✖ ${a['№ акта']} «${a['Наименование']}»: документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. Александр, посмотрите причину.`); }
-      else if (d.Posted) { const acc = await retroAcceptedFrom1c(d); await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С', ...acc }); out.posted.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}) проведён в 1С: ${ONEC_PROD.title} №${d.Number || ''}${acc['Принял к учёту (1С)'] ? ', принял к учёту ' + acc['Принял к учёту (1С)'] : ''}. ${link}`); await retroChatNotify(`✔ ${a['№ акта']} «${a['Наименование']}»: ${ONEC_PROD.title} №${d.Number || ''} проведён. Спасибо!`); }
+      else if (d.Posted && a['Статус'] !== 'Проведён в 1С') { const acc = await retroAcceptedFrom1c(d); await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С', ...acc }); out.posted.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}) проведён в 1С: ${ONEC_PROD.title} №${d.Number || ''}${acc['Принял к учёту (1С)'] ? ', принял к учёту ' + acc['Принял к учёту (1С)'] : ''}. ${link}`); }
+      else if (a['Статус'] === 'Проведён в 1С' && !d.Posted) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Черновик в 1С', 'Принял к учёту (1С)': '', 'Дата проведения 1С': null }); out.unposted.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}): документ ${ONEC_PROD.title} №${d.Number || ''} распроведён в 1С — акт снова «Черновик в 1С». ${link}`); }
     } catch (e) { if (e.status === 502 && /404|не найден/.test(String(e.message))) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); } else out.errors.push(`${a['№ акта']}: ${e.message}`); }
   }
   if (out.posted.length) { try { onecRunSync(); } catch { /* синк — best-effort */ } }
@@ -7908,15 +7909,11 @@ async function retroChatPreview(id) {
   const card = await buildRetroCard(id); if (!card) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
   const a = card.act; const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
   const n0 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
-  const L = [`📄 Акт выпуска ${a.no} от ${ruDate(a.date)} — ${a.name}${a.designation ? ' (' + a.designation + ')' : ''}`,
-    `Количество: ${n0(a.qty)} ${a.unit} · приходуем: ${a.whereTo || '—'}${a.account ? ' (счёт ' + a.account + ')' : ''}`,
-    a.period ? `Период изготовления: ${a.period}` : '',
-    `Материалы к списанию: ${a.lines.length} поз.${a.cost ? ' · по себестоимости 1С ' + n0(a.cost.toFixed(2)) + ' ₽' : ''}`,
-    ...a.lines.slice(0, 15).map((l, i) => `${i + 1}. ${l.name || l.onecName} — ${l.qtyFact != null ? n0(l.qtyFact) : '?'} ${l.unit}${l.onecCode ? ' · 1С ' + l.onecCode : ''}${l.warehouse ? ' · ' + l.warehouse : ''}`),
-    a.lines.length > 15 ? `… ещё ${a.lines.length - 15} поз. — в форме` : '',
-    `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''} · заполнил: ${a.responsible || '—'}`,
+  // K-191: коротко и без себестоимости (решение чата 07.09: с/с «никого не должна смущать», состав — в форме)
+  const L = [`📄 ${a.no} от ${ruDate(a.date)} — ${a.name}${a.designation ? ' (' + a.designation + ')' : ''}, ${n0(a.qty)} ${a.unit} → ${a.whereTo || '—'}`,
+    `${a.period ? 'Период: ' + a.period + ' · ' : ''}материалов к списанию: ${a.lines.length} поз. (состав — в форме)${a.mk ? ' · ' + a.mk : ''}`,
     a.note ? `Примечание: ${a.note}` : '',
-    `Печатная форма — во вложении. Акт в портале: ${portal}/#retro/${a.id}`].filter(Boolean);
+    `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''}. Акт в портале: ${portal}/#retro/${a.id}`].filter(Boolean);
   return { ok: true, text: L.join('\n'), chat: retroChatId(), chatSent: a.chatSent || '', pdf: !!cfg().GOTENBERG, status: a.status };
 }
 async function retroChatSend(body, session) {

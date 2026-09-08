@@ -7403,6 +7403,12 @@ async function retroSetStatus(body, session) {
     patch['Комментарий утверждающего'] = String(body.comment || '').trim() || 'доработка по замечаниям бухгалтерии'; patch['Дата возврата'] = whToday();
   }
   await ncUpdate('retro_outputs', a.Id ?? a.id, patch);
+  // K-202 (Александр 08.09: «когда он утвердит — сразу в чат и черновик обновлялся в 1С»): утверждение само создаёт/обновляет черновик в 1С и шлёт форму в чат
+  let onec = null;
+  if (to === 'Утверждён' && onecConfigured() && !onecDryRun()) {
+    try { onec = await retroTo1c({ id: a.Id ?? a.id }, session); }
+    catch (e) { onec = { error: String(e.message || e) }; onecLog('AUTO-1C-ERR', `${no}: ${e.message || e}`); }
+  }
   if (rework1c) {
     const who = (session && session.fio) || 'портал';
     await retroChatNotify(`↩ ${no} «${title}» возвращён на доработку (${who}): ${String(body.comment || '').trim() || 'по замечаниям бухгалтерии'}.\nЧерновик ${ONEC_PROD.title} №${replacedNo || '—'} в 1С пока не проводите — после доработки портал обновит его состав. ${link}`);
@@ -7414,13 +7420,14 @@ async function retroSetStatus(body, session) {
     let senderId = null; try { const st = await getStaffList(); const u = st.find((x) => x.name === senderName); if (u) senderId = u.id; } catch { /* без ЛС */ }
     if (senderId && String(senderId) !== meId) {
       const who = (session && session.fio) || 'портал';
-      const msg = to === 'Утверждён' ? `Акт выпуска ${no} (${title}) утверждён: ${who}. Материалы зарезервированы. ${link}`
+      const onecNote = onec && onec.doc ? ` Черновик в 1С ${onec.updated ? 'обновлён' : 'создан'}: ${ONEC_PROD.title} №${onec.doc.number}, форма ушла в чат бухгалтерии.` : (onec && onec.error ? ` Черновик в 1С не создан: ${onec.error} — нажмите кнопку на вкладке «Документы / 1С».` : '');
+      const msg = to === 'Утверждён' ? `Акт выпуска ${no} (${title}) утверждён: ${who}. Материалы зарезервированы.${onecNote} ${link}`
         : to === 'Отклонён' ? `Акт выпуска ${no} (${title}) возвращён на доработку: ${who}.${body.comment ? ' Комментарий: ' + String(body.comment).trim() : ''} Доработайте и отправьте снова или удалите черновик. ${link}`
         : `Акт выпуска ${no} возвращён в черновик: ${who}. ${link}`;
       await retroDm(senderId, msg);
     }
   }
-  return { ok: true, id: a.Id ?? a.id, status: returning ? 'Черновик' : to, returned: returning, rework1c, replacedNo };
+  return { ok: true, id: a.Id ?? a.id, status: returning ? 'Черновик' : to, returned: returning, rework1c, replacedNo, onec };
 }
 // K-165: удаление черновика акта (создатель, утверждающий или админ) — только «Черновик»
 async function retroDelete(body, session) {

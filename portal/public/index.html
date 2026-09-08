@@ -9584,7 +9584,7 @@
       await retroLoadApprovers(); // K-161
     }
     // ── K-168/169: НЗП по позициям ПЗ и выпуск производственного акта ──
-    let retroView='acts';
+    let retroView='acts', retroWhere=''; // K-204: фильтр «Куда приходуем» в реестре актов
     async function renderWip(body,host){
       body.innerHTML='<div class="card pad" style="color:var(--sub)">Считаю незавершённое производство…</div>';
       let d; try{ d=await (await fetch('/api/retro/wip')).json(); }catch(e){ d={error:String(e.message||e)}; }
@@ -9626,6 +9626,7 @@
       body.innerHTML=`<div class="card eq-filters" style="padding:8px 10px">
           <input id="retro-q" type="search" placeholder="Поиск: № акта, наименование, чертёж, МК" value="${esc(retroQ)}" style="min-width:260px" aria-label="Поиск">
           <select id="retro-st" aria-label="Статус">${opt('','Все статусы',retroStatus)+((RETRO.dict&&RETRO.dict.statuses)||[]).map(s=>opt(s,s,retroStatus)).join('')}</select>
+          ${retroView!=='writeoff'?`<select id="retro-where" aria-label="Куда приходуем">${opt('','Куда приходуем: все',retroWhere)+((RETRO.dict&&RETRO.dict.whereTo)||[]).filter(x=>!/\(25\)/.test(x)).map(x=>opt(x,x,retroWhere)).join('')}</select>`:''}
         </div><div id="retrogrid" style="margin-top:var(--gap);min-width:0"></div>`;
       if(retroView==='writeoff'&&RETRO.writeoff){ const wo=RETRO.writeoff; const bn=document.createElement('div'); bn.className='card'; const ok=!!wo.current; bn.style.cssText='margin-top:var(--gap);padding:10px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid '+(ok?'var(--em-500,#1a7f4b)':'var(--amber,#b45309)')+';background:'+(ok?'var(--em-50,#e7f5ec)':'#fff7ed');
         bn.innerHTML=ok?`<b>Списание за ${esc(wo.monthLabel)}:</b> ${esc(wo.current.no)} · ${retroStCell(wo.current.status)} · строк ${wo.current.lines}${wo.current.status==='Черновик'?' — дозаполните и отправьте на утверждение до '+esc(fmt(wo.deadline)):''}`:`<b>Списание за ${esc(wo.monthLabel)} ещё не создано.</b> <span class="c-gray">Сделать до конца месяца, ${esc(fmt(wo.deadline))}: расходники, израсходованные на общепроизводственные нужды, одним актом → «Требование-накладная» на счёт 25.</span>`;
@@ -9637,6 +9638,7 @@
         bn.querySelectorAll('[data-ldel]').forEach(b=>b.onclick=async()=>{ const l=locals[+b.dataset.ldel]; if(!(await uiConfirm('Удалить незаконченный черновик из браузера?',{ok:'Удалить',danger:true})))return; retroLocalClear(l.id); renderRetro(host); }); }
       body.querySelector('#retro-q').oninput=(e)=>{retroQ=e.target.value;retroGrid();};
       body.querySelector('#retro-st').onchange=(e)=>{retroStatus=e.target.value;retroGrid();};
+      const rw=body.querySelector('#retro-where'); if(rw)rw.onchange=(e)=>{retroWhere=e.target.value;retroGrid();};
       retroGrid();
       if(arg){ const it=RETRO.items.find(i=>String(i.id)===String(arg)||i.no===arg); if(it){ if(it.kind==='Списание'&&retroView!=='writeoff'){ retroView='writeoff'; renderRetro(host,arg); return; } retroOpen(it.id); } }
       else if(retroDrawerIsOpen()&&retroSel!=null&&retroSel!=='new') retroOpen(retroSel,{keepTab:true});
@@ -9645,6 +9647,7 @@
       let rows=((RETRO&&RETRO.items)||[]).filter(i=>retroView==='writeoff'?i.kind==='Списание':i.kind!=='Списание'); const q=(retroQ||'').trim().toLowerCase(); // K-196
       if(q)rows=rows.filter(i=>[i.no,i.name,i.designation,i.mk,i.responsible].some(x=>String(x||'').toLowerCase().includes(q)));
       if(retroStatus)rows=rows.filter(i=>i.status===retroStatus);
+      if(retroWhere&&retroView!=='writeoff')rows=rows.filter(i=>(i.whereTo||'')===retroWhere); // K-204
       return rows;
     }
     function retroGrid(){

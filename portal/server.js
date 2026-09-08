@@ -1552,6 +1552,43 @@ async function taskNotify(body, session) {
   logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: num.split('/')[0], who, details: `${head} по задаче ${num}: ${String(body.text || '').trim() || '—'}` });
   return { ok: true, sent, recipients: ids, dryRun: dry };
 }
+// K-197: кто ведёт ежемесячное списание (Настройки → 1С и бухгалтерия); за WRITEOFF_DAYS дней до конца месяца портал сам создаёт черновик и напоминает
+const WRITEOFF_HANDLERS_DEFAULT = [11, 159];
+const writeoffHandlerIds = () => { const raw = runtime.WRITEOFF_HANDLERS != null ? runtime.WRITEOFF_HANDLERS : (process.env.WRITEOFF_HANDLERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : WRITEOFF_HANDLERS_DEFAULT; };
+const writeoffDays = () => { const n = Number(runtime.WRITEOFF_DAYS != null ? runtime.WRITEOFF_DAYS : (process.env.WRITEOFF_DAYS || 5)); return Number.isFinite(n) && n > 0 ? n : 5; };
+const WRITEOFF_STATE_FILE = path.join(__dirname, '.data', '1c', 'writeoff.json');
+function retroWriteoffWindow(now) {
+  const d = now || new Date(); const ym = d.toISOString().slice(0, 7); const end = retroMonthEnd(ym);
+  const daysLeft = Math.round((new Date(end + 'T00:00:00Z').getTime() - new Date(d.toISOString().slice(0, 10) + 'T00:00:00Z').getTime()) / 86400000);
+  return { month: ym, monthLabel: retroMonthLabel(ym), deadline: end, daysLeft, due: daysLeft <= writeoffDays() };
+}
+// ежедневно: в окне «N дней до конца месяца» создать черновик списания, если его нет, и напомнить ответственным (1 раз при создании, 1 раз за день до срока)
+async function retroWriteoffEnsure() {
+  if (!isLive()) return { ok: false };
+  const w = retroWriteoffWindow(); if (!w.due) return { ok: true, due: false, ...w };
+  let st = {}; try { st = JSON.parse(fs.readFileSync(WRITEOFF_STATE_FILE, 'utf8')); } catch { st = {}; }
+  const acts = await ncListSoft('retro_outputs');
+  let cur = acts.find((x) => (x['Вид'] || '') === RETRO_KIND_WRITEOFF && String(x['Фактический период'] || '') === w.month && x['Статус'] !== 'Отклонён') || null;
+  const ids = writeoffHandlerIds(); let staff = []; try { staff = await getStaffList(); } catch { staff = []; }
+  const nameOf = (id) => { const u = staff.find((x) => Number(x.id) === Number(id)); return u ? u.name : ('id' + id); };
+  const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+  let created = null;
+  if (!cur) {
+    const r = await retroSave({ kind: RETRO_KIND_WRITEOFF, period: w.month, note: 'Создано порталом автоматически: заполните состав расходников за месяц', lines: [] }, { fio: nameOf(ids[0]), userId: ids[0] });
+    created = r; cur = { Id: r.id, '№ акта': r.no, 'Статус': 'Черновик' };
+    for (const id of ids) await retroDm(id, `Черновик ежемесячного списания за ${w.monthLabel} создан: ${r.no}. Заполните состав расходников и отправьте на утверждение до ${w.deadline.split('-').reverse().join('.')}. ${portal}/#retro/${r.id}`);
+    st[w.month] = { createdAt: new Date().toISOString(), no: r.no, remindedFinal: false };
+  }
+  const status = cur['Статус'] || 'Черновик';
+  if (['Черновик', 'На утверждении'].includes(status) && w.daysLeft <= 1 && !(st[w.month] && st[w.month].remindedFinal)) {
+    for (const id of ids) await retroDm(id, `Завтра конец месяца: списание за ${w.monthLabel} (${cur['№ акта']}) ещё «${status}». ${portal}/#retro/${cur.Id ?? cur.id}`);
+    st[w.month] = { ...(st[w.month] || {}), remindedFinal: true };
+  }
+  try { fs.mkdirSync(path.dirname(WRITEOFF_STATE_FILE), { recursive: true }); fs.writeFileSync(WRITEOFF_STATE_FILE, JSON.stringify(st, null, 2)); } catch { /* soft */ }
+  return { ok: true, due: true, ...w, current: { id: cur.Id ?? cur.id, no: cur['№ акта'], status }, created: !!created };
+}
+setTimeout(() => { retroWriteoffEnsure().catch((e) => console.warn('[writeoff] ensure:', e.message)); }, 90 * 1000);
+setInterval(() => { retroWriteoffEnsure().catch((e) => console.warn('[writeoff] ensure:', e.message)); }, 6 * 60 * 60 * 1000);
 const mkApproverIds = () => { const raw = runtime.MK_APPROVERS != null ? runtime.MK_APPROVERS : (process.env.MK_APPROVERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : retroApproverIds(); };
 const MK_APPROVAL_COLS = [['Согласующий (id)', 'Number'], ['Согласующий', 'SingleLineText'], ['Отправил на согласование', 'SingleLineText'], ['Дата отправки', 'Date'], ['Утвердил', 'SingleLineText'], ['Дата утверждения', 'Date'], ['Комментарий согласующего', 'LongText'], ['Дата возврата', 'Date']];
 async function mkEnsureApprovalCols() { for (const [t, u] of MK_APPROVAL_COLS) { try { await ncEnsureColumn('routes', t, u); } catch (e) { console.warn('[МК] колонка «' + t + '» недоступна:', e.message); } } for (const st of MK_STATUS) { try { await ncEnsureSelectOption('routes', 'Статус МК', st); } catch (e) { console.warn('[МК] статус «' + st + '»:', e.message); } } }
@@ -7544,13 +7581,14 @@ async function buildCabinet(session) {
   const meId = session && session.userId != null ? String(session.userId) : '';
   const fio = (session && session.fio) || '';
   const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
-  const out = { ok: true, me: { id: meId, fio, isAdmin, purchaseHandler: purchaseHandlerIds().includes(Number(meId)) }, approvals: [], sent: [], recent: [], purchases: [], drafts: [] };
+  const out = { ok: true, me: { id: meId, fio, isAdmin, purchaseHandler: purchaseHandlerIds().includes(Number(meId)), writeoffHandler: writeoffHandlerIds().includes(Number(meId)) }, approvals: [], sent: [], recent: [], purchases: [], drafts: [] };
   if (!isLive()) return out;
   try {
     const d = await buildRetroLive();
+    if (out.me.writeoffHandler) { const w = retroWriteoffWindow(); out.writeoff = { ...w, current: d.writeoff && d.writeoff.current ? d.writeoff.current : null }; } // K-197
     for (const a of d.items) {
       const item = { kind: 'retro', kindLabel: 'Акт выпуска', id: a.id, no: a.no, title: a.name, sub: `${a.qty} ${a.unit} · ${a.whereTo || '—'} · материалов ${a.lineCount}${a.cost ? ' · ' + a.cost.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽' : ''}`, status: a.status, date: a.sentAt || a.date, by: a.sentBy, approver: a.approverName, url: '#retro/' + a.id };
-      if (a.status === 'Черновик' && a.responsible && a.responsible === fio) out.drafts.push({ ...item, section: 'Акты выпуска', returned: a.returnedAt ? { by: a.approverName, at: a.returnedAt, comment: a.approverComment } : null });
+      if (a.status === 'Черновик' && ((a.responsible && a.responsible === fio) || (a.kind === RETRO_KIND_WRITEOFF && out.me.writeoffHandler))) out.drafts.push({ ...item, section: 'Акты выпуска', returned: a.returnedAt ? { by: a.approverName, at: a.returnedAt, comment: a.approverComment } : null });
       if (a.status === 'На утверждении' && (String(a.approverId ?? '') === meId || (isAdmin && !a.approverId))) out.approvals.push(item);
       else if (a.status === 'На утверждении' && a.sentBy && a.sentBy === fio) out.sent.push(item);
       else if (a.responsible === fio && ['Отклонён', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С'].includes(a.status) && a.approvedAt && (Date.now() - Date.parse(a.approvedAt)) < 30 * 86400000) out.recent.push(item);
@@ -9644,7 +9682,7 @@ function settingsView() {
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
     // K-159: 1С и бухгалтерия
-    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','), mkApprovers: mkApproverIds().join(','), otkUsers: otkUserIds().join(','),
+    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','), mkApprovers: mkApproverIds().join(','), otkUsers: otkUserIds().join(','), writeoffHandlers: writeoffHandlerIds().join(','), writeoffDays: writeoffDays(),
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -9686,6 +9724,8 @@ function saveSettings(body) {
   if (typeof body.accChat === 'string') next.BITRIX_ACC_CHAT = body.accChat.trim().replace(/^chat/, '');
   if (typeof body.mkApprovers === 'string') next.MK_APPROVERS = body.mkApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   if (typeof body.otkUsers === 'string') next.OTK_USERS = body.otkUsers.split(/[,;\s]+/).map(Number).filter(Boolean).join(','); // K-187
+  if (typeof body.writeoffHandlers === 'string') next.WRITEOFF_HANDLERS = body.writeoffHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(','); // K-197
+  if (body.writeoffDays != null && body.writeoffDays !== '' && Number(body.writeoffDays) > 0) next.WRITEOFF_DAYS = String(Math.round(Number(body.writeoffDays)));
   if (typeof body.purchaseHandlers === 'string') next.PURCHASE_HANDLERS = body.purchaseHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   if (typeof body.retroApprovers === 'string') next.RETRO_APPROVERS = body.retroApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
@@ -12831,6 +12871,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, patch, params: params.length });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
+    if (p === '/api/retro/writeoff-ensure' && req.method === 'POST') { const ses = sessionFromReq(req); if (!(ses && (ses.isAdmin || (ses.roles || []).includes('Администратор')))) return sendJson(res, 403, { error: 'Только администратор.' }); try { return sendJson(res, 200, await retroWriteoffEnsure()); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } } // K-197
     if (p === '/api/task/notify' && req.method === 'POST') { // K-187: «Вызвать контролёра» / «Сообщить технологу»
       if (!isLive()) return sendJson(res, 501, { error: 'Только в LIVE-режиме.' });
       try { return sendJson(res, 200, await taskNotify(await readBody(req), sessionFromReq(req))); }

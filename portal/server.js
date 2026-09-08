@@ -7130,6 +7130,9 @@ const RETRO_STATUS = ['Черновик', 'На утверждении', 'Утв
 const RETRO_RESERVING = new Set(['Утверждён', 'Черновик в 1С']);
 const RETRO_EDITABLE = new Set(['Черновик', 'Отклонён']);
 const RETRO_SOURCES = ['План МК', 'Типовой состав', 'Вручную', 'Расчёт по чертежу'];
+// K-195 (Александр, чат 07.09): «разделить — что в составе изделия, что как расходник потрачено»
+const RETRO_ROLES = ['В изделии', 'Расходник'];
+const retroRoleOf = (mkRole) => (mkRole === 'Вспомогательный' ? 'Расходник' : 'В изделии');
 const retroAccountOf = (where) => { const m = /\(([\d.]+)\)/.exec(String(where || '')); return m ? m[1] : ''; };
 async function retroNextNo() {
   const rows = await ncListSoft('retro_outputs');
@@ -7144,6 +7147,7 @@ function retroLineShape(l) {
     onecKey: l['Ключ 1С'] || '', onecCode: l['Код 1С'] || '', onecName: l['Наименование 1С'] || '', warehouse: l['Склад'] || '',
     unit: l['ЕИ'] || '', qtyPlan: l['Кол-во план'] != null ? Number(l['Кол-во план']) : null, qtyFact: l['Кол-во факт'] != null ? Number(l['Кол-во факт']) : null,
     cost: Number(l['Себестоимость']) || 0, sum: Number(l['Сумма']) || 0, source: l['Источник'] || 'Вручную', reason: l['Причина замены'] || '', note: l['Примечание'] || '',
+    role: RETRO_ROLES.includes(l['Назначение']) ? l['Назначение'] : 'В изделии', // K-195
     order: Number(l['Порядок']) || 0, actId: l.retro_outputs_id ?? null,
   };
 }
@@ -7206,6 +7210,7 @@ async function buildRetroCard(id) {
 }
 // создание/правка акта и его состава (только в редактируемых статусах)
 async function retroSave(body, session) {
+  try { await ncEnsureColumn('retro_lines', 'Назначение', 'SingleLineText'); } catch (e) { console.warn('[retro] колонка «Назначение»:', e.message); } // K-195
   const id = (body.id != null && body.id !== '') ? Number(body.id) : null;
   const acts = await ncListSoft('retro_outputs');
   const existing = id != null ? acts.find((x) => String(x.Id ?? x.id) === String(id)) : null;
@@ -7242,6 +7247,7 @@ async function retroSave(body, session) {
         'Кол-во план': (qp != null && !isNaN(qp)) ? qp : null, 'Кол-во факт': (qf != null && !isNaN(qf)) ? qf : null,
         'Себестоимость': cost, 'Сумма': sum, 'Источник': RETRO_SOURCES.includes(l.source) ? l.source : 'Вручную',
         'Причина замены': String(l.reason || '').trim(), 'Примечание': String(l.note || '').trim(), 'Порядок': i + 1,
+        'Назначение': RETRO_ROLES.includes(l.role) ? l.role : 'В изделии', // K-195
       },
     };
   }).filter((x) => x.row['Наименование'] || x.row['Ключ 1С']);
@@ -7573,9 +7579,9 @@ async function retroPrefill(q) {
     const rr = (await ncListSoft('routes')).find((x) => String(x.Id ?? x.id) === String(q.routeId));
     const bom = rr ? mkBomParse(rr['Спецификация материалов']).filter((m) => m.role !== 'Комплектующее') : [];
     const kgMap = await canonKgPerMMap();
-    if (bom.length) bom.forEach((m) => { const c = mkToKg(m.norm, m.unit, m.canonId, kgMap); plan.push({ canonId: m.canonId, name: m.name, unit: c.unit, qty: c.qty, source: 'План МК' }); });
+    if (bom.length) bom.forEach((m) => { const c = mkToKg(m.norm, m.unit, m.canonId, kgMap); plan.push({ canonId: m.canonId, name: m.name, unit: c.unit, qty: c.qty, source: 'План МК', role: retroRoleOf(m.role) }); });
     else { const ops = (await ncListSoft('operations')).filter((o) => String(o.routes_id) === String(q.routeId));
-      ops.forEach((o) => mkPlanParse(o['Материалы (план)']).forEach((m) => plan.push({ ...m, source: 'План МК' }))); }
+      ops.forEach((o) => mkPlanParse(o['Материалы (план)']).forEach((m) => plan.push({ ...m, source: 'План МК', role: retroRoleOf(m.role) }))); }
   } else if (q.canonId) {
     const c = (await ncListSoft('catalog_canon')).find((x) => String(x.Id ?? x.id) === String(q.canonId));
     let t = []; try { t = JSON.parse((c && c['Типовой состав']) || '[]'); } catch { t = []; }
@@ -7583,7 +7589,7 @@ async function retroPrefill(q) {
   }
   // свернуть по канону
   const acc = new Map();
-  for (const m of plan) { const k = m.canonId != null ? 'c' + m.canonId : 'n' + String(m.name || '').toLowerCase(); const a = acc.get(k) || { canonId: m.canonId ?? null, name: m.name || '', unit: m.unit || '', norm: 0, source: m.source }; a.norm += Number(m.qty) || 0; acc.set(k, a); }
+  for (const m of plan) { const k = m.canonId != null ? 'c' + m.canonId : 'n' + String(m.name || '').toLowerCase(); const a = acc.get(k) || { canonId: m.canonId ?? null, name: m.name || '', unit: m.unit || '', norm: 0, source: m.source, role: RETRO_ROLES.includes(m.role) ? m.role : 'В изделии' }; a.norm += Number(m.qty) || 0; acc.set(k, a); }
   // подбор позиции 1С: алиас канона с наибольшим доступным остатком
   const mirror = await ncListAll('onec_items'); const reserve = await retroReserveMap(null);
   const byCanon = new Map();
@@ -7593,7 +7599,7 @@ async function retroPrefill(q) {
     const best = cands[0] && cands[0].avail > 0 ? cands[0].m : (cands[0] ? cands[0].m : null);
     let wh = ''; try { const w = JSON.parse((best && best['Остатки по складам']) || '[]'); if (Array.isArray(w) && w.length) wh = w.sort((p, r) => r.qty - p.qty)[0].name; } catch { /* нет складов */ }
     const qp = +(a.norm * qty).toFixed(3);
-    return { canonId: a.canonId, name: a.name, unit: a.unit || (best ? best['ЕИ'] : ''), qtyPlan: qp, qtyFact: qp, source: a.source,
+    return { canonId: a.canonId, name: a.name, unit: a.unit || (best ? best['ЕИ'] : ''), qtyPlan: qp, qtyFact: qp, source: a.source, role: a.role,
       onecKey: best ? best['Ключ 1С'] : '', onecCode: best ? best['Код 1С'] : '', onecName: best ? best['Наименование'] : '', warehouse: wh, cost: best ? (Number(best['Себестоимость']) || 0) : 0,
       candidates: cands.slice(0, 6).map((c) => ({ key: c.m['Ключ 1С'], code: c.m['Код 1С'], name: c.m['Наименование'], available: +c.avail.toFixed(3), unit: c.m['ЕИ'] || '' })) };
   });
@@ -7621,7 +7627,10 @@ async function retroPrintHtml(id, opts) {
   const fmtD = (d) => ruDate(d) || esc(d || '');
   const n2 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const n3 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
-  const rows = a.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td></tr>`).join(''); // K-191 / Ф.16–Д.1 v1.1: без себестоимости (решение чата 07.09)
+  const grp = (title, arr, off) => arr.length ? `<tr><td colspan="7" style="background:#eef3f8;font-weight:700;text-align:left">${title}</td></tr>` + arr.map((l, i) => rowOf(l, off + i)).join('') : '';
+  const rowOf = (l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td></tr>`; // K-191 / Ф.16–Д.1 v1.1: без себестоимости (решение чата 07.09)
+  const inProd = a.lines.filter((l) => l.role !== 'Расходник'), cons = a.lines.filter((l) => l.role === 'Расходник');
+  const rows = (inProd.length && cons.length) ? grp('В состав изделия', inProd, 0) + grp('Расходные материалы (израсходовано при изготовлении)', cons, inProd.length) : a.lines.map((l, i) => rowOf(l, i)).join(''); // K-195 / v1.2: группы по назначению
   const sig = (role, who, when) => `<div class="sg"><div class="sg-r">${role}</div><div class="sg-l"><span class="sg-n">${esc(who || '')}</span><span class="sg-d">${when ? fmtD(when) : '«___» ________ 20___ г.'}</span></div><div class="sg-h"><span>подпись</span><span>Фамилия И.О.</span><span>дата</span></div></div>`;
   const logo = pbsLogoMonoDataUri();
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(a.no)} — Акт выпуска</title>
@@ -7682,7 +7691,7 @@ ${a.note ? `<div class="note"><b>Примечание:</b> ${esc(a.note)}</div>`
   ${sig('Утвердил', a.approvedBy, a.approvedAt)}
   ${sig('Принял к учёту (бухгалтерия)', a.acceptedBy, a.acceptedAt)}
 </div>
-<table class="req"><tr><td>Код документа:</td><td>Ф.16–Д.1</td></tr><tr><td>Версия:</td><td>1.1</td></tr><tr><td>Дата введения:</td><td>08.09.2026</td></tr>${blank ? '' : `<tr><td>Сформировано порталом ИСМ:</td><td>${ruDate(new Date().toISOString())}</td></tr>`}</table>
+<table class="req"><tr><td>Код документа:</td><td>Ф.16–Д.1</td></tr><tr><td>Версия:</td><td>1.2</td></tr><tr><td>Дата введения:</td><td>08.09.2026</td></tr>${blank ? '' : `<tr><td>Сформировано порталом ИСМ:</td><td>${ruDate(new Date().toISOString())}</td></tr>`}</table>
 <div class="ft">ООО «Петробалт Сервис» · 238315, Калининградская обл., МО Зеленоградский, ИП Храброво, ул. Инноваций, зд. 1 · Ф.16–Д.1</div>
 <script>if(location.search.includes('print=1'))window.print();</script></body></html>`;
 }
@@ -7970,7 +7979,7 @@ async function retroChatPreview(id) {
   const n0 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
   // K-191: коротко и без себестоимости (решение чата 07.09: с/с «никого не должна смущать», состав — в форме)
   const L = [`📄 ${a.no} от ${ruDate(a.date)} — ${a.name}${a.designation ? ' (' + a.designation + ')' : ''}, ${n0(a.qty)} ${a.unit} → ${a.whereTo || '—'}`,
-    `${a.period ? 'Период: ' + a.period + ' · ' : ''}материалов к списанию: ${a.lines.length} поз. (состав — в форме)${a.mk ? ' · ' + a.mk : ''}`,
+    `${a.period ? 'Период: ' + a.period + ' · ' : ''}материалов к списанию: ${a.lines.length} поз.${a.lines.length ? ' (в изделии ' + a.lines.filter((l) => l.role !== 'Расходник').length + ', расходники ' + a.lines.filter((l) => l.role === 'Расходник').length + '; состав — в форме)' : ''}${a.mk ? ' · ' + a.mk : ''}`,
     a.note ? `Примечание: ${a.note}` : '',
     `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''}. Акт в портале: ${portal}/#retro/${a.id}`].filter(Boolean);
   return { ok: true, text: L.join('\n'), chat: retroChatId(), chatSent: a.chatSent || '', pdf: !!cfg().GOTENBERG, status: a.status };

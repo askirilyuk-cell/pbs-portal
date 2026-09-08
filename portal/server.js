@@ -7174,7 +7174,7 @@ const RETRO_RESERVING = new Set(['Утверждён', 'Черновик в 1С'
 const RETRO_EDITABLE = new Set(['Черновик', 'Отклонён']);
 const RETRO_SOURCES = ['План МК', 'Типовой состав', 'Вручную', 'Расчёт по чертежу'];
 // K-195 (Александр, чат 07.09): «разделить — что в составе изделия, что как расходник потрачено»
-const RETRO_ROLES = ['В изделии', 'Расходник'];
+const RETRO_ROLES = ['В изделии', 'Расходник', 'Упаковка']; // K-205: упаковка (паллеты, стальная лента) — Герасимов 08.09
 const retroRoleOf = (mkRole) => (mkRole === 'Вспомогательный' ? 'Расходник' : 'В изделии');
 const retroAccountOf = (where) => { const m = /\(([\d.]+)\)/.exec(String(where || '')); return m ? m[1] : ''; };
 async function retroNextNo(kind) {
@@ -7696,8 +7696,8 @@ async function retroPrintHtml(id, opts) {
   const n3 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
   const grp = (title, arr, off) => arr.length ? `<tr><td colspan="7" style="background:#eef3f8;font-weight:700;text-align:left">${title}</td></tr>` + arr.map((l, i) => rowOf(l, off + i)).join('') : '';
   const rowOf = (l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name || l.onecName)}${l.note ? `<div class="sm">${esc(l.note)}</div>` : ''}${l.addedBy ? `<div class="sm">добавил: ${esc(l.addedBy)}${l.editedBy ? ' · изменил: ' + esc(l.editedBy) : ''}</div>` : ''}</td><td class="mono c">${esc(l.onecCode)}</td><td>${esc(l.onecName)}</td><td>${esc(l.warehouse)}</td><td class="c">${esc(l.unit)}</td><td class="r">${l.qtyFact != null ? n3(l.qtyFact) : '—'}</td></tr>`; // K-191 / Ф.16–Д.1 v1.1: без себестоимости (решение чата 07.09)
-  const inProd = a.lines.filter((l) => l.role !== 'Расходник'), cons = a.lines.filter((l) => l.role === 'Расходник');
-  const rows = (inProd.length && cons.length) ? grp('В состав изделия', inProd, 0) + grp('Расходные материалы (израсходовано при изготовлении)', cons, inProd.length) : a.lines.map((l, i) => rowOf(l, i)).join(''); // K-195 / v1.2: группы по назначению
+  const inProd = a.lines.filter((l) => l.role !== 'Расходник' && l.role !== 'Упаковка'), cons = a.lines.filter((l) => l.role === 'Расходник'), pack = a.lines.filter((l) => l.role === 'Упаковка');
+  const rows = ((cons.length || pack.length) && a.lines.length > inProd.length) ? grp('В состав изделия', inProd, 0) + grp('Расходные материалы (израсходовано при изготовлении)', cons, inProd.length) + grp('Упаковка (паллеты, лента, тара)', pack, inProd.length + cons.length) : a.lines.map((l, i) => rowOf(l, i)).join(''); // K-205 // K-195 / v1.2: группы по назначению
   const sig = (role, who, when) => `<div class="sg"><div class="sg-r">${role}</div><div class="sg-l"><span class="sg-n">${esc(who || '')}</span><span class="sg-d">${when ? fmtD(when) : '«___» ________ 20___ г.'}</span></div><div class="sg-h"><span>подпись</span><span>Фамилия И.О.</span><span>дата</span></div></div>`;
   const logo = pbsLogoMonoDataUri();
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(a.no)} — Акт выпуска</title>
@@ -8081,7 +8081,7 @@ async function retroChatPreview(id) {
   const L = a.kind === RETRO_KIND_WRITEOFF ? [`📄 ${a.no} от ${ruDate(a.date)} — списание расходных материалов на общепроизводственные нужды за ${retroMonthLabel(a.period)} (счёт 25), ${a.lines.length} поз.`,
     `Состав — в форме${a.note ? ' · ' + a.note : ''}`,
     `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''}. Акт в портале: ${portal}/#retro/${a.id}`] : [`📄 ${a.no} от ${ruDate(a.date)} — ${a.name}${a.designation ? ' (' + a.designation + ')' : ''}, ${n0(a.qty)} ${a.unit} → ${a.whereTo || '—'}`,
-    `${a.period ? 'Период: ' + a.period + ' · ' : ''}материалов к списанию: ${a.lines.length} поз.${a.lines.length ? ' (в изделии ' + a.lines.filter((l) => l.role !== 'Расходник').length + ', расходники ' + a.lines.filter((l) => l.role === 'Расходник').length + '; состав — в форме)' : ''}${a.mk ? ' · ' + a.mk : ''}`,
+    `${a.period ? 'Период: ' + a.period + ' · ' : ''}материалов к списанию: ${a.lines.length} поз.${a.lines.length ? ' (в изделии ' + a.lines.filter((l) => l.role !== 'Расходник' && l.role !== 'Упаковка').length + ', расходники ' + a.lines.filter((l) => l.role === 'Расходник').length + (a.lines.some((l) => l.role === 'Упаковка') ? ', упаковка ' + a.lines.filter((l) => l.role === 'Упаковка').length : '') + '; состав — в форме)' : ''}${a.mk ? ' · ' + a.mk : ''}`,
     a.note ? `Примечание: ${a.note}` : '',
     `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''}. Акт в портале: ${portal}/#retro/${a.id}`].filter(Boolean);
   return { ok: true, text: L.join('\n'), chat: retroChatId(), chatSent: a.chatSent || '', pdf: !!cfg().GOTENBERG, status: a.status };

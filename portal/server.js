@@ -7125,7 +7125,13 @@ async function onecCreateCanon(body) {
 //  Правила (концепт §9.3): состав — только из позиций с остатком в 1С; резерв держат акты в статусах
 //  «Утверждён»/«Черновик в 1С»; портал остатки 1С не правит, черновик в 1С создаёт K-159.
 // ============================================================================
-const RETRO_WHERE = ['Оснастка (10.10)', 'Инвентарь для цеха (10.09)', 'Готовая продукция (43)', 'Полуфабрикат (21)', 'Оборудование (08)'];
+const RETRO_WHERE = ['Оснастка (10.10)', 'Инвентарь для цеха (10.09)', 'Готовая продукция (43)', 'Полуфабрикат (21)', 'Оборудование (08)', 'Общепроизводственные расходы (25)'];
+// K-196: ежемесячное списание расходников на общепроизводственные нужды — вид акта «Списание», документ 1С «Требование-накладная», счёт 25
+const RETRO_KIND_WRITEOFF = 'Списание';
+const RETRO_WRITEOFF_WHERE = 'Общепроизводственные расходы (25)';
+const RU_MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+const retroMonthLabel = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(String(ym || '').trim()); return m ? `${RU_MONTHS[Number(m[2]) - 1] || m[2]} ${m[1]}` : String(ym || ''); };
+const retroMonthEnd = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(String(ym || '').trim()); if (!m) return ''; const d = new Date(Number(m[1]), Number(m[2]), 0); return `${m[1]}-${m[2]}-${String(d.getDate()).padStart(2, '0')}`; };
 const RETRO_STATUS = ['Черновик', 'На утверждении', 'Утверждён', 'Черновик в 1С', 'Проведён в 1С', 'Отклонён', 'Закрыт'];
 const RETRO_RESERVING = new Set(['Утверждён', 'Черновик в 1С']);
 const RETRO_EDITABLE = new Set(['Черновик', 'Отклонён']);
@@ -7134,12 +7140,13 @@ const RETRO_SOURCES = ['План МК', 'Типовой состав', 'Вруч
 const RETRO_ROLES = ['В изделии', 'Расходник'];
 const retroRoleOf = (mkRole) => (mkRole === 'Вспомогательный' ? 'Расходник' : 'В изделии');
 const retroAccountOf = (where) => { const m = /\(([\d.]+)\)/.exec(String(where || '')); return m ? m[1] : ''; };
-async function retroNextNo() {
+async function retroNextNo(kind) {
   const rows = await ncListSoft('retro_outputs');
+  const pre = kind === RETRO_KIND_WRITEOFF ? 'СП' : 'ВП'; // K-196: списания — своя нумерация
   const y = new Date().getFullYear(); let max = 0;
-  const re = new RegExp(`^ВП-${y}-(\\d+)$`);
+  const re = new RegExp(`^${pre}-${y}-(\\d+)$`);
   for (const r of rows) { const m = re.exec(String(r['№ акта'] || '').trim()); if (m) max = Math.max(max, Number(m[1])); }
-  return `ВП-${y}-${String(max + 1).padStart(3, '0')}`;
+  return `${pre}-${y}-${String(max + 1).padStart(3, '0')}`;
 }
 function retroLineShape(l) {
   return {
@@ -7194,7 +7201,8 @@ async function buildRetroLive() {
   const ls = lines.map(retroLineShape);
   const items = acts.map((a) => retroActShape(a, ls)).sort((a, b) => String(b.no).localeCompare(String(a.no), 'ru', { numeric: true }));
   const kpis = { total: items.length, draft: items.filter((i) => i.status === 'Черновик').length, pending: items.filter((i) => i.status === 'На утверждении').length, approved: items.filter((i) => i.status === 'Утверждён').length, in1c: items.filter((i) => i.status === 'Черновик в 1С').length, posted: items.filter((i) => i.status === 'Проведён в 1С' || i.status === 'Закрыт').length, cost: +items.reduce((s, i) => s + i.cost, 0).toFixed(2) };
-  return { mode: 'live', items, kpis, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } };
+  const ym = new Date().toISOString().slice(0, 7); const cur = items.find((i) => i.kind === RETRO_KIND_WRITEOFF && String(i.period || '') === ym && i.status !== 'Отклонён') || null; // K-196
+  return { mode: 'live', items, kpis, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES }, writeoff: { month: ym, monthLabel: retroMonthLabel(ym), deadline: retroMonthEnd(ym), current: cur ? { id: cur.id, no: cur.no, status: cur.status, lines: cur.lineCount } : null } };
 }
 async function buildRetroCard(id) {
   // K-164: при открытии/печати акта в статусе «Черновик в 1С» — точечная проверка проведения (не чаще раза в 10 мин)
@@ -7216,6 +7224,15 @@ async function retroSave(body, session) {
   const existing = id != null ? acts.find((x) => String(x.Id ?? x.id) === String(id)) : null;
   if (id != null && !existing) { const e = new Error('Акт не найден.'); e.status = 404; throw e; }
   if (existing && !RETRO_EDITABLE.has(existing['Статус'] || 'Черновик')) { const e = new Error(`Акт в статусе «${existing['Статус']}» не редактируется — верните в черновик.`); e.status = 400; throw e; }
+  const kind = existing ? (existing['Вид'] || 'Ретро') : (String(body.kind || '').trim() === RETRO_KIND_WRITEOFF ? RETRO_KIND_WRITEOFF : 'Ретро');
+  const isWriteoff = kind === RETRO_KIND_WRITEOFF;
+  if (isWriteoff) { // K-196: месяц обязателен, наименование и «куда» — фиксированные
+    const ym = String(body.period || '').trim(); if (!/^\d{4}-\d{2}$/.test(ym)) { const e = new Error('Укажите месяц списания.'); e.status = 400; throw e; }
+    const dup = acts.find((x) => (x['Вид'] || '') === RETRO_KIND_WRITEOFF && String(x['Фактический период'] || '') === ym && String(x.Id ?? x.id) !== String(id || '') && x['Статус'] !== 'Отклонён');
+    if (dup) { const e = new Error(`Списание за ${retroMonthLabel(ym)} уже есть: ${dup['№ акта']} (${dup['Статус']}).`); e.status = 400; throw e; }
+    try { await ncEnsureSelectOption('retro_outputs', 'Куда приходуем', RETRO_WRITEOFF_WHERE); } catch (e) { console.warn('[retro] вариант «Куда приходуем» (25):', e.message); }
+    body.name = `Списание расходных материалов на общепроизводственные нужды — ${retroMonthLabel(ym)}`; body.qty = 1; body.unit = 'мес'; body.whereTo = RETRO_WRITEOFF_WHERE; body.account = '25'; body.designation = ''; body.mk = ''; body.canonId = '';
+  }
   const name = String(body.name || '').trim(); if (!name) { const e = new Error('Укажите, что произведено (наименование).'); e.status = 400; throw e; }
   const qty = Number(String(body.qty ?? '').replace(',', '.')); if (!(qty > 0)) { const e = new Error('Укажите количество произведённого (> 0).'); e.status = 400; throw e; }
   const whereTo = String(body.whereTo || '').trim(); if (whereTo && !RETRO_WHERE.includes(whereTo)) { const e = new Error('Недопустимое значение «Куда приходуем».'); e.status = 400; throw e; }
@@ -7255,7 +7272,8 @@ async function retroSave(body, session) {
   let actId = id;
   if (existing) await ncUpdate('retro_outputs', actId, row);
   else {
-    row['№ акта'] = await retroNextNo(); row['Статус'] = 'Черновик';
+    row['№ акта'] = await retroNextNo(kind); row['Статус'] = 'Черновик';
+    if (isWriteoff) { try { await ncEnsureColumn('retro_outputs', 'Вид', 'SingleLineText'); } catch { /* soft */ } row['Вид'] = RETRO_KIND_WRITEOFF; }
     row['ИСМ-ид'] = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
     const cr = await ncCreateMany('retro_outputs', [row]); const c = Array.isArray(cr) ? cr[0] : cr; actId = c.Id ?? c.id;
   }
@@ -7673,8 +7691,8 @@ async function retroPrintHtml(id, opts) {
 </div>
 <div class="co">ООО «ПЕТРОБАЛТ СЕРВИС»</div>
 <div class="code">Ф.16–Д.1</div>
-<div class="title">АКТ ВЫПУСКА ПРОДУКЦИИ И ОСНАСТКИ</div>
-<div class="sub">оприходование произведённого и списание материалов по ДП–Д.1</div>
+<div class="title">${a.kind === RETRO_KIND_WRITEOFF ? 'АКТ СПИСАНИЯ МАТЕРИАЛОВ НА ОБЩЕПРОИЗВОДСТВЕННЫЕ НУЖДЫ' : 'АКТ ВЫПУСКА ПРОДУКЦИИ И ОСНАСТКИ'}</div>
+<div class="sub">${a.kind === RETRO_KIND_WRITEOFF ? 'ежемесячное списание расходных материалов за ' + esc(retroMonthLabel(a.period)) + ' (форма акта выпуска, вид «списание»)' : 'оприходование произведённого и списание материалов по ДП–Д.1'}</div>
 <div class="no"><span>Акт № <b>${esc(a.no)}</b> от ${blank ? '«___» ________ 20___ г.' : fmtD(a.date)}</span><span>${blank ? '' : 'Статус: <b>' + esc(a.status) + '</b>'}${a.onecDocNo ? ` · документ 1С ${esc(a.onecDocNo)} от ${fmtD(a.onecDocDate)}` : ''}</span></div>
 <div class="prod"><span class="k">Произведено</span><span class="v">${esc(a.name) || (blank ? '&nbsp;' : '')}</span>${a.designation ? `<span class="d">${esc(a.designation)}</span>` : ''}<span class="q">${blank ? '________ шт' : n3(a.qty) + ' ' + esc(a.unit)}</span></div>
 <table class="info"><tr><td class="k">Куда приходуем</td><td class="v">${esc(a.whereTo) || '—'}</td><td class="k">Счёт учёта</td><td class="v">${esc(a.account) || '—'}</td><td class="k">Фактический период</td><td class="v">${esc(a.period) || '—'}</td></tr>
@@ -7708,7 +7726,9 @@ ${a.note ? `<div class="note"><b>Примечание:</b> ${esc(a.note)}</div>`
 // ============================================================================
 const ONEC_ZERO_GUID = '00000000-0000-0000-0000-000000000000';
 const ONEC_PROD = { entity: 'Document_ОтчетПроизводстваЗаСмену', vid: 'ОтчетПроизводстваЗаСмену', title: 'Отчёт производства за смену' };
-const ONEC_POST_ALLOWED = new Set([ONEC_PROD.entity, 'Catalog_Номенклатура']);
+const ONEC_REQ = { entity: 'Document_ТребованиеНакладная', title: 'Требование-накладная' }; // K-196
+const ONEC_POST_ALLOWED = new Set([ONEC_PROD.entity, ONEC_REQ.entity, 'Catalog_Номенклатура']);
+const onecEntityOf = (kind) => (kind === RETRO_KIND_WRITEOFF ? ONEC_REQ : ONEC_PROD);
 const ONEC_UID_TAG = 'ИСМ-ид:';
 const ONEC_UID_RE = new RegExp(ONEC_UID_TAG + '([0-9a-fA-F-]{36})');
 const ONEC_NOM_GROUP_PORTAL = 'Создано порталом';
@@ -7810,8 +7830,39 @@ async function onecRetroProduct(act, mirror) {
   const u = units.find((x) => String(x.Description || '').trim().toLowerCase() === String(act.unit || 'шт').trim().toLowerCase()) || units.find((x) => String(x.Description || '').trim() === 'шт');
   return { key: '', code: '', name: act.name, willCreateGroup, create: { Description: String(act.name).slice(0, 100), Parent_Key: g.Ref_Key, ЕдиницаИзмерения_Key: (u && u.Ref_Key) || ONEC_ZERO_GUID, Комментарий: `${act.designation ? act.designation + ' · ' : ''}Портал ИСМ: акт выпуска ${act.no}${act.mk ? ', ' + act.mk : ''}. Обозначение/чертёж: ${act.designation || '—'}` } };
 }
+// K-196: ежемесячное списание → «Требование-накладная» на счёт 25 (реквизиты шапки — по последнему проведённому образцу, счёт затрат 25, субконто счёта затрат бухгалтер выставляет в черновике)
+let _onecReqTpl = null, _onecReqTplExp = 0;
+async function onecReqTemplate() {
+  if (_onecReqTpl && Date.now() < _onecReqTplExp) return _onecReqTpl;
+  const gid = (v) => (onecIsGuid(v) && v !== ONEC_ZERO_GUID) ? v : null;
+  const last = ((await onecGet(`${ONEC_REQ.entity}?$top=1&$orderby=Date desc&$filter=Posted eq true`)).value || [])[0] || {};
+  const base = await onecRetroTemplate();
+  const tpl = { last, warehouseKey: base.warehouseKey, warehouseName: base.warehouseName, orgKey: gid(last.Организация_Key) || base.orgKey, orgName: base.orgName, accByCode: base.accByCode,
+    responsibleKey: gid(last.Ответственный_Key) || base.responsibleKey, deptKey: gid(last.ПодразделениеОрганизации_Key) || ONEC_ZERO_GUID, costDeptKey: gid(last.ПодразделениеЗатрат_Key) || ONEC_ZERO_GUID,
+    purposeKey: gid(last.ЦельРасхода_Key) || ONEC_ZERO_GUID, costItemKey: (last.Субконто2_Type === 'StandardODATA.Catalog_СтатьиЗатрат' && gid(last.Субконто2)) || ONEC_ZERO_GUID, sampleNo: last.Number || '' };
+  _onecReqTpl = tpl; _onecReqTplExp = Date.now() + 10 * 60 * 1000; return tpl;
+}
+async function onecReqBuild(act) {
+  const tpl = await onecReqTemplate();
+  const mirror = await ncListAll('onec_items'); const byKey = new Map(mirror.map((m) => [String(m['Ключ 1С'] || ''), m]));
+  const acc25 = tpl.accByCode.get('25') || ONEC_ZERO_GUID;
+  const materials = []; const skipped = [];
+  for (const l of act.lines) {
+    const qf = Number(l.qtyFact); if (!l.onecKey || !(qf > 0)) { skipped.push(l.name || l.onecName || '—'); continue; }
+    const m = byKey.get(String(l.onecKey)); const info = await onecNomInfo(l.onecKey);
+    const accCode = String((m && m['Счета']) || '').split(', ').filter(Boolean)[0] || '';
+    materials.push({ LineNumber: String(materials.length + 1), Номенклатура_Key: l.onecKey, Количество: qf, КоличествоМест: 0, Коэффициент: 1, ЕдиницаИзмерения_Key: info.ЕдиницаИзмерения_Key || ONEC_ZERO_GUID, Счет_Key: tpl.accByCode.get(accCode) || ONEC_ZERO_GUID, СчетЗатрат_Key: acc25, _view: { name: l.onecName || (m && m['Наименование']) || l.name, code: l.onecCode || (m && m['Код 1С']) || '', qty: qf, unit: l.unit || (m && m['ЕИ']) || '', account: accCode } });
+  }
+  const comment = `${ONEC_UID_TAG}${act.ismUid} · ${act.no} · Портал ИСМ: ${act.name}${act.note ? '. ' + act.note : ''}`;
+  const doc = { Date: onecDateNow(), Posted: false, Организация_Key: tpl.orgKey, Склад_Key: tpl.warehouseKey, ПодразделениеОрганизации_Key: tpl.deptKey, СчетаУчетаЗатратВТаблице: false,
+    СчетЗатрат_Key: acc25, ПодразделениеЗатрат_Key: tpl.costDeptKey, Субконто1: '', Субконто1_Type: 'StandardODATA.Undefined', Субконто2: tpl.costItemKey !== ONEC_ZERO_GUID ? tpl.costItemKey : '', Субконто2_Type: tpl.costItemKey !== ONEC_ZERO_GUID ? 'StandardODATA.Catalog_СтатьиЗатрат' : 'StandardODATA.Undefined', Субконто3: '', Субконто3_Type: 'StandardODATA.Undefined',
+    Ответственный_Key: tpl.responsibleKey, ЦельРасхода_Key: tpl.purposeKey, Комментарий: comment, Материалы: materials.map(({ _view, ...r }) => r) };
+  const plan = { entity: ONEC_REQ.title, warehouse: tpl.warehouseName, org: tpl.orgName, sampleNo: tpl.sampleNo, product: { name: act.name, code: '', willCreate: false, account: '25 (счёт затрат)', qty: act.qty, unit: act.unit }, materials: materials.map((m) => m._view), skipped, comment };
+  return { doc, plan, product: { key: '', create: null } };
+}
 // сборка тела документа + план для показа (dry-run) — из акта и его состава
 async function onecRetroBuild(act) {
+  if (act.kind === RETRO_KIND_WRITEOFF) return onecReqBuild(act); // K-196
   const tpl = await onecRetroTemplate();
   const mirror = await ncListAll('onec_items'); const byKey = new Map(mirror.map((m) => [String(m['Ключ 1С'] || ''), m]));
   const product = await onecRetroProduct(act, mirror);
@@ -7839,11 +7890,11 @@ async function onecRetroBuild(act) {
 // найти уже созданный документ по uuid (предфильтр 1С + точное сравнение) или по сохранённой ссылке
 async function onecRetroFindExisting(act) {
   if (onecIsGuid(act.onecDocKey)) {
-    try { const d = await onecGet(`${ONEC_PROD.entity}(guid'${act.onecDocKey}')?$select=Ref_Key,Number,Date,Posted,DeletionMark,Комментарий`); if (d && d.Ref_Key && !d.DeletionMark) return d; } catch { /* нет — ищем по uid */ }
+    try { const d = await onecGet(`${onecEntityOf(act.kind).entity}(guid'${act.onecDocKey}')?$select=Ref_Key,Number,Date,Posted,DeletionMark,Комментарий`); if (d && d.Ref_Key && !d.DeletionMark) return d; } catch { /* нет — ищем по uid */ }
   }
   if (!onecIsGuid(act.ismUid)) return null;
   try {
-    const rows = (await onecGet(`${ONEC_PROD.entity}?$top=20&$orderby=Date desc&$select=Ref_Key,Number,Date,Posted,DeletionMark,Комментарий&$filter=substringof('${onecLit(ONEC_UID_TAG + act.ismUid)}',Комментарий) and DeletionMark eq false`)).value || [];
+    const rows = (await onecGet(`${onecEntityOf(act.kind).entity}?$top=20&$orderby=Date desc&$select=Ref_Key,Number,Date,Posted,DeletionMark,Комментарий&$filter=substringof('${onecLit(ONEC_UID_TAG + act.ismUid)}',Комментарий) and DeletionMark eq false`)).value || [];
     return rows.find((r) => onecUidFromComment(r.Комментарий) === String(act.ismUid).toLowerCase()) || null;
   } catch (e) { throw onecErr(502, 'Не удалось проверить, есть ли уже документ в 1С — создание отменено, чтобы не задвоить выпуск.'); }
 }
@@ -7864,11 +7915,11 @@ async function retroTo1c(body, session) {
   if (existing) { // K-194: акт доработан (Утверждён повторно), черновик в 1С не проведён — обновляем состав того же документа
     if (onecDryRun()) return { ok: true, dryRun: true, plan: built.plan, note: `Режим проверки: документ №${existing.Number} не обновлён. Так будет выглядеть состав.` };
     if (built.product.create) { const nom = await onecPost('Catalog_Номенклатура', built.product.create); built.doc.Продукция[0].Номенклатура_Key = nom.Ref_Key; built.plan.product.code = nom.Code || ''; built.plan.product.created = true; }
-    await onecPatch(ONEC_PROD.entity, existing.Ref_Key, { Продукция: built.doc.Продукция, Материалы: built.doc.Материалы, Комментарий: built.doc.Комментарий });
+    await onecPatch(onecEntityOf(act.kind).entity, existing.Ref_Key, act.kind === RETRO_KIND_WRITEOFF ? { Материалы: built.doc.Материалы, Комментарий: built.doc.Комментарий } : { Продукция: built.doc.Продукция, Материалы: built.doc.Материалы, Комментарий: built.doc.Комментарий });
     const doc = { ref: existing.Ref_Key, number: existing.Number || '', date: String(existing.Date || '').slice(0, 10), updated: true };
     await ncUpdate('retro_outputs', act.id, { 'Статус': 'Черновик в 1С', 'Документ 1С (ключ)': doc.ref, 'Документ 1С (№)': doc.number, 'Документ 1С (дата)': doc.date });
-    onecLog('RETRO', `${act.no} → обновлён ${ONEC_PROD.title} №${doc.number} (${doc.ref}), материалов ${built.plan.materials.length}`);
-    const line1c = `Черновик в 1С обновлён: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — состав заменён (${built.plan.materials.length} поз.), просьба проверить и провести.`;
+    onecLog('RETRO', `${act.no} → обновлён ${onecEntityOf(act.kind).title} №${doc.number} (${doc.ref}), материалов ${built.plan.materials.length}`);
+    const line1c = `Черновик в 1С обновлён: ${onecEntityOf(act.kind).title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — состав заменён (${built.plan.materials.length} поз.), просьба проверить и провести.`;
     let chat = null;
     try { const base = String(body.text || '').trim() || (await retroChatPreview(act.id)).text; const text = base.replace(/\nУтвердил: /, `\n${line1c}\nУтвердил: `); chat = await retroChatSend({ id: act.id, text: text.includes(line1c) ? text : text + '\n' + line1c }, session); }
     catch (e) { onecLog('CHAT-ERR', `после обновления ${doc.number}: ${e.message || e}`); const sent = await retroChatNotify(`📄 ${act.no} «${act.name}»\n${line1c}\nАкт в портале: ${cfg().PORTAL_BASE}/#retro/${act.id}`); chat = { ok: sent, attached: false, warning: String(e.message || e) }; }
@@ -7879,16 +7930,16 @@ async function retroTo1c(body, session) {
     const nom = await onecPost('Catalog_Номенклатура', built.product.create);
     built.doc.Продукция[0].Номенклатура_Key = nom.Ref_Key; built.plan.product.code = nom.Code || ''; built.plan.product.created = true;
   }
-  const created = await onecPost(ONEC_PROD.entity, built.doc);
+  const created = await onecPost(onecEntityOf(act.kind).entity, built.doc);
   const doc = { ref: created.Ref_Key, number: created.Number || '', date: String(created.Date || '').slice(0, 10) };
   const upd = { 'Статус': 'Черновик в 1С', 'Документ 1С (ключ)': doc.ref, 'Документ 1С (№)': doc.number, 'Документ 1С (дата)': doc.date };
   if (act.onecDocKey && act.onecDocKey !== doc.ref) { try { await ncEnsureColumn('retro_outputs', 'Документ 1С (заменён)', 'LongText'); } catch { /* soft */ } upd['Документ 1С (заменён)'] = (String(act.onecDocReplaced || '').trim() ? act.onecDocReplaced + '\n' : '') + `${act.onecDocNo || '—'} от ${act.onecDocDate || '—'} (${act.onecDocKey}) — исчез/удалён в 1С, заменён ${whToday()}`; } // K-194
   await ncUpdate('retro_outputs', act.id, upd);
-  onecLog('RETRO', `${act.no} → ${ONEC_PROD.title} №${doc.number} (${doc.ref})`);
+  onecLog('RETRO', `${act.no} → ${onecEntityOf(act.kind).title} №${doc.number} (${doc.ref})`);
   // K-190 (решение Александра 07.09): «отправка в чат = создание в 1С» — одно действие: черновик в 1С, затем в чат бухгалтерии
   // уходит печатная форма (PDF) с текстом предпросмотра (можно править) и строкой о созданном черновике. Откат на короткое сообщение, если файл не ушёл.
   const replacedNo = (act.onecDocKey && act.onecDocKey !== doc.ref) ? (act.onecDocNo || '') : '';
-  const line1c = `Черновик в 1С: ${ONEC_PROD.title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — просьба проверить и провести.${replacedNo && replacedNo !== '—' ? ' Заменяет черновик №' + replacedNo + ', которого больше нет в 1С.' : ''}${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '»' + (act.designation ? ', обозначение ' + act.designation + ' — в комментарии позиции' : '') + '.' : ''}`;
+  const line1c = `Черновик в 1С: ${onecEntityOf(act.kind).title} №${doc.number} от ${doc.date.split('-').reverse().join('.')} — просьба проверить и провести.${replacedNo && replacedNo !== '—' ? ' Заменяет черновик №' + replacedNo + ', которого больше нет в 1С.' : ''}${built.plan.product.created ? '\n⚠ Номенклатура «' + act.name + '» создана черновиком в группе «' + ONEC_NOM_GROUP_PORTAL + '»' + (act.designation ? ', обозначение ' + act.designation + ' — в комментарии позиции' : '') + '.' : ''}`;
   let chat = null;
   try {
     const base = String(body.text || '').trim() || (await retroChatPreview(act.id)).text;
@@ -7930,7 +7981,7 @@ async function retroPoll1c(opts) {
   const out = { checked: acts.length, posted: [], rejected: [], unposted: [], errors: [] };
   for (const a of acts) {
     try {
-      const d = await onecGet(`${ONEC_PROD.entity}(guid'${a['Документ 1С (ключ)']}')?$select=Ref_Key,Number,Posted,DeletionMark,Date,Ответственный_Key`);
+      const d = await onecGet(`${onecEntityOf(a['Вид'] || '').entity}(guid'${a['Документ 1С (ключ)']}')?$select=Ref_Key,Number,Posted,DeletionMark,Date,Ответственный_Key`);
       const link = `${String(cfg().PORTAL_BASE || '').replace(/\/+$/, '')}/#retro/${a.Id ?? a.id}`;
       if (d.DeletionMark) { await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Отклонён' }); out.rejected.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}): документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. ${link}`); await retroChatNotify(`✖ ${a['№ акта']} «${a['Наименование']}»: документ ${d.Number || ''} помечен в 1С на удаление — акт отклонён. Александр, посмотрите причину.`); }
       else if (d.Posted && a['Статус'] !== 'Проведён в 1С') { const acc = await retroAcceptedFrom1c(d); await ncUpdate('retro_outputs', a.Id ?? a.id, { 'Статус': 'Проведён в 1С', ...acc }); out.posted.push(a['№ акта']); await retroNotifyAuthor(a, `Акт выпуска ${a['№ акта']} (${a['Наименование']}) проведён в 1С: ${ONEC_PROD.title} №${d.Number || ''}${acc['Принял к учёту (1С)'] ? ', принял к учёту ' + acc['Принял к учёту (1С)'] : ''}. ${link}`); }
@@ -7978,7 +8029,9 @@ async function retroChatPreview(id) {
   const a = card.act; const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
   const n0 = (v) => (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
   // K-191: коротко и без себестоимости (решение чата 07.09: с/с «никого не должна смущать», состав — в форме)
-  const L = [`📄 ${a.no} от ${ruDate(a.date)} — ${a.name}${a.designation ? ' (' + a.designation + ')' : ''}, ${n0(a.qty)} ${a.unit} → ${a.whereTo || '—'}`,
+  const L = a.kind === RETRO_KIND_WRITEOFF ? [`📄 ${a.no} от ${ruDate(a.date)} — списание расходных материалов на общепроизводственные нужды за ${retroMonthLabel(a.period)} (счёт 25), ${a.lines.length} поз.`,
+    `Состав — в форме${a.note ? ' · ' + a.note : ''}`,
+    `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''}. Акт в портале: ${portal}/#retro/${a.id}`] : [`📄 ${a.no} от ${ruDate(a.date)} — ${a.name}${a.designation ? ' (' + a.designation + ')' : ''}, ${n0(a.qty)} ${a.unit} → ${a.whereTo || '—'}`,
     `${a.period ? 'Период: ' + a.period + ' · ' : ''}материалов к списанию: ${a.lines.length} поз.${a.lines.length ? ' (в изделии ' + a.lines.filter((l) => l.role !== 'Расходник').length + ', расходники ' + a.lines.filter((l) => l.role === 'Расходник').length + '; состав — в форме)' : ''}${a.mk ? ' · ' + a.mk : ''}`,
     a.note ? `Примечание: ${a.note}` : '',
     `Утвердил: ${a.approvedBy || '—'}${a.approvedAt ? ' ' + ruDate(a.approvedAt) : ''}. Акт в портале: ${portal}/#retro/${a.id}`].filter(Boolean);
@@ -12941,7 +12994,7 @@ const server = http.createServer(async (req, res) => {
     }
     // ── Акты выпуска (K-158, ретро-учёт произведённого) ──
     if (p === '/api/cabinet') { try { return sendJson(res, 200, await buildCabinet(sessionFromReq(req))); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
-    if (p === '/api/retro') {
+    if (p === '/api/retro') { // K-196: + напоминание о списании за текущий месяц (см. retroWriteoffState)
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES } });
       try { return sendJson(res, 200, await buildRetroLive()); } catch (e) { return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: { whereTo: RETRO_WHERE, statuses: RETRO_STATUS, sources: RETRO_SOURCES }, warning: String(e.message || e) }); }
     }

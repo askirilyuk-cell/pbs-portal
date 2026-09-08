@@ -1295,7 +1295,7 @@
           <a data-view="station" href="#station"><span class="i" data-ic="station"></span> Рабочее место</a>
           <a data-view="orders" href="#orders"><span class="i" data-ic="orders"></span> Заказы (ПЗ)</a>
           <a data-view="routes" href="#routes"><span class="i" data-ic="routes"></span> Маршруты (Ф.13)</a>
-          <a data-view="retro" href="#retro"><span class="i" data-ic="retro"></span> Акты выпуска</a>
+          <a data-view="retro" href="#retro"><span class="i" data-ic="retro"></span> Бухгалтерия</a>
           <a data-view="setup" href="#setup"><span class="i" data-ic="routes"></span> Карты наладки</a>
           <a data-view="control" href="#control"><span class="i" data-ic="control"></span> Контроль качества</a>
           <a data-view="equipment" href="#equipment"><span class="i" data-ic="equipment"></span> Участки и оборудование</a>
@@ -2068,7 +2068,7 @@
 
     // --- роутер по разделам навигации (hash) ----------------------------------
     const TITLES={board:'Производственная доска',station:'Рабочее место',orders:'Заказы (ПЗ)',routes:'Маршруты (Ф.13)',setup:'Карты наладки',control:'Контроль качества',
-      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Акты выпуска',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
+      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Бухгалтерия · производство',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
     // заглушки блоков ИСМ — тексты по утверждённым процедурам/Руководству ИСМ (ИСМ-РК)
     const STUBS={
       nc:{tag:'Качество · ДП–У.2 · ISO 9001 п.8.7/10.2',
@@ -2122,7 +2122,7 @@
       purchase:{t:'Управление закупками и оценка поставщиков',c:'ДП–К',s:'Заявки на закупку (ЗнЗ) · входной контроль · счета и приёмка'},
       catalog:{t:'Обозначение и наименование изделий продукции',c:'РИ.1–Д.1.2',s:'Канон-номенклатура · группы и подгруппы · децимальные номера'},
       cabinet:{t:'Мой кабинет — документы на моём решении',c:'',s:'Ждут моего утверждения · отправлено мной · недавние решения по моим документам'},
-      retro:{t:'Акты выпуска — ретро-учёт произведённого',c:'Ф.16–Д.1',s:'Что произведено · состав материалов из 1С · утверждение и передача в бухгалтерию'},
+      retro:{t:'Производство ↔ бухгалтерия',c:'Ф.16–Д.1',s:'Акты выпуска · ежемесячные списания на общепроизводственные нужды · НЗП — состав из 1С, утверждение, черновики документов в 1С'},
       onec:{t:'Материалы по данным 1С',c:'ДП–СХ',s:'Зеркало номенклатуры и остатков 1С:Бухгалтерия ПБС · привязка к канон-номенклатуре'},
       warehouse:{t:'Управление складом и запасами',c:'ДП–СХ',s:'Номенклатура склада · журнал движения · выдача в производство'},
       design:{t:'Проектирование, разработка и актуализация продукции',c:'ДП–П.1',s:'Конструкторская и технологическая документация · ревизии · извещения об изменении'},
@@ -9610,10 +9610,10 @@
       const live=RETRO.mode==='live', k=RETRO.kpis||{};
       const sum=live?`${retroN(k.total)} актов · черновиков ${retroN(k.draft)} · на утверждении ${retroN(k.pending)} · утверждено ${retroN(k.approved)} · в 1С ${retroN(k.in1c)} · проведено ${retroN(k.posted)}`:'реестр не наполнен';
       host.innerHTML=`<div class="card eq-tabbar">
-          <div class="eq-tabs"><button class="${retroView!=='wip'?'on':''}" data-rv="acts">Акты выпуска</button><button class="${retroView==='wip'?'on':''}" data-rv="wip">НЗП · незавершённое производство</button></div>
-          <span style="margin-left:auto;display:flex;gap:10px;align-items:center;padding:6px 0;flex-wrap:wrap">${srcChip(live,sum)}${retroCanWrite()?'<button class="ui-btn ui-btn--primary" id="retro-new">+ Акт выпуска</button>':''}</span></div>
+          <div class="eq-tabs"><button class="${retroView==='acts'||!retroView?'on':''}" data-rv="acts">Акты выпуска</button><button class="${retroView==='writeoff'?'on':''}" data-rv="writeoff">Ежемесячные списания</button><button class="${retroView==='wip'?'on':''}" data-rv="wip">НЗП · незавершённое производство</button></div>
+          <span style="margin-left:auto;display:flex;gap:10px;align-items:center;padding:6px 0;flex-wrap:wrap">${srcChip(live,sum)}${retroCanWrite()?(retroView==='writeoff'?'<button class="ui-btn ui-btn--primary" id="retro-new">+ Списание за месяц</button>':'<button class="ui-btn ui-btn--primary" id="retro-new">+ Акт выпуска</button>'):''}</span></div>
         <div id="retrobody" style="margin-top:var(--gap)"></div>`;
-      const nb=host.querySelector('#retro-new'); if(nb)nb.onclick=()=>retroOpenNew();
+      const nb=host.querySelector('#retro-new'); if(nb)nb.onclick=()=>retroOpenNew(retroView==='writeoff'?'Списание':'');
       host.querySelectorAll('[data-rv]').forEach(b=>b.onclick=()=>{ retroView=b.dataset.rv; renderRetro(host); });
       const body=host.querySelector('#retrobody');
       if(!live){ body.innerHTML=emptyCard('Реестр актов недоступен',{sub:RETRO.warning?esc(RETRO.warning):'Нужно подключение к базе.'}); return; }
@@ -9623,6 +9623,9 @@
           <input id="retro-q" type="search" placeholder="Поиск: № акта, наименование, чертёж, МК" value="${esc(retroQ)}" style="min-width:260px" aria-label="Поиск">
           <select id="retro-st" aria-label="Статус">${opt('','Все статусы',retroStatus)+((RETRO.dict&&RETRO.dict.statuses)||[]).map(s=>opt(s,s,retroStatus)).join('')}</select>
         </div><div id="retrogrid" style="margin-top:var(--gap);min-width:0"></div>`;
+      if(retroView==='writeoff'&&RETRO.writeoff){ const wo=RETRO.writeoff; const bn=document.createElement('div'); bn.className='card'; const ok=!!wo.current; bn.style.cssText='margin-top:var(--gap);padding:10px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid '+(ok?'var(--em-500,#1a7f4b)':'var(--amber,#b45309)')+';background:'+(ok?'var(--em-50,#e7f5ec)':'#fff7ed');
+        bn.innerHTML=ok?`<b>Списание за ${esc(wo.monthLabel)}:</b> ${esc(wo.current.no)} · ${retroStCell(wo.current.status)} · строк ${wo.current.lines}${wo.current.status==='Черновик'?' — дозаполните и отправьте на утверждение до '+esc(fmt(wo.deadline)):''}`:`<b>Списание за ${esc(wo.monthLabel)} ещё не создано.</b> <span class="c-gray">Сделать до конца месяца, ${esc(fmt(wo.deadline))}: расходники, израсходованные на общепроизводственные нужды, одним актом → «Требование-накладная» на счёт 25.</span>`;
+        body.insertBefore(bn,body.querySelector('#retrogrid')); }
       const locals=retroLocalList(); if(locals.length&&retroCanWrite()){ const bn=document.createElement('div'); bn.className='card'; bn.style.cssText='margin-top:var(--gap);padding:10px 14px;border:1px dashed var(--amber,#b45309);background:#fff7ed;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
         bn.innerHTML=`<b>Незаконченные акты в этом браузере:</b>`+locals.map((l,i)=>`<span style="display:inline-flex;gap:6px;align-items:center">${esc(l.no||'новый акт')}${l.name?' «'+esc(l.name)+'»':''} <span class="c-gray">${esc(retroWhen(l.savedAt))}${l.lines?' · строк '+l.lines:''}</span><button class="ui-btn" data-lgo="${i}" style="padding:3px 10px">Продолжить</button><button class="ui-btn ui-btn--ghost" data-ldel="${i}" style="padding:3px 8px;color:var(--red)">✕</button></span>`).join('');
         body.insertBefore(bn,body.querySelector('#retrogrid'));
@@ -9635,7 +9638,7 @@
       else if(retroDrawerIsOpen()&&retroSel!=null&&retroSel!=='new') retroOpen(retroSel,{keepTab:true});
     }
     function retroRows(){
-      let rows=((RETRO&&RETRO.items)||[]).slice(); const q=(retroQ||'').trim().toLowerCase();
+      let rows=((RETRO&&RETRO.items)||[]).filter(i=>retroView==='writeoff'?i.kind==='Списание':i.kind!=='Списание'); const q=(retroQ||'').trim().toLowerCase(); // K-196
       if(q)rows=rows.filter(i=>[i.no,i.name,i.designation,i.mk,i.responsible].some(x=>String(x||'').toLowerCase().includes(q)));
       if(retroStatus)rows=rows.filter(i=>i.status===retroStatus);
       return rows;
@@ -9672,7 +9675,7 @@
     const retroWhen=(iso)=>{ const d=new Date(iso); return isNaN(d)?'':d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
     async function retroLocalOffer(id){ const st=retroLocalRead(id); if(!st||!st.draft)return null; const ok=await uiConfirm(`Есть незаконченный ${id==null?'новый акт':'черновик этого акта'}${st.draft.name?' «'+st.draft.name+'»':''}, сохранён в браузере ${retroWhen(st.savedAt)}${(st.draft.lines||[]).length?', строк состава: '+st.draft.lines.length:''}.\nПродолжить с него?`,{title:'Незаконченный акт',ok:'Продолжить',cancel:'Начать заново'}); if(!ok){ retroLocalClear(id); return null; } return st.draft; }
     function retroBlankDraft(){ return { id:null, no:'', date:new Date().toISOString().slice(0,10), name:'', designation:'', canonId:'', qty:1, unit:'шт', whereTo:'Оснастка (10.10)', account:'10.10', period:'', responsible:(AUTH&&AUTH.fio)||'', mk:'', note:'', status:'Черновик', lines:[], editable:true, cost:0 }; }
-    async function retroOpenNew(){ await retroEnsureRefs(); retroSel='new'; retroCard={act:retroBlankDraft(),availability:{}}; const local=await retroLocalOffer(null); retroDraft=local?Object.assign(retroBlankDraft(),local,{id:null,editable:true}):JSON.parse(JSON.stringify(retroCard.act)); retroTab='act'; const d=retroDrawerHost(); d.classList.add('on'); retroPaint(); }
+    async function retroOpenNew(kind){ await retroEnsureRefs(); retroSel='new'; const blank=retroBlankDraft(); if(kind==='Списание'){ Object.assign(blank,{kind:'Списание',name:'Списание расходных материалов на общепроизводственные нужды',qty:1,unit:'мес',whereTo:'Общепроизводственные расходы (25)',account:'25',period:new Date().toISOString().slice(0,7)}); } retroCard={act:blank,availability:{}}; const local=kind==='Списание'?null:await retroLocalOffer(null); retroDraft=local?Object.assign(retroBlankDraft(),local,{id:null,editable:true}):JSON.parse(JSON.stringify(retroCard.act)); retroTab='act'; const d=retroDrawerHost(); d.classList.add('on'); retroPaint(); }
     // K-193: видимый ход загрузки (1С может отвечать 10+ с) и защита от повторных кликов по тому же акту
     let retroLoadingId=null, retroLoadTimer=null;
     function retroLoadingHtml(sec){ return `<div class="card pad" style="display:flex;gap:12px;align-items:center;color:var(--sub)"><span class="ui-spin"></span><div><div style="font-weight:600;color:var(--ink)">Открываю акт…</div><div style="font-size:12px">${sec>=2?'проверяю проведение в 1С — она отвечает до 10–15 с, подождите':'загружаю состав и остатки'}${sec?' · '+sec+' с':''}</div></div></div>`; }
@@ -9694,9 +9697,9 @@
       const d=retroDrawerHost(), a=retroDraft, w=retroCanWrite()&&a.editable, isNew=a.id==null;
       const tabs=[['act','Акт'],['lines','Состав'+(a.lines.length?' · '+a.lines.length:'')],['docs','Документы / 1С']];
       d.innerHTML=`<div class="eqd-h">
-          <div class="eqd-title"><span class="eqd-inv">${isNew?'Новый акт':esc(a.no)}</span>${retroStCell(a.status)}${a.kind==='Производство'?'<span class="st st--work">производство</span>':''}${a.cost?`<span class="st st--neutral">${retroN(a.cost,2)} ₽</span>`:''}</div>
+          <div class="eqd-title"><span class="eqd-inv">${isNew?'Новый акт':esc(a.no)}</span>${retroStCell(a.status)}${a.kind==='Производство'?'<span class="st st--work">производство</span>':a.kind==='Списание'?'<span class="st st--work">списание за месяц</span>':''}${a.cost?`<span class="st st--neutral">${retroN(a.cost,2)} ₽</span>`:''}</div>
           <button class="x" data-act="close" aria-label="Закрыть">✕</button>
-          <div class="eqd-name">${esc(a.name||'что произведено — заполните ниже')}</div>
+          <div class="eqd-name">${esc(a.name||(a.kind==='Списание'?'Списание за месяц':'что произведено — заполните ниже'))}</div>
           <div class="eqd-sub">${esc(a.whereTo||'куда приходуем не выбрано')}${a.mk?' · '+esc(a.mk):''}${a.status==='На утверждении'?' · на утверждении у '+esc(a.approverName||'—')+(a.sentAt?' с '+fmt(a.sentAt):'')+(a.sentBy?' · отправил '+esc(a.sentBy):''):''}${a.approvedBy&&a.status!=='На утверждении'&&a.status!=='Черновик'?' · утвердил '+esc(a.approvedBy)+' '+fmt(a.approvedAt):''}${a.status==='Черновик'&&a.returnedAt?' · <span style="color:var(--red)">возвращено на доработку '+(a.approverName?esc(a.approverName)+' ':'')+fmt(a.returnedAt)+': '+esc(a.approverComment||'')+'</span>':''}${a.status==='Отклонён'&&a.approverComment?' · <span style="color:var(--red)">отклонено: '+esc(a.approverComment)+'</span>':''}</div>
           <div class="eqd-actions">
             ${w?'<button class="ui-btn ui-btn--primary" data-act="save">Сохранить</button>':''}
@@ -9733,12 +9736,19 @@
       const mkOpts='<option value="">— без МК —</option>'+(retroRoutes||[]).map(r=>opt(r.mk,r.mk+' · '+(r.name||''),a.mk)).join('');
       const F=(l,inner)=>`<div class="eqd-f"><div class="l">${l}</div>${inner}</div>`;
       const inp=(k,ph,type)=>`<input class="rt-inp" data-rf="${k}" type="${type||'text'}" value="${esc(a[k]==null?'':a[k])}" placeholder="${esc(ph||'')}"${dis}>`;
+      if(a.kind==='Списание'){ // K-196: ежемесячное списание — только месяц и примечание
+        h.innerHTML=`<div class="eqd-grid two" style="padding-top:12px">
+          ${F('Месяц списания *',`<input class="rt-inp" data-rf="period" type="month" value="${esc(a.period||'')}"${dis}>`)}${F('Куда',`<input class="rt-inp" value="Общепроизводственные расходы (счёт 25) · Требование-накладная" disabled>`)}
+          ${F('Дата акта',inp('date','','date'))}${F('Создал в портале',`<input class="rt-inp" value="${esc(a.responsible||(AUTH&&AUTH.fio)||'')}" disabled>`)}
+          <div class="eqd-f" style="grid-column:span 2">${F('Примечание',`<textarea class="rt-inp" data-rf="note" rows="2"${dis} placeholder="напр. электроды, отрезные круги, СОЖ, перчатки — израсходовано в цехе за месяц">${esc(a.note||'')}</textarea>`)}</div>
+        </div><div class="eqd-sub" style="margin-top:10px">Состав — на вкладке «Состав»: расходники из зеркала 1С с фактическим количеством за месяц. Один акт на месяц; сделать до конца месяца. После утверждения — «Создать черновик в 1С и отправить в чат»: в 1С появится «Требование-накладная» на счёт 25, бухгалтер проверит статью затрат и проведёт.</div>`;
+        h.querySelectorAll('[data-rf]').forEach(el=>{ el.oninput=el.onchange=()=>{ a[el.dataset.rf]=el.value; }; }); return; }
       h.innerHTML=`<div class="eqd-grid two" style="padding-top:12px">
           <div class="eqd-f" style="grid-column:span 2">${F('Что произведено *',inp('name','напр. Пресс-форма протектора 178, станина'))}</div>
           ${F('Обозначение / чертёж',inp('designation','ПБС.ПЧ0001.01.000'))}
           ${F('Канон изделия',retroSearchHtml('canonId',a.canonId,(((CAT&&CAT.items)||[]).find(c=>String(c.id)===String(a.canonId))||{}).name||'','поиск по каталогу: наименование, категория',w))}
           ${F('Количество *',inp('qty','1','number'))}${F('Единица',inp('unit','шт'))}
-          ${F('Куда приходуем',`<select class="rt-inp" data-rf="whereTo"${dis}>${(dict.whereTo||[]).map(x=>opt(x,x,a.whereTo)).join('')}</select>`)}
+          ${F('Куда приходуем',`<select class="rt-inp" data-rf="whereTo"${dis}>${(dict.whereTo||[]).filter(x=>!/\(25\)/.test(x)).map(x=>opt(x,x,a.whereTo)).join('')}</select>`)}
           ${F('Счёт учёта (можно поправить)',inp('account','10.10'))}
           ${F('Фактический период изготовления',inp('period','напр. март–май 2026'))}${F('Дата акта',inp('date','','date'))}
           ${F('Создал в портале',`<input class="rt-inp" value="${esc(a.responsible||(AUTH&&AUTH.fio)||'')}" disabled title="Автоматически: кто создал/заполняет акт в портале. Ответственный в 1С — отдельное поле документа 1С, его ставит бухгалтерия">`)}
@@ -9820,7 +9830,7 @@
         const cnt=h.querySelector('#rp-cnt'); if(cnt)cnt.textContent=all.length>list.length?`показано ${list.length} из ${all.length} — уточните поиск`:`найдено ${all.length}`;
         h.querySelector('#rp-res').innerHTML=list.length?list.map(m=>`<div class="eqd-doc" style="cursor:pointer" data-pk="${esc(m.key)}"><span class="mono" style="color:var(--navy)">${esc(m.code)}</span><span class="nm">${esc(m.name)}${m.canonName?` <span class="c-gray">· канон: ${esc(m.canonName)}</span>`:''}</span><span class="sz">${m.hasStock?retroN(m.qty)+' '+esc(m.unit):'нет остатка'}</span></div>`).join(''):'<div class="eqd-sub">Ничего не найдено. Снимите «только с остатком» или обновите зеркало 1С.</div>';
         h.querySelectorAll('[data-pk]').forEach(el=>el.onclick=()=>{ const m=(ONEC.items||[]).find(x=>x.key===el.dataset.pk); if(!m)return; const wh=(m.warehouses||[]).slice().sort((p,r)=>r.qty-p.qty)[0]; const line=lineIdx!=null&&a.lines[lineIdx]?a.lines[lineIdx]:null;
-          const patch={onecKey:m.key,onecCode:m.code,onecName:m.name,unit:m.unit||(line&&line.unit)||'',warehouse:wh?wh.name:'',cost:m.cost}; if(!line){ a.lines.push(Object.assign({id:null,canonId:m.canonId||null,name:m.canonName||m.name,qtyPlan:null,qtyFact:null,sum:0,source:'Вручную',reason:'',note:'',role:'В изделии'},patch)); } else { Object.assign(line,patch); if(!line.canonId&&m.canonId)line.canonId=m.canonId; if(!line.name)line.name=m.canonName||m.name; }
+          const patch={onecKey:m.key,onecCode:m.code,onecName:m.name,unit:m.unit||(line&&line.unit)||'',warehouse:wh?wh.name:'',cost:m.cost}; if(!line){ a.lines.push(Object.assign({id:null,canonId:m.canonId||null,name:m.canonName||m.name,qtyPlan:null,qtyFact:null,sum:0,source:'Вручную',reason:'',note:'',role:a.kind==='Списание'?'Расходник':'В изделии'},patch)); } else { Object.assign(line,patch); if(!line.canonId&&m.canonId)line.canonId=m.canonId; if(!line.name)line.name=m.canonName||m.name; }
           retroPaintLines(); retroLocalStore(); }); };
       h.innerHTML=`<div class="card" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--sl-300)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${lineIdx!=null?'Позиция 1С для строки '+(lineIdx+1):'Материал из 1С'}</b><input id="rp-q" class="rt-inp" style="flex:1;min-width:200px" placeholder="поиск: название, код 1С, канон" value="${esc(q)}"><span class="c-gray" id="rp-cnt" style="font-size:12px"></span><label class="eq-check"><input type="checkbox" id="rp-stock" checked> только с остатком</label><button class="ui-btn ui-btn--ghost" id="rp-close">закрыть</button></div><div id="rp-res" style="margin-top:6px"></div></div>`;
       h.querySelector('#rp-q').oninput=(e)=>{q=e.target.value;paint();}; h.querySelector('#rp-stock').onchange=(e)=>{onlyStock=e.target.checked;paint();}; h.querySelector('#rp-close').onclick=()=>{h.innerHTML='';}; paint(); h.querySelector('#rp-q').focus();
@@ -9882,8 +9892,8 @@
         try{ const r=await fetch('/api/retro/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const x=await r.json().catch(()=>({})); if(!r.ok||x.error)throw new Error(x.error||('HTTP '+r.status)); toast(act==='approve'?'Акт утверждён, материалы зарезервированы.':'Акт возвращён на доработку, создатель уведомлён.','ok'); RETRO=null; renderCabinet(host); cabBadgeRefresh(); }catch(e){ toast('Не выполнено: '+e.message,'err'); } });
     }
     async function retroSave(){
-      retroCollect(); const a=retroDraft; if(!String(a.name||'').trim()){ toast('Укажите, что произведено.','err'); retroTab='act'; retroPaint(); return; }
-      const body={id:a.id,name:a.name,designation:a.designation,canonId:a.canonId||'',qty:a.qty,unit:a.unit,whereTo:a.whereTo,account:a.account,period:a.period,responsible:a.responsible,mk:a.mk,note:a.note,date:a.date,
+      retroCollect(); const a=retroDraft; if(a.kind!=='Списание'&&!String(a.name||'').trim()){ toast('Укажите, что произведено.','err'); retroTab='act'; retroPaint(); return; }
+      const body={id:a.id,kind:a.kind||'',name:a.name,designation:a.designation,canonId:a.canonId||'',qty:a.qty,unit:a.unit,whereTo:a.whereTo,account:a.account,period:a.period,responsible:a.responsible,mk:a.mk,note:a.note,date:a.date,
         lines:a.lines.map(l=>({id:l.id,canonId:l.canonId,name:l.name,onecKey:l.onecKey,onecCode:l.onecCode,onecName:l.onecName,warehouse:l.warehouse,unit:l.unit,qtyPlan:l.qtyPlan,qtyFact:l.qtyFact,cost:l.cost,source:l.source,reason:l.reason,note:l.note,role:l.role||'В изделии'}))};
       try{ const r=await fetch('/api/retro/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         toast(`Акт ${j.no||''} сохранён · строк ${j.lines} · ${retroN(j.cost,2)} ₽`,'ok'); retroLocalClear(a.id); if(a.id==null)retroLocalClear(null); RETRO=null; const v=document.getElementById('view'); retroSel=j.id; await renderRetro(v); retroOpen(j.id,{keepTab:true});

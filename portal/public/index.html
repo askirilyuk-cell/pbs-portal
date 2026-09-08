@@ -1544,7 +1544,10 @@
     }
     const stripHtml=(s)=>String(s??'').replace(/<[^>]*>/g,'').replace(/&[a-z]+;/g,' ').trim();
     // POST/PATCH JSON: postJson(url,body) или postJson(url,'PATCH',body); кидает ошибку при !ok/error
-    const postJson=async(url,a,b)=>{ let method='POST',body=a; if(typeof a==='string'){method=a;body=b;} const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; };
+    // K-203: сетевой сбой (Safari «Load failed», Chrome «Failed to fetch») — чаще всего перезапуск портала при деплое (~10 с): одна повторная попытка через 5 с, понятный текст вместо «Load failed»
+    const NET_ERR=/load failed|failed to fetch|networkerror|network request failed/i;
+    async function fetchRetry(url,opts){ try{ return await fetch(url,opts); }catch(e){ if(!NET_ERR.test(String(e&&e.message||e)))throw e; await new Promise(r=>setTimeout(r,5000)); try{ return await fetch(url,opts); }catch(e2){ throw new Error('Связь с порталом прервалась (возможно, он перезапускался) — подождите 10 секунд и повторите.'); } } }
+    const postJson=async(url,a,b)=>{ let method='POST',body=a; if(typeof a==='string'){method=a;body=b;} const r=await fetchRetry(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; };
 
     // Переиспользуемая таблица: поиск + сортировка по столбцу + resize колонок + группировка.
     // cols: [{label, cell:(row)=>html, val?:(row)=>значение для сортировки/поиска, align?, w?}]
@@ -9902,7 +9905,7 @@
       retroCollect(); const a=retroDraft; if(a.kind!=='Списание'&&!String(a.name||'').trim()){ toast('Укажите, что произведено.','err'); retroTab='act'; retroPaint(); return; }
       const body={id:a.id,kind:a.kind||'',name:a.name,designation:a.designation,canonId:a.canonId||'',qty:a.qty,unit:a.unit,whereTo:a.whereTo,account:a.account,period:a.period,responsible:a.responsible,mk:a.mk,note:a.note,date:a.date,
         lines:a.lines.map(l=>({id:l.id,canonId:l.canonId,name:l.name,onecKey:l.onecKey,onecCode:l.onecCode,onecName:l.onecName,warehouse:l.warehouse,unit:l.unit,qtyPlan:l.qtyPlan,qtyFact:l.qtyFact,cost:l.cost,source:l.source,reason:l.reason,note:l.note,role:l.role||'В изделии'}))};
-      try{ const r=await fetch('/api/retro/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+      try{ const r=await fetchRetry('/api/retro/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         toast(`Акт ${j.no||''} сохранён · строк ${j.lines} · ${retroN(j.cost,2)} ₽`,'ok'); retroLocalClear(a.id); if(a.id==null)retroLocalClear(null); RETRO=null; const v=document.getElementById('view'); retroSel=j.id; await renderRetro(v); retroOpen(j.id,{keepTab:true});
       }catch(e){ toast('Не сохранено: '+e.message,'err'); }
     }
@@ -9911,7 +9914,7 @@
       const dh=retroDrawerHost(); const btns=[...dh.querySelectorAll('.eqd-actions button,.eqd-actions a')]; btns.forEach(b=>{ b.dataset.wasDisabled=b.disabled?'1':''; b.disabled=true; b.style.pointerEvents='none'; });
       let busy=dh.querySelector('#retro-busy'); if(!busy){ busy=document.createElement('div'); busy.id='retro-busy'; busy.className='card pad'; busy.style.cssText='margin:8px 14px 0;display:flex;gap:10px;align-items:center;color:var(--sub);border:1px dashed var(--sl-300)'; const hdr=dh.querySelector('.eqd-h'); if(hdr)hdr.insertAdjacentElement('afterend',busy); else dh.prepend(busy); }
       busy.innerHTML='<span class="ui-spin"></span><span>Выполняю… уведомления в Bitrix и проверка 1С могут занять до 10–15 с</span>';
-      try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+      try{ const r=await fetchRetry(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         toast(okMsg,'ok'); if(j.onec){ const o=j.onec; setTimeout(()=>toast(o.error?'1С: '+o.error+' — повторите с вкладки «Документы / 1С».':(o.doc?`Черновик ${o.doc.number} ${o.updated?'обновлён':'создан'} в 1С${o.chat?(o.chat.attached?', форма ушла в чат бухгалтерии':', в чат ушло сообщение ссылкой'):''}.`:'1С: без изменений'),o.error?'err':'ok'),400); } RETRO=null; const id=retroDraft.id; const v=document.getElementById('view'); await renderRetro(v); retroOpen(id,{keepTab:true});
       }catch(e){ toast('Не выполнено: '+e.message,'err'); const b2=dh.querySelector('#retro-busy'); if(b2)b2.remove(); btns.forEach(b=>{ b.disabled=b.dataset.wasDisabled==='1'; b.style.pointerEvents=''; }); }
     }
@@ -10062,7 +10065,7 @@
       }
     }
     async function onecPost(url,body,okMsg){
-      try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+      try{ const r=await fetchRetry(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         toast(okMsg,'ok'); onecCat=null; onecDrTab='canon'; const v=document.getElementById('view'); if(v)renderOnec(v);
       }catch(e){ toast('Не сохранено: '+e.message,'err'); }
     }

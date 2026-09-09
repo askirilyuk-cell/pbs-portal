@@ -477,9 +477,6 @@
     .si-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--bd);border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:var(--gap);}
     .si-kpi .c{background:var(--card,#fff);padding:10px 12px;} .si-kpi b{display:block;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;} .si-kpi span{font-size:11px;color:var(--sub);}
     .si-kpi .c.red b{color:var(--red);} .si-kpi .c.amber b{color:#b45309;} .si-kpi .c.green b{color:#1a7f4b;} .si-kpi .c.on{outline:2px solid var(--navy);outline-offset:-2px;cursor:pointer;} .si-kpi .c{cursor:pointer;}
-    .si-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;} .si-pill.ok{background:#e8f5ee;color:#136c3a;} .si-pill.soon{background:#fdf1e3;color:#b45309;} .si-pill.overdue{background:#fdecec;color:#b3261e;} .si-pill.none{background:#fdf1e3;color:#b45309;} .si-pill.indicative{background:#eef2f6;color:var(--sub);} .si-pill.gray{background:#eef2f6;color:var(--sub);}
-    .si-kv--unused{display:grid;grid-template-columns:210px 1fr 210px 1fr;gap:8px 14px;font-size:13px;margin:16px 0 0;} .si-kv .k{color:var(--sub);}
-    @media (max-width:900px){.si-kv{grid-template-columns:150px 1fr;}}
     .cut-si{margin-top:10px;padding-top:10px;border-top:1px dashed var(--bd);} .cut-si .lab{font-size:12px;color:var(--sl-500);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;} .cut-si .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
     .si-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;border:1px solid var(--bd);background:#f6f8fa;font-size:13px;} .si-chip b{cursor:pointer;color:var(--sl-500);font-weight:700;} .si-chip.bad{background:#fdecec;border-color:#f0b4b4;} .si-chip.warn{background:#fdf1e3;border-color:#f0c9a0;} .si-chip .no{font-size:11px;color:#b91c1c;font-weight:600;}
     .si-warn{margin-top:8px;padding:8px 10px;border-radius:8px;background:#fdf1e3;border:1px solid #f0c9a0;color:#7c4a03;font-size:13px;}
@@ -1069,14 +1066,14 @@
     .eq-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
     .eq-filters input,.eq-filters select{font:inherit;font-size:var(--fs-12);padding:6px 9px;border:1px solid var(--bd);border-radius:var(--r-s);background:#fff;color:var(--ink);}
     .eq-check{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-12);color:var(--ink);cursor:pointer;padding:0 4px;white-space:nowrap;}
-    #eq-drawer,#onec-drawer,#retro-drawer{display:none;}
-    #eq-drawer.on,#onec-drawer.on,#retro-drawer.on{display:block;position:fixed;inset-block:0;right:0;z-index:80;width:100%;max-width:720px;box-sizing:border-box;
+    #eq-drawer,#onec-drawer,#retro-drawer,#si-drawer{display:none;}
+    #eq-drawer.on,#onec-drawer.on,#retro-drawer.on,#si-drawer.on{display:block;position:fixed;inset-block:0;right:0;z-index:80;width:100%;max-width:720px;box-sizing:border-box;
       background:var(--card,#fff);border-left:1px solid var(--sl-300);box-shadow:-8px 0 28px rgba(15,23,42,.16);
       padding:16px 18px;overflow-y:auto;overscroll-behavior:contain;animation:ui-slide-right var(--t-norm) var(--ease) both;}
-    #eq-drawer.on::before,#onec-drawer.on::before,#retro-drawer.on::before{content:'';position:fixed;inset:0;z-index:-1;background:rgba(15,23,42,.18);animation:ui-fade-in var(--t-norm) var(--ease) both;}
-    @media (max-width:760px){ #eq-drawer.on,#onec-drawer.on,#retro-drawer.on{max-width:100%;} }
+    #eq-drawer.on::before,#onec-drawer.on::before,#retro-drawer.on::before,#si-drawer.on::before{content:'';position:fixed;inset:0;z-index:-1;background:rgba(15,23,42,.18);animation:ui-fade-in var(--t-norm) var(--ease) both;}
+    @media (max-width:760px){ #eq-drawer.on,#onec-drawer.on,#retro-drawer.on,#si-drawer.on{max-width:100%;} }
     #retro-drawer.on{max-width:860px;}
-    #eq-drawer .eq-tabs,#onec-drawer .eq-tabs,#retro-drawer .eq-tabs{border-bottom:1px solid var(--bd);}
+    #eq-drawer .eq-tabs,#onec-drawer .eq-tabs,#retro-drawer .eq-tabs,#si-drawer .eq-tabs{border-bottom:1px solid var(--bd);}
     .retro-line{border:1px solid var(--bd);border-radius:var(--r-m);padding:8px 10px;margin-top:8px;background:#fff;}
     .retro-line.over{border-color:var(--ro-500);background:var(--ro-50);}
     .retro-line .rl-top{display:flex;align-items:center;gap:8px;font-size:var(--fs-12);}
@@ -1119,7 +1116,7 @@
     .eqd-doc{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--sl-100);font-size:var(--fs-12);}
     .eqd-doc .nm{font-weight:600;color:var(--ink);overflow-wrap:anywhere;}
     .eqd-doc .sz{margin-left:auto;color:var(--sl-500);white-space:nowrap;}
-    #eq-drawer .st,#onec-drawer .st,#retro-drawer .st{white-space:nowrap;}
+    #eq-drawer .st,#onec-drawer .st,#retro-drawer .st,#si-drawer .st{white-space:nowrap;}
     #eq-drawer .dt td.code,#onec-drawer .dt td.code{font-family:var(--mono);}
 
     /* ── K-112: карточка заказа как выезжающая панель справа ────────────────
@@ -2183,6 +2180,7 @@
         const target=(first&&first.view)||'docs';
         if(target!==v){ location.hash='#'+target; return; }
       }
+      if(v!=='si'){ const sd=document.getElementById('si-drawer'); if(sd&&sd.classList.contains('on')){ sd.classList.remove('on'); sd.innerHTML=''; } } // K-208: дровер СИ живёт только в своём разделе
       document.getElementById('h1').textContent=TITLES[v];
       renderScreenHead(v); // K-120: управляющая панель экрана
       document.title=TITLES[v]+' · ИСМ ПБС';
@@ -10741,274 +10739,257 @@
     // K-42: отношение остаток/мин (дефицит наверху) + ячейка остатка с ▼ (дальтоники) + ячейка «Поверка до».
     function tlDefRatio(i){ if(Number(i.balance)<=0) return -1; const min=Number(i.minStock)||0; if(min<=0) return 1e9; return (Number(i.balance)||0)/min; }
     function tlBalCell(i){ const q=tlQty(i.balance,i.unit); if(Number(i.balance)<=0) return `<b class="c-red" style="font-weight:800">▼ ${q}</b>`; if(i.belowMin) return `<b class="c-amber" style="font-weight:800">▼ ${q}</b>`; return `<b style="color:var(--ink)">${q}</b>`; }
-    // ── K-208: раздел «Средства измерения» ──────────────────────────────────
-    // Поэкземплярный учёт: карточка = один физический прибор (инв. №), без остатков и
-    // минимумов — у СИ их нет. Своя логика: поверка со сроком, состояние, место и
-    // ответственный, журнал событий, этикетка со штрихкодом. Вёрстка — как в
-    // «Инструменте и оснастке»: строка поиска, mstrip, фасеты слева, таблица справа.
-    let SI=null, siSel=new Set(), siQ='', siKind='', siCal='', siState='', siOpenId=null;
-    const SI_CAL_LBL={ok:'годен',soon:'скоро поверка',overdue:'просрочен',none:'нет данных',indicative:'индикаторный'};
-    function siCalPill(t){ const d=t.calNext?' · '+fmt(t.calNext):''; return `<span class="si-pill ${t.calState}">${SI_CAL_LBL[t.calState]||''}${t.calState==='indicative'||t.calState==='none'?'':d}</span>`; }
+    // ── K-208: раздел «Средства измерения» — канон реестров портала ─────────
+    // Каркас как у «Бухгалтерии» и «Маршрутов»: eq-tabbar → eq-filters → erpGrid
+    // (колонки тянутся, прячутся, сортируются) → карточка в правом дровере (#si-drawer,
+    // те же классы eqd-*). Поэкземплярный учёт: карточка = один физический прибор,
+    // без остатков и минимумов. Поверок в ПБС не было ни разу, поэтому «нет данных
+    // о поверке» — норма на старте; рабочее место предупреждает, но не блокирует.
+    let SI=null, siView='items', siQ='', siKind='', siCal='', siState='', siSel=null, siTab='card', siCard=null, siDraft=null, siGridApi=null, siJournal=null;
+    const siCanWrite=()=>{ try{ return !!(AUTH&&AUTH.isAdmin) || rbacAccess('tools')==='write' || (ME&&!ME.access); }catch{ return false; } };
+    const SI_CAL_LBL={ok:'поверен',soon:'истекает',overdue:'просрочен',none:'нет данных о поверке',indicative:'индикаторный'};
+    const siCalCell=(t)=>{ const k={ok:'done',soon:'work',overdue:'problem',none:'work',indicative:'neutral'}[t.calState]||'neutral';
+      const d=(t.calState==='ok'||t.calState==='soon'||t.calState==='overdue')&&t.calNext?' до '+fmt(t.calNext):''; return `<span class="st st--${k}">${SI_CAL_LBL[t.calState]||'—'}${d}</span>`; };
+    const siStCell=(st)=>`<span class="st st--${({'В работе':'done','На поверке':'work','В ремонте':'work','Не подтверждён':'work','Списан':'neutral'})[st]||'neutral'}">${esc(st||'—')}</span>`;
     async function renderSi(host,arg){
-      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка реестра средств измерения…</div>';
-      try{ SI=await (await fetch('/api/si')).json(); }catch(e){ host.innerHTML='<div class="card pad c-red">Не удалось загрузить реестр СИ: '+esc(e.message)+'</div>'; return; }
-      if(SI&&SI.error){ host.innerHTML='<div class="card pad c-red">'+esc(SI.error)+'</div>'; return; }
-      siOpenId=arg?String(arg):null;
-      siOpenId?siCardPage(host):siPaint(host);
+      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка раздела «Средства измерения»…</div>';
+      try{ SI=await (await fetch('/api/si')).json(); }catch(e){ SI={mode:'mock',items:[],kpis:{},dict:{},warning:String(e.message||e)}; }
+      const live=SI.mode==='live', k=SI.kpis||{};
+      const sum=live?`${k.total||0} приборов · поверено ${k.ok||0} · истекает ${k.soon||0} · просрочено ${k.overdue||0} · без данных ${k.none||0} · индикаторных ${k.indicative||0}`:'реестр не наполнен';
+      host.innerHTML=`<div class="card eq-tabbar">
+          <div class="eq-tabs"><button class="${siView==='items'?'on':''}" data-sv="items">Реестр приборов</button><button class="${siView==='journal'?'on':''}" data-sv="journal">Журнал событий</button></div>
+          <span style="margin-left:auto;display:flex;gap:10px;align-items:center;padding:6px 0;flex-wrap:wrap">${srcChip(live,sum)}${siCanWrite()?'<button class="ui-btn ui-btn--primary" id="si-new">+ Прибор</button>':''}</span></div>
+        <div id="sibody" style="margin-top:var(--gap)"></div>`;
+      const nb=host.querySelector('#si-new'); if(nb)nb.onclick=()=>siOpenNew();
+      host.querySelectorAll('[data-sv]').forEach(b=>b.onclick=()=>{ siView=b.dataset.sv; renderSi(host); });
+      const body=host.querySelector('#sibody');
+      if(!live){ body.innerHTML=emptyCard('Реестр средств измерения недоступен',{sub:SI.warning?esc(SI.warning):'Нужно подключение к базе.'}); return; }
+      if(siView==='journal'){ siJournalView(body); return; }
+      const opt=(v,l,cur)=>`<option value="${esc(String(v))}"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`;
+      const calOpts=[['','Поверка: все'],['ok','поверен'],['soon','истекает ≤ 30 дн'],['overdue','просрочен'],['none','нет данных о поверке'],['indicative','индикаторный']];
+      body.innerHTML=`<div class="card eq-filters" style="padding:8px 10px">
+          <input id="si-q" type="search" placeholder="Поиск: инв. №, название, тип, код 1С, ответственный — или скан этикетки" value="${esc(siQ)}" style="min-width:300px" aria-label="Поиск">
+          <select id="si-kind" aria-label="Тип">${opt('','Тип: все',siKind)+((SI.dict&&SI.dict.kinds)||[]).map(x=>opt(x,x,siKind)).join('')}</select>
+          <select id="si-cal" aria-label="Поверка">${calOpts.map(([v,l])=>opt(v,l,siCal)).join('')}</select>
+          <select id="si-state" aria-label="Состояние">${opt('','Состояние: все',siState)+((SI.dict&&SI.dict.states)||[]).map(x=>opt(x,x,siState)).join('')}</select>
+        </div><div id="sigrid" style="margin-top:var(--gap);min-width:0"></div>`;
+      body.querySelector('#si-q').oninput=(e)=>{ siQ=e.target.value; siGrid(); };
+      body.querySelector('#si-q').onkeydown=(e)=>{ if(e.key!=='Enter')return; const one=siRows(); if(one.length===1){ siQ=''; siGrid(); siOpen(one[0].id); } };
+      body.querySelector('#si-kind').onchange=(e)=>{ siKind=e.target.value; siGrid(); };
+      body.querySelector('#si-cal').onchange=(e)=>{ siCal=e.target.value; siGrid(); };
+      body.querySelector('#si-state').onchange=(e)=>{ siState=e.target.value; siGrid(); };
+      siGrid();
+      if(arg){ const it=(SI.items||[]).find(i=>String(i.id)===String(arg)||String(i.invNo).toUpperCase()===String(arg).toUpperCase()||String(i.bar).toUpperCase()===String(arg).toUpperCase()); if(it)siOpen(it.id); }
+      else if(siDrawerIsOpen()&&siSel!=null&&siSel!=='new') siOpen(siSel,{keepTab:true});
     }
-    function siFiltered(){
-      const q=siQ.trim().toLowerCase();
-      return (SI.items||[]).filter(t=>{
-        if(siKind&&t.kind!==siKind)return false;
-        if(siCal&&t.calState!==siCal)return false;
-        if(siState&&t.state!==siState)return false;
-        if(q&&![t.invNo,t.bar,t.name,t.kind,t.code1c,t.serial,t.responsible,t.place,t.section].some(v=>String(v||'').toLowerCase().includes(q)))return false;
-        return true;
-      });
+    function siRows(){
+      const q=(siQ||'').trim().toLowerCase();
+      return ((SI&&SI.items)||[]).filter(t=>{
+        if(siKind&&t.kind!==siKind)return false; if(siCal&&t.calState!==siCal)return false; if(siState&&t.state!==siState)return false;
+        if(q&&![t.invNo,t.bar,t.name,t.short,t.kind,t.code1c,t.serial,t.responsible,t.place,t.section].some(v=>String(v||'').toLowerCase().includes(q)))return false;
+        return true; });
     }
-    function siPicked(){ const ids=[...siSel]; return (SI.items||[]).filter(t=>ids.includes(String(t.id))); }
-    function siPaint(host){
-      const k=SI.kpis||{}, items=SI.items||[], list=siFiltered();
-      const m=(lbl,num,col,sub)=>`<div class="m"><div class="lbl">${lbl}</div><div class="num"${col?` style="color:${col}"`:''}>${num}</div>${sub?`<div style="font-size:10px;color:var(--sub);margin-top:1px">${sub}</div>`:''}</div>`;
-      const kpiStrip=`<div class="mstrip">
-          ${m('Приборов в реестре',k.total??0,'var(--navy)',(k.unconfirmed?k.unconfirmed+' списаны в 1С, но в цехе':'поэкземплярно, по инв. №'))}
-          ${m('Поверка действует',k.ok??0,(k.ok?'var(--ink)':'var(--sub)'),(k.soon?k.soon+' истекает ≤ 30 дн':'ДП–О.4'))}
-          ${m('Поверка просрочена',k.overdue??0,(k.overdue?'var(--red)':'var(--ink)'),'мерить нельзя до поверки')}
-          ${m('Нет данных о поверке',k.none??0,(k.none?'var(--amber)':'var(--ink)'),((k.indicative||0)+' индикаторных — поверка не нужна'))}
-        </div>`;
-      const hero=`<div class="tl-hero">
-          <div class="tl-hero-h">Реестр средств измерения — карточка на каждый физический прибор: инв. №, поверка со сроком, место и ответственный. Штрихкод на этикетке ищется этой же строкой.</div>
-          <input id="si-q" class="tl-qi" placeholder="напр. «штангенциркуль», «СИ-017», «БП-00004306» или скан этикетки" value="${esc(siQ)}">
-        </div>`;
-      const cnt=(f)=>items.filter(f).length;
-      const facet=(grp,val,label,count,on,dis)=>`<label class="tl-facet${on?' on':''}" data-grp="${grp}" data-val="${esc(String(val))}"${dis?' style="opacity:.45;pointer-events:none"':''}><input type="checkbox"${on?' checked':''}${dis?' disabled':''}><span class="tl-fl">${label}</span><span class="tl-fc">${count}</span></label>`;
-      const calF=[['','Все',items.length],['ok','Поверка действует',cnt(t=>t.calState==='ok')],['soon','⏰ Истекает ≤ 30 дн',cnt(t=>t.calState==='soon')],
-        ['overdue','⚠ Просрочена',cnt(t=>t.calState==='overdue')],['none','Нет данных',cnt(t=>t.calState==='none')],['indicative','Индикаторные',cnt(t=>t.calState==='indicative')]]
-        .map(([v,l,c])=>facet('cal',v,l,c,siCal===v,!c&&v)).join('');
-      const stF=[['','Все',items.length]].concat((SI.dict.states||[]).map(x=>[x,x,cnt(t=>t.state===x)]))
-        .map(([v,l,c])=>facet('state',v,esc(l),c,siState===v,!c&&v)).join('');
-      const kindF=(SI.dict.kinds||[]).map(x=>facet('kind',x,esc(x),cnt(t=>t.kind===x),siKind===x)).join('')||'<div style="font-size:11px;color:var(--sub);padding:2px 5px">— нет —</div>';
-      const facets=`<aside class="tl-facets">
-          <div class="tl-fgrp">Поверка</div>${calF}
-          <div class="tl-fgrp">Состояние</div>${stF}
-          <div class="tl-fgrp">Тип прибора</div>${kindF}
-          <button class="tbtn tl-reset" id="si-reset">Сбросить фильтры</button>
-        </aside>`;
-      const rows=list.map(t=>`<tr data-id="${t.id}">
-          <td><input type="checkbox" class="si-ck" data-id="${t.id}" ${siSel.has(String(t.id))?'checked':''}></td>
-          <td class="code">${esc(t.invNo)}</td>
-          <td>${esc(t.kind||'')}</td>
-          <td><a href="#si/${esc(String(t.id))}" class="si-open" data-id="${t.id}" style="color:var(--navy);font-weight:600">${esc(t.short||t.name)}</a><div class="c-gray" style="font-size:11px">${esc(t.short?t.name:'')}${t.serial?(t.short?' · ':'')+'зав. № '+esc(t.serial):''}</div></td>
-          <td>${esc(t.range||'—')}</td>
-          <td>${siCalPill(t)}</td>
-          <td>${t.state==='В работе'?'<span class="si-pill ok">в работе</span>':(t.state==='Не подтверждён'?'<span class="si-pill none">не подтверждён</span>':`<span class="si-pill gray">${esc(String(t.state).toLowerCase())}</span>`)}</td>
-          <td>${esc([t.section,t.place,t.responsible].filter(Boolean).join(' · ')||'—')}</td>
-          <td class="nowrap c-gray" style="font-family:var(--mono)">${esc(t.code1c||'')}</td></tr>`).join('')
-        ||'<tr><td colspan="9" class="c-gray" style="padding:16px">Ничего не найдено — снимите фильтры или уточните поиск.</td></tr>';
-      host.innerHTML=hero+kpiStrip+`
-        <div class="filters" style="margin-top:var(--gap)">
-          <span style="font-size:12px;color:var(--sub)">поэкземплярный учёт (у СИ нет остатка — есть инв. № и срок поверки)</span>
-          <span style="margin-left:auto"></span>
-          <button class="tbtn primary" id="si-cal">✓ Поверка</button>
-          <button class="tbtn green" id="si-new">+ Прибор</button>
-          <button class="tbtn" id="si-move">↹ Место / ответственный</button>
-          <button class="tbtn" id="si-lab">🖨 Этикетки</button>
+    function siGrid(){
+      const gh=document.getElementById('sigrid'); if(!gh)return;
+      const rows=siRows();
+      if(!rows.length){ gh.innerHTML=emptyCard((SI.items||[]).length?'Приборов по текущему фильтру нет':'Приборов в реестре ещё нет',{sub:(SI.items||[]).length?'Снимите фильтры.':'Заведите первый прибор: инв. № присвоится автоматически.',action:siCanWrite()?{label:'+ Прибор',onClick:()=>siOpenNew()}:null}); siGridApi=null; return; }
+      const cols=[
+        {key:'inv',label:'Инв. №',w:90,cls:'code',cell:t=>esc(t.invNo),sortVal:t=>t.invNo},
+        {key:'name',label:'Прибор',cls:'ell',cell:t=>`<span title="${esc(t.name)}" style="font-weight:600;color:var(--ink)">${esc(t.short||t.name)}</span>${t.short&&t.short!==t.name?`<div class="c-gray" style="font-size:11px">${esc(t.name)}</div>`:''}`,sortVal:t=>t.short||t.name},
+        {key:'kind',label:'Тип',w:130,cls:'nw c-gray',cell:t=>esc(t.kind||'—'),sortVal:t=>t.kind},
+        {key:'range',label:'Диапазон',w:120,cls:'nw c-gray',cell:t=>esc(t.range||'—'),sortVal:t=>t.range},
+        {key:'cal',label:'Поверка',w:190,cls:'nw',cell:siCalCell,sortVal:t=>({overdue:0,none:1,soon:2,ok:3,indicative:4}[t.calState]??9)+' '+(t.calNext||'')},
+        {key:'state',label:'Состояние',w:130,cls:'nw',cell:t=>siStCell(t.state),sortVal:t=>t.state},
+        {key:'where',label:'Где',w:160,cls:'ell c-gray',cell:t=>esc([t.section,t.place].filter(Boolean).join(' · ')||'—'),sortVal:t=>[t.section,t.place].join(' ')},
+        {key:'resp',label:'Ответственный',w:150,cls:'ell c-gray',cell:t=>esc(t.responsible||'—'),sortVal:t=>t.responsible},
+        {key:'serial',label:'Зав. №',w:110,cls:'nw code c-gray',cell:t=>esc(t.serial||'—'),sortVal:t=>t.serial},
+        {key:'code1c',label:'Код 1С',w:118,cls:'nw code c-gray',cell:t=>esc(t.code1c||'—'),sortVal:t=>t.code1c},
+      ];
+      const w=siCanWrite();
+      siGridApi=erpGrid(gh,{key:'si-reg',cols,rows,search:false,rowKey:t=>String(t.id),selKey:siSel!=null?String(siSel):null,onRow:t=>siOpen(t.id),
+        toolbar:[
+          {label:'✓ Поверка партией',cls:w?'primary':'',disabled:!w,onClick:()=>siEventDialog('Поверка')},
+          {label:'↹ Переместить / закрепить',disabled:!w,onClick:()=>siEventDialog('Перемещение')},
+          {label:'🖨 Этикетки',onClick:()=>siLabelsDialog()}],
+        info:`${srcChip(true)}<span>Приборов: <b style="color:var(--ink)">${rows.length}</b></span>`});
+    }
+    async function siJournalView(body){
+      body.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка журнала…</div>';
+      try{ siJournal=(await (await fetch('/api/si/journal')).json()).items||[]; }catch(e){ body.innerHTML=emptyCard('Журнал недоступен',{sub:esc(e.message)}); return; }
+      if(!siJournal.length){ body.innerHTML=emptyCard('Событий по приборам ещё не было',{sub:'Поверка, перемещение, выдача, ремонт и списание записываются сюда автоматически из карточки прибора.'}); return; }
+      const ev=(e)=>`<span class="st st--${({'Поверка':'done','Калибровка':'done','Перемещение':'work','Выдача':'work','Возврат':'done','Ремонт':'work','Инвентаризация':'neutral','Списание':'problem'})[e]||'neutral'}">${esc(e)}</span>`;
+      const cols=[
+        {key:'date',label:'Дата',w:92,cls:'nw c-gray',cell:j=>fmt(j.date),sortVal:j=>j.date},
+        {key:'inv',label:'Инв. №',w:90,cls:'code',cell:j=>esc(j.invNo),sortVal:j=>j.invNo},
+        {key:'name',label:'Прибор',cls:'ell',cell:j=>`<span style="font-weight:600;color:var(--ink)">${esc(j.name||'—')}</span>`,sortVal:j=>j.name},
+        {key:'event',label:'Событие',w:130,cls:'nw',cell:j=>ev(j.event),sortVal:j=>j.event},
+        {key:'next',label:'Годен до',w:100,cls:'nw',cell:j=>j.calNext?fmt(j.calNext):'<span class="c-gray">—</span>',sortVal:j=>j.calNext},
+        {key:'cert',label:'Свидетельство',w:130,cls:'nw code c-gray',cell:j=>esc(j.cert||'—'),sortVal:j=>j.cert},
+        {key:'to',label:'Куда / кому',w:160,cls:'ell c-gray',cell:j=>esc(j.to||'—'),sortVal:j=>j.to},
+        {key:'who',label:'Кто внёс',w:150,cls:'ell c-gray',cell:j=>esc(j.who||'—'),sortVal:j=>j.who},
+        {key:'note',label:'Комментарий',w:200,cls:'ell c-gray',cell:j=>esc(j.note||'—'),sortVal:j=>j.note},
+      ];
+      body.innerHTML='<div id="sijgrid" style="min-width:0"></div>';
+      erpGrid(body.querySelector('#sijgrid'),{key:'si-journal',cols,rows:siJournal,onRow:j=>{ if(j.itemId!=null){ siView='items'; renderSi(document.getElementById('view'),j.itemId); } },
+        info:`${srcChip(true)}<span>Событий: <b style="color:var(--ink)">${siJournal.length}</b></span>`});
+    }
+    // ── дровер прибора (те же классы, что у актов и оборудования) ──
+    function siDrawerHost(){ let d=document.getElementById('si-drawer'); if(!d){ d=document.createElement('div'); d.id='si-drawer'; document.body.appendChild(d); } return d; }
+    const siDrawerIsOpen=()=>{ const d=document.getElementById('si-drawer'); return !!(d&&d.classList.contains('on')); };
+    function siDrawerClose(resetHash){ const d=document.getElementById('si-drawer'); if(d){ d.classList.remove('on'); d.innerHTML=''; } siSel=null; siCard=null; siDraft=null; siGrid(); if(resetHash!==false){ try{history.replaceState(null,'','#si');}catch{} } }
+    async function siOpen(id,opts){
+      const d=siDrawerHost(); siSel=id; if(!(opts&&opts.keepTab))siTab='card';
+      try{history.replaceState(null,'','#si/'+encodeURIComponent(id));}catch{}
+      d.classList.add('on'); if(!(opts&&opts.keepTab))d.innerHTML='<div class="eqd-h"><div class="eqd-title"><span class="eqd-inv">…</span></div><button class="x" data-act="close" aria-label="Закрыть">✕</button><div class="eqd-sub">Загрузка карточки…</div></div>';
+      siGrid();
+      let card=null; try{ card=await (await fetch('/api/si/card?id='+encodeURIComponent(id))).json(); }catch(e){ card={error:String(e.message||e)}; }
+      if(String(siSel)!==String(id)||!siDrawerIsOpen())return;
+      if(!card||!card.card){ d.innerHTML=`<div class="eqd-h"><div class="eqd-title"><b>Прибор недоступен</b></div><button class="x" data-act="close" aria-label="Закрыть">✕</button></div>`+emptyState('Данные прибора не получены',{sub:esc((card&&card.error)||'')}); d.querySelector('[data-act="close"]').onclick=()=>siDrawerClose(); return; }
+      siCard=card; siDraft=JSON.parse(JSON.stringify(card.card)); siPaint();
+    }
+    function siOpenNew(){ const d=siDrawerHost(); siSel='new'; siTab='card'; siCard={card:null,journal:[]}; siDraft={id:null,invNo:'',name:'',short:'',kind:'',serial:'',range:'',accuracy:'',code1c:'',mode:'Поверка',interval:'',calDate:'',calNext:'',calCert:'',state:'В работе',section:'',place:'',responsible:'',since:'',note:'',calState:'none'}; d.classList.add('on'); siPaint(); }
+    function siPaint(){
+      const d=siDrawerHost(), t=siDraft, w=siCanWrite(), isNew=t.id==null, jr=(siCard&&siCard.journal)||[];
+      const tabs=[['card','Карточка'],['journal','Журнал'+(jr.length?' · '+jr.length:'')]];
+      const whereTxt=[t.section,t.place].filter(Boolean).join(' · ');
+      d.innerHTML=`<div class="eqd-h">
+          <div class="eqd-title"><span class="eqd-inv">${isNew?'Новый прибор':esc(t.invNo)}</span>${isNew?'':siCalCell(t)}${isNew?'':siStCell(t.state)}${t.kind?`<span class="st st--neutral">${esc(t.kind)}</span>`:''}</div>
+          <button class="x" data-act="close" aria-label="Закрыть">✕</button>
+          <div class="eqd-name">${esc(t.short||t.name||'наименование — заполните ниже')}</div>
+          <div class="eqd-sub">${esc(t.short&&t.name!==t.short?t.name:'')}${whereTxt?(t.short&&t.name!==t.short?' · ':'')+esc(whereTxt):''}${t.responsible?' · '+esc(t.responsible):''}${t.code1c?' · 1С '+esc(t.code1c):''}</div>
+          <div class="eqd-actions">
+            ${w?'<button class="ui-btn ui-btn--primary" data-act="save">Сохранить</button>':''}
+            ${(!isNew&&w)?'<button class="ui-btn" data-act="cal" title="Записать поверку или калибровку: срок посчитается по интервалу">✓ Поверка</button><button class="ui-btn" data-act="move" title="Участок, место хранения, ответственный">↹ Место / ответственный</button>':''}
+            ${(!isNew&&w&&t.state!=='Списан')?'<button class="ui-btn ui-btn--ghost" data-act="off" title="Ремонт, инвентаризация или списание">Ремонт / списание…</button>':''}
+            ${!isNew?`<a class="ui-btn" href="/api/si/labels?ids=${encodeURIComponent(t.id)}" target="_blank" rel="noopener"><i class=ic-print></i> Этикетка</a>`:''}
+          </div></div>
+        <div class="eq-tabs" id="si-tabs">${tabs.map(([k,l])=>`<button data-tab="${k}" class="${siTab===k?'on':''}">${l}</button>`).join('')}</div>
+        <div id="si-body"></div>`;
+      d.querySelector('[data-act="close"]').onclick=()=>siDrawerClose();
+      d.querySelectorAll('#si-tabs button').forEach(b=>b.onclick=()=>{ siTab=b.dataset.tab; siPaint(); });
+      const on=(sel,fn)=>{ const el=d.querySelector(sel); if(el)el.onclick=fn; };
+      on('[data-act="save"]',()=>siSave());
+      on('[data-act="cal"]',()=>siEventDialog('Поверка',[String(t.id)]));
+      on('[data-act="move"]',()=>siEventDialog('Перемещение',[String(t.id)]));
+      on('[data-act="off"]',()=>siEventDialog('Ремонт',[String(t.id)]));
+      siTab==='journal'?siPaintJournal():siPaintCard();
+    }
+    function siPaintCard(){
+      const h=document.getElementById('si-body'), t=siDraft, w=siCanWrite(), dis=w?'':' disabled';
+      const F=(l,inner,span)=>`<div class="eqd-f"${span?' style="grid-column:span 2"':''}><div class="l">${l}</div>${inner}</div>`;
+      const inp=(k,ph,type)=>`<input class="rt-inp" data-sf="${k}" type="${type||'text'}" value="${esc(t[k]==null?'':t[k])}" placeholder="${esc(ph||'')}"${dis}>`;
+      const sel=(k,list)=>`<select class="rt-inp" data-sf="${k}"${dis}>${list.map(x=>`<option${String(t[k])===x?' selected':''}>${esc(x)}</option>`).join('')}</select>`;
+      const noCal=t.mode!=='Индикаторный'&&!t.calDate&&!t.calNext;
+      h.innerHTML=`<div class="eqd-grid two" style="padding-top:12px">
+          ${F('Наименование (как в 1С) *',inp('name','напр. Штангенциркуль ШЦ-I-150-0,05'),true)}
+          ${F('Кратко — идёт на этикетку и в список оператора',inp('short','напр. Штангенциркуль 150 мм'))}
+          ${F('Тип',inp('kind','штангенциркуль, микрометр, рулетка…'))}
+          ${F('Инв. №'+(t.id==null?' (авто СИ-NNN)':''),inp('invNo',t.id==null?'присвоится автоматически':''))}
+          ${F('Заводской №',inp('serial'))}
+          ${F('Диапазон',inp('range','0–150 мм'))}
+          ${F('Класс точности / цена деления',inp('accuracy','0,05 мм'))}
+          ${F('Код 1С',inp('code1c','БП-000NNNN'))}
+          ${F('Состояние',sel('state',(SI.dict&&SI.dict.states)||['В работе']))}
         </div>
-        <div class="tl-3col" style="margin-top:var(--gap)">
-          ${facets}
-          <div style="min-width:0">
-            <div class="filters" style="margin-bottom:8px;font-size:12px;color:var(--sub)">
-              <span style="font-weight:600;color:var(--sub)">Активно:</span>
-              ${[siCal?SI_CAL_LBL[siCal]:'',siState,siKind].filter(Boolean).map(x=>`<span class="lit">${esc(x)}</span>`).join('')||'<span class="lit">весь реестр</span>'}
-              ${siSel.size?`<span class="lit">отмечено ${siSel.size}</span>`:''}
-              <span style="margin-left:auto;color:var(--sub)"><b style="color:var(--ink)">${list.length}</b> из ${items.length}</span>
-            </div>
-            <div class="tbl-wrap"><table class="dt" style="table-layout:fixed;width:100%">
-              <colgroup><col style="width:30px"><col style="width:78px"><col style="width:120px"><col><col style="width:110px"><col style="width:150px"><col style="width:120px"><col style="width:150px"><col style="width:110px"></colgroup>
-              <thead><tr>
-              <th><input type="checkbox" id="si-all"></th><th>Инв. №</th><th>Тип</th><th>Наименование</th><th>Диапазон</th><th>Поверка</th><th>Состояние</th><th>Где и у кого</th><th>Код 1С</th>
-            </tr></thead><tbody>${rows}</tbody></table></div>
-            <div class="c-gray" style="font-size:12px;margin-top:10px">Поверок по ПБС не проводилось — свидетельства вносим по мере поверки. Экран оператора предупреждает, если прибор без поверки или просрочен, но работать не мешает.</div>
-          </div>
-        </div>`;
-      const q=host.querySelector('#si-q');
-      q.oninput=()=>{ siQ=q.value; const p0=q.selectionStart; siPaint(host); const q2=host.querySelector('#si-q'); q2.focus(); q2.setSelectionRange(p0,p0); };
-      q.onkeydown=(e)=>{ if(e.key!=='Enter')return; const one=siFiltered(); if(one.length===1){ siQ=''; siOpenId=String(one[0].id); siCardPage(host); } };
-      host.querySelectorAll('.tl-facet[data-grp="cal"]').forEach(el=>el.onclick=()=>{ siCal=el.dataset.val; siPaint(host); });
-      host.querySelectorAll('.tl-facet[data-grp="state"]').forEach(el=>el.onclick=()=>{ siState=el.dataset.val; siPaint(host); });
-      host.querySelectorAll('.tl-facet[data-grp="kind"]').forEach(el=>el.onclick=()=>{ siKind=(siKind===el.dataset.val)?'':el.dataset.val; siPaint(host); });
-      host.querySelector('#si-reset').onclick=()=>{ siCal='';siState='';siKind='';siQ=''; siPaint(host); };
-      host.querySelectorAll('.si-ck').forEach(c=>c.onchange=()=>{ if(c.checked)siSel.add(c.dataset.id); else siSel.delete(c.dataset.id); siPaint(host); });
-      const all=host.querySelector('#si-all'); if(all)all.onchange=()=>{ siFiltered().forEach(t=>{ if(all.checked)siSel.add(String(t.id)); else siSel.delete(String(t.id)); }); siPaint(host); };
-      host.querySelectorAll('.si-open').forEach(a2=>a2.onclick=(e)=>{ e.preventDefault(); siOpenId=a2.dataset.id; siCardPage(host); });
-      host.querySelector('#si-new').onclick=()=>siForm(host,null);
-      host.querySelector('#si-cal').onclick=()=>siEventDialog(host,'Поверка');
-      host.querySelector('#si-move').onclick=()=>siEventDialog(host,'Перемещение');
-      host.querySelector('#si-lab').onclick=()=>siLabelsDialog();
-      try{ rbacGateWrite(host); }catch{}
-    }
-    // карточка прибора — по канону карточки позиции «Инструмента и оснастки»:
-    // панель действий, блок реквизитов в две колонки, журнал через jTable.
-    const siStateChip=(st)=>{ const k={'В работе':'in','На поверке':'warn','В ремонте':'warn','Не подтверждён':'warn','Списан':'gray'}[st]||'gray'; return tlChip(st||'—',k); };
-    const siCalChip=(t)=>t.calState==='overdue'?tlChip('поверка просрочена','out')
-      :(t.calState==='soon'?tlChip('поверка ≤30 дн','warn')
-      :(t.calState==='none'?tlChip('нет данных о поверке','warn')
-      :(t.calState==='indicative'?tlChip('индикаторный · без поверки','gray'):tlChip('поверен до '+fmt(t.calNext),'in'))));
-    async function siCardPage(host){
-      host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка карточки…</div>';
-      let d; try{ d=await (await fetch('/api/si/card?id='+encodeURIComponent(siOpenId))).json(); }catch(e){ toast('Не удалось открыть карточку: '+e.message,'err'); siOpenId=null; siPaint(host); return; }
-      if(d.error){ toast(d.error,'err'); siOpenId=null; siPaint(host); return; }
-      const t=d.card, jr=d.journal||[];
-      const kv=(l,v,style)=>`<div><div style="font-size:11px;color:var(--sl-500)">${l}</div><div style="${style||''}">${v||'—'}</div></div>`;
-      const details=`
-        ${kv('Наименование (1С)',esc(t.name),'color:var(--ink);font-weight:600')}
-        ${kv('Кратко — на этикетку',esc(t.short)||'<span style="color:#b45309;font-weight:600">не задано</span>')}
-        ${kv('Инв. №',esc(t.invNo),'font-weight:600;color:var(--navy)')}
-        ${kv('Тип',esc(t.kind))}
-        ${kv('Заводской №',esc(t.serial))}
-        ${kv('Код 1С',esc(t.code1c),'font-family:var(--mono)')}
-        ${kv('Диапазон',esc(t.range))}
-        ${kv('Класс точности / цена деления',esc(t.accuracy))}
-        ${kv('Режим',esc(t.mode))}
-        ${kv('Межповерочный интервал',t.interval?esc(String(t.interval))+' мес':'—')}
-        ${kv('Дата поверки',t.calDate?fmt(t.calDate):'—')}
-        ${kv('Годен до',t.calNext?fmt(t.calNext):'—',t.calState==='overdue'?'color:var(--red);font-weight:700':(t.calState==='soon'?'color:#b45309;font-weight:600':''))}
-        ${kv('№ свидетельства',esc(t.calCert)||(t.mode==='Индикаторный'?'не требуется':'<span style="color:#b45309;font-weight:600">данных о поверке нет</span>'))}
-        ${kv('Ответственный',esc(t.responsible))}
-        ${kv('Где',esc([t.section,t.place].filter(Boolean).join(' · ')))}
-        ${kv('Состояние',siStateChip(t.state))}
-        ${kv('Дата ввода',t.since?fmt(t.since):'—')}
-        ${kv('Примечание',esc(t.note))}`;
-      const evChip=(e)=>({'Поверка':['поверка','in'],'Калибровка':['калибровка','in'],'Перемещение':['перемещение','warn'],'Выдача':['выдача','out'],'Возврат':['возврат','in'],'Ремонт':['ремонт','warn'],'Инвентаризация':['инвентаризация','gray'],'Списание':['списание','out']}[e]||[e,'gray']);
-      const jhead='<tr><th>Дата</th><th>Событие</th><th>Годен до</th><th>Свидетельство</th><th>Куда / кому</th><th>Кто внёс</th><th>Комментарий</th></tr>';
-      const jrows=jr.length?jr.map(j=>{ const c=evChip(j.event);
-        return `<tr><td class="nowrap">${fmt(j.date)}</td><td>${tlChip(c[0],c[1])}</td><td class="nowrap">${j.calNext?fmt(j.calNext):'—'}</td><td class="nowrap">${esc(j.cert||'—')}</td><td>${esc(j.to||'—')}</td><td class="nowrap">${esc(j.who||'—')}</td><td>${esc(j.note||'—')}</td></tr>`; }).join('')
-        :'<tr><td colspan="7" style="padding:14px;color:var(--sl-500);text-align:center">Событий по прибору нет: поверка, перемещение, выдача и списание появятся здесь.</td></tr>';
-      host.innerHTML=`<div class="card pad tl-cardtoolbar">
-          <button class="tbtn" id="si-back">← Назад к списку</button>
-          <span class="code" style="font-size:18px;color:var(--navy);font-weight:700">${esc(t.invNo)}</span>
-          <span style="font-weight:600;color:var(--ink);font-size:14px">${esc(t.short||t.name)}</span>
-          ${tlChip(t.kind||'СИ','spec')}${siStateChip(t.state)}${siCalChip(t)}
-          <span style="margin-left:auto"></span>
-          <button class="tbtn primary" id="sic-cal">✓ Поверка</button>
-          <button class="tbtn" id="sic-move">↹ Место / ответственный</button>
-          <button class="tbtn" id="sic-edit">Изменить</button>
-          <button class="tbtn" id="sic-lab">🖨 Этикетка</button>
+        <div class="eqd-sec">Поверка · ДП–О.4</div>
+        ${noCal?'<div class="eqd-note" style="border-left:3px solid var(--amber,#b45309)">Данных о поверке нет — по ПБС поверки ещё не проводились. Пока прибор без свидетельства, экран оператора предупреждает, что мерить им можно только как индикаторным. Свидетельство вносите кнопкой «✓ Поверка» — срок посчитается сам.</div>':''}
+        <div class="eqd-grid two" style="padding-top:12px">
+          ${F('Режим',sel('mode',(SI.dict&&SI.dict.modes)||['Поверка','Калибровка','Индикаторный']))}
+          ${F('Межповерочный интервал, мес',inp('interval','12','number'))}
+          ${F('Дата поверки',inp('calDate','','date'))}
+          ${F('Годен до (пусто — посчитается по интервалу)',inp('calNext','','date'))}
+          ${F('№ свидетельства',inp('calCert','СП-…'))}
+          ${F('Дата ввода в эксплуатацию',inp('since','','date'))}
         </div>
-        <div class="card pad">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:10px">Карточка средства измерения (поэкземплярно · поверка ДП–О.4)</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px 18px;font-size:12px">${details}</div>
-        </div>
-        <div class="card pad">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:10px">Журнал прибора</div>
-          ${jTable(jhead,jrows)}
+        <div class="eqd-sec">Где и у кого</div>
+        <div class="eqd-grid two" style="padding-top:12px">
+          ${F('Участок',inp('section','ПБС-УЧ-16'))}
+          ${F('Место хранения',inp('place','шкаф ОТК / станок'))}
+          ${F('Ответственный',inp('responsible'))}
+          ${F('Примечание',`<textarea class="rt-inp" data-sf="note" rows="2"${dis}>${esc(t.note||'')}</textarea>`,true)}
         </div>`;
-      host.querySelector('#si-back').onclick=()=>{ siOpenId=null; siPaint(host); };
-      host.querySelector('#sic-edit').onclick=()=>siForm(host,t);
-      host.querySelector('#sic-cal').onclick=()=>{ siSel=new Set([String(t.id)]); siEventDialog(host,'Поверка'); };
-      host.querySelector('#sic-move').onclick=()=>{ siSel=new Set([String(t.id)]); siEventDialog(host,'Перемещение'); };
-      host.querySelector('#sic-lab').onclick=()=>window.open('/api/si/labels?ids='+encodeURIComponent(t.id),'_blank');
-      try{ rbacGateWrite(host); }catch{}
+      h.querySelectorAll('[data-sf]').forEach(el=>{ el.oninput=el.onchange=()=>{ t[el.dataset.sf]=el.value; }; });
     }
-    // форма прибора
-    function siForm(host,t){
-      const it=t||{mode:'Поверка',state:'В работе'};
-      const w=document.createElement('div'); w.className='ui-dlg';
-      const F=(lab,id,val,attr='')=>`<label style="display:block"><span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px">${lab}</span><input class="rt-inp" id="${id}" value="${esc(val==null?'':val)}" ${attr} style="width:100%"></label>`;
-      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:720px"><div class="ui-dlg-h">${t?'Прибор '+esc(t.invNo):'Новый прибор'}</div><div class="ui-dlg-t">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          <div style="grid-column:span 2">${F('Наименование (как в 1С)','sif-name',it.name)}</div>
-          ${F('Тип (штангенциркуль, микрометр…)','sif-kind',it.kind)}
-          <div style="grid-column:span 2">${F('Кратко — идёт на этикетку','sif-short',it.short,'placeholder="напр. Штангенциркуль 150 мм"')}</div>
-          ${F('Инв. №'+(t?'':' (авто СИ-NNN)'),'sif-inv',it.invNo,t?'':'placeholder="авто"')}
-          ${F('Заводской №','sif-serial',it.serial)}
-          ${F('Код 1С','sif-code1c',it.code1c,'placeholder="БП-000NNNN"')}
-          ${F('Диапазон','sif-range',it.range,'placeholder="0–150 мм"')}
-          ${F('Класс точности / цена деления','sif-acc',it.accuracy,'placeholder="0,05 мм"')}
-          <label style="display:block"><span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px">Режим</span><select class="rt-inp" id="sif-mode" style="width:100%">${(SI.dict.modes||[]).map(m=>`<option ${it.mode===m?'selected':''}>${esc(m)}</option>`).join('')}</select></label>
-          ${F('Межповерочный интервал, мес','sif-int',it.interval||'','type="number" min="0" step="1" placeholder="12"')}
-          ${F('Дата поверки','sif-cal',it.calDate,'type="date"')}
-          ${F('Годен до (можно не заполнять)','sif-next',it.calNext,'type="date"')}
-          ${F('№ свидетельства','sif-cert',it.calCert)}
-          ${F('Участок','sif-sec',it.section,'placeholder="ПБС-УЧ-16"')}
-          ${F('Место хранения','sif-place',it.place,'placeholder="шкаф ОТК / станок"')}
-          ${F('Ответственный','sif-resp',it.responsible)}
-          <label style="display:block"><span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px">Состояние</span><select class="rt-inp" id="sif-state" style="width:100%">${(SI.dict.states||[]).map(m=>`<option ${it.state===m?'selected':''}>${esc(m)}</option>`).join('')}</select></label>
-          <div style="grid-column:span 3">${F('Примечание','sif-note',it.note)}</div>
-        </div><div class="c-red" id="sif-err" style="margin-top:8px"></div></div>
-        <div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn pri" data-d="ok">Сохранить</button></div></div>`;
-      document.body.appendChild(w);
-      const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
-      w.querySelector('[data-d="ok"]').onclick=async()=>{
-        const V=(id)=>{ const el=w.querySelector('#'+id); return el?el.value.trim():''; };
-        const body={ id:t?t.id:undefined, name:V('sif-name'), short:V('sif-short'), kind:V('sif-kind'), invNo:V('sif-inv'), serial:V('sif-serial'),
-          code1c:V('sif-code1c'), range:V('sif-range'), accuracy:V('sif-acc'), mode:V('sif-mode'), interval:V('sif-int'),
-          calDate:V('sif-cal'), calNext:V('sif-next'), calCert:V('sif-cert'), section:V('sif-sec'), place:V('sif-place'),
-          responsible:V('sif-resp'), state:V('sif-state'), note:V('sif-note') };
-        if(!body.name){ w.querySelector('#sif-err').textContent='Укажите наименование.'; return; }
-        try{ const j=await postJson('/api/si/save',body); close(); toast(j.created?'Заведён '+j.invNo:'Сохранено','ok'); renderSi(host,siOpenId); }
-        catch(e){ w.querySelector('#sif-err').textContent=e.message; }
-      };
+    function siPaintJournal(){
+      const h=document.getElementById('si-body'), jr=(siCard&&siCard.journal)||[];
+      const ev=(e)=>`<span class="st st--${({'Поверка':'done','Калибровка':'done','Перемещение':'work','Выдача':'work','Возврат':'done','Ремонт':'work','Инвентаризация':'neutral','Списание':'problem'})[e]||'neutral'}">${esc(e)}</span>`;
+      const head='<tr><th>Дата</th><th>Событие</th><th>Годен до</th><th>Свидетельство</th><th>Куда / кому</th><th>Кто внёс</th><th>Комментарий</th></tr>';
+      const rows=jr.length?jr.map(j=>`<tr><td class="nowrap">${fmt(j.date)}</td><td>${ev(j.event)}</td><td class="nowrap">${j.calNext?fmt(j.calNext):'—'}</td><td class="nowrap">${esc(j.cert||'—')}</td><td>${esc(j.to||'—')}</td><td class="nowrap">${esc(j.who||'—')}</td><td>${esc(j.note||'—')}</td></tr>`).join('')
+        :'<tr><td colspan="7" style="padding:14px;color:var(--sl-500);text-align:center">Событий по прибору ещё нет: поверка, перемещение, выдача и списание появятся здесь.</td></tr>';
+      h.innerHTML=`<div style="padding-top:12px">${jTable(head,rows)}</div>`;
     }
-    // событие по выбранным приборам: поверка / перемещение / ремонт / списание
-    function siEventDialog(host,kind){
-      const sel=siPicked(); if(!sel.length){ toast('Отметьте приборы галочками.','warn'); return; }
+    async function siSave(){
+      const t=siDraft; if(!String(t.name||'').trim()){ toast('Укажите наименование прибора.','err'); siTab='card'; siPaint(); return; }
+      const body={id:t.id,invNo:t.invNo,name:t.name,short:t.short,kind:t.kind,serial:t.serial,range:t.range,accuracy:t.accuracy,code1c:t.code1c,mode:t.mode,interval:t.interval,calDate:t.calDate,calNext:t.calNext,calCert:t.calCert,state:t.state,section:t.section,place:t.place,responsible:t.responsible,since:t.since,note:t.note};
+      try{ const j=await postJson('/api/si/save',body); toast(j.created?'Заведён '+j.invNo:'Сохранено','ok'); SI=null; const host=document.getElementById('view'); await renderSi(host,j.id); }
+      catch(e){ toast('Не сохранено: '+e.message,'err'); }
+    }
+    // событие по одному или нескольким приборам: поверка / перемещение / ремонт / списание.
+    // Список приборов — чекбоксы (предвыбор: переданные id, иначе текущий фильтр реестра).
+    function siEventDialog(kind,presetIds){
+      const all=(SI&&SI.items||[]).filter(t=>t.state!=='Списан'), pre=new Set((presetIds||[]).map(String));
+      const pool=presetIds&&presetIds.length?all.filter(t=>pre.has(String(t.id))):siRows().filter(t=>t.state!=='Списан');
+      if(!pool.length){ toast('Нет приборов под текущим фильтром.','warn'); return; }
+      const chosen=new Set(pool.map(t=>String(t.id)));
       const w=document.createElement('div'); w.className='ui-dlg';
       const today=new Date().toISOString().slice(0,10);
       const cal=(kind==='Поверка'||kind==='Калибровка');
       const fields=cal?`
           <label>Событие<br><select class="rt-inp" id="sie-kind" style="width:100%"><option>Поверка</option><option>Калибровка</option></select></label>
           <label>Дата поверки<br><input class="rt-inp" type="date" id="sie-date" value="${today}" style="width:100%"></label>
-          <label>Межповерочный интервал, мес<br><input class="rt-inp" type="number" min="0" step="1" id="sie-int" value="${sel[0].interval||12}" style="width:100%"></label>
+          <label>Межповерочный интервал, мес<br><input class="rt-inp" type="number" min="0" step="1" id="sie-int" value="${pool[0].interval||12}" style="width:100%"></label>
           <label>Годен до (если не считать по интервалу)<br><input class="rt-inp" type="date" id="sie-next" style="width:100%"></label>
           <label>№ свидетельства<br><input class="rt-inp" id="sie-cert" placeholder="одно на партию — впишется всем" style="width:100%"></label>`
-        :`<label>Событие<br><select class="rt-inp" id="sie-kind" style="width:100%">${['Перемещение','Выдача','Возврат','Ремонт','Инвентаризация','Списание'].map(x=>`<option ${x===kind?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
+        :(kind==='Ремонт'?`
+          <label>Событие<br><select class="rt-inp" id="sie-kind" style="width:100%">${['Ремонт','Инвентаризация','Списание'].map(x=>`<option ${x===kind?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
+          <label>Дата<br><input class="rt-inp" type="date" id="sie-date" value="${today}" style="width:100%"></label>`
+        :`
+          <label>Событие<br><select class="rt-inp" id="sie-kind" style="width:100%">${['Перемещение','Выдача','Возврат'].map(x=>`<option ${x===kind?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
           <label>Дата<br><input class="rt-inp" type="date" id="sie-date" value="${today}" style="width:100%"></label>
-          <label>Участок<br><input class="rt-inp" id="sie-sec" value="${esc(sel[0].section||'')}" placeholder="ПБС-УЧ-16" style="width:100%"></label>
-          <label>Место хранения<br><input class="rt-inp" id="sie-place" value="${esc(sel[0].place||'')}" placeholder="шкаф ОТК / станок" style="width:100%"></label>
-          <label>Ответственный<br><input class="rt-inp" id="sie-resp" value="${esc(sel[0].responsible||'')}" style="width:100%"></label>`;
-      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:560px"><div class="ui-dlg-h">${cal?'Поверка':'Событие по прибору'} · ${sel.length} шт</div><div class="ui-dlg-t">
-        <div class="c-gray" style="font-size:12px;margin-bottom:10px">${esc(sel.slice(0,6).map(t=>t.invNo).join(', '))}${sel.length>6?' и ещё '+(sel.length-6):''}</div>
-        <div style="display:grid;gap:10px">${fields}<label>Примечание<br><input class="rt-inp" id="sie-note" style="width:100%"></label></div>
-        <div class="c-red" id="sie-err" style="margin-top:8px"></div></div>
-        <div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn pri" data-d="ok">Записать</button></div></div>`;
+          <label>Участок<br><input class="rt-inp" id="sie-sec" value="${esc(pool[0].section||'')}" placeholder="ПБС-УЧ-16" style="width:100%"></label>
+          <label>Место хранения<br><input class="rt-inp" id="sie-place" value="${esc(pool[0].place||'')}" placeholder="шкаф ОТК / станок" style="width:100%"></label>
+          <label>Ответственный<br><input class="rt-inp" id="sie-resp" value="${esc(pool[0].responsible||'')}" style="width:100%"></label>`);
+      const list=pool.map(t=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--sl-100)"><input type="checkbox" data-sid="${t.id}" checked><span class="code" style="font-family:var(--mono);font-weight:700;color:var(--navy)">${esc(t.invNo)}</span><span>${esc(t.short||t.name)}</span><span class="c-gray" style="margin-left:auto;font-size:11px">${esc(SI_CAL_LBL[t.calState]||'')}</span></label>`).join('');
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:720px"><div class="ui-dlg-h">${cal?'Поверка':(kind==='Ремонт'?'Ремонт / инвентаризация / списание':'Место и ответственный')}</div><div class="ui-dlg-t">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="display:grid;gap:10px;align-content:start">${fields}<label>Примечание<br><input class="rt-inp" id="sie-note" style="width:100%"></label></div>
+          <div><div class="eqd-sec" style="margin-top:0">Приборы · <span id="sie-cnt">${pool.length}</span></div><div style="max-height:46vh;overflow:auto">${list}</div></div>
+        </div><div class="c-red" id="sie-err" style="margin-top:8px"></div></div>
+        <div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn ui-btn--primary" data-d="ok">Записать</button></div></div>`;
       document.body.appendChild(w);
       const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
+      w.querySelectorAll('[data-sid]').forEach(c=>c.onchange=()=>{ c.checked?chosen.add(c.dataset.sid):chosen.delete(c.dataset.sid); w.querySelector('#sie-cnt').textContent=chosen.size; });
       w.querySelector('[data-d="ok"]').onclick=async()=>{
         const V=(id)=>{ const el=w.querySelector('#'+id); return el?el.value.trim():''; };
-        const body={ ids:sel.map(t=>String(t.id)), event:V('sie-kind'), date:V('sie-date'), note:V('sie-note'),
-          calCert:V('sie-cert'), interval:V('sie-int'), calNext:V('sie-next'),
-          section:V('sie-sec'), place:V('sie-place'), responsible:V('sie-resp') };
-        try{ const j=await postJson('/api/si/event',body); close(); toast(j.event+': '+j.count+' шт','ok'); const back=siOpenId; siSel=new Set(); renderSi(host,back); }
+        if(!chosen.size){ w.querySelector('#sie-err').textContent='Отметьте хотя бы один прибор.'; return; }
+        const body={ ids:[...chosen], event:V('sie-kind'), date:V('sie-date'), note:V('sie-note'), calCert:V('sie-cert'), interval:V('sie-int'), calNext:V('sie-next'), section:V('sie-sec'), place:V('sie-place'), responsible:V('sie-resp') };
+        try{ const j=await postJson('/api/si/event',body); close(); toast(j.event+': '+j.count+' шт','ok'); SI=null; const keep=siSel; await renderSi(document.getElementById('view'),keep!=null&&keep!=='new'?keep:undefined); }
         catch(e){ w.querySelector('#sie-err').textContent=e.message; }
       };
     }
-    // печать этикеток: формат, вид кода и отбор
+    // печать этикеток: формат, вид кода, отбор чекбоксами (предвыбор — текущий фильтр)
     function siLabelsDialog(){
-      const sel=siPicked(), list=sel.length?sel:siFiltered();
+      const pool=siRows().filter(t=>t.state!=='Списан'); if(!pool.length){ toast('Нет приборов под текущим фильтром.','warn'); return; }
+      const chosen=new Set(pool.map(t=>String(t.id)));
       const w=document.createElement('div'); w.className='ui-dlg';
-      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:600px"><div class="ui-dlg-h">Этикетки на приборы</div><div class="ui-dlg-t">
-        <div style="display:grid;gap:12px">
-          <label>Формат<br><select id="sl-size" class="rt-inp" style="width:100%">
-            <option value="30x15">30 × 15 мм — малая, влезает на штангенциркуль</option>
-            <option value="40x20">40 × 20 мм — средняя, помещается диапазон и свидетельство</option>
-            <option value="58x30">58 × 30 мм — крупная, на ящик или крупный прибор</option></select></label>
-          <label>Код на этикетке<br><select id="sl-code" class="rt-inp" style="width:100%">
-            <option value="qr">QR — открывает карточку прибора с историей поверок</option>
-            <option value="code128">Штрихкод Code128 — для обычного одномерного сканера</option></select></label>
-          <div class="c-gray" style="font-size:12px" id="sl-note"></div>
-        </div></div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn pri" data-d="ok">Печать</button></div></div>`;
+      const list=pool.map(t=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--sl-100)"><input type="checkbox" data-sid="${t.id}" checked><span style="font-family:var(--mono);font-weight:700;color:var(--navy)">${esc(t.invNo)}</span><span>${esc(t.short||t.name)}</span></label>`).join('');
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:720px"><div class="ui-dlg-h">Этикетки на приборы</div><div class="ui-dlg-t">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="display:grid;gap:10px;align-content:start">
+            <label>Формат<br><select id="sl-size" class="rt-inp" style="width:100%"><option value="30x15">30 × 15 мм — малая, влезает на штангенциркуль</option><option value="40x20">40 × 20 мм — средняя, с диапазоном и свидетельством</option><option value="58x30">58 × 30 мм — крупная, на ящик или крупный прибор</option></select></label>
+            <label>Код на этикетке<br><select id="sl-code" class="rt-inp" style="width:100%"><option value="qr">QR — открывает карточку прибора с историей</option><option value="code128">Штрихкод Code128 — для одномерного сканера</option></select></label>
+            <div class="c-gray" style="font-size:12px" id="sl-note"></div>
+          </div>
+          <div><div class="eqd-sec" style="margin-top:0">Приборы · <span id="sl-cnt">${pool.length}</span></div><div style="max-height:46vh;overflow:auto">${list}</div></div>
+        </div></div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn ui-btn--primary" data-d="ok">Печать</button></div></div>`;
       document.body.appendChild(w);
-      const note=w.querySelector('#sl-note'); const codeSel=w.querySelector('#sl-code');
-      const paint=()=>{ note.innerHTML=`Печатается <b>${list.length}</b> шт${sel.length?' (отмеченные галочками)':' (всё, что сейчас в списке)'}. На этикетке — инв. №, короткое название и срок поверки («до ММ.ГГ» или «нет поверки» красным). `
-        +(codeSel.value==='qr'
-          ? 'QR ведёт на карточку прибора в портале: с телефона в цеховой сети видно поверку и всю историю. Для рабочего места нужен 2D-сканер (обычный одномерный QR не читает).'
-          : 'Code128 содержит инв. № латиницей (СИ-017 → SI-017): такой код читает любой USB-сканер и подставляет прибор в «чем меряли» на экране оператора.'); };
+      const note=w.querySelector('#sl-note'), codeSel=w.querySelector('#sl-code');
+      const paint=()=>{ note.innerHTML='На этикетке: инв. №, «Поверен до ММ.ГГГГ» или «НЕ ПОВЕРЕН» красным, короткое название. '+(codeSel.value==='qr'?'QR ведёт на карточку прибора в портале — с телефона в цеховой сети видна поверка и вся история; на посту нужен 2D-сканер.':'Code128 содержит инв. № латиницей (СИ-017 → SI-017): читает любой USB-сканер и подставляет прибор в «чем меряли».'); };
       codeSel.onchange=paint; paint();
       const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
-      w.querySelector('[data-d="ok"]').onclick=()=>{ const size=w.querySelector('#sl-size').value, code=codeSel.value; close();
-        if(!list.length){ toast('Нечего печатать.','warn'); return; }
-        window.open('/api/si/labels?size='+encodeURIComponent(size)+'&code='+encodeURIComponent(code)+'&ids='+encodeURIComponent(list.map(t=>t.id).join(',')),'_blank'); };
+      w.querySelectorAll('[data-sid]').forEach(c=>c.onchange=()=>{ c.checked?chosen.add(c.dataset.sid):chosen.delete(c.dataset.sid); w.querySelector('#sl-cnt').textContent=chosen.size; });
+      w.querySelector('[data-d="ok"]').onclick=()=>{ if(!chosen.size){ toast('Отметьте хотя бы один прибор.','warn'); return; } const size=w.querySelector('#sl-size').value, code=codeSel.value; close();
+        window.open('/api/si/labels?size='+encodeURIComponent(size)+'&code='+encodeURIComponent(code)+'&ids='+encodeURIComponent([...chosen].join(',')),'_blank'); };
     }
     function tlCalCell(i){ if(!i.calNext) return '<span class="c-gray">—</span>'; const c=i.calOverdue?'c-red':(i.calSoon?'c-amber':'c-gray'); return `<span class="${c}"${i.calOverdue?' style="font-weight:700"':''}>${fmt(i.calNext)}</span>`; }
     // K-55: «Где» — склад·ячейка (нейтр.) / цех·участок (жёлтый chip)

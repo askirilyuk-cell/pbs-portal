@@ -8559,6 +8559,14 @@ async function siEvent(body, sess) {
   logEvent({ type: 'комментарий', obj: 'СИ', objNum: targets.map((t) => t.invNo).join(', '), who, details: kind + (body.note ? ' · ' + body.note : '') });
   return { ok: true, count: targets.length, event: kind };
 }
+// сводный журнал по всем приборам (вкладка «Журнал событий» раздела)
+async function siJournalAll() {
+  const items = await siAll(); const byInv = new Map(items.map((t) => [t.invNo, t]));
+  return (await ncListSoft('si_journal')).map((r) => { const t = byInv.get(String(r['Инв. №'] || '').trim()); return {
+    id: r.Id ?? r.id, date: r['Дата'] ? String(r['Дата']).slice(0, 10) : '', invNo: r['Инв. №'] || '', itemId: t ? t.id : null, name: t ? (t.short || t.name) : '',
+    event: r['Событие'] || '', to: r['Куда / кому'] || '', cert: r['№ свидетельства'] || '', calNext: r['Годен до'] ? String(r['Годен до']).slice(0, 10) : '', who: r['Кто внёс'] || '', note: r['Примечание'] || '' }; })
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.id - a.id));
+}
 async function siCard(id) {
   const items = await siAll();
   const key = String(id || '').trim().toUpperCase();
@@ -13294,6 +13302,7 @@ const server = http.createServer(async (req, res) => {
     }
     // ── K-208: раздел «Средства измерения» ──────────────────────────────────
     if (p === '/api/si' && req.method === 'GET') { try { return sendJson(res, 200, await siModel()); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/si/journal' && req.method === 'GET') { try { return sendJson(res, 200, { items: await siJournalAll() }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/si/card' && req.method === 'GET') { try { return sendJson(res, 200, await siCard(url.searchParams.get('id'))); } catch (e) { return sendJson(res, 404, { error: String(e.message || e) }); } }
     if (p === '/api/si/save' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' });

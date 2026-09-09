@@ -1935,7 +1935,7 @@
     const _fetch=window.fetch.bind(window);
     window.fetch=function(input,init){
       try{
-        if(RBAC_ON&&ME&&ME.authenticated){
+        if(RBAC_ON&&ME&&ME.authenticated&&!ME.isStation){ // K-206g: пост участка — сервер ограничивает его своим белым списком путей; клиентский гейт мапит /api/task на «Доску» (view) и блокировал «Начать»
           const url=typeof input==='string'?input:(input&&input.url)||'';
           const method=((init&&init.method)||(typeof input==='object'&&input&&input.method)||'GET').toUpperCase();
           if(/\/api\//.test(url)&&method!=='GET'&&method!=='HEAD'){

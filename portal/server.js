@@ -8580,10 +8580,10 @@ async function siWorkplaceList() {
   }));
 }
 const SI_LABEL_SIZES = { '30x15': { w: 30, h: 15 }, '40x20': { w: 40, h: 20 }, '58x30': { w: 58, h: 30 } };
-// K-210: этикетка на прибор. 30×15 мм по умолчанию — должна влезать на штангенциркуль,
-// поэтому на ней короткое (каноничное) имя, а не полное из 1С: полные названия бывают
-// в три строки. Код: QR со ссылкой на карточку прибора (открывается с историей поверок
-// и перемещений) либо Code128 по инв. № — для обычного одномерного USB-сканера на посту.
+// K-210: этикетка на прибор. 30×15 мм — должна влезать на штангенциркуль, поэтому текст
+// колонкой (инв. № · срок · короткое имя в две строки), а не в одну строку: длинные
+// названия из 1С обрезались. Код: QR со ссылкой на карточку прибора (открывается с
+// историей поверок и перемещений) либо Code128 по инв. № — для одномерного USB-сканера.
 async function siLabelsHtml(ids, size, codeKind) {
   const sz = SI_LABEL_SIZES[size] || SI_LABEL_SIZES['30x15'];
   let list = await siAll();
@@ -8591,33 +8591,36 @@ async function siLabelsHtml(ids, size, codeKind) {
   if (want.length) list = list.filter((t) => want.includes(String(t.id)) || want.includes(String(t.invNo)));
   const base = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '') || 'http://nas-pbs:4173';
   const mmYY = (d) => { const p2 = String(d).slice(0, 10).split('-'); return p2[1] + '.' + p2[0].slice(2); };
-  const small = sz.w <= 35;
+  const small = sz.w <= 35, big = sz.w >= 55;
   const qr = codeKind !== 'code128' && !!qrcodeLib;
   const cut = (v, n) => { const x = String(v || ''); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
-  const qrMm = small ? 11 : (sz.w >= 55 ? 18 : 14);
+  // размеры подобраны под ширину: у 30 мм на текст остаётся ~17 мм при QR 10 мм
+  const F = small ? { qr: 10, inv: 7.5, due: 5.2, nm: 5, sub: 4.6 } : (big ? { qr: 18, inv: 13, due: 8.5, nm: 8, sub: 7 } : { qr: 13, inv: 10, due: 6.8, nm: 6.5, sub: 5.6 });
   const cards = list.map((t) => {
+    // главное для оператора: можно этим мерить или нет — видно глазами, без карточки
     const bad = t.calState === 'overdue' || t.calState === 'none';
-    const due = t.mode === 'Индикаторный' ? 'без поверки'
-      : (t.calNext ? 'до ' + mmYY(t.calNext) : 'нет поверки');
-    const title = cut(t.short || t.kind || t.name, small ? 34 : 60);
-    const sub = small ? '' : `<div class="c">${hesc(cut([t.range, t.calCert ? 'свид. ' + t.calCert : '', t.responsible].filter(Boolean).join(' · ') || 'ООО «Петробалт Сервис»', 52))}</div>`;
-    const code = qr ? `<div class="qr">${qrSvg(base + '/#si/' + t.bar, qrMm)}</div>`
-      : `<div class="bc">${code128Svg(t.bar, 30)}</div>`;
-    return `<div class="lb">${qr ? code : ''}<div class="txt">`
-      + `<div class="top"><b>${hesc(t.invNo || '—')}</b><span class="${bad ? 'bad' : ''}">${hesc(due)}</span></div>`
-      + `<div class="c nm">${hesc(title)}</div>${sub}${qr ? '' : code}</div></div>`;
+    const yyyy = (d) => { const p2 = String(d).slice(0, 10).split('-'); return p2[1] + '.' + p2[0]; };
+    const due = t.mode === 'Индикаторный' ? (small ? 'Без поверки' : 'Без поверки · индикаторный')
+      : (t.calState === 'overdue' ? 'ПРОСРОЧЕН ' + (t.calNext ? 'с ' + yyyy(t.calNext) : '')
+        : (t.calNext ? 'Поверен до ' + yyyy(t.calNext) : 'НЕ ПОВЕРЕН'));
+    const title = cut(t.short || t.kind || t.name, small ? 40 : 70);
+    const sub = small ? '' : `<div class="sub">${hesc(cut([t.range, t.calCert ? 'свид. ' + t.calCert : '', t.responsible || 'ООО «Петробалт Сервис»'].filter(Boolean).join(' · '), 60))}</div>`;
+    const code = qr ? `<div class="qr">${qrSvg(base + '/#si/' + t.bar, F.qr)}</div>` : '';
+    const bar = qr ? '' : `<div class="bc">${code128Svg(t.bar, 30)}</div>`;
+    return `<div class="lb">${code}<div class="txt"><div class="inv">${hesc(t.invNo || '—')}</div>`
+      + `<div class="due ${bad ? 'bad' : ''}">${hesc(due)}</div>`
+      + `<div class="nm">${hesc(title)}</div>${sub}${bar}</div></div>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Этикетки СИ ${sz.w}×${sz.h} мм</title><style>`
     + `@page{size:${sz.w}mm ${sz.h}mm;margin:0}body{margin:0;font-family:system-ui,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
-    + `.lb{width:${sz.w}mm;height:${sz.h}mm;box-sizing:border-box;padding:${small ? '1mm' : '1.6mm 2mm'};page-break-after:always;display:flex;align-items:center;gap:${small ? '1mm' : '2mm'};overflow:hidden}`
-    + `.lb .txt{min-width:0;flex:1;display:flex;flex-direction:column;gap:${small ? '.4mm' : '.8mm'}}`
-    + `.qr{line-height:0;flex:0 0 auto}.qr svg{display:block}`
-    + `.top{display:flex;justify-content:space-between;align-items:baseline;gap:1mm;min-width:0}`
-    + `.top b{font-size:${small ? '8pt' : '12pt'};font-weight:800;white-space:nowrap}`
-    + `.top span{font-size:${small ? '5.5pt' : '8pt'};white-space:nowrap;color:#333}.top .bad{color:#b91c1c;font-weight:700}`
-    + `.c{font-size:${small ? '5.5pt' : '8pt'};color:#222;overflow:hidden;line-height:1.15}`
-    + `.nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:600}`
-    + `.bc{line-height:0}.bc svg{width:100%;height:${small ? 3.5 : 6}mm}`
+    + `.lb{width:${sz.w}mm;height:${sz.h}mm;box-sizing:border-box;padding:${small ? '.8mm 1mm' : '1.4mm 1.8mm'};page-break-after:always;display:flex;align-items:center;gap:${small ? '1mm' : '1.8mm'};overflow:hidden}`
+    + `.qr{flex:0 0 auto;line-height:0}.qr svg{display:block}`
+    + `.txt{min-width:0;flex:1;overflow:hidden}`
+    + `.inv{font-size:${F.inv}pt;font-weight:800;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`
+    + `.due{font-size:${F.due}pt;line-height:1.15;color:#111;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.due.bad{color:#fff;background:#b91c1c;font-weight:800;padding:.2mm .8mm;border-radius:.6mm;display:inline-block;letter-spacing:.2px}`
+    + `.nm{font-size:${F.nm}pt;line-height:1.15;font-weight:600;color:#111;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}`
+    + `.sub{font-size:${F.sub}pt;line-height:1.15;color:#444;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}`
+    + `.bc{line-height:0;margin-top:.5mm}.bc svg{width:100%;height:${small ? 3.2 : 5}mm}`
     + `@media screen{body{background:#eee;padding:10px}.lb{background:#fff;margin:0 0 6px;border:.2mm dashed #999}}`
     + `</style></head><body>${cards || '<p>Приборы не найдены.</p>'}<scr` + `ipt>setTimeout(function(){window.print()},300)</scr` + `ipt></body></html>`;
 }

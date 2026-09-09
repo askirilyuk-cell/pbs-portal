@@ -21,8 +21,14 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// K-210: генератор QR — вендорная библиотека qrcode-generator (MIT, K. Arase), CommonJS,
+// поэтому подключаем через createRequire. Ставится вместе с server.js (portal/vendor/).
+const nodeRequire = createRequire(import.meta.url);
+let qrcodeLib = null;
+try { qrcodeLib = nodeRequire('./vendor/qrcode-generator.js'); } catch (e) { console.warn('[qr] библиотека QR недоступна:', e.message); }
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(__dirname, 'public');
 const RUNTIME_FILE = path.join(__dirname, '.runtime.json');
@@ -1557,6 +1563,11 @@ async function taskNotify(body, session) {
 // K-197: кто ведёт ежемесячное списание (Настройки → 1С и бухгалтерия); за WRITEOFF_DAYS дней до конца месяца портал сам создаёт черновик и напоминает
 const WRITEOFF_HANDLERS_DEFAULT = [11, 159];
 const writeoffHandlerIds = () => { const raw = runtime.WRITEOFF_HANDLERS != null ? runtime.WRITEOFF_HANDLERS : (process.env.WRITEOFF_HANDLERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : WRITEOFF_HANDLERS_DEFAULT; };
+// K-211: кто отвечает за поверку средств измерения (Настройки → Интеграции).
+// По умолчанию — Кирилюк (11): на 09.09.2026 поверкой в ПБС занимается он.
+const SI_HANDLERS_DEFAULT = [11];
+const siHandlerIds = () => { const raw = runtime.SI_HANDLERS != null ? runtime.SI_HANDLERS : (process.env.SI_HANDLERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : SI_HANDLERS_DEFAULT; };
+const siWarnDays = () => { const n = Number(runtime.SI_WARN_DAYS != null ? runtime.SI_WARN_DAYS : (process.env.SI_WARN_DAYS || 30)); return Number.isFinite(n) && n > 0 ? n : 30; };
 const writeoffDays = () => { const n = Number(runtime.WRITEOFF_DAYS != null ? runtime.WRITEOFF_DAYS : (process.env.WRITEOFF_DAYS || 5)); return Number.isFinite(n) && n > 0 ? n : 5; };
 const WRITEOFF_STATE_FILE = path.join(__dirname, '.data', '1c', 'writeoff.json');
 function retroWriteoffWindow(now) {
@@ -7594,8 +7605,10 @@ async function buildCabinet(session) {
   const meId = session && session.userId != null ? String(session.userId) : '';
   const fio = (session && session.fio) || '';
   const isAdmin = !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
-  const out = { ok: true, me: { id: meId, fio, isAdmin, purchaseHandler: purchaseHandlerIds().includes(Number(meId)), writeoffHandler: writeoffHandlerIds().includes(Number(meId)) }, approvals: [], sent: [], recent: [], purchases: [], drafts: [] };
+  const out = { ok: true, me: { id: meId, fio, isAdmin, purchaseHandler: purchaseHandlerIds().includes(Number(meId)), writeoffHandler: writeoffHandlerIds().includes(Number(meId)), siHandler: siHandlerIds().includes(Number(meId)) }, approvals: [], sent: [], recent: [], purchases: [], drafts: [] };
   if (!isLive()) return out;
+  // K-211: ответственному за поверку — сводка по средствам измерения
+  if (out.me.siHandler || isAdmin) { try { out.si = await siSummary(); } catch (e) { console.warn('[K-211] сводка СИ:', e.message); } }
   try {
     const d = await buildRetroLive();
     if (out.me.writeoffHandler) { const w = retroWriteoffWindow(); out.writeoff = { ...w, current: d.writeoff && d.writeoff.current ? d.writeoff.current : null }; } // K-197
@@ -8136,6 +8149,7 @@ async function retroWeeklyDigest(force) {
 // K-164 (решение владельца 05.09): не «раз в час», а фоном раз в 4 часа + точечная проверка при открытии/печати акта (retroPollOne)
 setTimeout(() => { retroPoll1c().catch(() => {}); }, 90 * 1000);
 setInterval(() => { retroPoll1c().catch(() => {}); }, 4 * 60 * 60 * 1000);
+setInterval(() => { siRemindEnsure().catch((e) => console.warn('[K-211] напоминание по поверке:', e.message)); }, 12 * 60 * 60 * 1000); // K-211
 setInterval(() => { retroWeeklyDigest(false).catch(() => {}); }, 20 * 60 * 1000);
 
 // ============================================================================
@@ -8392,14 +8406,21 @@ function siShape(r) {
     : (!calDate && !calNext ? 'none' : (overdue ? 'overdue' : (calNext && calNext <= soon ? 'soon' : 'ok')));
   return {
     id: r.Id ?? r.id, invNo: String(r['Инв. №'] || '').trim(), bar: asciiBar(r['Инв. №']),
-    name: r['Наименование'] || '', kind: r['Тип'] || '', serial: r['Заводской №'] || '',
+    name: r['Наименование'] || '', short: r['Кратко'] || '', kind: r['Тип'] || '', serial: r['Заводской №'] || '',
     range: r['Диапазон'] || '', accuracy: r['Класс точности'] || '', code1c: r['Код 1С'] || '',
     mode, interval, calDate, calNext, calCert: r['№ свидетельства'] || '', calState,
     state, section: r['Участок'] || '', place: r['Место хранения'] || '', responsible: r['Ответственный'] || '',
     since: d(r['Дата ввода']), note: r['Примечание'] || '',
   };
 }
+let siColsReady = false;
+async function siEnsureCols() {
+  if (siColsReady) return;
+  try { await ncEnsureColumn('si_items', 'Кратко', 'SingleLineText'); siColsReady = true; }
+  catch (e) { console.warn('K-210: колонка «Кратко» недоступна:', e.message); }
+}
 async function siAll() {
+  await siEnsureCols();
   const rows = await ncListSoft('si_items');
   return rows.map(siShape).sort((a, b) => String(a.invNo).localeCompare(String(b.invNo), 'ru'));
 }
@@ -8419,13 +8440,47 @@ async function siModel() {
     dict: { modes: SI_MODES, states: SI_STATES, events: SI_EVENTS, kinds: [...new Set(items.map((t) => t.kind).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru')) },
   };
 }
+// сводка состояния поверки — для «Моего кабинета» и напоминаний ответственному
+async function siSummary() {
+  if (!isLive()) return { total: 0, overdue: 0, soon: 0, none: 0, items: [] };
+  const items = await siAll();
+  const live = items.filter((t) => t.state !== 'Списан');
+  const pick = (st) => live.filter((t) => t.calState === st);
+  const overdue = pick('overdue'), soon = pick('soon'), none = pick('none');
+  return {
+    total: live.length, overdue: overdue.length, soon: soon.length, none: none.length,
+    warnDays: siWarnDays(),
+    items: [...overdue, ...soon].sort((a, b) => String(a.calNext).localeCompare(String(b.calNext)))
+      .slice(0, 10).map((t) => ({ id: t.id, invNo: t.invNo, name: t.short || t.name, calNext: t.calNext, calState: t.calState })),
+  };
+}
+// напоминание ответственному за поверку — не чаще раза в неделю и только если есть что чинить
+const SI_STATE_FILE = path.join(ROOT, 'portal', '.si-remind.json');
+function siRemindState() { try { return JSON.parse(fs.readFileSync(SI_STATE_FILE, 'utf8')); } catch { return {}; } }
+async function siRemindEnsure() {
+  if (!isLive()) return { skipped: 'mock' };
+  let sum; try { sum = await siSummary(); } catch (e) { return { error: e.message }; }
+  if (!sum.overdue && !sum.none) return { skipped: 'нечего напоминать' };
+  const st = siRemindState();
+  if (st.lastSent && (Date.now() - Date.parse(st.lastSent)) < 7 * 86400000) return { skipped: 'уже напоминали ' + st.lastSent };
+  const lines = [`Средства измерения: ${sum.overdue ? sum.overdue + ' с просроченной поверкой' : ''}${sum.overdue && sum.none ? ', ' : ''}${sum.none ? sum.none + ' без данных о поверке' : ''}${sum.soon ? ', ' + sum.soon + ' истекает в ближайшие ' + sum.warnDays + ' дн.' : ''}.`];
+  if (sum.items.length) lines.push(sum.items.map((t) => `${t.invNo} ${t.name}${t.calNext ? ' — до ' + t.calNext : ''}`).join('\n'));
+  lines.push(`Реестр: ${String(cfg().PORTAL_BASE || '').replace(/\/+$/, '')}/#si`);
+  let sent = 0;
+  for (const id of siHandlerIds()) {
+    try { await bitrixCall('im.message.add', { USER_ID: id, MESSAGE: lines.join('\n') }); sent++; }
+    catch (e) { console.warn('[K-211] напоминание по поверке не отправлено', id, e.message); }
+  }
+  try { fs.writeFileSync(SI_STATE_FILE, JSON.stringify({ lastSent: new Date().toISOString(), overdue: sum.overdue, none: sum.none })); } catch {}
+  return { ok: true, sent, overdue: sum.overdue, none: sum.none };
+}
 function siNextInv(rows) {
   let max = 0;
   for (const r of rows) { const m = /^СИ-(\d+)$/.exec(String(r.invNo || r['Инв. №'] || '').trim()); if (m) max = Math.max(max, Number(m[1])); }
   return 'СИ-' + String(max + 1).padStart(3, '0');
 }
 const SI_WRITE = {
-  'Наименование': 'name', 'Тип': 'kind', 'Заводской №': 'serial', 'Диапазон': 'range',
+  'Наименование': 'name', 'Кратко': 'short', 'Тип': 'kind', 'Заводской №': 'serial', 'Диапазон': 'range',
   'Класс точности': 'accuracy', 'Код 1С': 'code1c', '№ свидетельства': 'calCert',
   'Участок': 'section', 'Место хранения': 'place', 'Ответственный': 'responsible', 'Примечание': 'note',
 };
@@ -8506,7 +8561,9 @@ async function siEvent(body, sess) {
 }
 async function siCard(id) {
   const items = await siAll();
-  const card = items.find((x) => String(x.id) === String(id));
+  const key = String(id || '').trim().toUpperCase();
+  const card = items.find((x) => String(x.id) === String(id))
+    || items.find((x) => String(x.invNo).toUpperCase() === key) || items.find((x) => String(x.bar).toUpperCase() === key);
   if (!card) throw new Error('Прибор не найден.');
   const j = (await ncListSoft('si_journal')).filter((r) => String(r['Инв. №'] || '').trim() === card.invNo)
     .map((r) => ({ id: r.Id ?? r.id, date: r['Дата'] ? String(r['Дата']).slice(0, 10) : '', event: r['Событие'] || '', to: r['Куда / кому'] || '', cert: r['№ свидетельства'] || '', calNext: r['Годен до'] ? String(r['Годен до']).slice(0, 10) : '', who: r['Кто внёс'] || '', note: r['Примечание'] || '' }))
@@ -8517,35 +8574,50 @@ async function siCard(id) {
 async function siWorkplaceList() {
   const items = await siAll();
   return items.filter((t) => t.state !== 'Списан').map((t) => ({
-    id: t.id, invNo: t.invNo, bar: t.bar, name: t.name, kind: t.kind, range: t.range,
+    id: t.id, invNo: t.invNo, bar: t.bar, name: t.short || t.name, fullName: t.name, kind: t.kind, range: t.range,
     calMode: t.mode, calDate: t.calDate, calNext: t.calNext, calCert: t.calCert, calState: t.calState,
     responsible: t.responsible, where: [t.section, t.place].filter(Boolean).join(' · '), code1c: t.code1c,
   }));
 }
-const SI_LABEL_SIZES = { '30x15': { w: 30, h: 15 }, '50x20': { w: 50, h: 20 }, '58x30': { w: 58, h: 30 } };
-// этикетка на прибор. По умолчанию 30×15 мм — требование цеха: должна влезать на штангенциркуль.
-async function siLabelsHtml(ids, size) {
+const SI_LABEL_SIZES = { '30x15': { w: 30, h: 15 }, '40x20': { w: 40, h: 20 }, '58x30': { w: 58, h: 30 } };
+// K-210: этикетка на прибор. 30×15 мм по умолчанию — должна влезать на штангенциркуль,
+// поэтому на ней короткое (каноничное) имя, а не полное из 1С: полные названия бывают
+// в три строки. Код: QR со ссылкой на карточку прибора (открывается с историей поверок
+// и перемещений) либо Code128 по инв. № — для обычного одномерного USB-сканера на посту.
+async function siLabelsHtml(ids, size, codeKind) {
   const sz = SI_LABEL_SIZES[size] || SI_LABEL_SIZES['30x15'];
   let list = await siAll();
   const want = (ids || []).map(String).filter(Boolean);
   if (want.length) list = list.filter((t) => want.includes(String(t.id)) || want.includes(String(t.invNo)));
-  const rus = (d) => (d ? String(d).slice(0, 10).split('-').reverse().slice(0, 2).join('.') : '');
+  const base = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '') || 'http://nas-pbs:4173';
+  const mmYY = (d) => { const p2 = String(d).slice(0, 10).split('-'); return p2[1] + '.' + p2[0].slice(2); };
   const small = sz.w <= 35;
+  const qr = codeKind !== 'code128' && !!qrcodeLib;
+  const cut = (v, n) => { const x = String(v || ''); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
+  const qrMm = small ? 11 : (sz.w >= 55 ? 18 : 14);
   const cards = list.map((t) => {
-    const due = t.mode === 'Индикаторный' ? 'без поверки' : (t.calNext ? 'до ' + rus(t.calNext) : 'поверка не проведена');
     const bad = t.calState === 'overdue' || t.calState === 'none';
-    const line2 = small ? String(t.kind || t.name).slice(0, 26) : [t.name, t.range].filter(Boolean).join(' · ').slice(0, 60);
-    return `<div class="lb"><div class="top"><b>${hesc(t.invNo || '—')}</b><span class="${bad ? 'bad' : ''}">${hesc(due)}</span></div>`
-      + `<div class="bc">${code128Svg(t.bar, 30)}</div>`
-      + `<div class="c">${hesc(line2)}</div>${small ? '' : `<div class="c">${hesc(t.calCert ? 'свид. ' + t.calCert : 'свидетельства нет')} · ООО «Петробалт Сервис»</div>`}</div>`;
+    const due = t.mode === 'Индикаторный' ? 'без поверки'
+      : (t.calNext ? 'до ' + mmYY(t.calNext) : 'нет поверки');
+    const title = cut(t.short || t.kind || t.name, small ? 34 : 60);
+    const sub = small ? '' : `<div class="c">${hesc(cut([t.range, t.calCert ? 'свид. ' + t.calCert : '', t.responsible].filter(Boolean).join(' · ') || 'ООО «Петробалт Сервис»', 52))}</div>`;
+    const code = qr ? `<div class="qr">${qrSvg(base + '/#si/' + t.bar, qrMm)}</div>`
+      : `<div class="bc">${code128Svg(t.bar, 30)}</div>`;
+    return `<div class="lb">${qr ? code : ''}<div class="txt">`
+      + `<div class="top"><b>${hesc(t.invNo || '—')}</b><span class="${bad ? 'bad' : ''}">${hesc(due)}</span></div>`
+      + `<div class="c nm">${hesc(title)}</div>${sub}${qr ? '' : code}</div></div>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Этикетки СИ ${sz.w}×${sz.h} мм</title><style>`
-    + `@page{size:${sz.w}mm ${sz.h}mm;margin:0}body{margin:0;font-family:system-ui,Arial,sans-serif}`
-    + `.lb{width:${sz.w}mm;height:${sz.h}mm;box-sizing:border-box;padding:${small ? '.8mm 1mm' : '1.5mm 2mm'};page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}`
-    + `.top{display:flex;justify-content:space-between;align-items:baseline;gap:1mm}.top b{font-size:${small ? '8pt' : '12pt'};font-weight:800;letter-spacing:.2px}`
-    + `.top span{font-size:${small ? '5.5pt' : '8pt'};white-space:nowrap}.top .bad{color:#b91c1c;font-weight:700}`
-    + `.bc{line-height:0}.bc svg{width:${sz.w - (small ? 2 : 4)}mm;height:${small ? 4 : 7}mm}`
-    + `.c{font-size:${small ? '5pt' : '7pt'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`
+    + `@page{size:${sz.w}mm ${sz.h}mm;margin:0}body{margin:0;font-family:system-ui,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
+    + `.lb{width:${sz.w}mm;height:${sz.h}mm;box-sizing:border-box;padding:${small ? '1mm' : '1.6mm 2mm'};page-break-after:always;display:flex;align-items:center;gap:${small ? '1mm' : '2mm'};overflow:hidden}`
+    + `.lb .txt{min-width:0;flex:1;display:flex;flex-direction:column;gap:${small ? '.4mm' : '.8mm'}}`
+    + `.qr{line-height:0;flex:0 0 auto}.qr svg{display:block}`
+    + `.top{display:flex;justify-content:space-between;align-items:baseline;gap:1mm;min-width:0}`
+    + `.top b{font-size:${small ? '8pt' : '12pt'};font-weight:800;white-space:nowrap}`
+    + `.top span{font-size:${small ? '5.5pt' : '8pt'};white-space:nowrap;color:#333}.top .bad{color:#b91c1c;font-weight:700}`
+    + `.c{font-size:${small ? '5.5pt' : '8pt'};color:#222;overflow:hidden;line-height:1.15}`
+    + `.nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:600}`
+    + `.bc{line-height:0}.bc svg{width:100%;height:${small ? 3.5 : 6}mm}`
     + `@media screen{body{background:#eee;padding:10px}.lb{background:#fff;margin:0 0 6px;border:.2mm dashed #999}}`
     + `</style></head><body>${cards || '<p>Приборы не найдены.</p>'}<scr` + `ipt>setTimeout(function(){window.print()},300)</scr` + `ipt></body></html>`;
 }
@@ -9895,7 +9967,7 @@ function settingsView() {
     kpSignThreshold: c.KP_SIGN_THRESHOLD, kpVatRate: c.KP_VAT_RATE, kpProfitPct: c.KP_PROFIT_PCT,
     kpSlaPrepDays: c.KP_SLA_PREP_DAYS, kpSlaFollowupDays: c.KP_SLA_FOLLOWUP_DAYS,
     // K-159: 1С и бухгалтерия
-    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','), mkApprovers: mkApproverIds().join(','), otkUsers: otkUserIds().join(','), writeoffHandlers: writeoffHandlerIds().join(','), writeoffDays: writeoffDays(),
+    onecSet: !!(c.ONEC_URL && c.ONEC_LOGIN && c.ONEC_PASSWORD), onecUrl: c.ONEC_URL, onecWarehouse: c.ONEC_WAREHOUSE, onecDryRun: onecDryRun(), accChat: String(runtime.BITRIX_ACC_CHAT || ''), retroApprovers: retroApproverIds().join(','), purchaseHandlers: purchaseHandlerIds().join(','), mkApprovers: mkApproverIds().join(','), otkUsers: otkUserIds().join(','), writeoffHandlers: writeoffHandlerIds().join(','), writeoffDays: writeoffDays(), siHandlers: siHandlerIds().join(','), siWarnDays: siWarnDays(),
     schemaMap: hasMap(),
     mode: isLive() ? (hasMap() && c.GOTENBERG ? 'LIVE' : 'LIVE (доска; печать только на сервере)') : 'MOCK',
   };
@@ -9939,6 +10011,8 @@ function saveSettings(body) {
   if (typeof body.otkUsers === 'string') next.OTK_USERS = body.otkUsers.split(/[,;\s]+/).map(Number).filter(Boolean).join(','); // K-187
   if (typeof body.writeoffHandlers === 'string') next.WRITEOFF_HANDLERS = body.writeoffHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(','); // K-197
   if (body.writeoffDays != null && body.writeoffDays !== '' && Number(body.writeoffDays) > 0) next.WRITEOFF_DAYS = String(Math.round(Number(body.writeoffDays)));
+  if (typeof body.siHandlers === 'string') next.SI_HANDLERS = body.siHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(','); // K-211
+  if (body.siWarnDays != null && body.siWarnDays !== '' && Number(body.siWarnDays) > 0) next.SI_WARN_DAYS = String(Math.round(Number(body.siWarnDays)));
   if (typeof body.purchaseHandlers === 'string') next.PURCHASE_HANDLERS = body.purchaseHandlers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   if (typeof body.retroApprovers === 'string') next.RETRO_APPROVERS = body.retroApprovers.split(/[,;\s]+/).map(Number).filter(Boolean).join(',');
   // пустое поле — «не менять» (как и у остальных настроек); '__clear__' — снять свой адрес
@@ -11143,6 +11217,19 @@ function code128Svg(text, h) {
 const BAR_TR = { 'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'E', 'Ж': 'ZH', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M', 'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U', 'Ф': 'F', 'Х': 'H', 'Ц': 'C', 'Ч': 'CH', 'Ш': 'SH', 'Щ': 'SCH', 'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'YU', 'Я': 'YA' };
 function asciiBar(s) {
   return String(s || '').toUpperCase().split('').map((ch) => (BAR_TR[ch] !== undefined ? BAR_TR[ch] : ch)).join('').replace(/[^\x20-\x7E]/g, '');
+}
+// K-210: QR как SVG (один <path> из модулей). Уровень коррекции M — этикетка живёт в цехе,
+// её затирают и пачкают. Возвращает '' , если библиотека не подключилась.
+function qrSvg(text, mm) {
+  if (!qrcodeLib) return '';
+  try {
+    const qr = qrcodeLib(0, 'M'); qr.addData(String(text || ''), 'Byte'); qr.make();
+    const n = qr.getModuleCount(); const q = 2; // тихая зона 2 модуля
+    let d = '';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + q} ${r + q}h1v1h-1z`;
+    const side = n + q * 2;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}" width="${mm || 10}mm" height="${mm || 10}mm" shape-rendering="crispEdges"><rect width="${side}" height="${side}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  } catch (e) { console.warn('[qr]', e.message); return ''; }
 }
 async function stationBadgesHtml(sectionCode, ids) {
   await stationEnsureEmployeeCols();
@@ -13213,9 +13300,13 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' });
       try { return sendJson(res, 200, await siEvent(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
+    if (p === '/api/si/remind' && req.method === 'POST') { // K-211: разослать напоминание ответственному вручную
+      const ses = sessionFromReq(req); if (!(ses && (ses.isAdmin || siHandlerIds().includes(Number(ses.userId))))) return sendJson(res, 403, { error: 'Только администратор или ответственный за поверку.' });
+      try { const st = siRemindState(); if (st.lastSent) { try { fs.unlinkSync(SI_STATE_FILE); } catch {} } return sendJson(res, 200, await siRemindEnsure()); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+    }
     if (p === '/api/si/labels' && req.method === 'GET') { // этикетки на приборы (30×15 мм — влезает на штангенциркуль)
       try {
-        const html = await siLabelsHtml(String(url.searchParams.get('ids') || '').split(',').filter(Boolean), url.searchParams.get('size') || '30x15');
+        const html = await siLabelsHtml(String(url.searchParams.get('ids') || '').split(',').filter(Boolean), url.searchParams.get('size') || '30x15', url.searchParams.get('code') || 'qr');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html);
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }

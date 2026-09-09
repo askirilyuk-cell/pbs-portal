@@ -10900,7 +10900,8 @@ async function stationSectionEmployees(sectionCode) {
   const [emps, secs] = await Promise.all([ncListSoft('employees'), ncListSoft('sections')]);
   const sec = secs.find((x) => String(x['Код'] || '').trim() === String(sectionCode || '').trim());
   const secId = sec ? (sec.Id ?? sec.id) : null;
-  const active = emps.filter((e) => e['Активен'] !== false && e['Активен'] !== 0);
+  const anyActive = emps.some((e) => e['Активен'] === true || e['Активен'] === 1); // флаг «Активен» учитываем, только если его вообще ведут
+  const active = anyActive ? emps.filter((e) => e['Активен'] === true || e['Активен'] === 1) : emps;
   const linked = (sec && Array.isArray(sec['Сотрудники участка']) ? sec['Сотрудники участка'].map((x) => x.Id ?? x.id) : []);
   const mine = active.filter((e) => (secId != null && Number(e.sections_id) === Number(secId)) || linked.includes(e.Id ?? e.id));
   return (mine.length ? mine : active).map((e) => ({ id: e.Id ?? e.id, fio: e['ФИО'] || '', role: e['Роль'] || '', badge: e['Код бейджа'] || '', hasPin: !!String(e['ПИН'] || '').trim(), own: mine.length > 0 }));
@@ -10908,7 +10909,8 @@ async function stationSectionEmployees(sectionCode) {
 async function stationEnsureEmployeeCols() { try { await ncEnsureColumn('employees', 'Код бейджа', 'SingleLineText'); await ncEnsureColumn('employees', 'ПИН', 'SingleLineText'); } catch (e) { console.warn('[station] колонки сотрудников:', e.message); } }
 async function stationSetOperator(sess, body) {
   await stationEnsureEmployeeCols();
-  const emps = (await ncListSoft('employees')).filter((e) => e['Активен'] !== false && e['Активен'] !== 0);
+  const all = await ncListSoft('employees'); const anyActive = all.some((e) => e['Активен'] === true || e['Активен'] === 1);
+  const emps = anyActive ? all.filter((e) => e['Активен'] === true || e['Активен'] === 1) : all;
   let emp = null;
   const badge = String(body.badge || '').trim().toUpperCase();
   if (badge) { emp = emps.find((e) => String(e['Код бейджа'] || '').trim().toUpperCase() === badge) || (badge.startsWith(BADGE_PREFIX) ? emps.find((e) => String(e.Id ?? e.id) === badge.slice(BADGE_PREFIX.length)) : null); if (!emp) { const err = new Error(`Бейдж ${badge} не найден среди активных сотрудников.`); err.status = 404; throw err; } }
@@ -11506,6 +11508,7 @@ const server = http.createServer(async (req, res) => {
     //  НИЧЕГО не блокирует — существующие /api/* работают как раньше (роль лишь информативна).
     req.session = sessionFromReq(req);
     if (req.session && req.session.isStation) { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) { persistSessions(); req.session.operator = null; } else if (raw && raw.operator && req.method !== 'GET') raw.operator.at = Date.now(); } // K-206
+    if (req.session && req.session.isStation && p.startsWith('/api/') && !['/api/me', '/api/board', '/api/station', '/api/task', '/api/metal/blank', '/api/metal/find-blank', '/api/onec', '/api/routes/catalog', '/api/design/kd'].some((pre) => p === pre || p.startsWith(pre + '/') || p.startsWith(pre + '?'))) return sendJson(res, 403, { error: 'Пост участка: доступ только к рабочему месту.' }); // K-206
     req.roles = sessionPortalRoles(req.session);           // мультироль: эффективный набор портальных ролей
     req.role = req.roles[0] || 'guest';                    // первичная (для сообщений/обратной совместимости)
     if (p === '/api/me') return handleMe(req, res);

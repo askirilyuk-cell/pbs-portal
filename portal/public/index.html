@@ -472,6 +472,10 @@
     .cut-btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
     .cut-t{width:100%;border-collapse:collapse;font-size:14px;} .cut-t th{text-align:left;color:var(--sl-500);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;border-bottom:1px solid #eef2f6;} .cut-t td{padding:7px 8px;border-bottom:1px solid #eef2f6;vertical-align:middle;} .cut-t tr:last-child td{border-bottom:0;}
     .cut-inp{border:1px solid var(--bd);border-radius:8px;padding:9px 10px;font:inherit;font-size:16px;background:#fff;color:#1b2a3a;width:110px;text-align:center;} .cut-inp.wide{width:100%;text-align:left;}
+    .cut-si{margin-top:10px;padding-top:10px;border-top:1px dashed var(--bd);} .cut-si .lab{font-size:12px;color:var(--sl-500);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;} .cut-si .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+    .si-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;border:1px solid var(--bd);background:#f6f8fa;font-size:13px;} .si-chip b{cursor:pointer;color:var(--sl-500);font-weight:700;} .si-chip.bad{background:#fdecec;border-color:#f0b4b4;} .si-chip.warn{background:#fdf1e3;border-color:#f0c9a0;} .si-chip .no{font-size:11px;color:#b91c1c;font-weight:600;}
+    .si-warn{margin-top:8px;padding:8px 10px;border-radius:8px;background:#fdf1e3;border:1px solid #f0c9a0;color:#7c4a03;font-size:13px;}
+    .si-pick{display:grid;gap:4px;max-height:46vh;overflow:auto;} .si-pick .it{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;cursor:pointer;background:#fff;text-align:left;} .si-pick .it.on{border-color:#1a7f4b;background:#eef7f1;} .si-pick .it small{color:var(--sl-500);}
     .cut-units{display:flex;gap:6px;flex-wrap:wrap;align-items:center;} .cut-units b{width:36px;height:36px;border-radius:7px;background:#eef2f6;border:1px solid var(--bd);display:inline-flex;align-items:center;justify-content:center;font-size:13px;} .cut-units b.d{background:#1a7f4b;border-color:#1a7f4b;color:#fff;} .cut-units b.w{background:#1d4ed8;border-color:#1d4ed8;color:#fff;} .cut-units b.x{background:#b91c1c;border-color:#b91c1c;color:#fff;} .cut-units b.q{background:#fdf1e3;border-color:#f0c9a0;color:#b45309;}
     .cut-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;} .cut-kv .k{color:var(--sl-500);}
     .cut-note{font-size:12px;color:var(--sl-500);line-height:1.45;}
@@ -10681,6 +10685,7 @@
           <span style="margin-left:auto"></span>
           <button class="tbtn primary" id="tl-move">↹ Операция</button>
           <button class="tbtn green" id="tl-new">+ Завести (мастер)</button>
+          ${tlSub==='si'?'<button class="tbtn" id="tl-si-lab">🖨 Этикетки СИ</button>':''}
           <button class="tbtn" id="tl-loc">Места хранения</button>
           <button class="tbtn" id="tl-act">Акт списания за месяц</button>
         </div>
@@ -10700,6 +10705,7 @@
       const rs=host.querySelector('#tl-reset'); if(rs)rs.onclick=()=>{tlCat='';tlFilter='all';tlPlace='';tlSel=null;tlItemsBody(host);};
       const mv=host.querySelector('#tl-move'); if(mv)mv.onclick=()=>{const it=(items.find(x=>x.code===tlSel&&tlSubOf(x)===tlSub))||items.find(x=>tlSubOf(x)===tlSub);openToolMove(it,'');};
       const nw=host.querySelector('#tl-new'); if(nw)nw.onclick=()=>{tlWizSub=(tlSub||'cut');tlWizStep=1;tlWizData={};tlTab='wizard';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='wizard'));tlBody();};
+      const siLab=host.querySelector('#tl-si-lab'); if(siLab)siLab.onclick=()=>tlSiLabels(subItems); // K-207
       const lc=host.querySelector('#tl-loc'); if(lc)lc.onclick=()=>{tlTab='loc';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));tlBody();};
       const ac=host.querySelector('#tl-act'); if(ac)ac.onclick=()=>{tlTab='act';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));tlBody();};
       // единый поиск: обновление результатов + дозагрузка каталога/кулачков для 3-го хранилища и KPI-плитки
@@ -10726,6 +10732,26 @@
     // K-42: отношение остаток/мин (дефицит наверху) + ячейка остатка с ▼ (дальтоники) + ячейка «Поверка до».
     function tlDefRatio(i){ if(Number(i.balance)<=0) return -1; const min=Number(i.minStock)||0; if(min<=0) return 1e9; return (Number(i.balance)||0)/min; }
     function tlBalCell(i){ const q=tlQty(i.balance,i.unit); if(Number(i.balance)<=0) return `<b class="c-red" style="font-weight:800">▼ ${q}</b>`; if(i.belowMin) return `<b class="c-amber" style="font-weight:800">▼ ${q}</b>`; return `<b style="color:var(--ink)">${q}</b>`; }
+    // K-207: печать этикеток на приборы. Формат по умолчанию 30×15 мм — влезает на штангенциркуль.
+    async function tlSiLabels(items){
+      const list=(items||[]).filter(i=>i.isSi);
+      const w=document.createElement('div'); w.className='ui-dlg';
+      const noCal=list.filter(i=>i.calState==='none').length;
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog"><div class="ui-dlg-h">Этикетки на приборы</div><div class="ui-dlg-t">
+        <div style="display:grid;gap:10px">
+          <label>Формат этикетки<br><select id="sl-size" class="rt-inp" style="width:100%"><option value="30x15">30 × 15 мм — малая (штангенциркуль, микрометр)</option><option value="50x20">50 × 20 мм — средняя</option><option value="58x30">58 × 30 мм — крупная (с наименованием и свидетельством)</option></select></label>
+          <label>Что печатать<br><select id="sl-what" class="rt-inp" style="width:100%"><option value="all">все приборы реестра (${list.length})</option><option value="cal">только с действующей поверкой (${list.filter(i=>i.calState==='ok'||i.calState==='soon').length})</option><option value="none">только без данных о поверке (${noCal})</option></select></label>
+          <div class="cut-note">На этикетке: инв. №, срок поверки (или «поверка не проведена»), штрихкод Code128 по инв. № — сканер на рабочем месте подставит прибор в «чем меряли».</div>
+        </div></div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn pri" data-d="ok">Печать</button></div></div>`;
+      document.body.appendChild(w);
+      const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
+      w.querySelector('[data-d="ok"]').onclick=()=>{
+        const size=w.querySelector('#sl-size').value, what=w.querySelector('#sl-what').value;
+        const sel=list.filter(i=>what==='all'||(what==='cal'?(i.calState==='ok'||i.calState==='soon'):i.calState==='none'));
+        close(); if(!sel.length){ toast('Нечего печатать.','warn'); return; }
+        window.open('/api/tools/si-labels?size='+encodeURIComponent(size)+'&ids='+encodeURIComponent(sel.map(i=>i.id).join(',')),'_blank');
+      };
+    }
     function tlCalCell(i){ if(!i.calNext) return '<span class="c-gray">—</span>'; const c=i.calOverdue?'c-red':(i.calSoon?'c-amber':'c-gray'); return `<span class="${c}"${i.calOverdue?' style="font-weight:700"':''}>${fmt(i.calNext)}</span>`; }
     // K-55: «Где» — склад·ячейка (нейтр.) / цех·участок (жёлтый chip)
     function tlWhereCell(i){ const w=i.where||'—'; if(w==='—') return '<span class="c-gray">—</span>'; return i.whereKind==='shop'?tlChip(w,'warn'):`<span title="${esc(w)}">${esc(w)}</span>`; }
@@ -10809,9 +10835,12 @@
         ${kv('Инв. №',esc(it.invNo),'font-weight:600;color:var(--navy)')}
         ${code1cKv}
         ${kv('Диапазон / класс точности',esc(it.accuracyRange))}
+        ${kv('Режим',esc(it.calMode||'Поверка'))}
+        ${kv('Межповерочный интервал',it.calInterval?esc(String(it.calInterval))+' мес':'—')}
         ${kv('Дата поверки',it.calDate?fmt(it.calDate):'—')}
         ${kv('След. поверка',it.calNext?fmt(it.calNext):'—',it.calOverdue?'color:var(--red);font-weight:700':(it.calSoon?'color:#b45309;font-weight:600':''))}
-        ${kv('№ свидетельства',esc(it.calCert))}
+        ${kv('№ свидетельства',esc(it.calCert)||(it.calMode==='Индикаторный'?'не требуется':'<span style="color:#b45309;font-weight:600">данных о поверке нет</span>'))}
+        ${kv('Ответственный',esc(it.responsible))}
         ${whereKv}
         ${kv('Статус',tlStatusChip(it.status)||esc(it.status))}`; }
       else { details=`
@@ -11014,8 +11043,11 @@
             <div style="grid-column:span 4">${FLAB('Инв. №'+(edit?'':' (авто СИ-NNN)'))}<input id="te-inv" style="${FINP}" value="${esc(it.invNo||'')}" ${edit?'':'placeholder="авто"'}></div>
             <div style="grid-column:span 4">${FLAB('Диапазон / класс точности')}<input id="te-acc" style="${FINP}" value="${esc(it.accuracyRange||'')}" placeholder="0–150 мм / 0.05"></div>
             <div style="grid-column:span 4">${FLAB('Ед. изм.')}<input id="te-unit" style="${FINP}" value="${esc(it.unit||'шт')}"></div>
+            <div style="grid-column:span 4">${FLAB('Режим')}<select id="te-calmode" style="${FINP}">${opt(['Поверка','Калибровка','Индикаторный'],it.calMode||'Поверка')}</select></div>
+            <div style="grid-column:span 4">${FLAB('Межповерочный интервал, мес')}<input id="te-cali" type="number" min="0" step="1" style="${FINP}" value="${esc(it.calInterval||'')}" placeholder="12"></div>
+            <div style="grid-column:span 4">${FLAB('Ответственный')}<input id="te-resp" style="${FINP}" value="${esc(it.responsible||'')}" placeholder="за кем закреплён"></div>
             <div style="grid-column:span 4">${FLAB('Дата поверки')}<input id="te-cal" type="date" style="${FINP}" value="${esc(it.calDate||'')}"></div>
-            <div style="grid-column:span 4">${FLAB('След. поверка')}<input id="te-calnext" type="date" style="${FINP}" value="${esc(it.calNext||'')}"></div>
+            <div style="grid-column:span 4">${FLAB('След. поверка (можно оставить пустой)')}<input id="te-calnext" type="date" style="${FINP}" value="${esc(it.calNext||'')}"></div>
             <div style="grid-column:span 4">${FLAB('№ свидетельства')}<input id="te-cert" style="${FINP}" value="${esc(it.calCert||'')}" placeholder="СП-…"></div>
             <div style="grid-column:span 4">${FLAB('Код 1С (для списания)')}<input id="te-code1c" style="${FINP}" value="${esc(it.code1c||'')}" placeholder="БП-000NNNN"></div>
             <div style="grid-column:span 4">${FLAB('Местоположение')}<input id="te-loc" style="${FINP}" value="${esc(it.location||'')}" placeholder="Кладовая СИ"></div>
@@ -11058,7 +11090,9 @@
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
         const body={ name:V('te-name'), note:V('te-note'), code1c:V('te-code1c') };
         if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('te-rigkind'); body.category=V('te-cat'); body.invNo=V('te-inv'); body.invoiceNo=V('te-invoice'); body.location=V('te-loc'); body.status=V('te-status'); body.sectionCode=V('te-sec')||''; }
-        else if(sub==='si'){ body.type='Расходный'; body.category='Мерительный/СИ'; body.invNo=V('te-inv'); body.accuracyRange=V('te-acc'); body.unit=V('te-unit'); body.calDate=V('te-cal'); body.calNext=V('te-calnext'); body.calCert=V('te-cert'); body.location=V('te-loc'); body.status=V('te-status'); }
+        else if(sub==='si'){ body.type='Расходный'; body.category='Мерительный/СИ'; body.invNo=V('te-inv'); body.accuracyRange=V('te-acc'); body.unit=V('te-unit'); body.calDate=V('te-cal'); body.calNext=V('te-calnext'); body.calCert=V('te-cert'); body.location=V('te-loc'); body.status=V('te-status');
+          body.calMode=V('te-calmode'); body.calInterval=V('te-cali'); body.responsible=V('te-resp'); // K-207
+          if(!body.calNext&&body.calDate&&Number(body.calInterval)>0){ const d=new Date(body.calDate+'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth()+Number(body.calInterval)); body.calNext=d.toISOString().slice(0,10); } }
         else { body.type=V('te-type'); body.category=V('te-cat'); body.subcategory=V('te-subcat'); body.unit=V('te-unit'); body.cell=V('te-cell'); body.minStock=V('te-min'); if(!edit&&V('te-bal'))body.balance=Number(V('te-bal')); const se=document.getElementById('te-sec'); if(se)body.sectionCode=se.value||''; }
         if(edit)body.id=it.id;
         if(!body.name){ err.textContent='Укажите наименование.'; toast('Укажите наименование.','err'); return; }
@@ -12074,7 +12108,8 @@
       const meName=stationOpName()||(ME&&ME.name)||(ME&&ME.fio)||'';
       const jByU=new Map((t.journal||[]).map(j=>[Number(j.unit),j]));
       const units=Array.from({length:qty},(_,i)=>{ const j=jByU.get(i+1)||{}; return {id:j.id,unit:i+1,executor:j.executor||'',blankNo:j.blankNo||'',self:j.self||'',otk:j.otk||'',date:j.date||'',note:j.note||'',measured:j.measured===''||j.measured==null?'':Number(j.measured),matCode:j.matCode||''}; });
-      const st={status:t.status,startedAt:t.startedAt||'',mat:null,matList:[],matConfirmed:false,barLen:null,remMode:'do',blankInfo:null,otkCalled:false,busy:false};
+      const st={status:t.status,startedAt:t.startedAt||'',mat:null,matList:[],matConfirmed:false,barLen:null,remMode:'do',blankInfo:null,otkCalled:false,busy:false,
+        si:cutSiParse((t.journal||[]).map(j=>j.si).find(Boolean)||''),siList:[]}; // K-207: чем меряли
       const blankName=String(t.blankText||t.materials||'').replace(/^Заготовка:\s*/i,'').split(' · норма')[0].trim();
       const eq=(t.equipList||[])[0]; const eqTxt=eq?[eq.name||eq.model,eq.invNo].filter(Boolean).join(' · '):(t.equip||'станок не указан');
       const inTol=(v)=>{ if(v===''||v==null)return null; if(lo==null||hi==null)return true; return v>=lo-1e-9&&v<=hi+1e-9; };
@@ -12118,6 +12153,7 @@
                 <div class="cut-units">${tiles}<span class="cut-note" style="margin-left:6px">принято ${acc} из ${qty}${reqOtk&&units.some(u=>unitState(u)==='q')?' · ждёт ОТК '+units.filter(u=>unitState(u)==='q').length:''}</span></div>
                 <div class="tbl-wrap"><table class="cut-t"><thead><tr><th>№</th><th>Измерено, мм</th><th>${lo!=null&&hi!=null?'допуск '+esc(String(lo))+'–'+esc(String(hi)):'результат'}</th>${reqOtk?'<th>ОТК</th>':''}<th>Маркировка</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
                 <div class="cut-btns">${reqOtk?`<button class="cut-btn" id="cut-otk" ${units.some(u=>unitState(u)==='q')?'':'disabled'}>${st.otkCalled?'Контролёр вызван ✓':'Вызвать контролёра'}</button>`:''}<button class="cut-btn ghost" id="cut-tech">Сообщить технологу</button></div>
+                <div class="cut-si">${cutSiBlock(st)}</div>
                 <div class="cut-note">Длина вне допуска не принимается как «годен»: «Брак» уходит в журнал как брак (материал списывается вместе с годными). ${reqOtk?'Контролёр ставит отметку в колонке «ОТК» на этом экране.':'Без подтверждённой карточки металла кнопка «Годна» неактивна.'}</div>
               </div></div>
             </div>
@@ -12152,7 +12188,7 @@
         wire();
       };
       const setMsg=(txt,err)=>{ const m=document.getElementById('cut-msg'); if(m){ m.style.color=err?'var(--red)':'var(--sl-500)'; m.textContent=txt; } };
-      const saveJournal=async()=>{ const rows=units.map(u=>({id:u.id,unit:u.unit,executor:u.executor,blankNo:u.blankNo,self:u.self,otk:u.otk,date:u.date,note:u.note,measured:u.measured,matCode:u.matCode}));
+      const saveJournal=async()=>{ const si=st.si.join(', '); const rows=units.map(u=>({id:u.id,unit:u.unit,executor:u.executor,blankNo:u.blankNo,self:u.self,otk:u.otk,date:u.date,note:u.note,measured:u.measured,matCode:u.matCode,si}));
         await postJson('/api/task/journal',{taskNum:t.num,rows}); const fresh=await cutFetchBoardTask(t.id); if(fresh){ (fresh.journal||[]).forEach(j=>{ const u=units[Number(j.unit)-1]; if(u)u.id=j.id; }); } };
       const saveTask=async(body)=>postJson('/api/task/update',Object.assign({id:t.id},body));
       const readInputs=()=>{ units.forEach(u=>{ const i=host.querySelector(`[data-meas="${u.unit}"]`); if(i&&!i.disabled){ const v=cutNum(i.value); u.measured=v==null?'':v; } const o=host.querySelector(`[data-otk="${u.unit}"]`); if(o)u.otk=o.value; }); const bl=host.querySelector('#cut-barlen'); if(bl){ const v=cutNum(bl.value); st.barLen=v==null?null:v; } const rm=host.querySelector('input[name="cut-rem"]:checked'); if(rm)st.remMode=rm.value; };
@@ -12162,9 +12198,13 @@
         host.querySelector('#cut-classic').onclick=(e)=>{ e.preventDefault(); cutClassic=true; renderStationTask(host,t.id); cutClassic=false; };
         const ob=host.querySelector('#cut-op'); if(ob)ob.onclick=()=>stationOperatorDialog(()=>renderStationTask(host,t.id));
         const scan=host.querySelector('#cut-scan'); if(scan){ scan.onkeydown=async(e)=>{ if(e.key!=='Enter')return; e.preventDefault(); const code=scan.value.trim().toUpperCase(); if(!code)return; if(code.startsWith('СОТР-')){ try{ await stationSetOperator({badge:code}); renderStationTask(host,t.id); }catch(err){ toast(err.message,'err'); scan.select(); } return; } // K-206: бейдж сотрудника — смена оператора
-          if(noOp){ toast('Сначала представьтесь: отсканируйте свой бейдж.','err'); return; } const m=st.matList.find(x=>String(x.code||'').toUpperCase()===code)||st.matList.find(x=>code.includes(String(x.code||'').toUpperCase())); if(!m){ toast('Карточка '+code+' не найдена среди карточек склада металла.','err'); scan.select(); return; } readInputs(); pickMat(m,true); toast('Материал подтверждён: '+m.code,'ok'); paint(); }; }
+          if(noOp){ toast('Сначала представьтесь: отсканируйте свой бейдж.','err'); return; }
+          if(/^(СИ|SI)-/.test(code)){ const it=cutSiFind(st,code); if(!it){ toast('Прибор '+code+' не найден в реестре СИ.','err'); scan.select(); return; } readInputs(); if(!st.si.includes(it.invNo))st.si.push(it.invNo); scan.value=''; if(it.calState==='none'||it.calState==='overdue')toast(cutSiWarn(it),'warn'); else toast('Прибор: '+it.invNo+' · '+(it.kind||it.name),'ok'); paint(); return; } // K-207
+          const m=st.matList.find(x=>String(x.code||'').toUpperCase()===code)||st.matList.find(x=>code.includes(String(x.code||'').toUpperCase())); if(!m){ toast('Карточка '+code+' не найдена среди карточек склада металла.','err'); scan.select(); return; } readInputs(); pickMat(m,true); toast('Материал подтверждён: '+m.code,'ok'); paint(); }; }
         const ms=host.querySelector('#cut-matsel'); if(ms)ms.onchange=()=>{ const [k,id]=ms.value.split(':'); const m=st.matList.find(x=>x.kind===k&&String(x.id)===String(id)); readInputs(); pickMat(m||null,false); paint(); };
         const cf=host.querySelector('#cut-confirm'); if(cf)cf.onclick=()=>{ readInputs(); st.matConfirmed=true; paint(); };
+        const sib=host.querySelector('#cut-si-add'); if(sib)sib.onclick=()=>{ readInputs(); cutSiDialog(st,()=>paint()); }; // K-207
+        host.querySelectorAll('[data-si-del]').forEach(b0=>b0.onclick=()=>{ readInputs(); st.si=st.si.filter(x=>x!==b0.dataset.siDel); paint(); });
         host.querySelectorAll('[data-meas]').forEach(i=>i.addEventListener('change',()=>{ readInputs(); paint(); }));
         host.querySelectorAll('[data-otk]').forEach(o=>o.addEventListener('change',async()=>{ readInputs(); const u=units[Number(o.dataset.otk)-1]; if(u&&u.otk){ u.note=(u.note?u.note+'; ':'')+'ОТК '+u.otk+' '+(meName||'')+' '+new Date().toLocaleString('ru-RU'); } paint(); try{ await saveJournal(); }catch(e){ setMsg('Ошибка: '+e.message,true); } }));
         host.querySelectorAll('input[name="cut-rem"]').forEach(r=>r.addEventListener('change',()=>{ readInputs(); paint(); }));
@@ -12207,6 +12247,8 @@
           const list=[...(d.candidates||[]),...(d.remnants||[])]; st.matList=list;
           const prev=units.map(u=>u.matCode).find(Boolean); const chosen=(prev&&list.find(x=>x.code===prev))||list.find(x=>x.tag==='chosen')||list.find(x=>x.tag==='recommended')||null;
           readInputs(); pickMat(chosen,!!prev&&!!chosen&&chosen.code===prev); paint(); const sc=host.querySelector('#cut-scan'); if(sc&&!st.matConfirmed)sc.focus(); }catch{} })();
+      // K-207: реестр СИ (наборный список «чем меряли»)
+      (async()=>{ try{ const d=await (await fetch('/api/task/si-list')).json(); if(d&&d.items){ st.siList=d.items; paint(); } }catch{} })();
       // таймер в шапке
       const tm=setInterval(()=>{ if(!document.body.contains(host)||!host.querySelector('#cut-stpill')){ clearInterval(tm); return; } if(st.status==='В работе'&&st.startedAt){ const p=host.querySelector('#cut-stpill .cut-pill'); if(p)p.textContent='в работе · '+cutElapsed(st.startedAt); } },30000);
     }
@@ -14776,6 +14818,39 @@
     const RT_CUT_TYPES=new Set(['ОП-ЗАГ','ОП-МПЛ','ОП-УШМ','ОП-ПЛ']);
     // K-187: технолог задаёт размер по чертежу и припуск, оператор видит итоговую длину реза L = размер + припуск (припуск — внутри L, штриховкой)
     function cutNum(v){ const n=parseFloat(String(v??'').replace(',','.').replace(/[^\d.\-]/g,'')); return Number.isFinite(n)?n:null; }
+    // ── K-207: средства измерения на рабочем месте ─────────────────────────────
+    // Оператор отмечает, чем мерил: для прослеживаемости (на отрезке некритично, на
+    // последующих операциях критично). Поверок в ПБС не было ни разу, поэтому у приборов
+    // пока нет данных — экран об этом предупреждает, но работать не мешает.
+    function cutSiParse(v){ return String(v||'').split(/[,;]+/).map(x=>x.trim()).filter(Boolean); }
+    function cutSiFind(st,code){ const c=String(code||'').trim().toUpperCase(); return (st.siList||[]).find(x=>String(x.invNo||'').toUpperCase()===c)||(st.siList||[]).find(x=>String(x.bar||'').toUpperCase()===c)||null; }
+    function cutSiState(st,inv){ return cutSiFind(st,inv)||{invNo:inv,name:'',kind:'',calState:'none'}; }
+    function cutSiWarn(it){ return it.calState==='overdue'?`${it.invNo}: поверка просрочена (${it.calNext?fmt(it.calNext):'—'}) — измерять можно, но отметьте это технологу.`:`${it.invNo}: нет данных о поверке — прибор в реестре, но свидетельство не заведено.`; }
+    function cutSiBlock(st){
+      const items=(st.si||[]).map(inv=>cutSiState(st,inv));
+      const chips=items.map(it=>{ const cls=it.calState==='overdue'?'bad':(it.calState==='none'?'warn':''); const sub=it.calState==='indicative'?'индикаторный':(it.calState==='none'?'нет поверки':(it.calState==='overdue'?'просрочен':(it.calNext?'до '+fmt(it.calNext):''))); 
+        return `<span class="si-chip ${cls}"><span>${esc(it.invNo)}${it.kind||it.name?' · '+esc(String(it.kind||it.name).toLowerCase()):''}${sub?` <span class="${it.calState==='none'||it.calState==='overdue'?'no':'cut-note'}">${esc(sub)}</span>`:''}</span><b data-si-del="${esc(it.invNo)}" title="убрать">×</b></span>`; }).join('');
+      const bad=items.filter(it=>it.calState==='none'||it.calState==='overdue');
+      return `<div class="lab">Чем меряли</div><div class="chips">${chips||'<span class="cut-note">приборы не отмечены</span>'}<button class="cut-btn sm ghost" id="cut-si-add">+ Прибор</button></div>`
+        +(bad.length?`<div class="si-warn"><b>Внимание:</b> ${bad.map(it=>esc(cutSiWarn(it))).join(' ')}</div>`:'');
+    }
+    function cutSiDialog(st,done){
+      const w=document.createElement('div'); w.className='ui-dlg';
+      const paint=(q)=>{ const s0=String(q||'').trim().toLowerCase();
+        const list=(st.siList||[]).filter(x=>!s0||[x.invNo,x.name,x.kind,x.code1c].some(v=>String(v||'').toLowerCase().includes(s0)));
+        const rows=list.map(x=>{ const on=st.si.includes(x.invNo); const tag=x.calState==='indicative'?'<span class="cut-pill gray">индикаторный</span>':(x.calState==='none'?'<span class="cut-pill warn">нет поверки</span>':(x.calState==='overdue'?'<span class="cut-pill bad">просрочен</span>':(x.calState==='soon'?'<span class="cut-pill warn">скоро поверка</span>':'<span class="cut-pill ok">годен до '+fmt(x.calNext)+'</span>')));
+          return `<button type="button" class="it ${on?'on':''}" data-inv="${esc(x.invNo)}"><span><b>${esc(x.invNo)}</b> · ${esc(x.name)}<br><small>${esc([x.kind,x.range,x.where].filter(Boolean).join(' · '))}</small></span>${tag}</button>`; }).join('');
+        w.querySelector('#si-list').innerHTML=rows||'<div class="cut-note">Ничего не найдено. Приборы заводятся в разделе «Инструмент и оснастка» → СИ.</div>';
+        w.querySelectorAll('#si-list .it').forEach(b=>b.onclick=()=>{ const inv=b.dataset.inv; if(st.si.includes(inv))st.si=st.si.filter(x=>x!==inv); else st.si.push(inv); paint(w.querySelector('#si-q').value); });
+      };
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:640px"><div class="ui-dlg-h">Чем меряли</div><div class="ui-dlg-t"><input class="cut-inp wide" id="si-q" placeholder="▣ Отсканируйте этикетку прибора или найдите по номеру / названию" autocomplete="off"><div class="si-pick" id="si-list" style="margin-top:8px"></div></div><div class="ui-dlg-b"><button class="ui-btn pri" data-d="ok">Готово</button></div></div>`;
+      document.body.appendChild(w); paint('');
+      const q=w.querySelector('#si-q'); q.focus();
+      q.oninput=()=>paint(q.value);
+      q.onkeydown=(e)=>{ if(e.key!=='Enter')return; e.preventDefault(); const it=cutSiFind(st,q.value.trim()); if(it){ if(!st.si.includes(it.invNo))st.si.push(it.invNo); q.value=''; } paint(q.value); };
+      const close=()=>{ w.remove(); if(done)done(); };
+      w.querySelector('[data-d="ok"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
+    }
     function cutParseTol(t){ const s=String(t||'').trim().replace(',','.'); if(!s)return null; let m=/^±\s*([\d.]+)$/.exec(s)||/^\+\/-\s*([\d.]+)$/.exec(s)||/^\+-\s*([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[1]),hi:Number(m[1]),text:'±'+m[1]};
       m=/^\+\s*([\d.]+)\s*[\/ ]\s*-\s*([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[2]),hi:Number(m[1]),text:'+'+m[1]+'/−'+m[2]};
       m=/^-\s*([\d.]+)\s*[\/ ]\s*\+\s*([\d.]+)$/.exec(s); if(m)return {lo:-Number(m[1]),hi:Number(m[2]),text:'+'+m[2]+'/−'+m[1]};

@@ -6368,7 +6368,7 @@ async function buildBoardLive() {
       .map((j) => ({ id: idOf(j), unit: j['№ единицы'] ?? '', executor: j['Исполнитель'] || '',
         blankNo: j['№ заготовки / приёмки'] || '', self: j['Самоконтроль'] || '', otk: j['Контроль ОТК'] || '',
         date: j['Дата'] || '', note: j['Примечание'] || '',
-        measured: j['Измерено'] ?? '', matCode: j['Карточка металла'] || '' })) // K-187
+        measured: j['Измерено'] ?? '', matCode: j['Карточка металла'] || '', si: j['СИ'] || '' })) // K-187 / K-207
       .sort((a, b) => (Number(a.unit) || 0) - (Number(b.unit) || 0));
     // параметры: значения задачи (если есть), иначе набор из типа операции (без значения)
     //  норматив/допуск — план (read-only для рабочего), факт — то, что забил рабочий.
@@ -8454,8 +8454,18 @@ function toolShape(it) {
   const special = type === 'Специальный';
   // подраздел: si · оснастка (rig) · режущий (cut)
   const rig = special; // спец. инструмент = пресс-формы/оснастка (инвентарный)
-  const calOverdue = !!calNext && calNext < today;
-  const calSoon = !!calNext && !calOverdue && calNext <= soonIso;
+  // K-207: межповерочный интервал (мес) + режим (Поверка / Калибровка / Индикаторный) + ответственный.
+  // «След. поверка» может быть не заполнена — считаем её из даты поверки и интервала.
+  const calInterval = whNum(it['Межповерочный интервал (мес)']);
+  const calMode = String(it['Режим поверки'] || '').trim() || 'Поверка';
+  const responsible = String(it['Ответственный'] || '').trim();
+  let calNextEff = calNext;
+  if (!calNextEff && calDate && calInterval > 0) { const d = new Date(calDate + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + calInterval); calNextEff = d.toISOString().slice(0, 10); }
+  const calOverdue = calMode !== 'Индикаторный' && !!calNextEff && calNextEff < today;
+  const calSoon = calMode !== 'Индикаторный' && !!calNextEff && !calOverdue && calNextEff <= soonIso;
+  // состояние прибора для рабочего места: индикаторный / нет данных / просрочен / скоро / годен
+  const calState = !isSi ? '' : (calMode === 'Индикаторный' ? 'indicative'
+    : (!calDate && !calNextEff ? 'none' : (calOverdue ? 'overdue' : (calSoon ? 'soon' : 'ok'))));
   // 3-уровневая подсветка остатка (режущий): ≤0 красный, ≤мин жёлтый, иначе зелёный
   const stockLevel = balance <= 0 ? 'empty' : (min > 0 && balance <= min ? 'low' : 'ok');
   const w = toolWhere(it); // K-55: локация (склад·ячейка / цех·участок)
@@ -8468,7 +8478,8 @@ function toolShape(it) {
     invNo: it['Инв. №'] || '', accuracyRange: it['Диапазон / класс точности'] || '', status,
     invoiceNo: it['№ СФ'] || '', location: it['Местоположение'] || '', registeredAt: it['Дата регистрации'] || '', rigKind,
     sectionCode: it['Участок (код)'] || '', // K-172: участок приписки оснастки (фильтр в конструкторе МК)
-    calDate, calNext, calCert: it['№ свидетельства о поверке'] || '', calOverdue, calSoon,
+    calDate, calNext: calNextEff, calCert: it['№ свидетельства о поверке'] || '', calOverdue, calSoon,
+    calInterval, calMode, responsible, calState, // K-207
     // K-55: справочный код 1С (БП-000NNNN) — идёт в акт списания / выдачу для бухгалтерии
     code1c: it['Код 1С'] || '',
     // K-55: локация «где лежит / кому передан»
@@ -8538,6 +8549,7 @@ const TOOL_WRITE = {
   'Ячейка': 'cell', 'Примечание': 'note', 'Инв. №': 'invNo', 'Диапазон / класс точности': 'accuracyRange',
   '№ СФ': 'invoiceNo', 'Местоположение': 'location', '№ свидетельства о поверке': 'calCert',
   'Код 1С': 'code1c', // K-55: справочный код 1С (БП-000NNNN)
+  'Ответственный': 'responsible', // K-207: за кем закреплён прибор
   'Участок (код)': 'sectionCode', // K-172
 };
 const TOOL_STATUSES = ['Годен', 'Просрочен', 'В эксплуатации', 'На станке', 'Списан'];
@@ -8550,10 +8562,67 @@ function toolBuildPatch(body) {
   if (TOOL_STATUSES.includes(body.status)) patch['Статус'] = body.status;
   if (TOOL_RIG_KINDS.includes(body.rigKind)) patch['Вид оснастки'] = body.rigKind;
   if (body.minStock != null && body.minStock !== '') patch['Мин. остаток'] = Number(body.minStock);
+  if (SI_CAL_MODES.includes(body.calMode)) patch['Режим поверки'] = body.calMode; // K-207
+  if (body.calInterval != null && body.calInterval !== '') patch['Межповерочный интервал (мес)'] = Number(body.calInterval);
   if (body.calDate) patch['Дата поверки'] = String(body.calDate).slice(0, 10);
   if (body.calNext) patch['След. поверка'] = String(body.calNext).slice(0, 10);
   if (body.registeredAt) patch['Дата регистрации'] = String(body.registeredAt).slice(0, 10);
   return patch;
+}
+//  K-207: СРЕДСТВА ИЗМЕРЕНИЯ (СИ) — реестр поверки и этикетка на прибор.
+//  Реестр — та же таблица «Инструмент и оснастка», категория «Мерительный/СИ» (второго
+//  реестра не заводим). Поверок в ПБС не делалось ни разу — приборы только закупали,
+//  поэтому «нет данных о поверке» на старте норма, а рабочее место на такой прибор
+//  ругается (предупреждение, не блокировка). Индикаторные (рулетки, линейки, шаблон
+//  сварщика) поверке не подлежат, но в реестре и с этикеткой — все приборы.
+const SI_CAL_MODES = ['Поверка', 'Калибровка', 'Индикаторный'];
+let siColsReady = false;
+async function siEnsureCols() {
+  if (siColsReady) return;
+  try {
+    await ncEnsureColumn('tools', 'Межповерочный интервал (мес)', 'Number');
+    await ncEnsureColumn('tools', 'Ответственный', 'SingleLineText');
+    await ncEnsureColumn('tools', 'Режим поверки', 'SingleLineText');
+    siColsReady = true;
+  } catch (e) { console.warn('K-207: колонки СИ недоступны:', e.message); }
+}
+// наборный список приборов для рабочего места (чем оператор мерил)
+async function siList() {
+  await siEnsureCols();
+  const items = (await ncListSoft('tools')).map(toolShape).filter((t) => t.isSi);
+  items.sort((a, b) => String(a.invNo || 'яя').localeCompare(String(b.invNo || 'яя'), 'ru'));
+  return items.map((t) => ({
+    id: t.id, invNo: t.invNo, bar: asciiBar(t.invNo), name: t.name, kind: t.subcategory,
+    range: t.accuracyRange, calMode: t.calMode, calDate: t.calDate, calNext: t.calNext,
+    calCert: t.calCert, calState: t.calState, responsible: t.responsible, where: t.where, code1c: t.code1c,
+  }));
+}
+const SI_LABEL_SIZES = { '30x15': { w: 30, h: 15 }, '50x20': { w: 50, h: 20 }, '58x30': { w: 58, h: 30 } };
+// печатная страница этикеток. Малый формат 30×15 мм — чтобы влезла на штангенциркуль.
+async function siLabelsHtml(ids, size) {
+  const sz = SI_LABEL_SIZES[size] || SI_LABEL_SIZES['30x15'];
+  let list = await siList();
+  const want = (ids || []).map(String).filter(Boolean);
+  if (want.length) list = list.filter((t) => want.includes(String(t.id)) || want.includes(String(t.invNo)));
+  const rus = (d) => (d ? String(d).slice(0, 10).split('-').reverse().slice(0, 2).join('.') : '');
+  const small = sz.w <= 35;
+  const cards = list.map((t) => {
+    const due = t.calMode === 'Индикаторный' ? 'без поверки' : (t.calNext ? 'до ' + rus(t.calNext) : 'поверка не проведена');
+    const bad = t.calState === 'overdue' || t.calState === 'none';
+    const line2 = small ? String(t.kind || t.name).slice(0, 26) : [t.name, t.range].filter(Boolean).join(' · ').slice(0, 60);
+    return `<div class="lb"><div class="top"><b>${hesc(t.invNo || '—')}</b><span class="${bad ? 'bad' : ''}">${hesc(due)}</span></div>`
+      + `<div class="bc">${code128Svg(asciiBar(t.invNo || ''), 30)}</div>`
+      + `<div class="c">${hesc(line2)}</div>${small ? '' : `<div class="c">${hesc(t.calCert ? 'свид. ' + t.calCert : 'свидетельства нет')} · ООО «Петробалт Сервис»</div>`}</div>`;
+  }).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Этикетки СИ ${sz.w}×${sz.h} мм</title><style>`
+    + `@page{size:${sz.w}mm ${sz.h}mm;margin:0}body{margin:0;font-family:system-ui,Arial,sans-serif}`
+    + `.lb{width:${sz.w}mm;height:${sz.h}mm;box-sizing:border-box;padding:${small ? '.8mm 1mm' : '1.5mm 2mm'};page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}`
+    + `.top{display:flex;justify-content:space-between;align-items:baseline;gap:1mm}.top b{font-size:${small ? '8pt' : '12pt'};font-weight:800;letter-spacing:.2px}`
+    + `.top span{font-size:${small ? '5.5pt' : '8pt'};white-space:nowrap}.top .bad{color:#b91c1c;font-weight:700}`
+    + `.bc{line-height:0}.bc svg{width:${sz.w - (small ? 2 : 4)}mm;height:${small ? 4 : 7}mm}`
+    + `.c{font-size:${small ? '5pt' : '7pt'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`
+    + `@media screen{body{background:#eee;padding:10px}.lb{background:#fff;margin:0 0 6px;border:.2mm dashed #999}}`
+    + `</style></head><body>${cards || '<p>Приборы не найдены.</p>'}<scr` + `ipt>setTimeout(function(){window.print()},300)</scr` + `ipt></body></html>`;
 }
 // POST /api/tools/save — создать/обновить инструмент (автонумер ИН-NNNN при создании)
 async function toolSave(body) {
@@ -10914,7 +10983,8 @@ async function stationSetOperator(sess, body) {
   const emps = anyActive ? all.filter((e) => e['Активен'] === true || e['Активен'] === 1) : all;
   let emp = null;
   const badge = String(body.badge || '').trim().toUpperCase();
-  if (badge) { emp = emps.find((e) => String(e['Код бейджа'] || '').trim().toUpperCase() === badge) || (badge.startsWith(BADGE_PREFIX) ? emps.find((e) => String(e.Id ?? e.id) === badge.slice(BADGE_PREFIX.length)) : null); if (!emp) { const err = new Error(`Бейдж ${badge} не найден среди активных сотрудников.`); err.status = 404; throw err; } }
+  if (badge) { const bar = asciiBar(badge); emp = emps.find((e) => String(e['Код бейджа'] || '').trim().toUpperCase() === badge) || emps.find((e) => asciiBar(e['Код бейджа']) === bar) // K-207: сканер отдаёт SOTR-9
+    || (badge.startsWith(BADGE_PREFIX) ? emps.find((e) => String(e.Id ?? e.id) === badge.slice(BADGE_PREFIX.length)) : null) || (/^SOTR-(\d+)$/.test(bar) ? emps.find((e) => String(e.Id ?? e.id) === /^SOTR-(\d+)$/.exec(bar)[1]) : null); if (!emp) { const err = new Error(`Бейдж ${badge} не найден среди активных сотрудников.`); err.status = 404; throw err; } }
   else {
     emp = emps.find((e) => String(e.Id ?? e.id) === String(body.employeeId)); if (!emp) { const err = new Error('Сотрудник не найден.'); err.status = 404; throw err; }
     const pin = String(emp['ПИН'] || '').trim(); if (pin && pin !== String(body.pin || '').trim()) { const err = new Error('Неверный ПИН.'); err.status = 403; throw err; }
@@ -10934,6 +11004,13 @@ function code128Svg(text, h) {
   for (const v of vals) { const w = C128[v]; for (let i = 0; i < w.length; i++) { const n = Number(w[i]); if (i % 2 === 0) rects.push(`<rect x="${x}" y="0" width="${n}" height="${h || 40}"/>`); x += n; } }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} ${h || 40}" width="${x * 2}" height="${(h || 40) * 2}" shape-rendering="crispEdges" preserveAspectRatio="none">${rects.join('')}</svg>`;
 }
+// K-207: Code128 кодирует только ASCII (кириллица давала пустые полосы) — для штрихкода
+// код транслитерируем: «СОТР-9» → SOTR-9, «СИ-041» → SI-041. Человекочитаемый код на бирке
+// остаётся кириллическим, сканер отдаёт латиницу — сверка идёт по обоим написаниям.
+const BAR_TR = { 'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'E', 'Ж': 'ZH', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M', 'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U', 'Ф': 'F', 'Х': 'H', 'Ц': 'C', 'Ч': 'CH', 'Ш': 'SH', 'Щ': 'SCH', 'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'YU', 'Я': 'YA' };
+function asciiBar(s) {
+  return String(s || '').toUpperCase().split('').map((ch) => (BAR_TR[ch] !== undefined ? BAR_TR[ch] : ch)).join('').replace(/[^\x20-\x7E]/g, '');
+}
 async function stationBadgesHtml(sectionCode, ids) {
   await stationEnsureEmployeeCols();
   let list = await stationSectionEmployees(sectionCode);
@@ -10941,7 +11018,7 @@ async function stationBadgesHtml(sectionCode, ids) {
   const upd = [];
   for (const e of list) { if (!e.badge) { e.badge = BADGE_PREFIX + e.id; upd.push({ Id: e.id, 'Код бейджа': e.badge }); } }
   if (upd.length) { try { await ncUpdateMany('employees', upd); } catch (er) { console.warn('[station] коды бейджей не записаны:', er.message); } }
-  const cards = list.map((e) => `<div class="lb"><div class="n">${hesc(e.fio)}</div><div class="r">${hesc(e.role || '')}${sectionCode ? ' · ' + hesc(sectionCode) : ''}</div><div class="bc">${code128Svg(e.badge, 38)}</div><div class="c">${hesc(e.badge)} · ООО «Петробалт Сервис» · портал ИСМ</div></div>`).join('');
+  const cards = list.map((e) => `<div class="lb"><div class="n">${hesc(e.fio)}</div><div class="r">${hesc(e.role || '')}${sectionCode ? ' · ' + hesc(sectionCode) : ''}</div><div class="bc">${code128Svg(asciiBar(e.badge), 38)}</div><div class="c">${hesc(e.badge)} · скан ${hesc(asciiBar(e.badge))} · ООО «Петробалт Сервис»</div></div>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Бейджи сотрудников ${hesc(sectionCode || '')}</title><style>@page{size:100mm 50mm;margin:3mm}body{margin:0;font-family:system-ui,Arial,sans-serif}.lb{width:94mm;height:44mm;box-sizing:border-box;padding:2mm 3mm;page-break-after:always;border:.2mm dashed #999;display:flex;flex-direction:column;justify-content:space-between}.n{font-size:16pt;font-weight:800}.r{font-size:9pt;color:#333}.bc svg{width:70mm;height:14mm}.c{font-size:8pt;color:#333}@media screen{body{background:#eee;padding:10px}.lb{background:#fff;margin:0 0 8px}}</style></head><body>${cards || '<p>Сотрудников нет.</p>'}<scr` + `ipt>setTimeout(function(){window.print()},300)</scr` + `ipt></body></html>`;
 }
 function persistSessions() { try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions)); } catch {} }
@@ -12988,6 +13065,17 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await taskNotify(await readBody(req), sessionFromReq(req))); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
+    if (p === '/api/task/si-list' && req.method === 'GET') { // K-207: наборный список СИ на рабочем месте (доступен посту участка — префикс /api/task в белом списке)
+      if (!isLive()) return sendJson(res, 200, { items: [] });
+      try { return sendJson(res, 200, { items: await siList() }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/tools/si-labels' && req.method === 'GET') { // K-207: этикетки на приборы (30×15 мм — влезает на штангенциркуль)
+      const s0 = req.session; if (!s0 || !(s0.isAdmin || (s0.roles || []).some((r) => ['admin', 'Администратор', 'Технолог', 'Руководство', 'ОТК'].includes(r)))) return sendJson(res, 403, { error: 'Печать этикеток СИ — администратор, технолог, ОТК или руководство.' });
+      try {
+        const html = await siLabelsHtml(String(url.searchParams.get('ids') || '').split(',').filter(Boolean), url.searchParams.get('size') || '30x15');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html);
+      } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+    }
     if (p === '/api/task/journal' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' });
       const body = await readBody(req);
@@ -13002,9 +13090,10 @@ const server = http.createServer(async (req, res) => {
         'Дата': r.date ? String(r.date).slice(0, 10) : null, 'Примечание': String(r.note || ''),
         'Измерено': (r.measured === '' || r.measured == null || !Number.isFinite(Number(r.measured))) ? null : Number(r.measured), // K-187
         'Карточка металла': String(r.matCode || ''),
+        'СИ': String(r.si || ''), // K-207: чем меряли (инв. № приборов через запятую)
       });
-      const hasData = (r) => r.executor || r.blankNo || r.self || r.otk || r.date || r.note || r.measured || r.matCode;
-      try { await ncEnsureColumn('journal', 'Измерено', 'Decimal'); await ncEnsureColumn('journal', 'Карточка металла', 'SingleLineText'); } catch (e) { console.warn('K-187: колонки журнала:', e.message); }
+      const hasData = (r) => r.executor || r.blankNo || r.self || r.otk || r.date || r.note || r.measured || r.matCode || r.si;
+      try { await ncEnsureColumn('journal', 'Измерено', 'Decimal'); await ncEnsureColumn('journal', 'Карточка металла', 'SingleLineText'); await ncEnsureColumn('journal', 'СИ', 'SingleLineText'); } catch (e) { console.warn('K-187/K-207: колонки журнала:', e.message); }
       const rows = Array.isArray(body.rows) ? body.rows : [];
       const updates = [], creates = [];
       for (const r of rows) { if (r.id != null) updates.push({ Id: r.id, ...jval(r) }); else if (hasData(r)) creates.push(jval(r)); }

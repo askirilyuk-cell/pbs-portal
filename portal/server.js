@@ -11139,6 +11139,13 @@ async function handleAuth(req, res, p, url) {
     const token = String(url.searchParams.get('token') || '').trim();
     const post = stationPosts().find((x) => x.token && x.token === token);
     if (!post) { res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Неверный токен поста. Токены — Настройки → «Посты участков».'); return true; }
+    // K-206d: киоск открывает эту ссылку при каждом старте Chrome (в т.ч. после падения) — если кука уже
+    // от этого же поста, переиспользуем сессию, иначе за год накопятся тысячи записей в .sessions.local.json
+    const cur = sessionFromReq(req);
+    if (cur && cur.isStation && cur.station && cur.station.postId === post.id) {
+      const list0 = stationPosts(); const me0 = list0.find((x) => x.id === post.id); if (me0) { me0.lastSeen = new Date().toISOString(); stationPostsSave(list0); }
+      res.writeHead(302, { Location: '/#station' }); res.end(); return true;
+    }
     const sid = crypto.randomBytes(24).toString('hex');
     sessions[sid] = { userId: 'post:' + post.id, fio: `Пост ${post.section}${post.name ? ' · ' + post.name : ''}`, position: 'рабочее место', email: '', depts: [],
       roles: ['station'], role: 'Цех', portalRoles: ['Цех'], isAdmin: false, isStation: true, station: { postId: post.id, section: post.section, name: post.name || '' }, operator: null, exp: Date.now() + STATION_SESSION_TTL };

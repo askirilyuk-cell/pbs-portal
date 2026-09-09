@@ -449,7 +449,9 @@
     .st-card .op{font-size:12px;color:var(--gray);}
     .st-card .nm{font-size:18px;font-weight:700;color:var(--navy);margin:3px 0;}
     .st-card .meta{font-size:12px;color:#52606d;margin-top:8px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;}
-    .st-empty{grid-column:1/-1;color:var(--sl-500);font-size:14px;padding:28px;text-align:center;}
+    .st-empty{grid-column:1/-1;color:var(--sl-500);font-size:16px;padding:36px 28px;text-align:center;line-height:1.6;}
+    .st-due{font-size:12px;color:#52606d;white-space:nowrap;} .st-due.red{color:#b3261e;font-weight:700;} .st-due.amber{color:#b45309;font-weight:600;}
+    .st-q{float:right;font-size:11px;font-weight:700;color:var(--navy);background:#eef2f9;border-radius:999px;padding:1px 8px;}
     .st-panel{display:flex;flex-direction:column;gap:14px;max-width:760px;}
     /* K-187: экран оператора отрезки (планшет 1280×800, ПК участка) */
     .cut-wrap{display:flex;flex-direction:column;gap:12px;max-width:1320px;}
@@ -2183,6 +2185,7 @@
         const target=(first&&first.view)||'docs';
         if(target!==v){ location.hash='#'+target; return; }
       }
+      document.querySelectorAll('.si-card').forEach(e=>e.remove()); // K-208: панель прибора живёт только в своём разделе
       document.getElementById('h1').textContent=TITLES[v];
       renderScreenHead(v); // K-120: управляющая панель экрана
       document.title=TITLES[v]+' · ИСМ ПБС';
@@ -10778,8 +10781,8 @@
         </div>
         <div class="filters">
           <input class="rt-inp" id="si-q" placeholder="▣ Скан этикетки, инв. №, наименование, код 1С" value="${esc(siQ)}" style="min-width:300px">
-          <select class="rt-inp" id="si-kind"><option value="">— все типы —</option>${(SI.dict.kinds||[]).map(x=>`<option ${siKind===x?'selected':''}>${esc(x)}</option>`).join('')}</select>
-          <select class="rt-inp" id="si-state"><option value="">— все состояния —</option>${(SI.dict.states||[]).map(x=>`<option ${siState===x?'selected':''}>${esc(x)}</option>`).join('')}</select>
+          <select class="rt-inp" id="si-kind" style="max-width:220px"><option value="">— все типы —</option>${(SI.dict.kinds||[]).map(x=>`<option ${siKind===x?'selected':''}>${esc(x)}</option>`).join('')}</select>
+          <select class="rt-inp" id="si-state" style="max-width:220px"><option value="">— все состояния —</option>${(SI.dict.states||[]).map(x=>`<option ${siState===x?'selected':''}>${esc(x)}</option>`).join('')}</select>
           <span style="margin-left:auto"></span>
           <button class="tbtn green" id="si-new">+ Прибор</button>
           <button class="tbtn primary" id="si-cal">✓ Поверка</button>
@@ -12079,11 +12082,23 @@
       const kiosk=!!(ME&&ME.isStation); if(kiosk&&ME.station&&ME.station.section)stationSel=ME.station.section; // K-206
       const opts=secs.map(s=>`<option value="${esc(s.code)}" ${s.code===stationSel?'selected':''}>${esc(s.code)}${s.name?' · '+esc(s.name):''}</option>`).join('')||'<option>нет участков</option>';
       const ord={'В работе':0,'В очереди':1,'Приостановлено':2,'Выполнено':3};
-      const tasks=stationTasks().sort((a,b)=>(ord[a.status]??9)-(ord[b.status]??9));
-      const cards=tasks.map(t=>`<div class="st-card ${TKCLASS[t.status]||'work'}" data-tid="${esc(t.id??t.num)}">
-        <div class="op">${esc(t.op)} · ${esc(t.pz)}</div>
+      // K-209: внутри статуса — по сроку (что горит, то и первое); очередь пронумерована
+      const dnum=(t)=>t.plan?(Date.parse(t.plan)||8e15):8e15;
+      const tasks=stationTasks().sort((a,b)=>((ord[a.status]??9)-(ord[b.status]??9))||(dnum(a)-dnum(b)));
+      let qn=0;
+      const dueChip=(t)=>{ if(!t.plan)return '<span class="st-due">срок не задан</span>';
+        const d=Math.round((Date.parse(t.plan)-Date.now())/864e5);
+        if(t.status==='Выполнено')return `<span class="st-due">срок ${fmt(t.plan)}</span>`;
+        if(d<0)return `<span class="st-due red">просрочено на ${-d} дн · ${fmt(t.plan)}</span>`;
+        if(d===0)return `<span class="st-due red">срок сегодня</span>`;
+        if(d<=2)return `<span class="st-due amber">срок через ${d} дн · ${fmt(t.plan)}</span>`;
+        return `<span class="st-due">срок ${fmt(t.plan)} · через ${d} дн</span>`; };
+      const cards=tasks.map(t=>{ const q=t.status==='В очереди'?++qn:0;
+        return `<div class="st-card ${TKCLASS[t.status]||'work'}" data-tid="${esc(t.id??t.num)}">
+        <div class="op">${esc(t.op)} · ${esc(t.pz)}${q?`<span class="st-q">${q}-я в очереди</span>`:''}</div>
         <div class="nm">${esc(t.title||'Операция')}</div>
-        <div class="meta">${badge(t.status)}<span>срок ${fmt(t.plan)}</span></div></div>`).join('')||'<div class="st-empty">На участке нет задач</div>';
+        <div class="meta">${badge(t.status)}${dueChip(t)}${t.qtyPlan?`<span class="st-due">${esc(String(t.qtyPlan))} шт</span>`:''}</div></div>`; }).join('')
+        ||`<div class="st-empty">На участке нет задач.<br><span style="font-size:14px;opacity:.75">Как только технолог поставит операцию на ${esc(stationSel)}, она появится здесь — первой будет та, у которой ближе срок.</span></div>`;
       host.innerHTML=`<div class="st-top"><span class="title">Рабочее место</span>
         <select id="st-sec" aria-label="Участок" ${kiosk?'disabled':''}>${opts}</select>
         ${kiosk?stationOpBtnHtml():''}

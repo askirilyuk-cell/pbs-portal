@@ -472,6 +472,14 @@
     .cut-btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
     .cut-t{width:100%;border-collapse:collapse;font-size:14px;} .cut-t th{text-align:left;color:var(--sl-500);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;border-bottom:1px solid #eef2f6;} .cut-t td{padding:7px 8px;border-bottom:1px solid #eef2f6;vertical-align:middle;} .cut-t tr:last-child td{border-bottom:0;}
     .cut-inp{border:1px solid var(--bd);border-radius:8px;padding:9px 10px;font:inherit;font-size:16px;background:#fff;color:#1b2a3a;width:110px;text-align:center;} .cut-inp.wide{width:100%;text-align:left;}
+    .si-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--bd);border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:var(--gap);}
+    .si-kpi .c{background:var(--card,#fff);padding:10px 12px;} .si-kpi b{display:block;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;} .si-kpi span{font-size:11px;color:var(--sub);}
+    .si-kpi .c.red b{color:var(--red);} .si-kpi .c.amber b{color:#b45309;} .si-kpi .c.green b{color:#1a7f4b;} .si-kpi .c.on{outline:2px solid var(--navy);outline-offset:-2px;cursor:pointer;} .si-kpi .c{cursor:pointer;}
+    .si-t{width:100%;border-collapse:collapse;font-size:13px;} .si-t th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--sub);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--bd);white-space:nowrap;}
+    .si-t td{padding:7px 10px;border-bottom:1px solid var(--bd);vertical-align:middle;} .si-t tr:hover td{background:#f6f8fa;} .si-t .mono{font-family:var(--mono);white-space:nowrap;}
+    .si-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;} .si-pill.ok{background:#e8f5ee;color:#136c3a;} .si-pill.soon{background:#fdf1e3;color:#b45309;} .si-pill.overdue{background:#fdecec;color:#b3261e;} .si-pill.none{background:#fdf1e3;color:#b45309;} .si-pill.indicative{background:#eef2f6;color:var(--sub);} .si-pill.gray{background:#eef2f6;color:var(--sub);}
+    .si-card{position:fixed;top:0;right:0;bottom:0;width:min(560px,96vw);background:#fff;border-left:1px solid var(--bd);box-shadow:-8px 0 24px rgba(0,0,0,.12);z-index:60;overflow:auto;padding:18px 20px;}
+    .si-card h3{margin:0 0 2px;font-size:18px;} .si-card .kv{display:grid;grid-template-columns:190px 1fr;gap:6px 12px;font-size:13px;margin:12px 0;} .si-card .kv .k{color:var(--sub);}
     .cut-si{margin-top:10px;padding-top:10px;border-top:1px dashed var(--bd);} .cut-si .lab{font-size:12px;color:var(--sl-500);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;} .cut-si .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
     .si-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;border:1px solid var(--bd);background:#f6f8fa;font-size:13px;} .si-chip b{cursor:pointer;color:var(--sl-500);font-weight:700;} .si-chip.bad{background:#fdecec;border-color:#f0b4b4;} .si-chip.warn{background:#fdf1e3;border-color:#f0c9a0;} .si-chip .no{font-size:11px;color:#b91c1c;font-weight:600;}
     .si-warn{margin-top:8px;padding:8px 10px;border-radius:8px;background:#fdf1e3;border:1px solid #f0c9a0;color:#7c4a03;font-size:13px;}
@@ -1309,6 +1317,7 @@
           <a data-view="control" href="#control"><span class="i" data-ic="control"></span> Контроль качества</a>
           <a data-view="equipment" href="#equipment"><span class="i" data-ic="equipment"></span> Участки и оборудование</a>
           <a data-view="tools" href="#tools"><span class="i" data-ic="tools"></span> Инструмент и оснастка</a>
+          <a data-view="si" href="#si"><span class="i" data-ic="control"></span> Средства измерения</a>
           <a data-view="metal" href="#metal"><span class="i" data-ic="metal"></span> Учёт остатков металла</a>
         </div>
         <div class="navg" data-g="sales">
@@ -1908,7 +1917,7 @@
     const RBAC_API_PREFIX=[['/api/board','board'],['/api/station','station'],['/api/orders','orders'],['/api/control','control'],['/api/routes','routes'],['/api/route','routes'],['/api/task','board'],['/api/equipment','equipment'],['/api/tools','tools'],['/api/metal','metal'],['/api/warehouse','warehouse'],['/api/sales','sales'],['/api/lov','lov'],['/api/counterpart','counterparties'],['/api/procurement','purchase'],['/api/catalog','catalog'],['/api/design','design'],['/api/docs','docs'],['/api/logistics','logistics'],['/api/drawing-mass','logistics'],['/api/settings','settings']];
     function rbacApiSection(u){ try{ const p=new URL(u,location.origin).pathname; for(const[pre,sec]of RBAC_API_PREFIX)if(p===pre||p.startsWith(pre+'/')||p.startsWith(pre+'.'))return sec; }catch{} return null; }
     const rbacRole=()=>ME?(ME.effectiveRole||ME.role||'guest'):'guest';
-    const rbacAccess=(sec)=>(ME&&ME.access)?ME.access[sec]:undefined;
+    const rbacAccess=(sec)=>(ME&&ME.access)?ME.access[sec==='si'?'tools':sec]:undefined; // K-208: «Средства измерения» — права раздела инструмента
     // K-49 D3: в разделах «только просмотр» прячем контролы ЗАПИСИ (создать/изменить/
     // удалить/провести). Чтение (печать/экспорт/PDF/xlsx/реестр/расчёт) не трогаем.
     // Акцентные кнопки действий: .tbtn.primary/.tbtn.green + del/select грида + #dnew.
@@ -2081,7 +2090,7 @@
 
     // --- роутер по разделам навигации (hash) ----------------------------------
     const TITLES={board:'Производственная доска',station:'Рабочее место',orders:'Заказы (ПЗ)',routes:'Маршруты (Ф.13)',setup:'Карты наладки',control:'Контроль качества',
-      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Бухгалтерия · производство',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
+      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Бухгалтерия · производство',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',si:'Средства измерения (СИ)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
     // заглушки блоков ИСМ — тексты по утверждённым процедурам/Руководству ИСМ (ИСМ-РК)
     const STUBS={
       nc:{tag:'Качество · ДП–У.2 · ISO 9001 п.8.7/10.2',
@@ -2193,6 +2202,7 @@
       else if(v==='warehouse')renderWarehouse(host,arg);
       else if(v==='equipment')renderEquipment(host,arg);
       else if(v==='tools')renderTools(host,arg);
+      else if(v==='si')renderSi(host,arg);
       else if(v==='metal')renderMetal(host,arg);
       else if(v==='counterparties')renderCounterparties(host,arg);
       else if(v==='settings')renderSettings(host);
@@ -10588,7 +10598,7 @@
     let TL=null, tlTab='items', tlSel=null, tlSub='cut', tlCat='', tlFilter='all', tlCardCache={}, tlPlace='', tlGridApi=null;
     // редизайн ДП–О.3.1: единый поиск, каталог-пары, кулачки+оправки карточками, мастер заведения
     let tlQuery='', tlCatSub='pairs', tlLibSub='jaws', tlWizStep=1, tlWizSub='cut', tlWizData={};
-    const TL_SUBS=[['cut','Режущий инструмент'],['si','Мерительный (СИ)'],['osn','Оснастка']];
+    const TL_SUBS=[['cut','Режущий инструмент'],['osn','Оснастка']]; // K-208: СИ уехали в свой раздел
     const tlSubOf=(i)=>i.subdivision||(i.isSi?'si':i.special?'osn':'cut');
     const tlIsInv=(i)=>tlSubOf(i)==='osn'; // инвентарная модель (оснастка)
     const tlQty=(n,u)=>Number(n||0).toLocaleString('ru-RU',{maximumFractionDigits:3})+(u?(' '+u):'');
@@ -10685,7 +10695,6 @@
           <span style="margin-left:auto"></span>
           <button class="tbtn primary" id="tl-move">↹ Операция</button>
           <button class="tbtn green" id="tl-new">+ Завести (мастер)</button>
-          ${tlSub==='si'?'<button class="tbtn" id="tl-si-lab">🖨 Этикетки СИ</button>':''}
           <button class="tbtn" id="tl-loc">Места хранения</button>
           <button class="tbtn" id="tl-act">Акт списания за месяц</button>
         </div>
@@ -10705,7 +10714,6 @@
       const rs=host.querySelector('#tl-reset'); if(rs)rs.onclick=()=>{tlCat='';tlFilter='all';tlPlace='';tlSel=null;tlItemsBody(host);};
       const mv=host.querySelector('#tl-move'); if(mv)mv.onclick=()=>{const it=(items.find(x=>x.code===tlSel&&tlSubOf(x)===tlSub))||items.find(x=>tlSubOf(x)===tlSub);openToolMove(it,'');};
       const nw=host.querySelector('#tl-new'); if(nw)nw.onclick=()=>{tlWizSub=(tlSub||'cut');tlWizStep=1;tlWizData={};tlTab='wizard';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='wizard'));tlBody();};
-      const siLab=host.querySelector('#tl-si-lab'); if(siLab)siLab.onclick=()=>tlSiLabels(subItems); // K-207
       const lc=host.querySelector('#tl-loc'); if(lc)lc.onclick=()=>{tlTab='loc';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));tlBody();};
       const ac=host.querySelector('#tl-act'); if(ac)ac.onclick=()=>{tlTab='act';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));tlBody();};
       // единый поиск: обновление результатов + дозагрузка каталога/кулачков для 3-го хранилища и KPI-плитки
@@ -10732,25 +10740,207 @@
     // K-42: отношение остаток/мин (дефицит наверху) + ячейка остатка с ▼ (дальтоники) + ячейка «Поверка до».
     function tlDefRatio(i){ if(Number(i.balance)<=0) return -1; const min=Number(i.minStock)||0; if(min<=0) return 1e9; return (Number(i.balance)||0)/min; }
     function tlBalCell(i){ const q=tlQty(i.balance,i.unit); if(Number(i.balance)<=0) return `<b class="c-red" style="font-weight:800">▼ ${q}</b>`; if(i.belowMin) return `<b class="c-amber" style="font-weight:800">▼ ${q}</b>`; return `<b style="color:var(--ink)">${q}</b>`; }
-    // K-207: печать этикеток на приборы. Формат по умолчанию 30×15 мм — влезает на штангенциркуль.
-    async function tlSiLabels(items){
-      const list=(items||[]).filter(i=>i.isSi);
+    // ── K-208: раздел «Средства измерения» ──────────────────────────────────
+    // Поэкземплярный учёт: карточка = один физический прибор (инв. №), без остатков и
+    // минимумов — у СИ их нет. Своя логика: поверка со сроком, состояние, место и
+    // ответственный, журнал событий, этикетка со штрихкодом.
+    let SI=null, siSel=new Set(), siQ='', siKind='', siCal='', siState='', siOpen=null;
+    const SI_CAL_LBL={ok:'годен',soon:'скоро поверка',overdue:'просрочен',none:'нет данных',indicative:'индикаторный'};
+    function siCalPill(t){ return `<span class="si-pill ${t.calState}">${SI_CAL_LBL[t.calState]||''}${t.calState==='ok'||t.calState==='soon'?' · '+fmt(t.calNext):''}${t.calState==='overdue'&&t.calNext?' · '+fmt(t.calNext):''}</span>`; }
+    async function renderSi(host,arg){
+      host.innerHTML='<div class="c-gray" style="padding:20px">Загрузка реестра СИ…</div>';
+      try{ SI=await (await fetch('/api/si')).json(); }catch(e){ host.innerHTML='<div class="c-red" style="padding:20px">Не удалось загрузить реестр СИ: '+esc(e.message)+'</div>'; return; }
+      if(SI&&SI.error){ host.innerHTML='<div class="c-red" style="padding:20px">'+esc(SI.error)+'</div>'; return; }
+      siPaint(host);
+      if(arg)siCardOpen(host,arg);
+    }
+    function siFiltered(){
+      const q=siQ.trim().toLowerCase();
+      return (SI.items||[]).filter(t=>{
+        if(siKind&&t.kind!==siKind)return false;
+        if(siCal&&t.calState!==siCal)return false;
+        if(siState&&t.state!==siState)return false;
+        if(q&&![t.invNo,t.name,t.kind,t.code1c,t.serial,t.responsible,t.place,t.section].some(v=>String(v||'').toLowerCase().includes(q)))return false;
+        return true;
+      });
+    }
+    function siPaint(host){
+      const k=SI.kpis||{}, list=siFiltered();
+      const kpi=(cls,val,lbl,f)=>`<div class="c ${cls} ${siCal===f?'on':''}" data-cal="${f||''}"><b>${val||0}</b><span>${lbl}</span></div>`;
+      host.innerHTML=`
+        <div class="si-kpi">
+          ${kpi('',k.total,'приборов в реестре','')}
+          ${kpi('green',k.ok,'поверка действует','ok')}
+          ${kpi('amber',k.soon,'поверка ≤ 30 дней','soon')}
+          ${kpi('red',k.overdue,'поверка просрочена','overdue')}
+          ${kpi('amber',k.none,'нет данных о поверке','none')}
+          ${kpi('',k.indicative,'индикаторные','indicative')}
+        </div>
+        <div class="filters">
+          <input class="rt-inp" id="si-q" placeholder="▣ Скан этикетки, инв. №, наименование, код 1С" value="${esc(siQ)}" style="min-width:300px">
+          <select class="rt-inp" id="si-kind"><option value="">— все типы —</option>${(SI.dict.kinds||[]).map(x=>`<option ${siKind===x?'selected':''}>${esc(x)}</option>`).join('')}</select>
+          <select class="rt-inp" id="si-state"><option value="">— все состояния —</option>${(SI.dict.states||[]).map(x=>`<option ${siState===x?'selected':''}>${esc(x)}</option>`).join('')}</select>
+          <span style="margin-left:auto"></span>
+          <button class="tbtn green" id="si-new">+ Прибор</button>
+          <button class="tbtn primary" id="si-cal">✓ Поверка</button>
+          <button class="tbtn" id="si-move">↹ Место / ответственный</button>
+          <button class="tbtn" id="si-lab">🖨 Этикетки</button>
+        </div>
+        <div class="tbl-wrap"><table class="si-t"><thead><tr>
+          <th style="width:28px"><input type="checkbox" id="si-all"></th><th>Инв. №</th><th>Тип</th><th>Наименование</th><th>Диапазон</th><th>Поверка</th><th>Состояние</th><th>Где и у кого</th><th>Код 1С</th>
+        </tr></thead><tbody>${list.map(t=>`<tr data-id="${t.id}">
+          <td><input type="checkbox" class="si-ck" data-id="${t.id}" ${siSel.has(String(t.id))?'checked':''}></td>
+          <td class="mono"><b>${esc(t.invNo)}</b></td>
+          <td>${esc(t.kind||'')}</td>
+          <td><a href="#" class="si-open" data-id="${t.id}" style="color:var(--navy)">${esc(t.name)}</a>${t.serial?`<div class="c-gray" style="font-size:11px">зав. № ${esc(t.serial)}</div>`:''}</td>
+          <td>${esc(t.range||'—')}</td>
+          <td>${siCalPill(t)}</td>
+          <td>${t.state==='В работе'?'<span class="si-pill ok">в работе</span>':(t.state==='Не подтверждён'?'<span class="si-pill none">не подтверждён</span>':`<span class="si-pill gray">${esc(t.state.toLowerCase())}</span>`)}</td>
+          <td>${esc([t.section,t.place,t.responsible].filter(Boolean).join(' · ')||'—')}</td>
+          <td class="mono c-gray">${esc(t.code1c||'')}</td></tr>`).join('')||'<tr><td colspan="9" class="c-gray" style="padding:16px">Ничего не найдено.</td></tr>'}</tbody></table></div>
+        <div class="c-gray" style="font-size:12px;margin-top:10px">Показано ${list.length} из ${(SI.items||[]).length}. Поверок по ПБС не проводилось — у приборов пустые данные; вносите свидетельства по мере поверки, экран оператора предупреждает о приборе без поверки.</div>`;
+      const q=host.querySelector('#si-q');
+      q.oninput=()=>{ siQ=q.value; const p0=q.selectionStart; siPaint(host); const q2=host.querySelector('#si-q'); q2.focus(); q2.setSelectionRange(p0,p0); };
+      q.onkeydown=(e)=>{ if(e.key!=='Enter')return; const one=siFiltered(); if(one.length===1){ siQ=''; siCardOpen(host,one[0].id); } };
+      host.querySelector('#si-kind').onchange=(e)=>{ siKind=e.target.value; siPaint(host); };
+      host.querySelector('#si-state').onchange=(e)=>{ siState=e.target.value; siPaint(host); };
+      host.querySelectorAll('.si-kpi .c').forEach(c=>c.onclick=()=>{ siCal=(siCal===c.dataset.cal)?'':c.dataset.cal; siPaint(host); });
+      host.querySelectorAll('.si-ck').forEach(c=>c.onchange=()=>{ if(c.checked)siSel.add(c.dataset.id); else siSel.delete(c.dataset.id); });
+      const all=host.querySelector('#si-all'); if(all)all.onchange=()=>{ siFiltered().forEach(t=>{ if(all.checked)siSel.add(String(t.id)); else siSel.delete(String(t.id)); }); siPaint(host); };
+      host.querySelectorAll('.si-open').forEach(a2=>a2.onclick=(e)=>{ e.preventDefault(); siCardOpen(host,a2.dataset.id); });
+      host.querySelector('#si-new').onclick=()=>siForm(host,null);
+      host.querySelector('#si-cal').onclick=()=>siEventDialog(host,'Поверка');
+      host.querySelector('#si-move').onclick=()=>siEventDialog(host,'Перемещение');
+      host.querySelector('#si-lab').onclick=()=>siLabelsDialog();
+      try{ rbacGateWrite(host); }catch{}
+    }
+    function siPicked(){ const ids=[...siSel]; return (SI.items||[]).filter(t=>ids.includes(String(t.id))); }
+    // карточка прибора: реквизиты + журнал событий
+    async function siCardOpen(host,id){
+      let d; try{ d=await (await fetch('/api/si/card?id='+encodeURIComponent(id))).json(); }catch(e){ toast('Не удалось открыть карточку: '+e.message,'err'); return; }
+      if(d.error){ toast(d.error,'err'); return; }
+      const t=d.card; siOpen=t;
+      const el=document.createElement('div'); el.className='si-card';
+      const kv=(k,v)=>`<div class="k">${k}</div><div>${v||'—'}</div>`;
+      el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div><h3>${esc(t.invNo)} · ${esc(t.name)}</h3><div class="c-gray">${esc([t.kind,t.range,t.accuracy].filter(Boolean).join(' · '))}</div></div>
+          <button class="tbtn" id="sic-x">✕</button></div>
+        <div style="margin-top:10px">${siCalPill(t)} <span class="si-pill ${t.state==='В работе'?'ok':'gray'}">${esc(t.state.toLowerCase())}</span></div>
+        <div class="kv">
+          ${kv('Режим',esc(t.mode))}
+          ${kv('Межповерочный интервал',t.interval?esc(String(t.interval))+' мес':'—')}
+          ${kv('Дата поверки',t.calDate?fmt(t.calDate):'—')}
+          ${kv('Годен до',t.calNext?fmt(t.calNext):'—')}
+          ${kv('№ свидетельства',esc(t.calCert)||(t.mode==='Индикаторный'?'не требуется':'<span style="color:#b45309;font-weight:600">нет</span>'))}
+          ${kv('Заводской №',esc(t.serial))}
+          ${kv('Участок / место',esc([t.section,t.place].filter(Boolean).join(' · ')))}
+          ${kv('Ответственный',esc(t.responsible))}
+          ${kv('Код 1С',esc(t.code1c))}
+          ${kv('Примечание',esc(t.note))}
+        </div>
+        <div class="filters" style="margin:0 0 12px">
+          <button class="tbtn primary" id="sic-cal">✓ Поверка</button>
+          <button class="tbtn" id="sic-move">↹ Место</button>
+          <button class="tbtn" id="sic-edit">Изменить</button>
+          <button class="tbtn" id="sic-lab">🖨 Этикетка</button>
+        </div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--sub);margin-bottom:6px">Журнал прибора</div>
+        <table class="si-t"><tbody>${(d.journal||[]).map(j=>`<tr><td class="mono">${esc(fmt(j.date))}</td><td><b>${esc(j.event)}</b>${j.cert?' · свид. '+esc(j.cert):''}${j.calNext?' · до '+esc(fmt(j.calNext)):''}${j.to?' · '+esc(j.to):''}${j.note?'<div class="c-gray" style="font-size:11px">'+esc(j.note)+'</div>':''}</td><td class="c-gray">${esc(j.who)}</td></tr>`).join('')||'<tr><td class="c-gray" style="padding:10px">Событий пока нет.</td></tr>'}</tbody></table>`;
+      document.body.appendChild(el);
+      const close=()=>{ el.remove(); siOpen=null; };
+      el.querySelector('#sic-x').onclick=close;
+      el.querySelector('#sic-edit').onclick=()=>{ close(); siForm(host,t); };
+      el.querySelector('#sic-cal').onclick=()=>{ siSel=new Set([String(t.id)]); close(); siEventDialog(host,'Поверка'); };
+      el.querySelector('#sic-move').onclick=()=>{ siSel=new Set([String(t.id)]); close(); siEventDialog(host,'Перемещение'); };
+      el.querySelector('#sic-lab').onclick=()=>window.open('/api/si/labels?ids='+encodeURIComponent(t.id),'_blank');
+      try{ rbacGateWrite(el); }catch{}
+    }
+    // форма прибора
+    function siForm(host,t){
+      const it=t||{mode:'Поверка',state:'В работе'};
       const w=document.createElement('div'); w.className='ui-dlg';
-      const noCal=list.filter(i=>i.calState==='none').length;
+      const F=(lab,id,val,attr='')=>`<label style="display:block"><span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px">${lab}</span><input class="rt-inp" id="${id}" value="${esc(val==null?'':val)}" ${attr} style="width:100%"></label>`;
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:720px"><div class="ui-dlg-h">${t?'Прибор '+esc(t.invNo):'Новый прибор'}</div><div class="ui-dlg-t">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div style="grid-column:span 2">${F('Наименование','sif-name',it.name)}</div>
+          ${F('Тип (штангенциркуль, микрометр…)','sif-kind',it.kind)}
+          ${F('Инв. №'+(t?'':' (авто СИ-NNN)'),'sif-inv',it.invNo,t?'':'placeholder="авто"')}
+          ${F('Заводской №','sif-serial',it.serial)}
+          ${F('Код 1С','sif-code1c',it.code1c,'placeholder="БП-000NNNN"')}
+          ${F('Диапазон','sif-range',it.range,'placeholder="0–150 мм"')}
+          ${F('Класс точности / цена деления','sif-acc',it.accuracy,'placeholder="0,05 мм"')}
+          <label style="display:block"><span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px">Режим</span><select class="rt-inp" id="sif-mode" style="width:100%">${(SI.dict.modes||[]).map(m=>`<option ${it.mode===m?'selected':''}>${esc(m)}</option>`).join('')}</select></label>
+          ${F('Межповерочный интервал, мес','sif-int',it.interval||'','type="number" min="0" step="1" placeholder="12"')}
+          ${F('Дата поверки','sif-cal',it.calDate,'type="date"')}
+          ${F('Годен до (можно не заполнять)','sif-next',it.calNext,'type="date"')}
+          ${F('№ свидетельства','sif-cert',it.calCert)}
+          ${F('Участок','sif-sec',it.section,'placeholder="ПБС-УЧ-16"')}
+          ${F('Место хранения','sif-place',it.place,'placeholder="шкаф ОТК / станок"')}
+          ${F('Ответственный','sif-resp',it.responsible)}
+          <label style="display:block"><span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px">Состояние</span><select class="rt-inp" id="sif-state" style="width:100%">${(SI.dict.states||[]).map(m=>`<option ${it.state===m?'selected':''}>${esc(m)}</option>`).join('')}</select></label>
+          <div style="grid-column:span 3">${F('Примечание','sif-note',it.note)}</div>
+        </div><div class="c-red" id="sif-err" style="margin-top:8px"></div></div>
+        <div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn pri" data-d="ok">Сохранить</button></div></div>`;
+      document.body.appendChild(w);
+      const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
+      w.querySelector('[data-d="ok"]').onclick=async()=>{
+        const V=(id)=>{ const el=w.querySelector('#'+id); return el?el.value.trim():''; };
+        const body={ id:t?t.id:undefined, name:V('sif-name'), kind:V('sif-kind'), invNo:V('sif-inv'), serial:V('sif-serial'),
+          code1c:V('sif-code1c'), range:V('sif-range'), accuracy:V('sif-acc'), mode:V('sif-mode'), interval:V('sif-int'),
+          calDate:V('sif-cal'), calNext:V('sif-next'), calCert:V('sif-cert'), section:V('sif-sec'), place:V('sif-place'),
+          responsible:V('sif-resp'), state:V('sif-state'), note:V('sif-note') };
+        if(!body.name){ w.querySelector('#sif-err').textContent='Укажите наименование.'; return; }
+        try{ const j=await postJson('/api/si/save',body); close(); toast(j.created?'Заведён '+j.invNo:'Сохранено','ok'); renderSi(host); }
+        catch(e){ w.querySelector('#sif-err').textContent=e.message; }
+      };
+    }
+    // событие по выбранным приборам: поверка / перемещение / ремонт / списание
+    function siEventDialog(host,kind){
+      const sel=siPicked(); if(!sel.length){ toast('Отметьте приборы галочками.','warn'); return; }
+      const w=document.createElement('div'); w.className='ui-dlg';
+      const today=new Date().toISOString().slice(0,10);
+      const cal=(kind==='Поверка'||kind==='Калибровка');
+      const fields=cal?`
+          <label>Событие<br><select class="rt-inp" id="sie-kind" style="width:100%"><option>Поверка</option><option>Калибровка</option></select></label>
+          <label>Дата поверки<br><input class="rt-inp" type="date" id="sie-date" value="${today}" style="width:100%"></label>
+          <label>Межповерочный интервал, мес<br><input class="rt-inp" type="number" min="0" step="1" id="sie-int" value="${sel[0].interval||12}" style="width:100%"></label>
+          <label>Годен до (если не считать по интервалу)<br><input class="rt-inp" type="date" id="sie-next" style="width:100%"></label>
+          <label>№ свидетельства<br><input class="rt-inp" id="sie-cert" placeholder="одно на партию — впишется всем" style="width:100%"></label>`
+        :`<label>Событие<br><select class="rt-inp" id="sie-kind" style="width:100%">${['Перемещение','Выдача','Возврат','Ремонт','Инвентаризация','Списание'].map(x=>`<option ${x===kind?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
+          <label>Дата<br><input class="rt-inp" type="date" id="sie-date" value="${today}" style="width:100%"></label>
+          <label>Участок<br><input class="rt-inp" id="sie-sec" value="${esc(sel[0].section||'')}" placeholder="ПБС-УЧ-16" style="width:100%"></label>
+          <label>Место хранения<br><input class="rt-inp" id="sie-place" value="${esc(sel[0].place||'')}" placeholder="шкаф ОТК / станок" style="width:100%"></label>
+          <label>Ответственный<br><input class="rt-inp" id="sie-resp" value="${esc(sel[0].responsible||'')}" style="width:100%"></label>`;
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:560px"><div class="ui-dlg-h">${cal?'Поверка':'Событие по прибору'} · ${sel.length} шт</div><div class="ui-dlg-t">
+        <div class="c-gray" style="font-size:12px;margin-bottom:10px">${esc(sel.slice(0,6).map(t=>t.invNo).join(', '))}${sel.length>6?' и ещё '+(sel.length-6):''}</div>
+        <div style="display:grid;gap:10px">${fields}<label>Примечание<br><input class="rt-inp" id="sie-note" style="width:100%"></label></div>
+        <div class="c-red" id="sie-err" style="margin-top:8px"></div></div>
+        <div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn pri" data-d="ok">Записать</button></div></div>`;
+      document.body.appendChild(w);
+      const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
+      w.querySelector('[data-d="ok"]').onclick=async()=>{
+        const V=(id)=>{ const el=w.querySelector('#'+id); return el?el.value.trim():''; };
+        const body={ ids:sel.map(t=>String(t.id)), event:V('sie-kind'), date:V('sie-date'), note:V('sie-note'),
+          calCert:V('sie-cert'), interval:V('sie-int'), calNext:V('sie-next'),
+          section:V('sie-sec'), place:V('sie-place'), responsible:V('sie-resp') };
+        try{ const j=await postJson('/api/si/event',body); close(); toast(j.event+': '+j.count+' шт','ok'); siSel=new Set(); renderSi(host); }
+        catch(e){ w.querySelector('#sie-err').textContent=e.message; }
+      };
+    }
+    // печать этикеток: формат и отбор
+    function siLabelsDialog(){
+      const sel=siPicked(), list=sel.length?sel:siFiltered();
+      const w=document.createElement('div'); w.className='ui-dlg';
       w.innerHTML=`<div class="ui-dlg-box" role="dialog"><div class="ui-dlg-h">Этикетки на приборы</div><div class="ui-dlg-t">
         <div style="display:grid;gap:10px">
-          <label>Формат этикетки<br><select id="sl-size" class="rt-inp" style="width:100%"><option value="30x15">30 × 15 мм — малая (штангенциркуль, микрометр)</option><option value="50x20">50 × 20 мм — средняя</option><option value="58x30">58 × 30 мм — крупная (с наименованием и свидетельством)</option></select></label>
-          <label>Что печатать<br><select id="sl-what" class="rt-inp" style="width:100%"><option value="all">все приборы реестра (${list.length})</option><option value="cal">только с действующей поверкой (${list.filter(i=>i.calState==='ok'||i.calState==='soon').length})</option><option value="none">только без данных о поверке (${noCal})</option></select></label>
-          <div class="cut-note">На этикетке: инв. №, срок поверки (или «поверка не проведена»), штрихкод Code128 по инв. № — сканер на рабочем месте подставит прибор в «чем меряли».</div>
+          <label>Формат<br><select id="sl-size" class="rt-inp" style="width:100%"><option value="30x15">30 × 15 мм — малая (влезает на штангенциркуль)</option><option value="50x20">50 × 20 мм — средняя</option><option value="58x30">58 × 30 мм — крупная, с наименованием и свидетельством</option></select></label>
+          <div class="c-gray" style="font-size:12px">Печатается ${list.length} шт${sel.length?' (отмеченные галочками)':' (всё, что сейчас в списке)'}. На этикетке: инв. №, «до ММ.ГГ» или «поверка не проведена», штрихкод Code128 — сканер на рабочем месте подставит прибор в «чем меряли».</div>
         </div></div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn pri" data-d="ok">Печать</button></div></div>`;
       document.body.appendChild(w);
       const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
-      w.querySelector('[data-d="ok"]').onclick=()=>{
-        const size=w.querySelector('#sl-size').value, what=w.querySelector('#sl-what').value;
-        const sel=list.filter(i=>what==='all'||(what==='cal'?(i.calState==='ok'||i.calState==='soon'):i.calState==='none'));
-        close(); if(!sel.length){ toast('Нечего печатать.','warn'); return; }
-        window.open('/api/tools/si-labels?size='+encodeURIComponent(size)+'&ids='+encodeURIComponent(sel.map(i=>i.id).join(',')),'_blank');
-      };
+      w.querySelector('[data-d="ok"]').onclick=()=>{ const size=w.querySelector('#sl-size').value; close();
+        if(!list.length){ toast('Нечего печатать.','warn'); return; }
+        window.open('/api/si/labels?size='+encodeURIComponent(size)+'&ids='+encodeURIComponent(list.map(t=>t.id).join(',')),'_blank'); };
     }
     function tlCalCell(i){ if(!i.calNext) return '<span class="c-gray">—</span>'; const c=i.calOverdue?'c-red':(i.calSoon?'c-amber':'c-gray'); return `<span class="${c}"${i.calOverdue?' style="font-weight:700"':''}>${fmt(i.calNext)}</span>`; }
     // K-55: «Где» — склад·ячейка (нейтр.) / цех·участок (жёлтый chip)

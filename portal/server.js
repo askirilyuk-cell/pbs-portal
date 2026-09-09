@@ -10835,6 +10835,7 @@ function rbacEnforceOn() {
 // Активно ТОЛЬКО при RBAC_ENFORCE ON. /auth/*, /api/me|health|test|admin/* — всегда доступны.
 async function rbacEnforce(req, res, p) {
   if (!rbacEnforceOn()) return false;                 // OFF → пропускаем всё (как сейчас)
+  if (req.session && req.session.isStation) return false; // K-206f: пост участка уже ограничен своим белым списком путей (см. middleware) — ролевые права цеха к нему не применяем
   if (!p.startsWith('/api/')) return false;           // статика/экран входа — на клиенте
   if (p === '/api/me' || p === '/api/health' || p === '/api/test' || p.startsWith('/api/admin/')) return false;
   const role = req.role || 'guest';                    // первичная роль (для сообщений)

@@ -11182,7 +11182,7 @@ function handleMe(req, res) {
     roles: s.roles || [], bypass: !!s.bypass,
     isStation: !!s.isStation, station: s.station || null, operator: (() => { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) persistSessions(); return raw && raw.operator ? { id: raw.operator.id, fio: raw.operator.fio, role: raw.operator.role, since: raw.operator.since } : null; })(), // K-206
     // K-49 Шаг 2/3: флаг enforcement + ОБЪЕДИНЁННАЯ карта доступа набора ролей (для скрытия/read-only на фронте).
-    enforce, access: rbacAccessMapMulti(effectiveRoles), portalRoles: PORTAL_ROLES.filter((r) => r !== 'guest'),
+    enforce, access: s.isStation ? { station: 'write', board: 'view' } : rbacAccessMapMulti(effectiveRoles), portalRoles: PORTAL_ROLES.filter((r) => r !== 'guest'), // K-206: пост пишет только в «Рабочее место»
   });
 }
 // K-49 переключатель ролей (только Админ): POST /api/admin/view-as {role} → effectiveRole в сессию.

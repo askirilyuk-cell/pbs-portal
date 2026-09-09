@@ -4770,7 +4770,7 @@ function eventsWarnOnce(e) {
   console.warn('Лента событий: запись недоступна (таблицы «События» может не быть до APPLY migrate-047) — события не пишутся:', String((e && e.message) || e));
 }
 // ФИО автора события: сессия портала → X-Actor сервисного агента → пусто (система)
-const eventWho = (req, svc) => (req && req.session && req.session.fio) || (svc && svc.actor) || '';
+const eventWho = (req, svc) => (req && req.session && req.session.isStation && req.session.operator && req.session.operator.fio) || (req && req.session && req.session.fio) || (svc && svc.actor) || ''; // K-206: на посту — оператор
 // K-124: «Герасимов Артем Сергеевич» → «Герасимов А.С.» для подписи в печатных формах.
 //  Принимает либо три части, либо одну строку «Фамилия Имя [Отчество]».
 function fioInitials(last, first, middle) {
@@ -10883,6 +10883,64 @@ ensureAuthRuntime();
 
 function loadSessions() { try { return JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8')); } catch { return {}; } }
 let sessions = loadSessions();
+// ══ K-206: посты участков (киоски) — вход по токену поста, оператор представляется личной биркой ═════════════════
+//  runtime.STATION_POSTS = [{id, section, name, token, createdAt, lastSeen}]; сессия поста живёт год, оператор — до 30 мин бездействия.
+const STATION_SESSION_TTL = 365 * 24 * 3600 * 1000;
+const STATION_OPERATOR_IDLE = 30 * 60 * 1000;
+const BADGE_PREFIX = 'СОТР-';
+const stationPosts = () => { const raw = runtime.STATION_POSTS; if (Array.isArray(raw)) return raw; try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+function stationPostsSave(list) { runtime.STATION_POSTS = list; try { fs.writeFileSync(RUNTIME_FILE, JSON.stringify(runtime, null, 2)); } catch (e) { console.warn('[station] STATION_POSTS не сохранён:', e.message); } }
+function stationTouch(sess) { // бездействие → оператор «выходит»; возвращает true, если что-то изменилось
+  if (!sess || !sess.isStation || !sess.operator) return false;
+  if (Date.now() - (sess.operator.at || 0) > STATION_OPERATOR_IDLE) { sess.operator = null; return true; }
+  return false;
+}
+function stationSessionRaw(req) { const sid = parseCookies(req).pbs_sid; return sid ? sessions[sid] : null; }
+async function stationSectionEmployees(sectionCode) {
+  const [emps, secs] = await Promise.all([ncListSoft('employees'), ncListSoft('sections')]);
+  const sec = secs.find((x) => String(x['Код'] || '').trim() === String(sectionCode || '').trim());
+  const secId = sec ? (sec.Id ?? sec.id) : null;
+  const active = emps.filter((e) => e['Активен'] !== false && e['Активен'] !== 0);
+  const linked = (sec && Array.isArray(sec['Сотрудники участка']) ? sec['Сотрудники участка'].map((x) => x.Id ?? x.id) : []);
+  const mine = active.filter((e) => (secId != null && Number(e.sections_id) === Number(secId)) || linked.includes(e.Id ?? e.id));
+  return (mine.length ? mine : active).map((e) => ({ id: e.Id ?? e.id, fio: e['ФИО'] || '', role: e['Роль'] || '', badge: e['Код бейджа'] || '', hasPin: !!String(e['ПИН'] || '').trim(), own: mine.length > 0 }));
+}
+async function stationEnsureEmployeeCols() { try { await ncEnsureColumn('employees', 'Код бейджа', 'SingleLineText'); await ncEnsureColumn('employees', 'ПИН', 'SingleLineText'); } catch (e) { console.warn('[station] колонки сотрудников:', e.message); } }
+async function stationSetOperator(sess, body) {
+  await stationEnsureEmployeeCols();
+  const emps = (await ncListSoft('employees')).filter((e) => e['Активен'] !== false && e['Активен'] !== 0);
+  let emp = null;
+  const badge = String(body.badge || '').trim().toUpperCase();
+  if (badge) { emp = emps.find((e) => String(e['Код бейджа'] || '').trim().toUpperCase() === badge) || (badge.startsWith(BADGE_PREFIX) ? emps.find((e) => String(e.Id ?? e.id) === badge.slice(BADGE_PREFIX.length)) : null); if (!emp) { const err = new Error(`Бейдж ${badge} не найден среди активных сотрудников.`); err.status = 404; throw err; } }
+  else {
+    emp = emps.find((e) => String(e.Id ?? e.id) === String(body.employeeId)); if (!emp) { const err = new Error('Сотрудник не найден.'); err.status = 404; throw err; }
+    const pin = String(emp['ПИН'] || '').trim(); if (pin && pin !== String(body.pin || '').trim()) { const err = new Error('Неверный ПИН.'); err.status = 403; throw err; }
+  }
+  sess.operator = { id: emp.Id ?? emp.id, fio: emp['ФИО'] || '', role: emp['Роль'] || '', at: Date.now(), since: new Date().toISOString() };
+  persistSessions();
+  logEvent({ type: 'комментарий', obj: 'Пост', objNum: (sess.station && sess.station.section) || '', who: sess.operator.fio, details: `оператор представился на посту «${(sess.station && sess.station.name) || ''}»${badge ? ' по бейджу' : ''}` });
+  return sess.operator;
+}
+// Code128B → SVG (для бейджей и бирок; сканеры читают Code128 из коробки). Таблица ширин — стандарт ISO/IEC 15417.
+const C128 = '212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 2331112'.split(' ');
+function code128Svg(text, h) {
+  const t = String(text || ''); const vals = [104]; // START B
+  for (const ch of t) { const c = ch.charCodeAt(0); vals.push(c >= 32 && c <= 126 ? c - 32 : 0); }
+  let sum = vals[0]; for (let i = 1; i < vals.length; i++) sum += vals[i] * i; vals.push(sum % 103); vals.push(106);
+  let x = 0; const rects = [];
+  for (const v of vals) { const w = C128[v]; for (let i = 0; i < w.length; i++) { const n = Number(w[i]); if (i % 2 === 0) rects.push(`<rect x="${x}" y="0" width="${n}" height="${h || 40}"/>`); x += n; } }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} ${h || 40}" width="${x * 2}" height="${(h || 40) * 2}" shape-rendering="crispEdges" preserveAspectRatio="none">${rects.join('')}</svg>`;
+}
+async function stationBadgesHtml(sectionCode, ids) {
+  await stationEnsureEmployeeCols();
+  let list = await stationSectionEmployees(sectionCode);
+  if (ids && ids.length) list = list.filter((e) => ids.includes(String(e.id)));
+  const upd = [];
+  for (const e of list) { if (!e.badge) { e.badge = BADGE_PREFIX + e.id; upd.push({ Id: e.id, 'Код бейджа': e.badge }); } }
+  if (upd.length) { try { await ncUpdateMany('employees', upd); } catch (er) { console.warn('[station] коды бейджей не записаны:', er.message); } }
+  const cards = list.map((e) => `<div class="lb"><div class="n">${hesc(e.fio)}</div><div class="r">${hesc(e.role || '')}${sectionCode ? ' · ' + hesc(sectionCode) : ''}</div><div class="bc">${code128Svg(e.badge, 38)}</div><div class="c">${hesc(e.badge)} · ООО «Петробалт Сервис» · портал ИСМ</div></div>`).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Бейджи сотрудников ${hesc(sectionCode || '')}</title><style>@page{size:100mm 50mm;margin:3mm}body{margin:0;font-family:system-ui,Arial,sans-serif}.lb{width:94mm;height:44mm;box-sizing:border-box;padding:2mm 3mm;page-break-after:always;border:.2mm dashed #999;display:flex;flex-direction:column;justify-content:space-between}.n{font-size:16pt;font-weight:800}.r{font-size:9pt;color:#333}.bc svg{width:70mm;height:14mm}.c{font-size:8pt;color:#333}@media screen{body{background:#eee;padding:10px}.lb{background:#fff;margin:0 0 8px}}</style></head><body>${cards || '<p>Сотрудников нет.</p>'}<scr` + `ipt>setTimeout(function(){window.print()},300)</scr` + `ipt></body></html>`;
+}
 function persistSessions() { try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions)); } catch {} }
 function parseCookies(req) {
   const out = {}; const h = req.headers.cookie; if (!h) return out;
@@ -11075,6 +11133,19 @@ async function handleAuth(req, res, p, url) {
     if (req.method === 'POST') { sendJson(res, 200, { ok: true }); return true; }
     res.writeHead(302, { Location: '/' }); res.end(); return true;
   }
+  if (p === '/auth/station') { // K-206: вход поста участка по токену (киоск)
+    const token = String(url.searchParams.get('token') || '').trim();
+    const post = stationPosts().find((x) => x.token && x.token === token);
+    if (!post) { res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Неверный токен поста. Токены — Настройки → «Посты участков».'); return true; }
+    const sid = crypto.randomBytes(24).toString('hex');
+    sessions[sid] = { userId: 'post:' + post.id, fio: `Пост ${post.section}${post.name ? ' · ' + post.name : ''}`, position: 'рабочее место', email: '', depts: [],
+      roles: ['station'], role: 'Цех', portalRoles: ['Цех'], isAdmin: false, isStation: true, station: { postId: post.id, section: post.section, name: post.name || '' }, operator: null, exp: Date.now() + STATION_SESSION_TTL };
+    persistSessions();
+    const list = stationPosts(); const me = list.find((x) => x.id === post.id); if (me) { me.lastSeen = new Date().toISOString(); stationPostsSave(list); }
+    setCookie(res, 'pbs_sid', sid, { maxAge: Math.floor(STATION_SESSION_TTL / 1000) });
+    console.log(`[auth] пост ${post.section}: выдана сессия киоска`);
+    res.writeHead(302, { Location: '/#station' }); res.end(); return true;
+  }
   if (p === '/auth/admin') {
     // K-49 админ-обход: локальный вход по токену из runtime (на случай сбоя SSO).
     const token = url.searchParams.get('token') || '';
@@ -11107,6 +11178,7 @@ function handleMe(req, res) {
     role, effectiveRole, effectiveRoles, isAdmin: !!s.isAdmin, live: isLive(),
     viewAs: (s.isAdmin && s.effectiveRole && s.effectiveRole !== role) ? s.effectiveRole : null,
     roles: s.roles || [], bypass: !!s.bypass,
+    isStation: !!s.isStation, station: s.station || null, operator: (() => { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) persistSessions(); return raw && raw.operator ? { id: raw.operator.id, fio: raw.operator.fio, role: raw.operator.role, since: raw.operator.since } : null; })(), // K-206
     // K-49 Шаг 2/3: флаг enforcement + ОБЪЕДИНЁННАЯ карта доступа набора ролей (для скрытия/read-only на фронте).
     enforce, access: rbacAccessMapMulti(effectiveRoles), portalRoles: PORTAL_ROLES.filter((r) => r !== 'guest'),
   });
@@ -11433,6 +11505,7 @@ const server = http.createServer(async (req, res) => {
     // K-49 middleware (МЯГКИЙ режим): определяем сессию/роль и кладём в контекст запроса.
     //  НИЧЕГО не блокирует — существующие /api/* работают как раньше (роль лишь информативна).
     req.session = sessionFromReq(req);
+    if (req.session && req.session.isStation) { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) { persistSessions(); req.session.operator = null; } else if (raw && raw.operator && req.method !== 'GET') raw.operator.at = Date.now(); } // K-206
     req.roles = sessionPortalRoles(req.session);           // мультироль: эффективный набор портальных ролей
     req.role = req.roles[0] || 'guest';                    // первичная (для сообщений/обратной совместимости)
     if (p === '/api/me') return handleMe(req, res);
@@ -11440,6 +11513,22 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/admin/reset-view' && req.method === 'POST') { await handleResetView(req, res); return; }
     if (p === '/api/admin/roles' && req.method === 'GET') { await handleRolesGet(req, res); return; }
     if (p === '/api/admin/roles' && req.method === 'POST') { await handleRolesPost(req, res); return; }
+    // ── K-206: посты участков и оператор ──────────────────────────────────────────────
+    if (p === '/api/admin/station-posts') {
+      const s = req.session; if (!s || !s.isAdmin) return sendJson(res, 403, { error: 'Только администратор.' });
+      if (req.method === 'POST') { const b = await readBody(req); let list = stationPosts();
+        if (b.action === 'add') { const section = String(b.section || '').trim(); if (!section) return sendJson(res, 400, { error: 'Укажите код участка.' }); const id = Date.now().toString(36); list.push({ id, section, name: String(b.name || '').trim(), token: crypto.randomBytes(18).toString('hex'), createdAt: new Date().toISOString(), lastSeen: '' }); }
+        else if (b.action === 'remove') { list = list.filter((x) => x.id !== String(b.id)); for (const [sid, ss] of Object.entries(sessions)) if (ss && ss.isStation && ss.station && ss.station.postId === String(b.id)) delete sessions[sid]; persistSessions(); }
+        else if (b.action === 'rotate') { const x = list.find((y) => y.id === String(b.id)); if (x) x.token = crypto.randomBytes(18).toString('hex'); }
+        stationPostsSave(list); }
+      const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+      return sendJson(res, 200, { ok: true, posts: stationPosts().map((x) => ({ ...x, url: `${portal}/auth/station?token=${x.token}` })) });
+    }
+    if (p === '/api/station/operators' && req.method === 'GET') { const s = req.session; if (!s) return sendJson(res, 401, { error: 'Нет сессии.' }); const sec = url.searchParams.get('section') || (s.station && s.station.section) || ''; try { return sendJson(res, 200, { ok: true, section: sec, operators: await stationSectionEmployees(sec) }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/station/operator' && req.method === 'POST') { const raw = stationSessionRaw(req); if (!raw) return sendJson(res, 401, { error: 'Нет сессии.' }); try { const op = await stationSetOperator(raw, await readBody(req)); return sendJson(res, 200, { ok: true, operator: { id: op.id, fio: op.fio, role: op.role, since: op.since } }); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    if (p === '/api/station/operator/clear' && req.method === 'POST') { const raw = stationSessionRaw(req); if (raw) { raw.operator = null; persistSessions(); } return sendJson(res, 200, { ok: true }); }
+    if (p === '/api/station/touch' && req.method === 'POST') { const raw = stationSessionRaw(req); if (raw && raw.operator) { if (stationTouch(raw)) { persistSessions(); return sendJson(res, 200, { ok: true, operator: null, expired: true }); } raw.operator.at = Date.now(); } return sendJson(res, 200, { ok: true, operator: raw && raw.operator ? { id: raw.operator.id, fio: raw.operator.fio } : null }); }
+    if (p === '/api/station/badges' && req.method === 'GET') { const s = req.session; if (!s || !(s.isAdmin || (s.roles || []).some((r) => ['admin', 'Технолог', 'Руководство'].includes(r)))) return sendJson(res, 403, { error: 'Печать бейджей — администратор, технолог или руководство.' }); try { const html = await stationBadgesHtml(url.searchParams.get('section') || '', String(url.searchParams.get('ids') || '').split(',').filter(Boolean)); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     // K-49 Шаг 2: серверный enforcement (активен ТОЛЬКО при RBAC_ENFORCE ON; иначе no-op).
     if (await rbacEnforce(req, res, p)) return;
     if (p === '/api/health') return sendJson(res, 200, { ok: true, ...settingsView() });

@@ -16268,24 +16268,31 @@
     const ed=()=>{const d=document.getElementById('eq-drawer');return d&&d.classList.contains('on')?d:null;}; // K-153: дровер оборудования
     const nd=()=>{const d=document.getElementById('onec-drawer');return d&&d.classList.contains('on')?d:null;}; // K-156: дровер позиции 1С
     const rd=()=>{const d=document.getElementById('retro-drawer');return d&&d.classList.contains('on')?d:null;}; // K-158: дровер акта выпуска
-    const open=()=>!!document.getElementById('od-tabs')||!!zd()||!!ed()||!!nd()||!!rd();
+    const sd=()=>{const d=document.getElementById('si-drawer');return d&&d.classList.contains('on')?d:null;}; // K-208: дровер прибора СИ
+    const open=()=>!!document.getElementById('od-tabs')||!!zd()||!!ed()||!!nd()||!!rd()||!!sd();
+    // K-212: диалоги uiConfirm/uiPrompt/uiAlert (#ui-dlg, .ui-dlg) живут в body, вне дровера — клик по их кнопке
+    // не должен считаться «кликом вне панели». Иначе: «Незаконченный акт → Продолжить» закрывал дровер
+    // ещё на mousedown, акт «возвращался к списку», а локальная копия оставалась — закольцовка (Герасимов, 10.09).
+    const dlgOpen=()=>!!document.querySelector('#ui-dlg,.ui-dlg');
     const modalOpen=()=>{const m=document.getElementById('modal');return !!(m&&m.classList.contains('open'));};
     const close=()=>{ if(zd()){ if(typeof znzFormBack==='function') znzFormBack(); return; }
       if(ed()){ if(typeof eqDrawerClose==='function') eqDrawerClose(); return; }
       if(nd()){ if(typeof onecDrawerClose==='function') onecDrawerClose(); return; }
       if(rd()){ if(typeof retroDrawerClose==='function') retroDrawerClose(); return; }
+      if(sd()){ if(typeof siDrawerClose==='function') siDrawerClose(); return; }
       const x=document.getElementById('od-x'); if(x) x.click(); };
     document.addEventListener('mousedown',(ev)=>{
       if(!open())return;
-      const e=zd()||ed()||nd()||rd()||od();
+      if(dlgOpen()||ev.target.closest('#ui-dlg,.ui-dlg'))return; // K-212: диалог поверх дровера — дровер не закрываем
+      const e=zd()||ed()||nd()||rd()||sd()||od();
       if(e&&e.contains(ev.target))return;       // клик внутри панели — не трогаем
       if(ev.target.closest('#ogrid'))return;    // клик по строке списка = выбор другой карточки
       if(ev.target.closest('[data-znz]'))return;// то же для списка заявок
-      if(ev.target.closest('#eqreggrid,#eqsecgrid,#onecgrid,#retrogrid'))return;// то же для реестров оборудования и участков (K-153)
+      if(ev.target.closest('#eqreggrid,#eqsecgrid,#onecgrid,#retrogrid,#sigrid,#sijgrid'))return;// то же для реестров оборудования, участков, актов и СИ
       if(modalOpen()||ev.target.closest('#modal,#mscrim'))return; // модалка поверх дровера — дровер не закрываем
       close();
     },true);
-    document.addEventListener('keydown',(ev)=>{ if(ev.key==='Escape'&&open()&&!modalOpen()) close(); });
+    document.addEventListener('keydown',(ev)=>{ if(ev.key==='Escape'&&open()&&!modalOpen()&&!dlgOpen()) close(); }); // K-212: Escape в диалоге закрывает диалог, не дровер
     // уход из раздела оборудования (смена #hash) — дровер живёт в body, закрываем сами
     window.addEventListener('hashchange',()=>{ if(ed()&&!String(location.hash||'').startsWith('#equipment')&&typeof eqDrawerClose==='function') eqDrawerClose(false); if(nd()&&!String(location.hash||'').startsWith('#onec')&&typeof onecDrawerClose==='function') onecDrawerClose(false); if(rd()&&!String(location.hash||'').startsWith('#retro')&&typeof retroDrawerClose==='function') retroDrawerClose(false); });
   })();

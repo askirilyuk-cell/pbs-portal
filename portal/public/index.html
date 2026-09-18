@@ -11293,10 +11293,9 @@
             <div style="grid-column:span 4">${FLAB('Категория')}<select id="te-cat" style="${FINP}"><option value="">—</option>${opt((dict.categories||[]).filter(c=>['Токарные','Фрезерные','Пресс-формы','Оправки','Прочее'].includes(c)),it.category)}</select></div>
             <div style="grid-column:span 4">${FLAB('Инв. №'+(edit?'':' (авто ОСН-ГГММ-NNN)'))}<input id="te-inv" style="${FINP}" value="${esc(it.invNo||'')}" ${edit?'':'placeholder="присвоится автоматически"'}></div>
             <div style="grid-column:span 4">${FLAB('Код 1С (для списания)')}<input id="te-code1c" style="${FINP}" value="${esc(it.code1c||'')}" placeholder="БП-000NNNN"></div>
-            <div style="grid-column:span 4">${FLAB('№ СФ (счёт-фактура)')}<input id="te-invoice" style="${FINP}" value="${esc(it.invoiceNo||'')}"></div>
             <div style="grid-column:span 4">${FLAB('Участок приписки')}<select id="te-sec" style="${FINP}"><option value="">— не задан —</option>${(sectionsList()||[]).map(sx=>`<option value="${esc(sx.code)}"${sx.code===(it.sectionCode||'')?' selected':''}>${esc(sx.code)}${sx.name?' · '+esc(sx.name):''}</option>`).join('')}</select></div>
-            <div style="grid-column:span 4">${FLAB('Местоположение')}<input id="te-loc" list="te-stations" style="${FINP}" value="${esc(it.location||'')}" placeholder="Склад / станок"><datalist id="te-stations">${stationList}</datalist></div>
-            <div style="grid-column:span 4">${FLAB('Статус')}<select id="te-status" style="${FINP}">${opt(['В эксплуатации','На станке','Списан'],it.status||'В эксплуатации')}</select></div>
+            <div style="grid-column:span 4">${FLAB('Где именно на участке')}<select id="te-loc" style="${FINP}">${tlPlaceOptions(it.sectionCode||'',it.location||'')}</select></div>
+            <div style="grid-column:span 4">${FLAB('Статус')}<select id="te-status" style="${FINP}">${opt(['В эксплуатации','Списан'],it.status==='Списан'?'Списан':'В эксплуатации')}</select></div>
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="te-note" style="${FINP}" value="${esc(it.note||'')}"></div>`; }
       else if(sub==='si'){ title=edit?'СИ '+esc(it.invNo||it.code):'Новое СИ (мерительный инструмент)';
         fields=`
@@ -11345,6 +11344,7 @@
       modal.classList.add('open'); mscrim.classList.add('open');
       document.getElementById('mx').onclick=closeModal; document.getElementById('te-cancel').onclick=closeModal;
       { const rk=document.getElementById('te-rigkind'), cb=document.getElementById('te-clampbox'); if(rk&&cb)rk.onchange=()=>{ cb.style.display=rk.value==='Зажимное устройство'?'grid':'none'; }; } // K-228
+      { const sc=document.getElementById('te-sec'), lc=document.getElementById('te-loc'); if(sc&&lc&&lc.tagName==='SELECT'){ sc.onchange=()=>{ lc.innerHTML=tlPlaceOptions(sc.value,''); }; if(typeof EQ==='undefined'||!EQ)loadEquipReg().then(()=>{ const cur=lc.value; lc.innerHTML=tlPlaceOptions(sc.value,cur); }); } } // K-229
       // K-39 (5a/5b): переключатель подраздела в шапке формы заведения — меняет набор полей
       if(!edit)modal.querySelectorAll('#te-sub button').forEach(b=>b.onclick=()=>{if(b.dataset.sub!==sub)openToolEdit(null,b.dataset.sub);});
       document.getElementById('te-save').onclick=async()=>{
@@ -12030,6 +12030,13 @@
       osn:'Инвентарный учёт: инв.№, статус, местоположение · приёмка, перемещение, списание.'};
     // K-227: в мастере заведения инструмента/оснастки — поиск по зеркалу номенклатуры 1С. Выбранная позиция
     // даёт наименование, код 1С (для списания) и единицу; всё можно поправить руками после подстановки.
+    // K-229: место оснастки — участок и станок на нём (из реестра оборудования), а не общий список моделей станков
+    function tlPlaceOptions(secCode,cur){ const eq=((typeof EQ!=='undefined'&&EQ&&EQ.items)||[]); const sec=(sectionsList()||[]).find(x=>x.code===secCode); const c=String(cur||'');
+      const here=eq.filter(e=>secCode&&(String(e.sectionName||'').includes(secCode)||(sec&&sec.name&&String(e.sectionName||'').trim()===String(sec.name).trim())));
+      const lab=(e)=>[e.model||e.name,e.invNo].filter(Boolean).join(' · ');
+      let h=`<option value="Склад"${c==='Склад'||!c?' selected':''}>${secCode?'на участке, не на станке':'Склад'}</option>`+here.map(e=>`<option value="${esc(lab(e))}"${c===lab(e)?' selected':''}>${esc(lab(e))}</option>`).join('');
+      if(c&&c!=='Склад'&&!here.some(e=>lab(e)===c))h+=`<option value="${esc(c)}" selected>${esc(c)}</option>`;
+      if(secCode&&!here.length)h+='<option disabled>— на участке нет станков в реестре оборудования —</option>'; return h; }
     async function tlWiz1cMount(host){ const nameEl=host.querySelector('#wz-name'); if(!nameEl||host.querySelector('#wz-1c'))return; let grid=nameEl.parentElement; while(grid&&!/grid-template-columns|display:\s*grid/.test(grid.getAttribute('style')||''))grid=grid.parentElement; // сетка полей шага (а не ячейка «grid-column:span 12» — блок попадал в одну колонку из 12)
       if(!grid||!grid.parentElement)return;
       const box=document.createElement('div'); box.id='wz-1c'; box.style.cssText='margin:0 0 14px;padding:12px 14px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)';
@@ -12052,7 +12059,7 @@
       q.oninput=paint; st.onchange=paint; paint(); }
     function tlWizCollect(){
       const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():undefined;};
-      ['name','type','category','subcategory','code1c','unit','cell','minStock','balance','accuracyRange','invNo','calDate','calNext','calCert','location','status','rigKind','invoiceNo','note','clampKind','chuckDia','boreDia','spindleMount','maxRpm'].forEach(k=>{const v=V('wz-'+k);if(v!==undefined)tlWizData[k]=v;});
+      ['name','type','category','subcategory','code1c','unit','cell','minStock','balance','accuracyRange','invNo','calDate','calNext','calCert','location','status','rigKind','invoiceNo','note','sectionCode','clampKind','chuckDia','boreDia','spindleMount','maxRpm'].forEach(k=>{const v=V('wz-'+k);if(v!==undefined)tlWizData[k]=v;});
     }
     function tlWizardBody(host){
       const step=tlWizStep, sub=tlWizSub, d=tlWizData;
@@ -12079,7 +12086,7 @@
         if(sub==='osn'){ flds=`
             <div style="grid-column:span 12">${FLAB('Наименование',true)}<input id="wz-name" style="${FINP}" value="${val('name')}" placeholder="напр. Оправка цанговая BT40-ER32"></div>
             <div style="grid-column:span 6">${FLAB('Вид оснастки')}<select id="wz-rigKind" style="${FINP}">${sel(dict.rigKinds||['Державка','Приспособление','Пресс-форма','Оправка'],d.rigKind)}</select></div>
-            <div style="grid-column:span 6">${FLAB('Категория')}<select id="wz-category" style="${FINP}">${sel((dict.categories||[]).filter(c=>c!=='Мерительный/СИ'),d.category)}</select></div>
+            <div id="wz-catbox" style="grid-column:span 6;${d.rigKind==='Зажимное устройство'?'visibility:hidden':''}">${FLAB('Категория')}<select id="wz-category" style="${FINP}">${sel((dict.categories||[]).filter(c=>['Пресс-формы','Оправки','Прочее'].includes(c)),d.category)}</select></div>
             <div style="grid-column:span 6">${FLAB('Инв. № (авто ОСН-ГГММ-NNN)')}<input id="wz-invNo" style="${FINP}" value="${val('invNo')}" placeholder="присвоится автоматически"></div>
             <div style="grid-column:span 6">${FLAB('Код 1С (для списания)')}<input id="wz-code1c" style="${FINP}" value="${val('code1c')}" placeholder="БП-000NNNN"></div>
             <div id="wz-clampbox" style="grid-column:span 12;display:${d.rigKind==='Зажимное устройство'?'grid':'none'};grid-template-columns:repeat(12,1fr);gap:12px;padding:12px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)">
@@ -12120,9 +12127,9 @@
         const stationList=locs.filter(l=>l.assign&&l.assign.indexOf('Станок')>=0).map(l=>`<option value="${esc(l.code)}">`).join('');
         let flds;
         if(sub==='osn'){ flds=`
-            <div style="grid-column:span 4">${FLAB('Местоположение')}<input id="wz-location" list="wz-stations" style="${FINP}" value="${val('location')}" placeholder="Склад / станок"><datalist id="wz-stations">${stationList}</datalist></div>
-            <div style="grid-column:span 4">${FLAB('№ СФ (счёт-фактура)')}<input id="wz-invoiceNo" style="${FINP}" value="${val('invoiceNo')}"></div>
-            <div style="grid-column:span 4">${FLAB('Статус')}<select id="wz-status" style="${FINP}">${sel(['В эксплуатации','На станке','Списан'],d.status||'В эксплуатации')}</select></div>
+            <div style="grid-column:span 4">${FLAB('Участок')}<select id="wz-sectionCode" style="${FINP}"><option value="">— склад / участок не задан —</option>${(sectionsList()||[]).map(sx=>`<option value="${esc(sx.code)}"${sx.code===(d.sectionCode||'')?' selected':''}>${esc(sx.code)}${sx.name?' · '+esc(sx.name):''}</option>`).join('')}</select></div>
+            <div style="grid-column:span 4">${FLAB('Где именно на участке')}<select id="wz-location" style="${FINP}">${tlPlaceOptions(d.sectionCode||'',d.location||'')}</select></div>
+            <div style="grid-column:span 4">${FLAB('Статус')}<select id="wz-status" style="${FINP}">${['В эксплуатации','Списан'].map(o=>`<option${(d.status||'В эксплуатации')===o?' selected':''}>${o}</option>`).join('')}</select></div>
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="wz-note" style="${FINP}" value="${val('note')}"></div>`; }
         else if(sub==='si'){ flds=`
             <div style="grid-column:span 4">${FLAB('Дата поверки')}<input id="wz-calDate" type="date" style="${FINP}" value="${val('calDate')}"></div>
@@ -12154,8 +12161,10 @@
         const bk=host.querySelector('#wz-back'); if(bk)bk.onclick=()=>{tlWizCollect();tlWizStep=step-1;tlWizardBody(host);};
         const nx=host.querySelector('#wz-next'); if(nx)nx.onclick=()=>{tlWizCollect();if(!(tlWizData.name||'').trim()){toast('Укажите наименование.','err');return;}tlWizStep=3;tlWizardBody(host);};
         const fn=host.querySelector('#wz-finish'); if(fn)fn.onclick=()=>tlWizSave(host);
+        if(step===3&&sub==='osn'){ const sc=host.querySelector('#wz-sectionCode'), lc=host.querySelector('#wz-location'); if(sc&&lc)sc.onchange=()=>{ lc.innerHTML=tlPlaceOptions(sc.value,''); }; // K-229
+          if(typeof EQ==='undefined'||!EQ){ loadEquipReg().then(()=>{ if(tlTab==='wizard'&&tlWizStep===3&&tlWizSub==='osn'){ tlWizCollect(); tlWizardBody(host); } }); } }
         if(step===2){ tlWiz1cMount(host); const rk=host.querySelector('#wz-rigKind'), cb=host.querySelector('#wz-clampbox'); // K-228
-          if(rk&&cb){ rk.addEventListener('change',()=>{ cb.style.display=rk.value==='Зажимное устройство'?'grid':'none'; });
+          if(rk&&cb){ rk.addEventListener('change',()=>{ const on=rk.value==='Зажимное устройство'; cb.style.display=on?'grid':'none'; const cx=host.querySelector('#wz-catbox'); if(cx){ cx.style.visibility=on?'hidden':''; if(on){ const c0=host.querySelector('#wz-category'); if(c0)c0.value=''; } } });
             const nm0=host.querySelector('#wz-name'); const guess=()=>{ if(!rk.value&&/^\s*(патрон|тиски|планшайб|люнет|цанг)/i.test(nm0.value)){ rk.value='Зажимное устройство'; rk.dispatchEvent(new Event('change')); } }; if(nm0){ nm0.addEventListener('input',guess); guess(); } } } // K-227: поиск позиции в 1С — наименование и код подставляются сами
         if(step===2&&sub==='cut'&&!tcCache.holders){ tlEnsureAux(()=>{ if(tlTab==='wizard'&&tlWizStep===2&&tlWizSub==='cut'){tlWizCollect();tlWizardBody(host);} }); }
       }
@@ -12166,8 +12175,8 @@
       const V=(k)=>String(d[k]||'').trim();
       if(!V('name')){ toast('Укажите наименование (шаг 2).','err'); tlWizStep=2; tlWizardBody(host); return; }
       const body={ name:V('name'), note:V('note'), code1c:V('code1c') };
-      if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('rigKind'); body.category=V('category'); body.invNo=V('invNo'); body.invoiceNo=V('invoiceNo'); body.location=V('location'); body.status=V('status')||'В эксплуатации';
-        if(body.rigKind==='Зажимное устройство'){ body.clampKind=V('clampKind'); body.chuckDia=V('chuckDia'); body.boreDia=V('boreDia'); body.spindleMount=V('spindleMount'); body.maxRpm=V('maxRpm'); } } // K-228
+      if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('rigKind'); body.category=V('category'); body.invNo=V('invNo'); body.invoiceNo=V('invoiceNo'); body.location=V('location'); body.sectionCode=V('sectionCode'); body.status=V('status')||'В эксплуатации';
+        if(body.rigKind==='Зажимное устройство'){ body.category=''; body.clampKind=V('clampKind'); body.chuckDia=V('chuckDia'); body.boreDia=V('boreDia'); body.spindleMount=V('spindleMount'); body.maxRpm=V('maxRpm'); } } // K-228
       else if(sub==='si'){ body.type='Расходный'; body.category='Мерительный/СИ'; body.invNo=V('invNo'); body.accuracyRange=V('accuracyRange'); body.unit=V('unit')||'шт'; body.calDate=V('calDate'); body.calNext=V('calNext'); body.calCert=V('calCert'); body.location=V('location'); body.status=V('status')||'Годен'; }
       else { body.type=V('type')||'Расходный'; body.category=V('category'); body.subcategory=V('subcategory'); body.unit=V('unit')||'шт'; body.cell=V('cell'); body.minStock=V('minStock'); if(V('balance'))body.balance=Number(V('balance')); }
       const fn=host.querySelector('#wz-finish'); if(fn){fn.disabled=true;fn.textContent='Заведение…';}

@@ -2178,7 +2178,9 @@ async function generateTasksFromRoute(routeId) {
         const opPlan = mkParamPlanParse(op['Параметры (план)']); // K-182: значения для этой МК
         for (const pid of _linkIds(ot['Параметры'])) {
           const p = pById.get(pid) || {};
-          const planned = opPlan.find((x) => x.name === String(p['Параметр'] || ''));
+          // K-214: параметр резки переименован («Размер по чертежу» → «Длина реза») — значения старых МК подхватываем по обоим именам
+          const pName = String(p['Параметр'] || ''); const isLen = (n) => /^(длина реза|размер)/i.test(String(n || ''));
+          const planned = opPlan.find((x) => x.name === pName) || (isLen(pName) ? opPlan.find((x) => isLen(x.name)) : null);
           const pvr = await ncCreateMany('task_param_values', [{
             'Параметр': p['Параметр'] || '', 'Единица': p['Единица'] || '',
             'Обязательный': !!p['Обязательный'], 'Норматив': (planned && planned.norm) || p['Норматив'] || '', 'Допуск': (planned && planned.tol) || p['Допуск'] || '', 'Факт': '',

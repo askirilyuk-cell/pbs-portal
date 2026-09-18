@@ -12405,6 +12405,8 @@
                 <div class="cut-task">Отрезать <span class="cut-mono">${qty} шт</span>${blankName?' · '+esc(blankName):''}${L!=null?` · <span class="cut-mono">L = ${esc(String(L))}${tol&&tol.text?' '+esc(tol.text):''} мм</span>`:' · <span class="cut-pill warn">размер реза не задан в МК</span>'}
                   <small>${lo!=null&&hi!=null?`годная длина ${esc(String(lo))}–${esc(String(hi))} мм`:(L!=null?'допуск не задан — режем в размер':'')}${perItem>1?` · ${perItem} заготовки на одно изделие`:''}</small></div>
                 ${rtCutFigureSvg({id:'c'+t.id,L:L!=null?L:'',tol:pSize.tol||'',qty:qty,blank:blankName||''})}
+                ${(()=>{ const modes=(t.params||[]).filter(p=>!CUT_RE_LEN.test(p.name||'')&&!CUT_RE_PER.test(p.name||'')&&!/^(припуск|количество)/i.test(p.name||'')&&String(p.norm||'').trim()); // K-215 (З-006)
+                  return modes.length?`<div class="cut-kv" style="margin-top:8px"><span class="k">Режимы реза</span><span>${modes.map(p=>`${esc(p.name)}: <b class="cut-mono">${esc(String(p.norm))}${p.unit?' '+esc(p.unit):''}</b>${p.tol?' <span class="cut-note">'+esc(p.tol)+'</span>':''}`).join(' · ')}</span></div>`:''; })()}
                 ${t.instructions?`<div class="cut-yellow"><b>Указания технолога:</b> ${esc(t.instructions)}</div>`:''}
                 <div class="cut-yellow" style="font-size:13px"><b>Маркировка</b> маркером на каждой заготовке: <span class="cut-mono">${esc(cutMarking(t,'N'))}</span> · карточка металла ${m?esc(m.code):'…'} — так заготовку в цехе можно отследить до заказа и партии металла.</div>
               </div></div>
@@ -14840,7 +14842,8 @@
     // этап 3 (msg 301): «Со склада (конкретная)» — живая карточка metal_stock (не канон), см. rtWiz.stockList
     const rtStockOptLabel=(s)=>`${s.code||''} · ${[s.rollType,s.grade,s.size].filter(Boolean).join(' ')} · дост. ${rtNum(s.available)} кг`;
     // выбор со склада: нулевые (и отрицательные) доступные остатки не показываем; уже выбранную карточку оставляем, чтобы не «потерять» её при редактировании МК
-    const rtStockPickList=(curId)=>(rtWiz&&rtWiz.stockList||[]).filter(s=>(Number(s.available)||0)>0||(curId!=null&&curId!==''&&String(s.id)===String(curId)));
+    // K-215 (З-008): если канон выбран — показываем только карточки металла, привязанные к этому канону (раньше был виден весь склад: к кругу ст.20 Ø120 предлагался 40Х Ø250)
+    const rtStockPickList=(curId,canonId)=>(rtWiz&&rtWiz.stockList||[]).filter(s=>((Number(s.available)||0)>0&&(canonId==null||canonId===''||String(s.canonId)===String(canonId)))||(curId!=null&&curId!==''&&String(s.id)===String(curId)));
     function rtStockHintHtml(it){
       if(!it)return 'Выберите карточку — покажем последний приход.';
       const li=it.lastIncoming;
@@ -14987,7 +14990,7 @@
     const rtKgHint=(m)=>{ const k=rtCanonKgPerM(m.canonId); const q=parseFloat(String((m.qty!=null&&m.qty!==''?m.qty:m.norm)==null?'':(m.qty!=null&&m.qty!==''?m.qty:m.norm)).replace(',','.')); if(!k||!(q>0))return ''; return (m.unit||'м')==='м'?`≈ ${rtNum(q*k)} кг`:`≈ ${rtNum(q/k)} м`; };
     function rtPlanRowHtml(m,idx){
       const isBlank=m.role==='Заготовка';
-      const stockOpt='<option value="">— подобрать по канону —</option>'+rtStockPickList(m.stockId).map(s=>`<option value="${s.id}"${String(s.id)===String(m.stockId)?' selected':''}>${esc(rtStockOptLabel(s))}</option>`).join('');
+      const stockOpt=`<option value="">${m.canonId&&!rtStockPickList(m.stockId,m.canonId).length?'— по этому канону на складе металла нет остатка —':'— подобрать по канону —'}</option>`+rtStockPickList(m.stockId,m.canonId).map(s=>`<option value="${s.id}"${String(s.id)===String(m.stockId)?' selected':''}>${esc(rtStockOptLabel(s))}</option>`).join('');
       return `<div class="rt-g2" data-pmrow="${idx}" style="margin-top:6px;grid-template-columns:150px minmax(0,1fr) 300px;gap:8px;align-items:start;${isBlank?'background:var(--sk-50);border-radius:var(--r-s);padding:6px':''}">
         <div class="rt-fld"><select class="rt-inp" data-pmf="role" data-pmi="${idx}" title="${rtEscA(RT_ROLE_LABEL[m.role||'Материал']||'')}">${RT_BOM_ROLES.map(r=>`<option value="${r}"${(m.role||'Материал')===r?' selected':''}>${r}</option>`).join('')}</select></div>
         <div class="rt-fld"><select class="rt-inp" data-pmf="canonId" data-pmi="${idx}">${rtPlanOptions(m.canonId)}</select></div>
@@ -14999,9 +15002,9 @@
     const rtHasBlank=()=>(rtWiz.ops||[]).some(op=>(op.planMaterials||[]).some(m=>m.role==='Заготовка'));
     // K-172: вход/выход операции — заготовка на первой, результат предыдущей на остальных
     function rtIoLineHtml(op,i){ const ops=rtWiz.ops||[]; const prev=ops[i-1]; const next=ops[i+1]; const nm=(o)=>o?(o.name||(rtOtById(o.opTypeId)||{}).name||('оп. '+(ops.indexOf(o)+1))):'';
-      const inp=i===0?'заготовка со склада (см. «Материалы»)':`результат оп. ${i} «${esc(nm(prev))}»`; const out=next?`полуфабрикат → оп. ${i+2} «${esc(nm(next))}»`:'готовый компонент / изделие';
+      const inp=i===0?'заготовка со склада (см. «Материалы»)':`результат оп. ${i} «${esc(nm(prev))}» — приходит сам, выбирать и вносить в материалы не нужно`; const out=next?`полуфабрикат → оп. ${i+2} «${esc(nm(next))}»`:'готовый компонент / изделие';
       return `<div style="margin:0 0 6px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--sub);padding:6px 10px;background:var(--sl-50);border-radius:var(--r-s)"><span><b style="color:var(--ink)">Вход операции:</b> ${inp}</span><span><b style="color:var(--ink)">Выход:</b> ${out}</span></div>`; }
-    const RT_ROLE_LABEL={'Заготовка':'со склада металла, одна на маршрут','Материал':'входит в изделие','Вспомогательный':'расходуется, в изделие не входит','Комплектующее':'готовая деталь / покупное'};
+    const RT_ROLE_LABEL={'Заготовка':'металл, из которого делается сама деталь (пруток, лист, труба): резервируется и списывается с карточки склада металла; одна на маршрут','Материал':'то, что добавляется к детали и остаётся в ней: наплавочная проволока, резина, клей, покрытие','Вспомогательный':'расходуется при изготовлении, в изделии не остаётся: СОЖ, круги, электроды на прихватку','Комплектующее':'готовая деталь или покупное изделие, которое ставится в сборку'};
     // K-214: норму заготовки на операции резки считает портал — (длина реза + пропил) × заготовок на изделие.
     // Она нужна для резерва металла, плановой себестоимости и план/факта списания, но вводить её руками незачем.
     function rtCutAutoNorm(op){ const ot=rtOtById(op.opTypeId)||{}; if(!RT_CUT_TYPES.has(ot.code||''))return null; const pp=op.paramPlan||[]; const g=(re)=>{ const x=pp.find(p=>re.test(String(p.name||''))); return x?cutNum(x.norm):null; };
@@ -15020,7 +15023,7 @@
       const noCanon=!(rtWiz.canonAll||[]).length;
       return `<div class="rt-fld" data-pm="${i}" style="margin-top:12px;padding:12px 14px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-weight:700">Материалы операции</span><span class="rt-rt">роль · канон-позиция · норма на 1 шт изделия · факт отмечает оператор в карте задачи</span>
-        <span class="rt-rt" style="width:100%;font-size:11px;color:var(--sl-500)">${Object.entries(RT_ROLE_LABEL).map(([k,v])=>`<b>${esc(k)}</b> — ${esc(v)}`).join(' · ')}. Результат предыдущей операции — это «Вход операции», не материал.</span>${filled.length?`<span class="rt-rt" style="margin-left:auto;color:var(--navy);font-weight:600">${filled.length} поз.</span>`:''}</div>
+        <span class="rt-rt" style="width:100%;font-size:11px;color:var(--sl-500)">${Object.entries(RT_ROLE_LABEL).map(([k,v])=>`<b>${esc(k)}</b> — ${esc(v)}`).join('<br>')}<br>Результат предыдущей операции (отрезанная заготовка → на токарную) сюда не вносится: он приходит сам, это «Вход операции» в строке выше.</span>${filled.length?`<span class="rt-rt" style="margin-left:auto;color:var(--navy);font-weight:600">${filled.length} поз.</span>`:''}</div>
         ${noCanon?'<div class="rt-hint" style="margin-top:6px">Каталог канон-номенклатуры пуст — заведите позиции в разделе «Каталог».</div>':''}
         <div data-pmf="rows">${list.map((m,idx)=>rtPlanRowHtml(m,idx)).join('')}</div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="tbtn" data-pmf="add" data-role="Материал" ${noCanon?'disabled':''}>+ Материал</button><button type="button" class="tbtn" data-pmf="add" data-role="Заготовка" ${noCanon||rtHasBlank()?'disabled':''} title="Заготовка одна на маршрут — резервируется на складе металла">+ Заготовка</button><button type="button" class="tbtn" data-pmf="add" data-role="Вспомогательный" ${noCanon?'disabled':''}>+ Вспомогательный</button><button type="button" class="tbtn" data-pmf="add" data-role="Комплектующее">+ Комплектующее</button></div>
@@ -15037,7 +15040,7 @@
     function rtBomRowHtml(m,i){
       const opsOpt='<option value="">— с первой операции —</option>'+(rtWiz.ops||[]).map((op,k)=>{const ot=rtOtById(op.opTypeId)||{};return `<option value="${k+1}"${String(m.opNo)===String(k+1)?' selected':''}>оп. ${k+1} · ${esc(op.name||ot.name||'')}</option>`;}).join('');
       const isBlank=m.role==='Заготовка';
-      const stockOpt='<option value="">— подобрать по канону —</option>'+rtStockPickList(m.stockId).map(s=>`<option value="${s.id}"${String(s.id)===String(m.stockId)?' selected':''}>${esc(rtStockOptLabel(s))}</option>`).join('');
+      const stockOpt=`<option value="">${m.canonId&&!rtStockPickList(m.stockId,m.canonId).length?'— по этому канону на складе металла нет остатка —':'— подобрать по канону —'}</option>`+rtStockPickList(m.stockId,m.canonId).map(s=>`<option value="${s.id}"${String(s.id)===String(m.stockId)?' selected':''}>${esc(rtStockOptLabel(s))}</option>`).join('');
       return `<div class="rt-bom" data-bi="${i}" style="padding:8px 10px;border:1px solid var(--bd);border-radius:var(--r-m);margin-top:6px;background:${isBlank?'var(--sk-50)':'#fff'}">
         <div class="rt-g2" style="grid-template-columns:150px 1fr 120px 64px 200px 34px;gap:8px;align-items:end">
           <div class="rt-fld"><label>Роль</label><select class="rt-inp" data-bf="role">${RT_BOM_ROLES.map(r=>`<option${r===m.role?' selected':''}>${r}</option>`).join('')}</select></div>

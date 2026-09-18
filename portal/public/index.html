@@ -14724,7 +14724,7 @@
     function rtTypeHintWire(host){ const sel=host.querySelector('#rb-type'), h=host.querySelector('#rb-type-hint'); if(!sel||!h)return; const paint=()=>{ h.textContent=RT_TYPE_HINT[sel.value]||''; }; sel.addEventListener('change',paint); paint(); }
     function rtWizRender(){
       if(!rtWiz)return; const host=rtWiz.host, step=rtWiz.step, rt=rtWiz.route;
-      const steps=[['Изделие','что и по какому чертежу'],['Операции маршрута','из типов · участок авто'],['Контроль и наладка','ОТК · карты наладки'],['Проверка и выпуск','предпросмотр Ф.13']];
+      const steps=[['Изделие','что и по какому чертежу'],['Операции маршрута','из типов · участок авто'],['Контроль','точки С / ОТК · СИ'],['Проверка и выпуск','предпросмотр Ф.13']];
       const stepper='<div class="tl-wiz">'+steps.map((s,i)=>{ const n=i+1, cls=n===step?'on':(n<step?'done':''), d=n<step?'✓':String(n); return `<button type="button" class="tl-wstepbtn ${cls}" data-go="${n}"><span class="tl-wd">${d}</span><span class="tl-wt">${esc(s[0])}<small>${esc(s[1])}</small></span></button>`; }).join('')+'</div>';
       const bodyHtml=step===1?rtStep1Html():step===2?rtStep2Html():step===3?rtStep3Html():rtStep4Html();
       const head=`<div class="row" style="margin-bottom:10px"><a class="c-blue" id="rt-exit" style="font-size:12px;text-decoration:none;cursor:pointer">← Маршруты</a><span class="title" style="font-size:16px">${rtWiz.routeId!=null?'Редактирование маршрутной карты':'Новая маршрутная карта (Ф.13)'}</span><span class="c-gray" style="font-size:12px">${rtWiz.routeId!=null&&rt.mk?esc(rt.mk):'№ присвоится при выпуске'}</span><span style="margin-left:auto;font-size:13px;color:var(--ink);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><span class="c-gray" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">${rt.type==='СБР'?'Собираем':'Изготавливаем'}</span><b>${esc(rt.name||'изделие ещё не названо')}</b>${rt.designation?`<span class="code c-gray" style="font-size:12px">${esc(rt.designation)}</span>`:''}${rt.productType?`<span class="c-gray" style="font-size:12px">· ${esc(rt.productType)}</span>`:''}</span></div>`;
@@ -15239,7 +15239,7 @@
             <div id="rt-oplist">${cards}</div>
             <div class="rt-hint" style="margin-top:10px">Операции добавляются из панели «Типы операций» справа: выберите участок → тип.</div>
           </div>
-          <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><button class="tbtn primary" id="rt-next" style="margin-left:auto">Далее: контроль и наладка →</button></div>
+          <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><button class="tbtn primary" id="rt-next" style="margin-left:auto">Далее: контроль →</button></div>
         </div>
         <div>
           <div class="card pad"><div class="rt-cardh">Типы операций <span class="rt-rt">выберите участок → тип</span></div><div class="rt-pal" id="rt-palbox">${pal}</div></div>
@@ -15247,17 +15247,16 @@
         </div>
       </div>`;
     }
-    // ── шаг 3: контроль и наладка (точки С / ОТК · СИ · карты наладки по операциям) ──
+    // ── шаг 3: контроль (точки С / ОТК · СИ); карта наладки — только внутри операции на шаге 2 (K-218, З-011) ──
     function rtStep3Html(){
       const rows=rtWiz.ops.map((op,i)=>{ const ot=rtOtById(op.opTypeId)||{}; const nm=op.name||ot.name||'Операция';
         return `<tr data-idx="${i}"><td class="ct c-gray">${i+1}</td><td><b style="color:var(--ink)">${esc(nm)}</b><div class="c-gray" style="font-size:11px">${esc(ot.section||'')}</div></td>
           <td><select class="rt-inp" data-of="control">${rtCtrlOptions(op.control)}</select></td>
-          <td><input class="rt-inp" data-of="si" value="${rtEscA(op.si)}" placeholder="из реестра СИ"></td>
-          <td><select class="rt-inp" data-of="setupCardNo">${rtSetupOptions(op.setupCardNo)}</select></td></tr>`;
-      }).join('')||'<tr><td colspan="5" class="c-gray" style="padding:12px">Операции не заведены — вернитесь на шаг 2.</td></tr>';
-      return `<div class="card pad"><div class="rt-cardh">Шаг 3 · Контроль и наладка <span class="rt-rt">точки С / ОТК · карты наладки по операциям</span></div>
-        <table class="dt"><thead><tr><th style="width:30px">№</th><th>Операция</th><th style="width:160px">Контроль</th><th style="width:170px">СИ (справочник)</th><th style="width:230px">Карта наладки</th></tr></thead><tbody>${rows}</tbody></table>
-        <div class="rt-info" style="margin-top:12px">${RT_SVG_INFO}<span>СИ выбираются из реестра мерительного инструмента (с контролем поверки), а карта наладки — из справочника карт наладки. Больше не PDF, брошенный «в примечание».</span></div>
+          <td><input class="rt-inp" data-of="si" value="${rtEscA(op.si)}" placeholder="из реестра СИ"></td></tr>`;
+      }).join('')||'<tr><td colspan="4" class="c-gray" style="padding:12px">Операции не заведены — вернитесь на шаг 2.</td></tr>';
+      return `<div class="card pad"><div class="rt-cardh">Шаг 3 · Контроль <span class="rt-rt">точки С / ОТК по операциям · чем меряют</span></div>
+        <table class="dt"><thead><tr><th style="width:30px">№</th><th>Операция</th><th style="width:200px">Контроль</th><th style="width:260px">СИ (справочник)</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="rt-info" style="margin-top:12px">${RT_SVG_INFO}<span>СИ выбираются из реестра средств измерения (с контролем поверки). Карта наладки, оснастка и программа ЧПУ задаются внутри самой операции на шаге 2 (K-218: здесь колонка «Карта наладки» убрана как дубль).</span></div>
         <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><button class="tbtn primary" id="rt-next" style="margin-left:auto">Далее: проверка и выпуск →</button></div>
       </div>`;
     }

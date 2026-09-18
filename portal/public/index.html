@@ -14437,8 +14437,11 @@
           <a href="#routes" class="c-blue" style="font-size:12px;text-decoration:none">← Маршруты</a>
           <span class="code" style="font-size:16px">${esc(r.mk)}</span>${rtTypeChip(r.type)}${rtStatus(r.statusMk||'Черновик')}${coopCardBadge}
           <span class="c-gray" style="font-size:12px">${r.statusMk==='На согласовании'?'у '+esc(r.approverName||'—')+(r.sentAt?' с '+fmt(r.sentAt):'')+(r.sentBy?' · отправил '+esc(r.sentBy):''):r.approvedBy&&['Утверждена','В производстве','Выполнена'].includes(r.statusMk)?'утвердил '+esc(r.approvedBy)+' '+fmt(r.approvedAt):''}${r.statusMk==='Черновик'&&r.returnedAt?'<span style="color:var(--red)">возвращено на доработку '+esc(r.approverName||'')+' '+fmt(r.returnedAt)+': '+esc(r.approverComment||'')+'</span>':''}</span>
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${d.mode==='live'?rtApprovalButtons(r):''}${d.mode==='live'?`<button class="tbtn" id="rc-edit" ${(r.statusMk||'Черновик')==='Черновик'||(AUTH&&AUTH.isAdmin)?'':'disabled title="Редактировать можно только черновик"'}>✎ Редактировать</button><button class="tbtn" id="rc-gen" ${['Утверждена','В производстве'].includes(r.statusMk)?'':'disabled title="Карты задач — по утверждённой МК"'}>⚙ Карты задач Ф.14</button>`:''}${pbtn('route',r.mk,'Печать Ф.13')}</span>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${d.mode==='live'?rtApprovalButtons(r):''}${d.mode==='live'?`<button class="tbtn" id="rc-edit" ${(r.statusMk||'Черновик')==='Черновик'||(AUTH&&AUTH.isAdmin)?'':'disabled title="Редактировать можно только черновик"'}>✎ Редактировать</button><button class="tbtn" id="rc-variant" title="Другой способ изготовления того же изделия: отдельная МК на тот же чертёж — копия этой, дальше правите отличия">⑂ Другой маршрут (копия)</button><button class="tbtn" id="rc-gen" ${['Утверждена','В производстве'].includes(r.statusMk)?'':'disabled title="Карты задач — по утверждённой МК"'}>⚙ Карты задач Ф.14</button>`:''}${pbtn('route',r.mk,'Печать Ф.13')}</span>
         </div><div id="rc-sendbox"></div>
+        ${(r.variant||(r.variants||[]).length)?`<div class="card pad" id="rc-variants" style="margin-bottom:var(--gap)"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="color:var(--ink)">Способы изготовления по чертежу ${esc(r.designation||'')}</b><span class="st st--${r.isMain?'ok':'neutral'}">эта МК: ${esc(r.variant||'без названия')}${r.isMain?' · основной':''}</span>${!r.isMain?`<button class="tbtn" data-vmain="${r.id}" style="padding:2px 8px;font-size:12px">сделать основным</button>`:''}</div>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">${(r.variants||[]).map(v=>`<div style="display:flex;gap:10px;align-items:center;font-size:13px"><a href="#routes/${v.id}" class="c-blue" style="text-decoration:none;font-weight:600">${esc(v.mk)}</a><span>${esc(v.variant||'без названия')}${v.isMain?' · <b>основной</b>':''}</span><span class="c-gray">${esc(v.statusMk)}</span></div>`).join('')||'<div class="c-gray" style="font-size:12px">Других МК на этот чертёж нет.</div>'}</div>
+          <div class="c-gray" style="font-size:12px;margin-top:6px">Каждый способ — отдельная МК со своими нормами, УП и согласованием. Под заказ технолог выбирает, по какой МК делать (и может разделить количество между ними).</div></div>`:''}
         <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:12px;margin-bottom:var(--gap)">
           <div><div style="font-size:11px;color:var(--sl-500)">Изделие / компонент</div><div style="color:var(--ink);font-weight:600">${esc(r.name||'—')}</div></div>
           <div><div style="font-size:11px;color:var(--sl-500)">Чертёж / обозначение</div><div style="font-family:var(--mono)">${esc(r.designation||'—')}</div></div>
@@ -14458,6 +14461,8 @@
         ${opFilesCard}`;
       const back=host.querySelector('[href="#routes"]'); if(back)back.onclick=(e)=>{e.preventDefault(); renderRoutesView(host);};
       const eb=host.querySelector('#rc-edit'); if(eb)eb.onclick=()=>openRouteBuilder(host,r.id);
+      { const vb=host.querySelector('#rc-variant'); if(vb)vb.onclick=async()=>{ const nm=await uiPrompt('Как назвать этот способ изготовления','',{placeholder:'напр.: универсал + фрезер'}); if(nm===null)return; openRouteBuilder(host,null,{copyFrom:r.id,variant:String(nm||'').trim()}); }; // K-219
+        const vbox=host.querySelector('#rc-variants'); if(vbox)vbox.querySelectorAll('[data-vmain]').forEach(b0=>b0.onclick=async()=>{ try{ await postJson('/api/route/variant',{id:Number(b0.dataset.vmain),isMain:true}); toast('Основной маршрут изменён.','ok'); RT=null; openRouteCard(host,r.id); }catch(e){ toast(e.message,'err'); } }); }
       rtApprovalWire(host,r); // K-171
       rtActualsLoad(host,r); // K-175
       const gb=host.querySelector('#rc-gen'); if(gb)gb.onclick=()=>genRouteTasks(host,r.id);
@@ -14709,10 +14714,12 @@
       try{ const ml=await (await fetch('/api/metal')).json(); if(ml&&Array.isArray(ml.items))stockList=ml.items; }catch(e){}
       let init={route:{type:'КОМ',name:'',designation:'',productType:'',revision:'',material:'',statusMk:'Черновик',projectDecNo:'',mk:''},operations:[]};
       if(routeId!=null){ try{ const d=await (await fetch('/api/route/edit?id='+encodeURIComponent(routeId))).json(); if(d&&d.route)init=d; }catch(e){} }
+      const copyFrom=(routeId==null&&opts&&opts.copyFrom!=null)?opts.copyFrom:null; // K-219: другой маршрут на тот же чертёж — копия МК как новый черновик
+      if(copyFrom!=null){ try{ const d=await (await fetch('/api/route/edit?id='+encodeURIComponent(copyFrom))).json(); if(d&&d.route){ init=d; init.route=Object.assign({},d.route,{mk:'',statusMk:'Черновик',variant:(opts&&opts.variant)||''}); (init.operations||[]).forEach(o=>{ o.ncFiles=[]; o.setupFiles=[]; if(o.coop&&o.coop.returned)o.coop.returned=[]; }); } }catch(e){} }
       const r0=init.route||{};
       rtWiz={ host, routeId, step:1, cat, catMetal, canonAll, stockList, contractors:(cat&&cat.contractors)||[],
         reg:{projects:(reg&&reg.projects)||[],docs:(reg&&reg.kd)||[]}, eqReg, tools, setup,
-        route:{type:r0.type||'КОМ',name:r0.name||'',designation:r0.designation||'',productType:r0.productType||'',revision:r0.revision||'',material:r0.material||'',statusMk:r0.statusMk||'Черновик',projectDecNo:r0.projectDecNo||'',mk:r0.mk||''},
+        route:{type:r0.type||'КОМ',name:r0.name||'',designation:r0.designation||'',productType:r0.productType||'',revision:r0.revision||'',material:r0.material||'',statusMk:r0.statusMk||'Черновик',projectDecNo:r0.projectDecNo||'',mk:r0.mk||'',variant:r0.variant||'',variantOf:copyFrom},
         kdSel:((r0.kdDrawings)||[]).slice(),
         bom:((r0.bom)||[]).map(m=>rtBomDefault(m)), // K-160: спецификация материалов изделия
         ops:(init.operations||[]).map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:o.setupCardNo||'',ncFiles:Array.isArray(o.ncFiles)?o.ncFiles.slice():[],control:o.control||'нет',norm:o.norm!=null?o.norm:'',paramPlan:Array.isArray(o.paramPlan)?o.paramPlan:[],comment:o.comment||'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:o.materials||'',planMaterials:(Array.isArray(o.planMaterials)?o.planMaterials.map(m=>Object.assign({},m)):[]),blank:i===0?rtBlankDefault(o.blank):null,coop:i>0?rtCoopDefault(o.coop):null,components:o.components||[],_open:i===0})) };
@@ -14763,7 +14770,7 @@
       if(!rtWiz)return; const host=rtWiz.host;
       if(step===1){ const g=(id)=>{const el=host.querySelector('#'+id);return el?el.value:'';};
         rtWiz.route.type=g('rb-type'); rtWiz.route.name=(g('rb-name')||'').trim(); rtWiz.route.designation=(g('rb-desig')||'').trim();
-        rtWiz.route.productType=g('rb-prod');  rtWiz.route.material=(g('rb-material')||'').trim();  rtWiz.route.projectDecNo=g('rb-proj'); rtBomApply(); }
+        rtWiz.route.productType=g('rb-prod'); if(host.querySelector('#rb-variant'))rtWiz.route.variant=(g('rb-variant')||'').trim();  rtWiz.route.material=(g('rb-material')||'').trim();  rtWiz.route.projectDecNo=g('rb-proj'); rtBomApply(); }
       else if(step===2||step===3){ rtReadOps(step); }
     }
     function rtReadOps(step){
@@ -14800,6 +14807,7 @@
           <div class="rt-fld" style="grid-column:span 2"><label>Наименование изделия / компонента</label><input class="rt-inp" id="rb-name" value="${rtEscA(rt.name)}" placeholder="напр. Втулка биметаллическая 2ДТ.180"></div>
           <div class="rt-fld"><label>Проект ОКР</label><select class="rt-inp" id="rb-proj"><option value="">— не выбран —</option>${kdProjects.map(p=>`<option value="${rtEscA(p.decNo)}"${p.decNo===(rt.projectDecNo||'')?' selected':''}>ПБС.${esc(p.decNo)} · ${esc(p.name||'')}</option>`).join('')}</select></div>
           <div class="rt-fld"><label>Изделие / обозначение (чертёж)</label><input class="rt-inp" id="rb-desig" value="${rtEscA(rt.designation)}" placeholder="2ДТ.180.00.00"></div>
+          ${(rt.variant||rtWiz.route.variantOf!=null)?`<div class="rt-fld"><label>Способ изготовления <span class="rt-rt">название этого маршрута среди МК на тот же чертёж</span></label><input class="rt-inp" id="rb-variant" value="${rtEscA(rt.variant||'')}" placeholder="напр.: универсал + фрезер"></div>`:''}
           <div class="rt-fld" style="grid-column:span 2"><label>Материал изделия (текст для Ф.13; авто из спецификации, можно поправить)</label><input class="rt-inp" id="rb-material" value="${rtEscA(rt.material)}" placeholder="напр. Сталь 45 + наплавка ПГ-СР4"></div>
           <div class="rt-fld"><label>Автор</label><input class="rt-inp" value="${rtEscA(rt.author||(AUTH&&AUTH.fio)||'')}" disabled title="Кто создал МК в портале; подставляется автоматически"></div>
           <div class="rt-fld"><label>Тип продукции</label><select class="rt-inp" id="rb-prod"><option value="">— не указан —</option>${opt(cat.productTypes,rt.productType)}</select></div>
@@ -15279,7 +15287,8 @@
         </div>
         <table class="dt"><thead><tr><th style="width:30px">№</th><th>Операция</th><th style="width:90px">Участок</th><th style="width:130px">Оборуд.</th><th style="width:120px">Оснастка</th><th class="ct" style="width:60px">Карта</th><th class="ct" style="width:64px">Контроль</th><th class="nw" style="width:60px">Норма</th></tr></thead><tbody>${rows}</tbody></table>
         ${warn}
-        <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><span style="margin-left:auto"></span><button class="tbtn" id="rt-draft">Сохранить черновик</button><button class="tbtn green" id="rt-release">Выпустить МК ✓</button></div>
+        <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><span style="margin-left:auto"></span><button class="tbtn" id="rt-draft">Сохранить черновик</button><button class="tbtn primary" id="rt-send">Сохранить и отправить на согласование</button><button class="tbtn green" id="rt-release" hidden>Сохранить и утвердить ✓</button></div>
+        <div class="rt-hint" style="margin-top:8px;text-align:right">Черновик можно править дальше. Отправленная на согласование и утверждённая МК не редактируется; задачи на участки создаются только по утверждённой. Кнопка «утвердить» видна тем, кто в списке согласующих МК.</div>
       </div>`;
     }
     function rtWizWire(step){
@@ -15397,7 +15406,14 @@
         const ao=host.querySelector('#rt-addop'); if(ao)ao.onclick=()=>rtAddOp('');
       }
       if(step===3){ const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(2); const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(4); }
-      if(step===4){ const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(3); const dr=host.querySelector('#rt-draft'); if(dr)dr.onclick=()=>rtWizSave(false); const rl=host.querySelector('#rt-release'); if(rl)rl.onclick=()=>rtWizSave(true); }
+      if(step===4){ const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(3); const dr=host.querySelector('#rt-draft'); if(dr)dr.onclick=()=>rtWizSave(false);
+        const sn=host.querySelector('#rt-send'); if(sn)sn.onclick=async()=>{ const list=await mkLoadApprovers(); if(!list.length){ toast('Список согласующих МК пуст — Настройки → «1С и бухгалтерия».','err'); return; }
+          let last=''; try{ last=localStorage.getItem('mk.approver')||''; }catch{} const w=document.createElement('div'); w.className='ui-dlg';
+          w.innerHTML=`<div class="ui-dlg-box" role="dialog"><div class="ui-dlg-h">Кому на согласование</div><div class="ui-dlg-t"><select class="rt-inp" id="rt-apsel" style="width:100%">${list.map(u=>`<option value="${u.id}"${String(u.id)===last?' selected':''}>${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join('')}</select><div class="c-gray" style="font-size:12px;margin-top:8px">МК сохранится и уйдёт согласующему: он получит уведомление в Bitrix и увидит её в «Моём кабинете». До его решения карта не редактируется.</div></div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn ui-btn--primary" data-d="ok">Сохранить и отправить</button></div></div>`;
+          document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+          w.querySelector('[data-d="ok"]').onclick=()=>{ const u=list.find(x=>String(x.id)===w.querySelector('#rt-apsel').value); w.remove(); if(!u)return; try{ localStorage.setItem('mk.approver',String(u.id)); }catch{} rtWizSave({send:u}); }; };
+        mkLoadApprovers().then(()=>{ const b0=host.querySelector('#rt-release'); if(b0&&mkIsApprover())b0.hidden=false; });
+        const rl=host.querySelector('#rt-release'); if(rl)rl.onclick=()=>rtWizSave({approve:true}); }
     }
     async function rtWizSave(release){
       if(!rtWiz)return; rtCollectStep(rtWiz.step); rtBomApply(); // K-160: заготовка и план операций — из спецификации
@@ -15406,10 +15422,15 @@
       // Этап 4: внешняя кооперация — та же схема, JSON в «materials» операции i>0 (см. rtCoopSerialize/сервер mkCoopParse); returned (история
       // приёмок возврата) уже сохранён внутри op.coop с загрузки формы — просто едет обратно, чтобы пересохранение МК его не стёрло.
       const ops=rtWiz.ops.map((op,i)=>({opTypeId:op.opTypeId||'',name:(op.name||'').trim(),equipment:(op.equipment||'').trim(),tooling:(op.tooling||'').trim(),setupCardNo:(op.setupCardNo||'').trim(),control:op.control||'нет',norm:op.norm,whatControl:(op.whatControl||'').trim(),si:(op.si||'').trim(),tolerance:(op.tolerance||'').trim(),planMaterials:(op.planMaterials||[]).filter(m=>m.canonId||String(m.name||'').trim()).map(m=>({canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',qty:m.qty,note:m.note||'',role:m.role||'Материал',stockId:m.stockId||null,partsPerBlank:m.partsPerBlank||null})),paramPlan:(op.paramPlan||[]),comment:(op.comment||'').trim(),materials:i===0?rtBlankSerialize(op.blank):(op.coop&&op.coop.enabled?rtCoopSerialize(op.coop):(op.materials||'').trim()),components:op.components||[]})).filter(o=>o.name||o.opTypeId);
-      const body={id:rtWiz.routeId,type:rtWiz.route.type,name:(rtWiz.route.name||'').trim(),designation:(rtWiz.route.designation||'').trim(),productType:rtWiz.route.productType||'',revision:(rtWiz.route.revision||'').trim(),material:(rtWiz.route.material||'').trim()||rtBomMaterialText(),bom:(rtWiz.bom||[]).map(m=>({role:m.role,canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',norm:m.norm,opNo:m.opNo||null,stockId:m.stockId||null,partsPerBlank:m.partsPerBlank||null,note:m.note||''})),statusMk:release?'Утверждена':(rtWiz.route.statusMk||'Черновик'),projectDecNo:rtWiz.route.projectDecNo||'',kdDrawings:rtWiz.kdSel,operations:ops};
-      const host=rtWiz.host; const btns=host.querySelectorAll('#rt-draft,#rt-release'); btns.forEach(b=>{b.disabled=true;});
+      const body={id:rtWiz.routeId,...((rtWiz.route.variant||rtWiz.route.variantOf!=null)?{variant:rtWiz.route.variant||'',variantOf:rtWiz.route.variantOf}:{}),type:rtWiz.route.type,name:(rtWiz.route.name||'').trim(),designation:(rtWiz.route.designation||'').trim(),productType:rtWiz.route.productType||'',revision:(rtWiz.route.revision||'').trim(),material:(rtWiz.route.material||'').trim()||rtBomMaterialText(),bom:(rtWiz.bom||[]).map(m=>({role:m.role,canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',norm:m.norm,opNo:m.opNo||null,stockId:m.stockId||null,partsPerBlank:m.partsPerBlank||null,note:m.note||''})),statusMk:release?'Утверждена':(rtWiz.route.statusMk||'Черновик'),projectDecNo:rtWiz.route.projectDecNo||'',kdDrawings:rtWiz.kdSel,operations:ops};
+      const host=rtWiz.host; const btns=host.querySelectorAll('#rt-draft,#rt-release,#rt-send'); btns.forEach(b=>{b.disabled=true;});
       try{ const r=await fetch('/api/routes/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-        RT=null; toast(`МК ${j.mk||''} ${release?'выпущена':'сохранена'} · операций: ${j.operations}${j.components?', компонентов: '+j.components:''}`,'ok');
+        RT=null; toast(`МК ${j.mk||''} сохранена · операций: ${j.operations}${j.components?', компонентов: '+j.components:''}`,'ok');
+        if(release&&(release.approve||release.send)){ // K-220: статус ставим сразу, без второго захода в карточку
+          try{ const sb=release.approve?{status:'Утверждена'}:{status:'На согласовании',approverId:release.send.id,approverName:release.send.name};
+            const rs=await fetch('/api/route/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:j.id,...sb})}); const js=await rs.json().catch(()=>({})); if(!rs.ok||js.error)throw new Error(js.error||('HTTP '+rs.status));
+            toast(release.approve?`МК ${j.mk||''} утверждена.`:`МК ${j.mk||''} отправлена на согласование: ${release.send.name}`,'ok'); try{cabBadgeRefresh();}catch{} }
+          catch(e){ toast(`МК сохранена черновиком, но ${release.approve?'утвердить':'отправить на согласование'} не удалось: ${e.message}`,'err'); } }
         // МК-резерв металла (этап 1): при переходе в «В производстве» — покажем, что произошло с резервом
         const br=j.blankReserve; if(br&&(br.reserved||br.note)){ setTimeout(()=>toast(br.reserved?`Резерв металла: ${br.reserved.code} · ${br.reserved.qty} кг`:br.note, br.reserved?'ok':'err'),300); }
         { const pend=rtWiz.ops.map((op,i)=>({n:i+1,files:op._ncPending||[]})).filter(x=>x.files.length); // K-216

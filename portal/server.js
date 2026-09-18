@@ -1348,9 +1348,20 @@ async function buildRoutesLive() {
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '',
       revision: r['Ревизия'] || '', status: r['Статус'] || '', statusMk: r['Статус МК'] || 'Черновик', author: r['Автор'] || '', approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', opCount: _linkIds(r['Операции маршрута']).length,
       hasCoop, coopDone: hasCoop ? coopDone : null, coopOverdueDays,
+      variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], // K-219
     };
   }).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
   return { mode: 'live', routes: list };
+}
+// K-219 (З-012): ВАРИАНТЫ МАРШРУТА. Одно изделие можно сделать разными путями (ЧПУ / универсал + фрезер).
+// Вариант — отдельная МК на тот же чертёж («Изделие / обозначение»), со своими нормами, УП и согласованием.
+// Поля МК: «Вариант» (название) и «Основной вариант» (флажок). Ветвлений внутри одной МК нет.
+function mkVariantsOf(routes, r) {
+  const des = String(r['Изделие / обозначение'] || '').trim().toLowerCase(); const rid = r.Id ?? r.id;
+  if (!des) return [];
+  return routes.filter((x) => (x.Id ?? x.id) !== rid && String(x['Изделие / обозначение'] || '').trim().toLowerCase() === des && String(x['Тип МК'] || '') === String(r['Тип МК'] || ''))
+    .map((x) => ({ id: x.Id ?? x.id, mk: x['№ МК'] || '', variant: x['Вариант'] || '', isMain: !!x['Основной вариант'], statusMk: x['Статус МК'] || 'Черновик', name: x['Наименование'] || '' }))
+    .sort((a, b) => (b.isMain - a.isMain) || String(a.mk).localeCompare(String(b.mk), 'ru'));
 }
 async function buildRouteCard(id) {
   const [routes, ops, opTypes, sections, params, comps, tasks] = await Promise.all([
@@ -1422,6 +1433,7 @@ async function buildRouteCard(id) {
       id: r.Id ?? r.id, mk: r['№ МК'] || '', type: r['Тип МК'] || '', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
+      variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], variants: mkVariantsOf(routes, r), // K-219
       approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
       normsFixed: r['Нормы зафиксированы'] || '', // K-175
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
@@ -1500,6 +1512,7 @@ async function buildRouteEdit(id) {
       id: rid, mk: r['№ МК'] || '', type: r['Тип МК'] || 'КОМ', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '',
       revision: r['Ревизия'] || '', statusMk: r['Статус МК'] || 'Черновик', material: r['Материал'] || '', author: r['Автор'] || '',
+      variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], // K-219
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
       bom: mkBomParse(r['Спецификация материалов']), // K-160
     },
@@ -1672,6 +1685,16 @@ async function saveRoute(body, session) {
   const pt = String(body.productType || '').trim();
   if (pt) { if (!MK_PRODUCT_TYPES.includes(pt)) throw new Error(`Недопустимый тип продукции «${pt}».`); routeRow['Тип продукции'] = pt; }
   if (body.revision) routeRow['Ревизия'] = String(body.revision).trim();
+  if (body.variant != null || body.variantOf != null) { // K-219
+    try { await ncEnsureColumn('routes', 'Вариант', 'SingleLineText'); await ncEnsureColumn('routes', 'Основной вариант', 'Checkbox');
+      if (body.variant != null) routeRow['Вариант'] = String(body.variant || '').trim();
+      if (body.isMain != null) routeRow['Основной вариант'] = !!body.isMain;
+      if (body.variantOf != null && body.variantOf !== '' && (body.id == null || body.id === '')) {
+        const src = (await ncListSoft('routes')).find((x) => String(x.Id ?? x.id) === String(body.variantOf));
+        if (src && !String(src['Вариант'] || '').trim()) await ncUpdate('routes', src.Id ?? src.id, { 'Вариант': 'Основной', 'Основной вариант': true });
+      }
+    } catch (e) { console.warn('МК: колонки вариантов недоступны:', e.message); }
+  }
   // K-81 доводка (migrate-043): «Материал» изделия — degrade-safe (колонка создаётся при первом сохранении, как «Чертежи КД»)
   if ('material' in body) {
     try { await ncEnsureColumn('routes', 'Материал', 'SingleLineText'); routeRow['Материал'] = String(body.material || '').trim(); }
@@ -12973,6 +12996,18 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 400, { error: 'Запись доступна только в режиме LIVE (NocoDB).' });
       try { return sendJson(res, 200, await saveRoute(await readBody(req), sessionFromReq(req))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/route/variant' && req.method === 'POST') { // K-219: переименовать вариант / сделать основным
+      if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' });
+      try {
+        const body = await readBody(req); const routes = await ncListSoft('routes');
+        const r = routes.find((x) => String(x.Id ?? x.id) === String(body.id)); if (!r) return sendJson(res, 404, { error: 'МК не найдена.' });
+        await ncEnsureColumn('routes', 'Вариант', 'SingleLineText'); await ncEnsureColumn('routes', 'Основной вариант', 'Checkbox');
+        const patch = {}; if (body.variant != null) patch['Вариант'] = String(body.variant || '').trim();
+        if (body.isMain === true) { patch['Основной вариант'] = true; const sib = mkVariantsOf(routes, r).filter((v) => v.isMain).map((v) => ({ Id: v.id, 'Основной вариант': false })); if (sib.length) await ncUpdateMany('routes', sib); }
+        if (Object.keys(patch).length) await ncUpdate('routes', r.Id ?? r.id, patch);
+        return sendJson(res, 200, { ok: true });
+      } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // K-18 генерация карт задач Ф.14 из МК
     if (p === '/api/route/actuals') { try { return sendJson(res, 200, await buildRouteActuals(url.searchParams.get('id'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }

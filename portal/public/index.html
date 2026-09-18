@@ -10611,12 +10611,12 @@
     //  3 подраздела: Режущий · Мерительный(СИ) · Пресс-формы/оснастка. Бэкенд /api/tools/*.
     let TL=null, tlTab='items', tlSel=null, tlSub='cut', tlCat='', tlFilter='all', tlCardCache={}, tlPlace='', tlGridApi=null;
     // редизайн ДП–О.3.1: единый поиск, каталог-пары, кулачки+оправки карточками, мастер заведения
-    let tlQuery='', tlCatSub='pairs', tlLibSub='jaws', tlWizStep=1, tlWizSub='cut', tlWizData={};
-    const TL_SUBS=[['cut','Режущий инструмент'],['osn','Оснастка'],['clamp','Зажимные устройства']]; // K-208: СИ уехали в свой раздел · K-234: зажимные — своим подразделом
+    let tlQuery='', tlCatSub='pairs', tlLibSub='clamp', tlWizStep=1, tlWizSub='cut', tlWizData={};
+    const TL_SUBS=[['cut','Режущий инструмент'],['osn','Оснастка']]; // K-208: СИ уехали в свой раздел · K-236: зажимные устройства — вкладка «Зажимные, кулачки, оправки»
     const tlSubOf=(i)=>i.subdivision||(i.isSi?'si':i.special?'osn':'cut');
     const tlIsInv=(i)=>tlSubOf(i)==='osn'; // инвентарная модель (оснастка)
     // K-234: в «Обзоре» зажимные устройства показываются отдельным подразделом; формы и учёт у них — как у оснастки (tlSubOf → 'osn')
-    const tlViewSub=(i)=>i.isClamp?'clamp':tlSubOf(i);
+    const tlViewSub=(i)=>tlSubOf(i);
     const tlSubIsInv=()=>tlSub==='osn'||tlSub==='clamp';
     const tlQty=(n,u)=>Number(n||0).toLocaleString('ru-RU',{maximumFractionDigits:3})+(u?(' '+u):'');
     const tlYmd=()=>new Date().toISOString().slice(0,10);
@@ -10641,7 +10641,7 @@
           <div class="seg" id="tlseg">
             <button data-t="items" class="${primary==='items'?'on':''}">Обзор и поиск</button>
             <button data-t="catalog" class="${primary==='catalog'?'on':''}">Каталог: державки ↔ пластины</button>
-            <button data-t="lib" class="${primary==='lib'?'on':''}">Кулачки и оправки</button>
+            <button data-t="lib" class="${primary==='lib'?'on':''}">Зажимные, кулачки, оправки</button>
             <button data-t="wizard" class="${primary==='wizard'?'on':''}">Мастер: завести</button>
           </div><span class="spacer" style="margin-left:auto"></span>${tag}</div>
         <div id="tlbody" style="margin-top:var(--gap)"></div>`;
@@ -11808,8 +11808,8 @@
         del:live?{key:'chuck_jaws',idOf:i=>i.id,reload:()=>{cjCache=null;cjBody(host);}}:undefined,
         info:`${srcChip(live)}<span>Комплектов: <b style="color:var(--ink)">${items.length}</b></span>`});
     }
-    function cjForm(item){
-      const edit=!!item; const D=cjCache||{}; const stations=D.stations||[];
+    function cjForm(item,preset){
+      const edit=!!item; if(!edit&&preset)item={chuckInv:preset.chuckInv||'',setNo:'',jawCount:'3',condition:'Годен'}; const D=cjCache||{}; const stations=D.stations||[];
       const G='display:grid;grid-template-columns:repeat(12,1fr);gap:14px';
       const opt=(arr,cur)=>['<option value="">—</option>'].concat(arr.map(o=>`<option${String(cur||'')===o?' selected':''}>${esc(o)}</option>`)).join('');
       const stOpt=(cur)=>['<option value="">— не привязан —</option>'].concat(stations.map(s=>`<option value="${s.id}"${String(cur||'')===String(s.id)?' selected':''}>${esc(s.name+(s.invNo?' · инв.'+s.invNo:'')+(s.chuckDia!=null?' · патрон Ø'+s.chuckDia:''))}</option>`)).join('');
@@ -11828,7 +11828,7 @@
             <div style="grid-column:span 4">${FLAB(edit?'№ комплекта':'№ комплекта (авто К-NN)')}<input id="cj-setNo" style="${FINP}" value="${esc(edit?item.setNo:'')}" placeholder="присвоится автоматически"></div>
             <div style="grid-column:span 4">${FLAB('Тип кулачков')}<select id="cj-type" style="${FINP}">${opt(CJ_TYPES,edit?item.jawType:'')}</select></div>
             <div style="grid-column:span 4">${FLAB('Количество кулачков')}<select id="cj-count" style="${FINP}">${opt(CJ_COUNTS,edit?item.jawCount:'3')}</select></div>
-            <div style="grid-column:span 8">${FLAB('Патрон, к которому комплект (оснастка «Зажимное устройство»)')}<select id="cj-chuck" style="${FINP}"><option value="">— не привязан —</option>${(D.chucks||[]).map(c=>`<option value="${esc(c.invNo||c.code)}"${(edit?item.chuckInv:'')===(c.invNo||c.code)?' selected':''}>${esc(c.label)}${c.where&&c.where!=='—'?' · '+esc(c.where):''}</option>`).join('')}</select>${(D.chucks||[]).length?'':'<div class="c-gray" style="font-size:11px;margin-top:3px">Патронов в реестре нет — заведите: «Мастер: завести» → Оснастка → вид «Зажимное устройство».</div>'}</div>
+            <div style="grid-column:span 8">${FLAB('Патрон, к которому комплект (оснастка «Зажимное устройство»)')}<select id="cj-chuck" style="${FINP}"><option value="">— не привязан —</option>${(D.chucks||[]).map(c=>`<option value="${esc(c.invNo||c.code)}"${((item&&item.chuckInv)||'')===(c.invNo||c.code)?' selected':''}>${esc(c.label)}${c.where&&c.where!=='—'?' · '+esc(c.where):''}</option>`).join('')}</select>${(D.chucks||[]).length?'':'<div class="c-gray" style="font-size:11px;margin-top:3px">Патронов в реестре нет — заведите: «Мастер: завести» → Оснастка → вид «Зажимное устройство».</div>'}</div>
             <div style="grid-column:span 4">${FLAB('Исполнение')}<select id="cj-exec" style="${FINP}">${opt((D.dict&&D.dict.exec)||['Прямые','Обратные','Накладные (сборные)','Специальные'],edit?item.exec:'')}</select></div>
             <div style="grid-column:span 4">${FLAB('Расточены под Ø (для сырых)')}<input id="cj-bored" style="${FINP}" value="${esc(edit?(item.boredFor||''):'')}" placeholder="напр. Ø140 H9"></div>
             <div style="grid-column:span 4">${FLAB('Рифление / крепление')}<input id="cj-serr" style="${FINP}" value="${esc(edit?(item.serration||''):'')}" placeholder="1,5×60° · Т-гайки М16"></div>
@@ -11847,7 +11847,7 @@
       const stationSel=document.getElementById('cj-station'), compatInp=document.getElementById('cj-compat');
       const stById={}; stations.forEach(s=>stById[String(s.id)]=s);
       stationSel.onchange=()=>{ const s=stById[String(stationSel.value)]; if(s&&s.compat){ compatInp.value=s.compat; } };
-      { const ch=document.getElementById('cj-chuck'); if(ch)ch.onchange=()=>{ const c=(D.chucks||[]).find(x=>(x.invNo||x.code)===ch.value); if(c)compatInp.value=[c.name,c.chuckDia?'Ø'+c.chuckDia:'',c.spindleMount].filter(Boolean).join(' · '); }; } // K-228
+      { const ch=document.getElementById('cj-chuck'); if(ch){ ch.onchange=()=>{ const c=(D.chucks||[]).find(x=>(x.invNo||x.code)===ch.value); if(c)compatInp.value=[c.name,c.chuckDia?'Ø'+c.chuckDia:'',c.spindleMount].filter(Boolean).join(' · '); }; if(!edit&&ch.value&&!compatInp.value)ch.onchange(); } } // K-228
       document.getElementById('cj-save').onclick=async()=>{
         const err=document.getElementById('cj-err'); err.textContent='';
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
@@ -11995,19 +11995,40 @@
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка библиотеки…</div>';
       if(!cjCache){ try{cjCache=await (await fetch('/api/chuck-jaws')).json();}catch(e){cjCache={items:[],mode:'mock',warning:String(e.message||e)};} }
       const D=cjCache||{items:[]}, jaws=D.items||[], live=D.mode==='live';
-      const mandrels=((TL&&TL.items)||[]).filter(i=>tlSubOf(i)==='osn'&&/оправк/i.test((i.rigKind||'')+' '+(i.category||'')+' '+(i.name||'')));
+      const mandrels=((TL&&TL.items)||[]).filter(i=>tlSubOf(i)==='osn'&&!i.isClamp&&/оправк/i.test((i.rigKind||'')+' '+(i.category||'')+' '+(i.name||'')));
+      const clamps=((TL&&TL.items)||[]).filter(i=>i.isClamp); // K-236
       const seg=`<div class="seg" id="tllib-seg">
+          <button data-s="clamp" class="${tlLibSub==='clamp'?'on':''}">Зажимные устройства <span class="lit">${clamps.length}</span></button>
           <button data-s="jaws" class="${tlLibSub==='jaws'?'on':''}">Комплекты кулачков <span class="lit">${jaws.length}</span></button>
           <button data-s="mand" class="${tlLibSub==='mand'?'on':''}">Оправки <span class="lit">${mandrels.length}</span></button>
         </div>`;
-      const addLbl=tlLibSub==='jaws'?'+ Добавить комплект':'+ Добавить оправку';
-      const note=tlLibSub==='jaws'?'Комплект кулачков привязан к патрону (оснастка «Зажимное устройство»); патрон переставляют между станками — место комплекта идёт за патроном':'Оправки — инвентарная оснастка (штучный учёт по инв.№, перемещение по цеху)';
+      const addLbl=tlLibSub==='clamp'?'+ Завести зажимное устройство':tlLibSub==='jaws'?'+ Добавить комплект':'+ Добавить оправку';
+      const note=tlLibSub==='clamp'?'Патроны, цанговые патроны, тиски, планшайбы, люнеты, центры — поштучно по инв. №; патрон переставляют между станками, кулачки привязаны к патрону':tlLibSub==='jaws'?'Комплект кулачков привязан к патрону (оснастка «Зажимное устройство»); патрон переставляют между станками — место комплекта идёт за патроном':'Оправки — инвентарная оснастка (штучный учёт по инв.№, перемещение по цеху)';
       host.innerHTML=`<div class="filters" style="margin-bottom:var(--gap)">${seg}<span style="font-size:12px;color:var(--sub);margin-left:12px">${note}</span><span style="margin-left:auto"></span>${srcChip(live)}<button class="tbtn green" id="tllib-add" style="margin-left:10px">${addLbl}</button></div>
         <div id="tllib-grid" class="tl-libgrid"></div>`;
       host.querySelectorAll('#tllib-seg button').forEach(b=>b.onclick=()=>{tlLibSub=b.dataset.s;tlLibBody(host);});
-      const add=host.querySelector('#tllib-add'); if(add)add.onclick=()=> tlLibSub==='jaws'?cjForm(null):openToolEdit(null,'osn');
+      const add=host.querySelector('#tllib-add'); if(add)add.onclick=()=>{ if(tlLibSub==='jaws')return cjForm(null); if(tlLibSub==='clamp'){ tlWizSub='osn'; tlWizStep=2; tlWizData={rigKind:'Зажимное устройство'}; tlTab='wizard'; document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='wizard')); return tlBody(); } openToolEdit(null,'osn'); };
       const gh=host.querySelector('#tllib-grid');
-      if(tlLibSub==='jaws'){
+      if(tlLibSub==='clamp'){
+        if(!clamps.length){ gh.innerHTML='<div class="card pad" style="grid-column:1/-1;color:var(--sub);font-size:12px">Зажимных устройств в реестре нет — «+ Завести зажимное устройство» (поиск по 1С есть на шаге «Идентификация»).</div>'; return; }
+        gh.innerHTML=clamps.map((i,ix)=>{ const js=jaws.filter(j=>j.chuckInv&&j.chuckInv===(i.invNo||i.code)&&j.condition!=='Списан');
+          return `<div class="tl-libcard" data-clampi="${ix}">
+            <div class="tl-lc-top"><span class="tl-lc-ic">◎</span><div style="min-width:0"><div class="tl-lc-no" style="white-space:nowrap">${esc(i.invNo||i.code)}</div><div class="tl-lc-sub">${esc(String(i.clampKind||'зажимное устройство').split(' ')[0].toLowerCase())}${i.chuckDia!=null?' · Ø'+esc(String(i.chuckDia)):''}</div></div><span style="margin-left:auto">${tlStatusChip(i.status)||''}</span></div>
+            <div class="tl-lc-body">
+              <span class="tl-lk">Наименование</span><span>${esc(i.name||'—')}</span>
+              ${i.clampKind?`<span class="tl-lk">Что это</span><span>${esc(i.clampKind)}</span>`:''}
+              <span class="tl-lk">Где</span><span>${i.whereKind==='shop'?tlChip(i.where,'warn'):esc(i.where||'—')}</span>
+              ${i.spindleMount?`<span class="tl-lk">Посадка</span><span>${esc(i.spindleMount)}</span>`:''}
+              ${i.boreDia!=null?`<span class="tl-lk">Проходное отв.</span><span>Ø${esc(String(i.boreDia))} мм</span>`:''}
+              ${i.maxRpm!=null?`<span class="tl-lk">Макс. обороты</span><span>${esc(String(i.maxRpm))} об/мин</span>`:''}
+              <span class="tl-lk">Кулачки</span><span>${js.length?js.map(j=>`<a href="#" data-jawopen="${esc(j.setNo)}" style="color:var(--navy)">${esc(j.setNo)}</a> <span class="c-gray">${esc([j.exec,j.jawType].filter(Boolean).join(' · ').toLowerCase())}</span>`).join('<br>'):'<span class="c-gray">комплектов нет</span>'}</span>
+            </div>
+            <div class="tl-lc-foot"><a href="#" data-jawnew="${esc(i.invNo||i.code)}" style="font-size:11px;color:var(--navy)">+ комплект кулачков</a><span style="margin-left:auto;font-size:11px;color:var(--navy)">Карточка →</span></div>
+          </div>`; }).join('');
+        gh.querySelectorAll('[data-jawopen]').forEach(a0=>a0.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); const j=jaws.find(x=>x.setNo===a0.dataset.jawopen); if(j)cjForm(j); });
+        gh.querySelectorAll('[data-jawnew]').forEach(a0=>a0.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); cjForm(null,{chuckInv:a0.dataset.jawnew}); });
+        gh.querySelectorAll('[data-clampi]').forEach(el=>el.onclick=()=>tlPickItem(clamps[+el.dataset.clampi].code));
+      } else if(tlLibSub==='jaws'){
         if(!jaws.length){ gh.innerHTML='<div class="card pad" style="grid-column:1/-1;color:var(--sub);font-size:12px">'+(live?'Библиотека пуста — «+ Добавить комплект».':'Таблица кулачков появится после миграции (нужен токен NocoDB).')+(D.warning?'<div style="margin-top:6px;color:#b45309">'+esc(D.warning)+'</div>':'')+'</div>'; return; }
         gh.innerHTML=jaws.map((i,ix)=>`<div class="tl-libcard" data-jaw="${ix}">
             <div class="tl-lc-top"><span class="tl-lc-ic">⚙</span><div style="min-width:0"><div class="tl-lc-no">${esc(i.setNo||'—')}</div><div class="tl-lc-sub">${esc([i.exec,i.jawType||'кулачки'].filter(Boolean).join(' · '))}${i.jawCount?(' · '+esc(i.jawCount)+' кул.'):''}</div></div><span style="margin-left:auto">${cjCondChip(i.condition)}</span></div>

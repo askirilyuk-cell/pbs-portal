@@ -12008,6 +12008,27 @@
     const WZ_PARA={cut:'Количественный учёт: остаток / минимум · выдача, пополнение, возврат, поступление.',
       si:'Инвентарный учёт + поверка (ДП–О.4): инв.№, свидетельство, срок поверки.',
       osn:'Инвентарный учёт: инв.№, статус, местоположение · приёмка, перемещение, списание.'};
+    // K-227: в мастере заведения инструмента/оснастки — поиск по зеркалу номенклатуры 1С. Выбранная позиция
+    // даёт наименование, код 1С (для списания) и единицу; всё можно поправить руками после подстановки.
+    async function tlWiz1cMount(host){ const nameEl=host.querySelector('#wz-name'); if(!nameEl||host.querySelector('#wz-1c'))return; const grid=nameEl.closest('div[style*="grid"]')||nameEl.parentElement; if(!grid||!grid.parentElement)return;
+      const box=document.createElement('div'); box.id='wz-1c'; box.style.cssText='margin:0 0 14px;padding:12px 14px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)';
+      box.innerHTML=`<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:8px">Найти в 1С <span style="font-weight:400;text-transform:none;letter-spacing:0">— если позиция уже куплена и числится в учёте</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="wz-1c-q" class="rt-inp" placeholder="напр. «патрон токарный», «тиски», БП-00001234" style="flex:1;min-width:260px" autocomplete="off"><label style="font-size:12px;color:var(--sub);display:flex;gap:5px;align-items:center;white-space:nowrap"><input type="checkbox" id="wz-1c-stock"> только с остатком</label></div>
+        <div id="wz-1c-res" style="margin-top:8px;max-height:260px;overflow:auto"></div>`;
+      grid.parentElement.insertBefore(box,grid);
+      const res=box.querySelector('#wz-1c-res'), q=box.querySelector('#wz-1c-q'), st=box.querySelector('#wz-1c-stock');
+      res.innerHTML='<div class="c-gray" style="font-size:12px">Загружаю номенклатуру 1С…</div>';
+      if(!ONEC){ try{ ONEC=await (await fetch('/api/onec')).json(); }catch{ ONEC={items:[]}; } }
+      const items=((ONEC&&ONEC.items)||[]).filter(m=>!m.isService&&!m.deleted);
+      const paint=()=>{ const words=q.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if(!words.length){ res.innerHTML=`<div class="c-gray" style="font-size:12px">В зеркале 1С ${items.length} позиций (синхронизация ${ONEC&&ONEC.syncedAt?esc(fmtDT(ONEC.syncedAt)):'—'}). Начните вводить название или код.</div>`; return; }
+        const all=items.filter(m=>(!st.checked||m.hasStock)&&words.every(w0=>[m.name,m.code,m.article,m.group].some(x=>String(x||'').toLowerCase().includes(w0)))); const list=all.slice(0,40);
+        res.innerHTML=list.length?list.map(m=>`<div class="eqd-doc" style="cursor:pointer" data-k="${esc(m.key)}"><span class="mono" style="color:var(--navy)">${esc(m.code)}</span><span class="nm">${esc(m.name)}<span class="c-gray"> · ${esc(m.group||'')}${m.accounts?' · сч. '+esc(m.accounts):''}</span></span><span class="sz">${m.hasStock?esc(String(m.qty))+' '+esc(m.unit||''):'списано / нет остатка'}</span></div>`).join('')+(all.length>list.length?`<div class="c-gray" style="font-size:12px;margin-top:4px">Показано ${list.length} из ${all.length} — уточните запрос.</div>`:'')
+          :'<div class="c-gray" style="font-size:12px">В 1С не найдено. Снимите «только с остатком» или заведите вручную ниже — код 1С можно вписать позже.</div>';
+        res.querySelectorAll('[data-k]').forEach(el=>el.onclick=()=>{ const m=items.find(x=>x.key===el.dataset.k); if(!m)return; const set=(id,v)=>{ const e=host.querySelector('#'+id); if(e&&v!=null){ e.value=v; e.dispatchEvent(new Event('input',{bubbles:true})); } };
+          set('wz-name',String(m.name||'').replace(/\s+/g,' ').trim()); set('wz-code1c',m.code||''); set('wz-unit',m.unit||''); tlWizData.unit=tlWizData.unit||m.unit||''; tlWizCollect();
+          res.innerHTML=`<div style="font-size:12px;color:#15803d">Подставлено из 1С: <b>${esc(m.code)}</b> · ${esc(m.name)}${m.hasStock?' · на остатке '+esc(String(m.qty))+' '+esc(m.unit||''):' · в 1С уже списано'}. Наименование можно сократить под цех — код 1С останется.</div>`; q.value=''; toast('Данные из 1С подставлены: '+m.code,'ok'); }); };
+      q.oninput=paint; st.onchange=paint; paint(); }
     function tlWizCollect(){
       const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():undefined;};
       ['name','type','category','subcategory','code1c','unit','cell','minStock','balance','accuracyRange','invNo','calDate','calNext','calCert','location','status','rigKind','invoiceNo','note'].forEach(k=>{const v=V('wz-'+k);if(v!==undefined)tlWizData[k]=v;});
@@ -12104,6 +12125,7 @@
         const bk=host.querySelector('#wz-back'); if(bk)bk.onclick=()=>{tlWizCollect();tlWizStep=step-1;tlWizardBody(host);};
         const nx=host.querySelector('#wz-next'); if(nx)nx.onclick=()=>{tlWizCollect();if(!(tlWizData.name||'').trim()){toast('Укажите наименование.','err');return;}tlWizStep=3;tlWizardBody(host);};
         const fn=host.querySelector('#wz-finish'); if(fn)fn.onclick=()=>tlWizSave(host);
+        if(step===2){ tlWiz1cMount(host); } // K-227: поиск позиции в 1С — наименование и код подставляются сами
         if(step===2&&sub==='cut'&&!tcCache.holders){ tlEnsureAux(()=>{ if(tlTab==='wizard'&&tlWizStep===2&&tlWizSub==='cut'){tlWizCollect();tlWizardBody(host);} }); }
       }
     }

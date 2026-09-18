@@ -10612,9 +10612,12 @@
     let TL=null, tlTab='items', tlSel=null, tlSub='cut', tlCat='', tlFilter='all', tlCardCache={}, tlPlace='', tlGridApi=null;
     // редизайн ДП–О.3.1: единый поиск, каталог-пары, кулачки+оправки карточками, мастер заведения
     let tlQuery='', tlCatSub='pairs', tlLibSub='jaws', tlWizStep=1, tlWizSub='cut', tlWizData={};
-    const TL_SUBS=[['cut','Режущий инструмент'],['osn','Оснастка']]; // K-208: СИ уехали в свой раздел
+    const TL_SUBS=[['cut','Режущий инструмент'],['osn','Оснастка'],['clamp','Зажимные устройства']]; // K-208: СИ уехали в свой раздел · K-234: зажимные — своим подразделом
     const tlSubOf=(i)=>i.subdivision||(i.isSi?'si':i.special?'osn':'cut');
     const tlIsInv=(i)=>tlSubOf(i)==='osn'; // инвентарная модель (оснастка)
+    // K-234: в «Обзоре» зажимные устройства показываются отдельным подразделом; формы и учёт у них — как у оснастки (tlSubOf → 'osn')
+    const tlViewSub=(i)=>i.isClamp?'clamp':tlSubOf(i);
+    const tlSubIsInv=()=>tlSub==='osn'||tlSub==='clamp';
     const tlQty=(n,u)=>Number(n||0).toLocaleString('ru-RU',{maximumFractionDigits:3})+(u?(' '+u):'');
     const tlYmd=()=>new Date().toISOString().slice(0,10);
     const tlMonthStart=()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10);};
@@ -10628,7 +10631,7 @@
     async function renderTools(host,arg){
       host.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка модуля «Инструмент и оснастка»…</div>';
       if(!TL){ try{TL=await (await fetch('/api/tools')).json();}catch(e){TL={mode:'mock',warning:String(e.message||e),items:[],kpis:{},signals:[],locations:[]};} }
-      if(arg){ const it=(TL.items||[]).find(i=>i.code===arg); if(it){ tlTab='items'; tlSub=tlSubOf(it); tlSel=arg; tlPlace=''; tlCat=''; tlFilter='all'; } }
+      if(arg){ const it=(TL.items||[]).find(i=>i.code===arg); if(it){ tlTab='items'; tlSub=tlViewSub(it); tlSel=arg; tlPlace=''; tlCat=''; tlFilter='all'; } }
       // миграция старых значений вкладок → новая раскладка (Обзор · Каталог-пары · Кулачки+оправки · Мастер)
       if(tlTab==='cathold'){tlTab='catalog';tlCatSub='holders';} else if(tlTab==='catins'){tlTab='catalog';tlCatSub='inserts';} else if(tlTab==='catjaws'){tlTab='lib';tlLibSub='jaws';}
       const live=TL.mode==='live';
@@ -10680,27 +10683,27 @@
         </div>`;
       // K-42: sigBlock (дефицит) и calBlock (поверка) — жёлтые карточки — убраны; данные в таблице (подсветка) + фильтры.
       // K-39: фасеты слева (Подраздел/Состояние/Категория чекбоксами+счётчики) · таблица · drawer справа.
-      const subCount=(s)=>items.filter(i=>tlSubOf(i)===s).length;
-      const subItems=items.filter(i=>tlSubOf(i)===tlSub);
+      const subCount=(s)=>items.filter(i=>tlViewSub(i)===s).length;
+      const subItems=items.filter(i=>tlViewSub(i)===tlSub);
       const defCount=subItems.filter(i=>i.belowMin||i.balance<=0).length;
       const normCount=subItems.length-defCount;
       const calCount=subItems.filter(i=>i.calOverdue||i.calSoon).length;
       const cats=[...new Set(subItems.map(i=>i.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
       const catCount=(c)=>subItems.filter(i=>i.category===c).length;
       const newLbl=tlSub==='si'?'СИ':(tlSub==='osn'?'Оснастку':'Инструмент');
-      const uchet=tlSub==='osn'?'инвентарный учёт (штучный, по инв.№)':'количественный учёт (остаток / мин)';
+      const uchet=tlSub==='clamp'?'патроны, тиски, планшайбы — поштучно; кулачки привязываются к патрону на вкладке «Кулачки и оправки»':tlSubIsInv()?'инвентарный учёт (штучный, по инв.№)':'количественный учёт (остаток / мин)';
       // фасет-строка: чекбокс + подпись + счётчик (data-grp/data-val)
       const facet=(grp,val,label,count,on,dis)=>`<label class="tl-facet${on?' on':''}" data-grp="${grp}" data-val="${esc(String(val))}"${dis?' style="opacity:.45;pointer-events:none"':''}><input type="checkbox"${on?' checked':''}${dis?' disabled':''}><span class="tl-fl">${label}</span><span class="tl-fc">${count}</span></label>`;
       const subFacets=TL_SUBS.map(([k,t])=>facet('sub',k,esc(t),subCount(k),tlSub===k)).join('');
       let stFacets=facet('st','all','Все',subItems.length,tlFilter==='all')
-        +facet('st','def','⚠ Дефицит',defCount,tlFilter==='def',!defCount)
-        +facet('st','norm','Норма',normCount,tlFilter==='norm',!normCount);
+        +(tlSubIsInv()?'':facet('st','def','⚠ Дефицит',defCount,tlFilter==='def',!defCount)
+        +facet('st','norm','Норма',normCount,tlFilter==='norm',!normCount));
       if(tlSub==='si')stFacets+=facet('st','cal','⏰ Поверка',calCount,tlFilter==='cal',!calCount);
       const catFacets=cats.length?cats.map(c=>facet('cat',c,esc(c),catCount(c),tlCat===c)).join(''):'<div style="font-size:11px;color:var(--sub);padding:2px 5px">— нет —</div>';
       const facets=`<aside class="tl-facets">
           <div class="tl-fgrp">Подраздел</div>${subFacets}
           <div class="tl-fgrp">Состояние</div>${stFacets}
-          <div class="tl-fgrp">Категория</div>${catFacets}
+          ${tlSub==='clamp'?'':`<div class="tl-fgrp">Категория</div>${catFacets}`}
           <button class="tbtn tl-reset" id="tl-reset">Сбросить фильтры</button>
         </aside>`;
       host.innerHTML=hero+kpiStrip+`
@@ -10726,8 +10729,8 @@
       host.querySelectorAll('.tl-facet[data-grp="st"]').forEach(el=>el.onclick=()=>{tlFilter=(tlFilter===el.dataset.val)?'all':el.dataset.val;host.querySelectorAll('.tl-facet[data-grp="st"]').forEach(x=>{const on=x.dataset.val===tlFilter;x.classList.toggle('on',on);const cb=x.querySelector('input');if(cb)cb.checked=on;});tlGrid();});
       host.querySelectorAll('.tl-facet[data-grp="cat"]').forEach(el=>el.onclick=()=>{tlCat=(tlCat===el.dataset.val)?'':el.dataset.val;host.querySelectorAll('.tl-facet[data-grp="cat"]').forEach(x=>{const on=x.dataset.val===tlCat;x.classList.toggle('on',on);const cb=x.querySelector('input');if(cb)cb.checked=on;});tlGrid();});
       const rs=host.querySelector('#tl-reset'); if(rs)rs.onclick=()=>{tlCat='';tlFilter='all';tlPlace='';tlSel=null;tlItemsBody(host);};
-      const mv=host.querySelector('#tl-move'); if(mv)mv.onclick=()=>{const it=(items.find(x=>x.code===tlSel&&tlSubOf(x)===tlSub))||items.find(x=>tlSubOf(x)===tlSub);openToolMove(it,'');};
-      const nw=host.querySelector('#tl-new'); if(nw)nw.onclick=()=>{tlWizSub=(tlSub||'cut');tlWizStep=1;tlWizData={};tlTab='wizard';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='wizard'));tlBody();};
+      const mv=host.querySelector('#tl-move'); if(mv)mv.onclick=()=>{const it=(items.find(x=>x.code===tlSel&&tlViewSub(x)===tlSub))||items.find(x=>tlViewSub(x)===tlSub);openToolMove(it,'');};
+      const nw=host.querySelector('#tl-new'); if(nw)nw.onclick=()=>{tlWizSub=(tlSub==='clamp'?'osn':(tlSub||'cut'));tlWizStep=(tlSub==='clamp'?2:1);tlWizData=(tlSub==='clamp'?{rigKind:'Зажимное устройство'}:{});tlTab='wizard';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='wizard'));tlBody();};
       const lc=host.querySelector('#tl-loc'); if(lc)lc.onclick=()=>{tlTab='loc';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));tlBody();};
       const ac=host.querySelector('#tl-act'); if(ac)ac.onclick=()=>{tlTab='act';document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));tlBody();};
       // единый поиск: обновление результатов + дозагрузка каталога/кулачков для 3-го хранилища и KPI-плитки
@@ -11013,14 +11016,14 @@
     function tlGrid(){
       const gh=document.getElementById('tlgrid'); if(!gh)return;
       const items=(TL&&TL.items)||[];
-      const subAll=items.filter(i=>tlSubOf(i)===tlSub);   // все позиции подраздела (для «N из M»)
+      const subAll=items.filter(i=>tlViewSub(i)===tlSub);   // все позиции подраздела (для «N из M»)
       let rows=subAll.slice();
       if(tlPlace)rows=rows.filter(i=>i.cell===tlPlace||i.location===tlPlace||i.storage===tlPlace);
       if(tlCat)rows=rows.filter(i=>i.category===tlCat);
       if(tlFilter==='def')rows=rows.filter(i=>i.belowMin||Number(i.balance)<=0);
       else if(tlFilter==='norm')rows=rows.filter(i=>!(i.belowMin||Number(i.balance)<=0));
       else if(tlFilter==='cal')rows=rows.filter(i=>i.calOverdue||i.calSoon);
-      if(tlSub==='osn') rows.sort((a,b)=>String(a.invNo||a.code).localeCompare(String(b.invNo||b.code),'ru'));
+      if(tlSubIsInv()) rows.sort((a,b)=>String(a.invNo||a.code).localeCompare(String(b.invNo||b.code),'ru'));
       else rows.sort((a,b)=>tlDefRatio(a)-tlDefRatio(b));   // дефицит/пусто наверху
       tlSummary(rows.length,subAll.length);
       if(!rows.length){ gh.innerHTML=(TL&&TL.mode==='live')?emptyCard('Позиций по текущему фильтру нет',{sub:'Снимите фильтр, чтобы увидеть весь инструмент.'}):emptyCard('Модуль «Инструмент и оснастка» ещё не наполнен',{sub:'Таблицы появятся после миграции.'}); tlGridApi=null; tlSel=null; tlShowDetail(null); tlSyncDrawer(); return; }
@@ -11028,7 +11031,18 @@
       if(tlSel&&!rows.some(r=>r.code===tlSel)) tlSel=null;
       const live=TL&&TL.mode==='live';
       let cols;
-      if(tlSub==='osn'){   // оснастка — инвентарная модель (штучный, по инв.№)
+      if(tlSub==='clamp'){ const jawsOf=(i)=>((cjCache&&cjCache.items)||[]).filter(j=>j.chuckInv&&j.chuckInv===(i.invNo||i.code)&&j.condition!=='Списан'); // K-234
+        cols=[
+          {key:'inv',label:'Инв. №',w:122,cls:'code',cell:i=>esc(i.invNo||i.code),sortVal:i=>i.invNo||i.code},
+          {key:'name',label:'Наименование',cls:'ell',cell:i=>`<span title="${esc(i.name||'')}" style="font-weight:600;color:var(--ink)">${esc(i.name||'—')}</span>`,sortVal:i=>i.name},
+          {key:'kind',label:'Что это',w:230,cls:'ell c-gray',cell:i=>esc(i.clampKind||'—'),sortVal:i=>i.clampKind},
+          {key:'dia',label:'Ø, мм',w:74,cls:'nw',cell:i=>i.chuckDia!=null?esc(String(i.chuckDia)):'—',sortVal:i=>Number(i.chuckDia)||0},
+          {key:'mount',label:'Посадка',w:110,cls:'nw c-gray',cell:i=>esc(i.spindleMount||'—'),sortVal:i=>i.spindleMount},
+          {key:'jaws',label:'Кулачки',w:150,cls:'nw',cell:i=>{ const j=jawsOf(i); return j.length?`<span title="${esc(j.map(x=>x.setNo+' '+(x.exec||'')+' '+(x.jawType||'')).join('; '))}">${j.length} компл.: ${esc(j.map(x=>x.setNo).join(', '))}</span>`:'<span class="c-gray">нет комплектов</span>'; },sortVal:i=>jawsOf(i).length},
+          {key:'status',label:'Статус',w:140,cls:'nw',cell:i=>tlStatusChip(i.status)||'<span class="c-gray">—</span>',sortVal:i=>i.status},
+          {key:'where',label:'Где',w:190,cls:'nw',cell:tlWhereCell,sortVal:i=>i.where||''},
+        ];
+      } else if(tlSub==='osn'){   // оснастка — инвентарная модель (штучный, по инв.№)
         cols=[
           {key:'inv',label:'Инв. №',w:122,cls:'code',cell:i=>esc(i.invNo||i.code),sortVal:i=>i.invNo||i.code},
           {key:'name',label:'Наименование',cls:'ell',cell:i=>`<span title="${esc(i.name||'')}" style="font-weight:600;color:var(--ink)">${esc(i.name||'—')}</span>`,sortVal:i=>i.name},
@@ -11906,7 +11920,7 @@
     // выбрать позицию реестра из поиска/карточки: перейти на «Обзор», подраздел и открыть drawer
     function tlPickItem(code){
       const it=((TL&&TL.items)||[]).find(x=>x.code===code); if(!it)return;
-      tlTab='items'; tlSub=tlSubOf(it); tlCat=''; tlFilter='all'; tlPlace=''; tlSel=code;
+      tlTab='items'; tlSub=tlViewSub(it); tlCat=''; tlFilter='all'; tlPlace=''; tlSel=code;
       document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));
       const h=document.getElementById('tlbody'); if(h)tlItemsBody(h);
       try{history.replaceState(null,'','#tools/'+encodeURIComponent(code));}catch{}

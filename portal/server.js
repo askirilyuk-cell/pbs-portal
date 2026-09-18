@@ -2181,6 +2181,9 @@ async function generateTasksFromRoute(routeId) {
           // K-214: параметр резки переименован («Размер по чертежу» → «Длина реза») — значения старых МК подхватываем по обоим именам
           const pName = String(p['Параметр'] || ''); const isLen = (n) => /^(длина реза|размер)/i.test(String(n || ''));
           const planned = opPlan.find((x) => x.name === pName) || (isLen(pName) ? opPlan.find((x) => isLen(x.name)) : null);
+          // K-217: операция идёт по программе ЧПУ (в МК отметка «по УП») — режимы n/S/t задаёт программа, оператору в Ф.14 пустые параметры не создаём
+          const byProgram = opPlan.some((x) => /^программа/i.test(String(x.name || '')) && /^по УП/i.test(String(x.norm || '')));
+          if (byProgram && !(planned && (planned.norm || planned.tol)) && !p['Норматив']) continue;
           const pvr = await ncCreateMany('task_param_values', [{
             'Параметр': p['Параметр'] || '', 'Единица': p['Единица'] || '',
             'Обязательный': !!p['Обязательный'], 'Норматив': (planned && planned.norm) || p['Норматив'] || '', 'Допуск': (planned && planned.tol) || p['Допуск'] || '', 'Факт': '',

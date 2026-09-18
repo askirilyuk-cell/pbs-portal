@@ -93,13 +93,20 @@ async function main() {
     const sectionId = opTypeId ? ((await linkedIds('op_types', 'Участки', opTypeId))[0] || null) : null;
     const sec = sectionId ? (sectionById.get(sectionId) || {}) : {};
 
-    // параметры/режимы — из типа операции
+    // K-235: параметры/режимы — ЗНАЧЕНИЯ, заданные технологом в МК («Параметры (план)»), с единицами из типа операции.
+    // Раньше печатались только названия параметров типа, без значений. Незаполненные параметры не выводим;
+    // «по УП» — режимы задаёт программа ЧПУ.
     let params = '—';
-    if (opTypeId) {
-      const pIds = await linkedIds('op_types', 'Параметры', opTypeId);
-      const names = pIds.map((id) => paramById.get(id)).filter(Boolean)
-        .map((p) => p['Единица'] ? `${p['Параметр']} (${p['Единица']})` : p['Параметр']);
-      if (names.length) params = esc(names.join('; '));
+    {
+      let plan = []; try { const a = JSON.parse(String(op['Параметры (план)'] || '') || '[]'); if (Array.isArray(a)) plan = a.filter((x) => x && x.name && (String(x.norm || '').trim() || String(x.tol || '').trim())); } catch { plan = []; }
+      const unitBy = new Map();
+      if (opTypeId) { const pIds = await linkedIds('op_types', 'Параметры', opTypeId); pIds.map((id) => paramById.get(id)).filter(Boolean).forEach((p) => unitBy.set(String(p['Параметр'] || ''), String(p['Единица'] || ''))); }
+      const lines = plan.map((x) => { const u = unitBy.get(String(x.name)) || (/^(длина реза|размер)/i.test(x.name) ? 'мм' : ''); const norm = String(x.norm || '').trim(); const tol = String(x.tol || '').trim();
+        if (/^программа/i.test(x.name) && /^по УП/i.test(norm)) return `<b>по программе ЧПУ</b>${norm.replace(/^по УП:?\s*/i, '') ? ': ' + esc(norm.replace(/^по УП:?\s*/i, '')) : ''}`;
+        const tolTxt = /^[\d.,]+$/.test(tol) ? '±' + tol : tol;                      // «1» в допуске = ±1
+        const hasUnit = u && norm.toLowerCase().replace(/\s+/g, '').endsWith(u.toLowerCase().replace(/\s+/g, '')); // «50 мм» + «мм» → без повтора
+        return `${esc(x.name)}: <b>${esc(norm)}</b>${tolTxt ? ' ' + esc(tolTxt) : ''}${u && norm && !hasUnit && /\d/.test(norm) ? ' ' + esc(u) : ''}`; });
+      if (lines.length) params = lines.join('<br>');
     }
 
     // № карт задач Ф.14 (если сгенерированы)
@@ -115,10 +122,10 @@ async function main() {
     const attMark = (attNc || attSetup) ? `<br><span class="small">📎 ${[attNc ? 'ЧПУ-программа' : null, attSetup ? 'карта наладки' : null].filter(Boolean).join(' · ')}</span>` : '';
     opRows.push(`<tr>
       <td class="c">${v(op['№ операции'])}</td>
-      <td>${v(ot['Наименование'] || op['Операция'])}${attMark}</td>
+      <td>${v(op['Операция'] || ot['Наименование'])}${attMark}</td>
       <td class="c">${v(ot['Код типа'])}</td>
       <td>${sec['Код'] ? `${esc(sec['Код'])} ${esc(sec['Участок'] || '')}` : '—'}</td>
-      <td>${v(op['Оборудование'])}</td>
+      <td>${v(op['Оборудование'])}${String(op['Оснастка'] || '').trim() ? `<br><span class="small">${esc(String(op['Оснастка']).split(/\s*;\s*/).filter(Boolean).join(' · '))}</span>` : ''}</td>
       <td>${params}</td>
       <td class="c">${ctlCell}</td>
       <td>${v(ot['РИ'])}</td>

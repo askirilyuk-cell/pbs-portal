@@ -6430,6 +6430,8 @@ async function buildBoardLive() {
       customer: orderRow['Заказчик / Инициатор'] || '', orderDue: position['Срок готовности'] || orderRow['Плановый срок'] || '',
       startedAt: t['Начато (факт)'] || '', finishedAt: t['Завершено (факт)'] || '', pauseReason: t['Причина приостановки'] || '',
       controlPoint: operation['Точка контроля'] || '', equipList, mk, routeAuthor: route['Автор'] || '',
+      // K-216 (З-010): программа ЧПУ и карта наладки операции — оператору прямо в карте задачи
+      opNo: operation['№ операции'] || '', ncFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'nc') : [], setupFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'setup') : [],
     };
   }
 
@@ -11826,7 +11828,7 @@ const server = http.createServer(async (req, res) => {
     //  НИЧЕГО не блокирует — существующие /api/* работают как раньше (роль лишь информативна).
     req.session = sessionFromReq(req);
     if (req.session && req.session.isStation) { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) { persistSessions(); req.session.operator = null; } else if (raw && raw.operator && req.method !== 'GET') raw.operator.at = Date.now(); } // K-206
-    if (req.session && req.session.isStation && p.startsWith('/api/') && !['/api/me', '/api/board', '/api/station', '/api/task', '/api/metal/blank', '/api/metal/blank-candidates', '/api/metal/find-blank', '/api/onec', '/api/routes/catalog', '/api/design/kd'].some((pre) => p === pre || p.startsWith(pre + '/') || p.startsWith(pre + '?'))) return sendJson(res, 403, { error: 'Пост участка: доступ только к рабочему месту.' }); // K-206
+    if (req.session && req.session.isStation && p.startsWith('/api/') && !['/api/me', '/api/board', '/api/station', '/api/task', '/api/metal/blank', '/api/metal/blank-candidates', '/api/metal/find-blank', '/api/onec', '/api/routes/catalog', '/api/route/opfile', '/api/design/kd'].some((pre) => p === pre || p.startsWith(pre + '/') || p.startsWith(pre + '?'))) return sendJson(res, 403, { error: 'Пост участка: доступ только к рабочему месту.' }); // K-206
     req.roles = sessionPortalRoles(req.session);           // мультироль: эффективный набор портальных ролей
     req.role = req.roles[0] || 'guest';                    // первичная (для сообщений/обратной совместимости)
     if (p === '/api/me') return handleMe(req, res);

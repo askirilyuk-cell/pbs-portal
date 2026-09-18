@@ -1434,6 +1434,7 @@ async function buildRouteCard(id) {
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
       variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], variants: mkVariantsOf(routes, r), // K-219
+      approvalQueue: mkQueueParse(r['Согласующие (очередь)']), // K-221
       approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
       normsFixed: r['Нормы зафиксированы'] || '', // K-175
       projectDecNo: r['Проект разработки (децим. №)'] || '', kdDrawings: _parseKd(r['Чертежи КД']),
@@ -1616,7 +1617,10 @@ async function retroWriteoffEnsure() {
 setTimeout(() => { retroWriteoffEnsure().catch((e) => console.warn('[writeoff] ensure:', e.message)); }, 90 * 1000);
 setInterval(() => { retroWriteoffEnsure().catch((e) => console.warn('[writeoff] ensure:', e.message)); }, 6 * 60 * 60 * 1000);
 const mkApproverIds = () => { const raw = runtime.MK_APPROVERS != null ? runtime.MK_APPROVERS : (process.env.MK_APPROVERS || ''); const ids = String(Array.isArray(raw) ? raw.join(',') : raw).split(/[,;\s]+/).map(Number).filter(Boolean); return ids.length ? ids : retroApproverIds(); };
-const MK_APPROVAL_COLS = [['Согласующий (id)', 'Number'], ['Согласующий', 'SingleLineText'], ['Отправил на согласование', 'SingleLineText'], ['Дата отправки', 'Date'], ['Утвердил', 'SingleLineText'], ['Дата утверждения', 'Date'], ['Комментарий согласующего', 'LongText'], ['Дата возврата', 'Date']];
+// K-221 (З-014): несколько согласующих — цепочка по очереди. «Согласующий (id)» всегда указывает на ТЕКУЩЕГО
+// (у кого карта сейчас), поэтому «Мой кабинет», уведомления и права решения работают как раньше; вся цепочка — в JSON.
+const mkQueueParse = (v) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a.filter((x) => x && x.id) : []; } catch { return []; } };
+const MK_APPROVAL_COLS = [['Согласующие (очередь)', 'LongText'], ['Согласующий (id)', 'Number'], ['Согласующий', 'SingleLineText'], ['Отправил на согласование', 'SingleLineText'], ['Дата отправки', 'Date'], ['Утвердил', 'SingleLineText'], ['Дата утверждения', 'Date'], ['Комментарий согласующего', 'LongText'], ['Дата возврата', 'Date']];
 async function mkEnsureApprovalCols() { for (const [t, u] of MK_APPROVAL_COLS) { try { await ncEnsureColumn('routes', t, u); } catch (e) { console.warn('[МК] колонка «' + t + '» недоступна:', e.message); } } for (const st of MK_STATUS) { try { await ncEnsureSelectOption('routes', 'Статус МК', st); } catch (e) { console.warn('[МК] статус «' + st + '»:', e.message); } } }
 const mkIsAdmin = (session) => !!(session && (session.isAdmin || (session.roles || []).includes('Администратор')));
 // смена статуса МК с синхронизацией резерва металла (заготовка оп. №1)
@@ -1643,9 +1647,13 @@ async function mkSetStatus(body, session) {
   await mkEnsureApprovalCols();
   const patch = {};
   if (to === 'На согласовании') {
-    const apId = Number(body.approverId); if (!apId) { const e = new Error('Выберите согласующего.'); e.status = 400; throw e; }
-    if (!mkApproverIds().includes(apId)) { const e = new Error('Этот сотрудник не в списке согласующих МК (Настройки).'); e.status = 400; throw e; }
-    patch['Согласующий (id)'] = apId; patch['Согласующий'] = String(body.approverName || '').trim() || ('id' + apId); patch['Отправил на согласование'] = fio; patch['Дата отправки'] = whToday(); patch['Комментарий согласующего'] = ''; patch['Дата возврата'] = null;
+    const chain = (Array.isArray(body.approvers) && body.approvers.length ? body.approvers : [{ id: body.approverId, name: body.approverName }])
+      .map((a) => ({ id: Number(a && a.id), name: String((a && a.name) || '').trim() })).filter((a) => a.id);
+    if (!chain.length) { const e = new Error('Выберите согласующего.'); e.status = 400; throw e; }
+    for (const a of chain) if (!mkApproverIds().includes(a.id)) { const e = new Error(`${a.name || 'id' + a.id} не в списке согласующих МК (Настройки).`); e.status = 400; throw e; }
+    const apId = chain[0].id;
+    patch['Согласующие (очередь)'] = JSON.stringify(chain.map((a) => ({ id: a.id, name: a.name || ('id' + a.id), done: false })));
+    patch['Согласующий (id)'] = apId; patch['Согласующий'] = chain[0].name || ('id' + apId); patch['Отправил на согласование'] = fio; patch['Дата отправки'] = whToday(); patch['Комментарий согласующего'] = ''; patch['Дата возврата'] = null;
     const res = await setMkStatus(r.Id ?? r.id, to, patch);
     const opsN = (await ncListSoft('operations')).filter((o) => Number(o.routes_id) === Number(r.Id ?? r.id)).length;
     const dm = await retroDm(apId, `Маршрутная карта ${r['№ МК']} ждёт вашего согласования: ${r['Наименование'] || ''}${r['Изделие / обозначение'] ? ' (' + r['Изделие / обозначение'] + ')' : ''}, операций ${opsN}. Отправил: ${fio}. Кабинет: ${portal}/#cabinet · МК: ${link}`);
@@ -1654,7 +1662,22 @@ async function mkSetStatus(body, session) {
   const approverId = r['Согласующий (id)'] != null && r['Согласующий (id)'] !== '' ? String(r['Согласующий (id)']) : '';
   if (from === 'На согласовании' && (to === 'Утверждена' || to === 'Черновик') && !admin && approverId && meId !== approverId && !(to === 'Черновик' && r['Отправил на согласование'] === fio)) { const e = new Error(`Согласовать или вернуть эту МК может ${r['Согласующий'] || 'назначенный согласующий'} (или Администратор).`); e.status = 403; throw e; }
   if (to === 'Утверждена' && from === 'Черновик' && !admin && !mkApproverIds().includes(Number(meId))) { const e = new Error('Утверждать МК могут только согласующие — отправьте карту на согласование.'); e.status = 403; throw e; }
-  if (to === 'Утверждена') { patch['Утвердил'] = fio; patch['Дата утверждения'] = whToday(); }
+  if (to === 'Утверждена' && from === 'На согласовании') { // K-221: цепочка — утверждает текущий, карта уходит следующему; «Утверждена» — после последнего
+    const q = mkQueueParse(r['Согласующие (очередь)']);
+    if (q.length > 1) {
+      const cur = q.find((x) => !x.done && String(x.id) === approverId) || q.find((x) => !x.done);
+      if (cur) { cur.done = true; cur.by = fio; cur.at = whToday(); }
+      const next = q.find((x) => !x.done);
+      if (next) {
+        await ncUpdate('routes', r.Id ?? r.id, { 'Согласующие (очередь)': JSON.stringify(q), 'Согласующий (id)': next.id, 'Согласующий': next.name });
+        let dm = null; try { dm = await retroDm(next.id, `Маршрутная карта ${r['№ МК']} ждёт вашего согласования: ${r['Наименование'] || ''}. Уже согласовали: ${q.filter((x) => x.done).map((x) => x.name).join(', ')}. ${link}`); } catch { /* уведомление — не критично */ }
+        return { ok: true, id: r.Id ?? r.id, mk: r['№ МК'] || '', from, to: from, partial: true, next: next.name, notified: dm };
+      }
+      patch['Согласующие (очередь)'] = JSON.stringify(q); patch['Утвердил'] = q.map((x) => x.by || x.name).join(', '); patch['Дата утверждения'] = whToday();
+    }
+  }
+  if (to === 'Утверждена' && !patch['Утвердил']) { patch['Утвердил'] = fio; patch['Дата утверждения'] = whToday(); }
+  if (to === 'Черновик') patch['Согласующие (очередь)'] = '';
   if (to === 'Черновик' && from === 'На согласовании' && meId === approverId) { patch['Комментарий согласующего'] = String(body.comment || '').trim() || 'без комментария'; patch['Дата возврата'] = whToday(); }
   const res = await setMkStatus(r.Id ?? r.id, to, patch);
   if (from === 'На согласовании') { const sender = r['Отправил на согласование'] || ''; try { const st = await getStaffList(); const u = st.find((x) => x.name === sender); if (u && String(u.id) !== meId) await retroDm(u.id, to === 'Утверждена' ? `МК ${r['№ МК']} (${r['Наименование'] || ''}) утверждена: ${fio}. ${link}` : `МК ${r['№ МК']} возвращена на доработку: ${fio}.${body.comment ? ' Комментарий: ' + String(body.comment).trim() : ''} ${link}`); } catch { /* без ЛС */ } }

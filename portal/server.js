@@ -1434,6 +1434,7 @@ async function buildRouteCard(id) {
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
       variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], variants: mkVariantsOf(routes, r), // K-219
+      history: mkHistParse(r['История']), // K-239
       approvalQueue: mkQueueParse(r['Согласующие (очередь)']), // K-221
       approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
       normsFixed: r['Нормы зафиксированы'] || '', // K-175
@@ -1636,7 +1637,57 @@ async function setMkStatus(routeId, newStatus, patchExtra) {
 }
 async function mkApprovers() { const ids = mkApproverIds(); let staff = []; try { staff = await getStaffList(); } catch { staff = []; } return ids.map((id) => { const u = staff.find((x) => Number(x.id) === id); return { id, name: u ? u.name : ('id' + id), position: u ? u.position : '' }; }); }
 // маршрут согласования МК: Черновик → На согласовании → Утверждена | назад в Черновик (на доработку с комментарием)
+// K-239: история МК — колонка «История» (JSON [{at,by,what}]). Пишется при смене статуса всегда; правки и вложения — с момента, когда МК вышла из черновика / уже утверждалась.
+function mkHistParse(raw) { try { const a = JSON.parse(String(raw || '') || '[]'); return Array.isArray(a) ? a.filter((x) => x && x.what) : []; } catch { return []; } }
+const mkHistShould = (row) => !!row && (String(row['Статус МК'] || 'Черновик').trim() !== 'Черновик' || /«Утверждена»/.test(String(row['История'] || '')));
+async function mkHistAdd(routeId, items, session) {
+  const list = (Array.isArray(items) ? items : [items]).map((x) => String(x || '').trim()).filter(Boolean); if (!list.length || routeId == null) return;
+  return withKeyLock('mk-hist:' + routeId, async () => {
+    try { await ncEnsureColumn('routes', 'История', 'LongText');
+      const r = (await ncListSoft('routes')).find((x) => String(x.Id ?? x.id) === String(routeId)); if (!r) return;
+      const by = (session && (session.fio || session.name)) || 'портал'; const at = new Date().toISOString();
+      const h = mkHistParse(r['История']).concat(list.map((what) => ({ at, by, what }))).slice(-400);
+      await ncUpdate('routes', r.Id ?? r.id, { 'История': JSON.stringify(h) });
+    } catch (e) { console.warn('K-239: история МК не записана:', e.message); }
+  });
+}
+async function mkHistFile(mk, what, session) { // вложения операций: пишем, только если МК уже выходила из черновика
+  try { if (!isLive()) return; const r = (await ncListSoft('routes')).find((x) => String(x['№ МК'] || '').trim() === String(mk || '').trim()); if (r && mkHistShould(r)) await mkHistAdd(r.Id ?? r.id, [what], session); } catch { /* история — не критично */ }
+}
+const MK_HIST_OP_FIELDS = [['Операция', 'название', 1], ['Оборудование', 'оборудование', 1], ['Норма времени (ч)', 'норма времени', 1], ['СИ', 'СИ', 1], ['Точка контроля', 'точка контроля', 1], ['Оснастка', 'оснастка', 0], ['Параметры (план)', 'режимы / параметры', 0], ['Материалы (план)', 'материалы', 0], ['Входящие материалы', 'заготовка', 0], ['Что контролировать', 'что контролировать', 0], ['Допуски', 'допуски', 0], ['Карта наладки (№)', 'карта наладки', 1], ['Комментарий оператору', 'комментарий оператору', 0]];
+function mkHistDiff(prevRoute, newRoute, oldOps, newOps) {
+  const nv = (v) => { if (v == null) return ''; if (typeof v === 'number') return String(v); const t = String(v).trim(); return t !== '' && !isNaN(Number(t)) ? String(Number(t)) : t; };
+  const out = [];
+  for (const [k, label] of [['Наименование', 'наименование'], ['Изделие / обозначение', 'обозначение'], ['Ревизия', 'ревизия'], ['Материал', 'материал'], ['Тип продукции', 'тип продукции'], ['Вариант', 'вариант']])
+    if (k in newRoute && nv(prevRoute[k]) !== nv(newRoute[k])) out.push(`Изменено поле «${label}»: «${nv(prevRoute[k]) || '—'}» → «${nv(newRoute[k]) || '—'}»`);
+  const o = [...oldOps].sort((a, b) => Number(a['№ операции']) - Number(b['№ операции']));
+  const was = o.map((x) => nv(x['Операция'])), now = newOps.map((x) => nv(x['Операция']));
+  const renameOnly = was.length === now.length && was.every((x, i) => x === now[i] || (!now.includes(x) && !was.includes(now[i])));
+  if (!renameOnly) {
+    const added = now.filter((x) => !was.includes(x)), gone = was.filter((x) => !now.includes(x));
+    if (added.length) out.push('Добавлены операции: ' + added.join('; '));
+    if (gone.length) out.push('Убраны операции: ' + gone.join('; '));
+    if (!added.length && !gone.length) out.push(was.length !== now.length ? `Изменено число операций: ${was.length} → ${now.length}` : 'Изменён порядок операций');
+  }
+  if (o.length === newOps.length) newOps.forEach((n, i) => {
+    const prev = o.find((x) => nv(x['Операция']) === nv(n['Операция'])) || o[i]; const ch = [];
+    for (const [k, label, short] of MK_HIST_OP_FIELDS) { const a = nv(prev[k]), b = nv(n[k]); if (a === b) continue; if (k === 'Операция' && prev !== o[i]) continue; ch.push(short ? `${label}: «${a || '—'}» → «${b || '—'}»` : label); }
+    if (ch.length) out.push(`Оп. ${i + 1} «${nv(n['Операция'])}»: ${ch.join('; ')}`);
+  });
+  return out;
+}
 async function mkSetStatus(body, session) {
+  const res = await mkSetStatusCore(body, session);
+  try { let what = '';
+    if (res && res.partial) what = `Согласовано; передано следующему согласующему: ${res.next}`;
+    else if (res && res.from !== res.to) { what = `Статус: «${res.from}» → «${res.to}»`;
+      if (res.to === 'На согласовании' && Array.isArray(body.approvers) && body.approvers.length) what += ' (согласующие: ' + body.approvers.map((a) => a && a.name).filter(Boolean).join(' → ') + ')';
+      if (res.to === 'Черновик' && String(body.comment || '').trim()) what += '. Комментарий: ' + String(body.comment).trim(); }
+    if (what) await mkHistAdd(res.id, [what], session);
+  } catch { /* история — не критично */ }
+  return res;
+}
+async function mkSetStatusCore(body, session) {
   const routes = await ncListSoft('routes'); const r = routes.find((x) => String(x.Id ?? x.id) === String(body.id));
   if (!r) { const e = new Error('Маршрут не найден.'); e.status = 404; throw e; }
   const from = String(r['Статус МК'] || 'Черновик').trim(); const to = String(body.status || '').trim(); const admin = mkIsAdmin(session);
@@ -1756,6 +1807,7 @@ async function saveRoute(body, session) {
     if (fio) { const prev = routeId != null ? (await ncListSoft('routes')).find((x) => (x.Id ?? x.id) === routeId) : null; if (!prev || !String(prev['Автор'] || '').trim()) { routeRow['Автор'] = fio; if (session && session.userId) { await ncEnsureColumn('routes', 'Автор (id)', 'SingleLineText'); routeRow['Автор (id)'] = String(session.userId); } } } } // K-187: id автора — для «Сообщить технологу»
   catch (e) { console.warn('МК: колонка «Автор» недоступна:', e.message); }
   let mk = '';
+  let histPrevRoute = null, histOldOps = []; const histNewOps = []; // K-239
   let oldStatusMk = null; // МК-резерв металла (этап 1): нужен статус ДО этого сохранения — иначе не увидеть переход «→ В производстве»
   if (routeId == null) {
     const year = new Date().getFullYear();
@@ -1773,6 +1825,7 @@ async function saveRoute(body, session) {
     await ncUpdate('routes', routeId, routeRow);
     // пересборка операций: удаляем прежние операции маршрута + их компоненты
     const [ops, comps] = await Promise.all([ncListSoft('operations'), ncListSoft('components_in')]);
+    histPrevRoute = existingRoute || null; histOldOps = ops.filter((o) => o.routes_id === routeId); // K-239
     const oldOpIds = new Set(ops.filter((o) => o.routes_id === routeId).map((o) => o.Id ?? o.id));
     const oldCompIds = comps.filter((c) => oldOpIds.has(c.operations_id)).map((c) => c.Id ?? c.id);
     if (oldCompIds.length) await ncDeleteMany('components_in', oldCompIds);
@@ -1825,6 +1878,7 @@ async function saveRoute(body, session) {
           opRow['Входящие материалы'] = JSON.stringify(bl); } } }
     if (hasParamPlan) { const pp = mkParamPlanClean(o.paramPlan); opRow['Параметры (план)'] = pp.length ? JSON.stringify(pp) : ''; } // K-182
     if (hasOpComment) opRow['Комментарий оператору'] = String(o.comment || '').trim(); // K-186
+    histNewOps.push(opRow);
     const cr = await ncCreateMany('operations', [opRow]);
     const co = Array.isArray(cr) ? cr[0] : cr; const opId = co.Id ?? co.id;
     await ncLinkRecords('routes', 'Операции маршрута', routeId, [opId]);
@@ -1849,6 +1903,12 @@ async function saveRoute(body, session) {
   try {
     blankReserve = await syncMkMetalReserve({ routeId, mk, oldStatusMk, newStatusMk: smk, blankRaw: (opsIn[0] && opsIn[0].materials) || '' });
   } catch (e) { console.warn(`МК ${mk}: синхронизация резерва металла по заготовке не выполнена:`, e.message); }
+  try { // K-239: история правок
+    if (!histPrevRoute) await mkHistAdd(routeId, ['МК создана'], session);
+    else if (mkHistShould(histPrevRoute)) { const d = mkHistDiff(histPrevRoute, routeRow, histOldOps, histNewOps);
+      if (oldStatusMk && oldStatusMk !== smk) d.unshift(`Статус: «${oldStatusMk}» → «${smk}»`);
+      if (d.length) await mkHistAdd(routeId, d, session); }
+  } catch (e) { console.warn('K-239: история МК:', e.message); }
   return { ok: true, id: routeId, mk, operations: opCount, components: compCount, blankReserve };
 }
 
@@ -13106,7 +13166,29 @@ const server = http.createServer(async (req, res) => {
         const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(String(f.filename));
       }
+      if (saved.length) await mkHistFile(mk, `Оп. ${op}: прикреплён файл ${kind === 'setup' ? 'карты наладки' : 'программы ЧПУ'} — ${saved.join(', ')}`, sessionFromReq(req)); // K-239
       return sendJson(res, 200, { ok: true, mk, op, kind, saved, skipped, files: mkOpFiles(mk, op, kind) });
+    }
+    // K-238: удаление ошибочно привязанного вложения операции. Файл не стирается, а уходит в подпапку _deleted (в списках не виден).
+    if (p === '/api/route/op/file-delete' && req.method === 'POST') {
+      try {
+        const b = await readBody(req); const mk = String(b.mk || '').trim(), op = String(b.op || '').trim(), kind = String(b.kind || '').trim(), rel = String(b.rel || '');
+        const dir = mkOpDir(mk, op, kind);
+        if (!dir || !rel) return sendJson(res, 400, { error: 'Не указано вложение (mk, op, kind, rel).' });
+        const target = path.normalize(path.join(dir, rel));
+        if (path.dirname(target) !== dir) return sendJson(res, 403, { error: 'Доступ запрещён.' });
+        let st; try { st = fs.statSync(target); } catch { return sendJson(res, 404, { error: 'Файл не найден.' }); }
+        if (!st.isFile()) return sendJson(res, 404, { error: 'Не файл.' });
+        const session = sessionFromReq(req);
+        const route = isLive() ? (await ncListSoft('routes')).find((x) => String(x['№ МК'] || '').trim() === mk) : null;
+        const stMk = route ? String(route['Статус МК'] || 'Черновик').trim() : 'Черновик';
+        if (!MK_EDITABLE.has(stMk) && !mkIsAdmin(session)) return sendJson(res, 403, { error: `МК в статусе «${stMk}» не редактируется — верните её в черновик через согласующего.` });
+        const bin = path.join(dir, '_deleted'); fs.mkdirSync(bin, { recursive: true });
+        fs.renameSync(target, path.join(bin, Date.now() + '__' + path.basename(target)));
+        console.log(`[mk-files] удалено вложение ${mk} оп.${op} ${kind}: ${path.basename(target)} — ${(session && session.name) || '?'}`);
+        await mkHistFile(mk, `Оп. ${op}: убран файл ${kind === 'setup' ? 'карты наладки' : 'программы ЧПУ'} — ${path.basename(target)}`, session); // K-239
+        return sendJson(res, 200, { ok: true, mk, op, kind, files: mkOpFiles(mk, op, kind) });
+      } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
     if (p === '/api/route/opfile') { // отдача вложения операции МК (inline-просмотр или dl=1 — скачивание), traversal-guard
       const mk = url.searchParams.get('mk') || '', op = url.searchParams.get('op') || '', kind = url.searchParams.get('kind') || '', rel = url.searchParams.get('rel') || '';

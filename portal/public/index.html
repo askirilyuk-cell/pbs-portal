@@ -15204,7 +15204,7 @@
           <div style="flex:1;min-width:180px"><div style="font-size:12px;font-weight:600;color:var(--ink)">Карта наладки</div><select class="rt-inp" data-of="setupCardNo" style="margin-top:5px">${rtSetupOptions(op.setupCardNo)}</select></div>
           ${op.setupCardNo?(sid!=null?`<a class="rt-file" href="#setup/${encodeURIComponent(sid)}"><i class=ic-doc></i> Открыть ${esc(op.setupCardNo)}</a>`:`<span class="rt-file"><i class=ic-doc></i> ${esc(op.setupCardNo)}</span>`):'<span class="rt-hint">не привязана — выберите из справочника</span>'}</div>`:'';
       return `<div class="rt-op${op._open?' open':''}" data-idx="${i}">
-        <div class="rt-ohead"><span class="rt-onum">${i+1}</span><div style="min-width:0"><div class="rt-oname">${esc(nm)}</div><div class="rt-osub">${esc(sub)}</div></div>${chip}<span class="rt-oarr">${RT_SVG_ARR}</span></div>
+        <div class="rt-ohead"><span class="rt-onum">${i+1}</span><div style="min-width:0"><div class="rt-oname">${esc(nm)}</div><div class="rt-osub">${esc(sub)}</div></div>${chip}<span class="rt-omove" style="margin-left:auto;display:inline-flex;gap:4px"><button type="button" class="tbtn" data-opmove="-1" data-opi="${i}" title="Переместить операцию выше" style="padding:2px 8px"${i===0?' disabled':''}>▲</button><button type="button" class="tbtn" data-opmove="1" data-opi="${i}" title="Переместить операцию ниже" style="padding:2px 8px"${i===(rtWiz.ops.length-1)?' disabled':''}>▼</button></span><span class="rt-oarr" style="margin-left:6px">${RT_SVG_ARR}</span></div>
         <div class="rt-obody">
           <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование) <span class="rt-rt">выберите из типовых или впишите своё</span></label><input class="rt-inp" data-of="name" list="rt-names-${i}" value="${rtEscA(op.name)}" placeholder="по умолч. = тип" autocomplete="off"><datalist id="rt-names-${i}">${(ot.names||[]).map(n=>`<option value="${rtEscA(n)}">`).join('')}</datalist></div></div>
           ${auto}
@@ -15307,6 +15307,12 @@
         host.querySelectorAll('.rt-ohead').forEach(h=>h.onclick=(e)=>{ if(e.target.closest('a,button,select,input'))return; const op=h.closest('.rt-op'); op.classList.toggle('open'); const i=+op.dataset.idx; if(rtWiz.ops[i])rtWiz.ops[i]._open=op.classList.contains('open'); });
         rtPalWire(host);
         host.querySelectorAll('[data-oprem]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); rtReadOps(2); rtWiz.ops.splice(+b.dataset.oprem,1); rtWiz._keepScroll=true; rtWizRender(); });
+        // K-222: порядок операций меняется стрелками ▲▼ (заготовка остаётся за первой операцией, кооперация — только не у первой)
+        host.querySelectorAll('[data-opmove]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); rtReadOps(2); const i=+b.dataset.opi, j=i+(+b.dataset.opmove), ops=rtWiz.ops; if(j<0||j>=ops.length)return;
+          const hadFiles=[ops[i],ops[j]].some(o=>(o.ncFiles||[]).length||String(o.setupCardNo||'').trim());
+          [ops[i],ops[j]]=[ops[j],ops[i]]; ops.forEach((o,k)=>{ if(k>0)o.blank=null; else o.coop=null; }); rtBomApply();
+          if(hadFiles&&rtWiz.routeId!=null)toast('Порядок изменён. Файлы УП у сохранённой МК привязаны к номеру операции — после сохранения проверьте вложения.','warn');
+          rtWiz._keepScroll=true; rtWizRender(); });
         host.querySelectorAll('#rt-oplist [data-of="opTypeId"]').forEach(s=>s.onchange=()=>{ rtReadOps(2); const op=rtWiz.ops[+s.closest('.rt-op').dataset.idx]; if(op){ const ot=rtOtById(op.opTypeId); const autoNames=new Set(((rtWiz.cat&&rtWiz.cat.opTypes)||[]).flatMap(t=>[t.name,...[2,3,4,5,6].map(n=>`${t.name} (${n})`)])); if(ot&&(!(op.name||'').trim()||autoNames.has(String(op.name).trim())))op.name=rtAutoName(ot,+s.closest('.rt-op').dataset.idx); } rtWiz._keepScroll=true; rtWizRender(); }); // K-177: имя из типа обновляется, пока его не переписали вручную
         const refresh=()=>{ rtReadOps(2); const box=host.querySelector('#rt-summbox'); if(box)box.innerHTML=rtSummaryHtml(); };
         host.querySelectorAll('#rt-oplist [data-of]:not([data-of="opTypeId"])').forEach(inp=>{ inp.oninput=refresh; inp.onchange=refresh; });

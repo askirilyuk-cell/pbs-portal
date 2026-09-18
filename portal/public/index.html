@@ -14841,7 +14841,7 @@
       setTimeout(()=>{ if(rtWiz&&rtWiz.host===host&&rtDraftHasContent())rtDraftStore(); },50); // K-176
       host.querySelectorAll('.tl-wstepbtn').forEach(b=>b.onclick=()=>rtWizGo(+b.dataset.go));
       const ex=host.querySelector('#rt-exit'); if(ex)ex.onclick=()=>rtWizExit();
-      { const sb=host.querySelector('#rt-savenow'); if(sb)sb.onclick=()=>rtWizSave({stay:true}); rtSaveStatePaint(); if(!host._rtStateWired){ host._rtStateWired=true; const upd=()=>setTimeout(rtSaveStatePaint,0); host.addEventListener('input',upd); host.addEventListener('change',upd); host.addEventListener('click',upd); } }
+      { const sb=host.querySelector('#rt-savenow'); if(sb){ sb.onclick=()=>rtWizSave({stay:true}); if(rtWiz._busySave)sb.disabled=true; } rtSaveStatePaint(); if(!host._rtStateWired){ host._rtStateWired=true; const upd=()=>setTimeout(rtSaveStatePaint,0); host.addEventListener('input',upd); host.addEventListener('change',upd); host.addEventListener('click',upd); } }
       rtWizWire(step); window.scrollTo(0,0);
     }
     function rtWizGo(step){ if(!rtWiz)return; rtCollectStep(rtWiz.step); rtWiz.step=Math.min(4,Math.max(1,step)); rtWizRender(); }
@@ -14867,10 +14867,10 @@
     // Копия в браузере осталась только страховкой от закрытой вкладки; после сохранения в портал она стирается.
     function rtWizSnap(){ if(!rtWiz)return ''; try{ return JSON.stringify({r:rtWiz.route,k:rtWiz.kdSel||[],o:(rtWiz.ops||[]).map(o=>{ const c={...o}; delete c._open; delete c._ncPending; c._pend=(o._ncPending||[]).map(f=>f.name); return c; })}); }catch{ return String(Math.random()); } }
     function rtWizDirty(){ if(!rtWiz)return false; try{ rtCollectStep(rtWiz.step); }catch{} return rtWizSnap()!==(rtWiz._savedSnap||''); }
-    function rtSaveStatePaint(){ if(!rtWiz)return; const el=rtWiz.host.querySelector('#rt-savestate'); if(!el)return; const dirty=rtWizDirty();
+    function rtSaveStatePaint(){ if(!rtWiz||rtWiz._busySave)return; const el=rtWiz.host.querySelector('#rt-savestate'); if(!el)return; const dirty=rtWizDirty();
       el.innerHTML=rtWiz.routeId==null?(rtDraftHasContent()?'<span style="color:#b45309">ещё не сохранена в портал — пока существует только в этом браузере</span>':'новая МК')
         :(dirty?`<span style="color:#b45309">есть несохранённые изменения</span>${rtWiz._savedAt?' · в портале версия от '+esc(fmtDT(rtWiz._savedAt)):''}`:`<span style="color:#15803d">сохранено в портале</span>${rtWiz._savedAt?' · '+esc(fmtDT(rtWiz._savedAt)):''}`); }
-    async function rtWizExit(){ if(!rtWiz||rtWiz._saving)return; const h=rtWiz.host, id=rtWiz.routeId;
+    async function rtWizExit(){ if(!rtWiz||rtWiz._saving)return; if(rtWiz._busySave){ toast('Идёт сохранение МК — дождитесь окончания.','warn'); return; } const h=rtWiz.host, id=rtWiz.routeId;
       if(rtDraftHasContent()&&!rtWizDirty()){ rtDraftClear(id); rtWiz=null; if(id!=null)openRouteCard(h,id); else renderRoutesView(h); return; } // всё уже в портале
       if(rtDraftHasContent()){ rtDraftStore(); const ok=await uiConfirm({title:'Сохранить изменения в портал?',text:'МК сохранится черновиком: появится в реестре и в «Мои черновики», продолжить можно с любого компьютера. Если не сохранять — набранное останется только в этом браузере (в реестре МК появится строка «несохранённый набросок»).',ok:'Сохранить в портал',cancel:'Не сохранять'}); if(!rtWiz)return; if(ok){ rtWiz._saving=true; const ex=h.querySelector('#rt-exit'); if(ex){ ex.style.pointerEvents='none'; ex.textContent='сохраняю…'; } try{ await rtWizSave(false); }finally{ if(rtWiz)rtWiz._saving=false; } return; } }
       rtWiz=null; if(id!=null)openRouteCard(h,id); else renderRoutesView(h); }
@@ -15560,7 +15560,8 @@
         const rl=host.querySelector('#rt-release'); if(rl)rl.onclick=()=>rtWizSave({approve:true}); }
     }
     async function rtWizSave(release){
-      if(!rtWiz)return; rtCollectStep(rtWiz.step); rtBomApply(); // K-160: заготовка и план операций — из спецификации
+      if(!rtWiz)return; if(rtWiz._busySave){ toast('МК уже сохраняется — подождите.','warn'); return; } // K-230: второе сохранение поверх первого давало дубли операций
+      rtCollectStep(rtWiz.step); rtBomApply(); // K-160: заготовка и план операций — из спецификации
       if(!(rtWiz.route.name||'').trim()){ toast('Укажите наименование изделия / компонента (шаг 1).','err'); rtWizGo(1); return; }
       // МК-резерв металла (этап 1): заготовка операции №1 сериализуется в JSON в «materials» (см. rtBlankSerialize/сервер mkBlankParse).
       // Этап 4: внешняя кооперация — та же схема, JSON в «materials» операции i>0 (см. rtCoopSerialize/сервер mkCoopParse); returned (история
@@ -15568,6 +15569,7 @@
       const ops=rtWiz.ops.map((op,i)=>({opTypeId:op.opTypeId||'',name:(op.name||'').trim(),equipment:(op.equipment||'').trim(),tooling:(op.tooling||'').trim(),setupCardNo:(op.setupCardNo||'').trim(),control:op.control||'нет',norm:op.norm,whatControl:(op.whatControl||'').trim(),si:(op.si||'').trim(),tolerance:(op.tolerance||'').trim(),planMaterials:(op.planMaterials||[]).filter(m=>m.canonId||String(m.name||'').trim()).map(m=>({canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',qty:m.qty,note:m.note||'',role:m.role||'Материал',stockId:m.stockId||null,partsPerBlank:m.partsPerBlank||null})),paramPlan:(op.paramPlan||[]),comment:(op.comment||'').trim(),materials:i===0?rtBlankSerialize(op.blank):(op.coop&&op.coop.enabled?rtCoopSerialize(op.coop):(op.materials||'').trim()),components:op.components||[]})).filter(o=>o.name||o.opTypeId);
       const body={id:rtWiz.routeId,...((rtWiz.route.variant||rtWiz.route.variantOf!=null)?{variant:rtWiz.route.variant||'',variantOf:rtWiz.route.variantOf}:{}),type:rtWiz.route.type,name:(rtWiz.route.name||'').trim(),designation:(rtWiz.route.designation||'').trim(),productType:rtWiz.route.productType||'',revision:(rtWiz.route.revision||'').trim(),material:(rtWiz.route.material||'').trim()||rtBomMaterialText(),bom:(rtWiz.bom||[]).map(m=>({role:m.role,canonId:m.canonId||null,name:m.name||'',unit:m.unit||'',norm:m.norm,opNo:m.opNo||null,stockId:m.stockId||null,partsPerBlank:m.partsPerBlank||null,note:m.note||''})),statusMk:release?'Утверждена':(rtWiz.route.statusMk||'Черновик'),projectDecNo:rtWiz.route.projectDecNo||'',kdDrawings:rtWiz.kdSel,operations:ops};
       const host=rtWiz.host; const btns=host.querySelectorAll('#rt-draft,#rt-release,#rt-send,#rt-savenow'); btns.forEach(b=>{b.disabled=true;});
+      rtWiz._busySave=true; { const ss=host.querySelector('#rt-savestate'); if(ss)ss.innerHTML=`<span class="ui-spin" style="display:inline-block;vertical-align:middle;margin-right:6px"></span>сохраняю ${rtWiz.ops.length} операций — это около ${Math.max(3,rtWiz.ops.length*2)} с, не закрывайте страницу`; }
       try{ const r=await fetch('/api/routes/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         RT=null; toast(`МК ${j.mk||''} сохранена в портал · операций: ${j.operations}${j.components?', компонентов: '+j.components:''}`,'ok');
         if(release&&release.stay){ // K-225: сохранить и продолжить работу в мастере
@@ -15586,6 +15588,7 @@
           if(pend.length)toast('Программы ЧПУ прикреплены: '+pend.map(x=>'оп. '+x.n).join(', '),'ok'); }
         rtDraftClear(rtWiz.routeId); const id=j.id; rtWiz=null; openRouteCard(host,id);
       }catch(e){ toast('Не удалось сохранить: '+(e.message||e),'err'); btns.forEach(b=>{b.disabled=false;}); }
+      finally{ if(rtWiz)rtWiz._busySave=false; }
     }
     // ══ Раздел «Карты наладки» — Конструктор карт наладки (Этап 2b модуля МК) ═══
     let SETUP=null, SETUPCAT=null;

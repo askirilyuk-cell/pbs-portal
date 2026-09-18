@@ -13045,7 +13045,11 @@ const server = http.createServer(async (req, res) => {
     // K-18 сохранение маршрута (создать/обновить + операции + компоненты)
     if (p === '/api/routes/save' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 400, { error: 'Запись доступна только в режиме LIVE (NocoDB).' });
-      try { return sendJson(res, 200, await saveRoute(await readBody(req), sessionFromReq(req))); }
+      // K-230: сохранение МК пересобирает операции (удалить старые → создать новые, ~2 с на операцию). Два одновременных
+      // сохранения одной МК переплетались и оставляли дубли операций (МК-КОМ-2026-006, 18.09) — теперь строго по очереди.
+      try { const body = await readBody(req); const ses = sessionFromReq(req);
+        const lockKey = 'route-save:' + ((body.id != null && body.id !== '') ? body.id : 'new:' + String(body.name || '').trim().toLowerCase() + '|' + String(body.designation || '').trim().toLowerCase());
+        return sendJson(res, 200, await withKeyLock(lockKey, () => saveRoute(body, ses))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/route/variant' && req.method === 'POST') { // K-219: переименовать вариант / сделать основным

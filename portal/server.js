@@ -8758,7 +8758,7 @@ function toolWhere(it) {
   if (shopArea) return { kind: 'shop', text: 'Цех · ' + shopArea };
   if (location && location.toLowerCase() !== 'склад') return { kind: 'shop', text: 'Цех · ' + location }; // оснастка на станке
   if (cell) return { kind: 'wh', text: 'Склад · ячейка ' + cell };
-  if (location) return { kind: 'wh', text: 'Склад · ' + location };
+  if (location) return { kind: 'wh', text: location.toLowerCase() === 'склад' ? 'Склад' : 'Склад · ' + location };
   return { kind: '', text: '—' };
 }
 function toolShape(it) {
@@ -10762,9 +10762,12 @@ async function buildChuckJaws() {
 }
 // upsert комплекта кулачков (уникальность по № комплекта — на уровне эндпоинта) + mm «Станок»
 async function chuckJawSave(body) {
-  const setNo = String(body.setNo || '').trim();
-  if (!setNo && (body.id == null || body.id === '')) { const e = new Error('Укажите № комплекта кулачков (setNo).'); e.status = 400; throw e; }
+  let setNo = String(body.setNo || '').trim();
   const rows = await ncListSoft('chuck_jaws');
+  if (!setNo && (body.id == null || body.id === '')) { // K-233: № комплекта присваивается сам — К-01, К-02…
+    let max = 0; for (const r of rows) { const m = /^К-(\d+)$/i.exec(String(r['№ комплекта'] || '').trim()); if (m) max = Math.max(max, Number(m[1])); }
+    setNo = 'К-' + String(max + 1).padStart(2, '0');
+  }
   const existing = (body.id != null && body.id !== '' && rows.find((r) => String(r.Id ?? r.id) === String(body.id)))
     || (setNo && rows.find((r) => String(r['№ комплекта'] || '').trim().toUpperCase() === setNo.toUpperCase()));
   const patch = {};

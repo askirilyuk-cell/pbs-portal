@@ -11811,7 +11811,7 @@
           </span>
         </div>
         <div class="card pad" style="margin-top:var(--gap)"><div style="${G}">
-            <div style="grid-column:span 4">${FLAB('№ комплекта',true)}<input id="cj-setNo" style="${FINP}" value="${esc(edit?item.setNo:'')}" placeholder="напр. К-07"></div>
+            <div style="grid-column:span 4">${FLAB(edit?'№ комплекта':'№ комплекта (авто К-NN)')}<input id="cj-setNo" style="${FINP}" value="${esc(edit?item.setNo:'')}" placeholder="присвоится автоматически"></div>
             <div style="grid-column:span 4">${FLAB('Тип кулачков')}<select id="cj-type" style="${FINP}">${opt(CJ_TYPES,edit?item.jawType:'')}</select></div>
             <div style="grid-column:span 4">${FLAB('Количество кулачков')}<select id="cj-count" style="${FINP}">${opt(CJ_COUNTS,edit?item.jawCount:'3')}</select></div>
             <div style="grid-column:span 8">${FLAB('Патрон, к которому комплект (оснастка «Зажимное устройство»)')}<select id="cj-chuck" style="${FINP}"><option value="">— не привязан —</option>${(D.chucks||[]).map(c=>`<option value="${esc(c.invNo||c.code)}"${(edit?item.chuckInv:'')===(c.invNo||c.code)?' selected':''}>${esc(c.label)}${c.where&&c.where!=='—'?' · '+esc(c.where):''}</option>`).join('')}</select>${(D.chucks||[]).length?'':'<div class="c-gray" style="font-size:11px;margin-top:3px">Патронов в реестре нет — заведите: «Мастер: завести» → Оснастка → вид «Зажимное устройство».</div>'}</div>
@@ -11821,10 +11821,9 @@
             <div style="grid-column:span 4">${FLAB('Специальные — что именно')}<input id="cj-special" style="${FINP}" value="${esc(edit?(item.special||''):'')}" placeholder="полнообхватные, с насечкой…"></div>
             <div style="grid-column:span 12">${FLAB('Станок (если патрон не заведён отдельно — старая привязка)')}<select id="cj-station" style="${FINP}">${stOpt(edit?item.stationId:'')}</select></div>
             <div style="grid-column:span 12">${FLAB('Совместимость (авто из патрона станка · можно уточнить)')}<input id="cj-compat" style="${FINP}" value="${esc(edit?(item.compat||''):'')}" placeholder="подтянется из выбранного станка"></div>
-            <div style="grid-column:span 6">${FLAB('Ø зажима (диапазон / расточен под Ø/деталь)')}<input id="cj-clamp" style="${FINP}" value="${esc(edit?item.clampDia:'')}" placeholder="напр. Ø80–160 / расточен Ø140 H9"></div>
-            <div style="grid-column:span 6">${FLAB('Материал')}<input id="cj-material" style="${FINP}" value="${esc(edit?item.material:'')}" placeholder="напр. сталь 45 / закалённые"></div>
+            <div style="grid-column:span 4">${FLAB('Диапазон зажима, Ø')}<input id="cj-clamp" style="${FINP}" value="${esc(edit?item.clampDia:'')}" placeholder="напр. Ø80–160"></div>
             <div style="grid-column:span 4">${FLAB('Состояние')}<select id="cj-cond" style="${FINP}">${CJ_CONDS.map(o=>`<option${(edit?item.condition:'Годен')===o?' selected':''}>${esc(o)}</option>`).join('')}</select></div>
-            <div style="grid-column:span 8">${FLAB('Локация')}<input id="cj-loc" style="${FINP}" value="${esc(edit?item.location:'')}" placeholder="стеллаж / ячейка / у станка"></div>
+            <div style="grid-column:span 4">${FLAB('Где лежит комплект')}<input id="cj-loc" style="${FINP}" value="${esc(edit?item.location:'')}" placeholder="стеллаж / ячейка / у станка"></div>
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="cj-note" style="${FINP}" value="${esc(edit?item.note:'')}"></div>
         </div></div>
         <div class="card pad" style="margin-top:var(--gap)">${FLAB('Эскиз / фото комплекта')}<div id="cj-dz" style="margin-top:6px"></div>${(edit&&item.files&&item.files.length)?`<div style="margin-top:8px;font-size:12px">Уже приложено: ${cjFileLinks(item.setNo,item.files)}</div>`:''}</div>
@@ -11838,7 +11837,7 @@
       document.getElementById('cj-save').onclick=async()=>{
         const err=document.getElementById('cj-err'); err.textContent='';
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
-        const setNo=V('cj-setNo'); if(!setNo){ err.textContent='Укажите № комплекта.'; toast('Укажите № комплекта.','err'); return; }
+        const setNo=V('cj-setNo'); if(!setNo&&edit){ err.textContent='Укажите № комплекта.'; toast('Укажите № комплекта.','err'); return; } // K-233: у нового комплекта номер присвоит сервер
         const body={setNo,jawType:V('cj-type'),jawCount:V('cj-count'),stationId:stationSel.value,compat:V('cj-compat'),chuckInv:V('cj-chuck'),exec:V('cj-exec'),boredFor:V('cj-bored'),serration:V('cj-serr'),special:V('cj-special'),
           clampDia:V('cj-clamp'),material:V('cj-material'),condition:V('cj-cond'),location:V('cj-loc'),note:V('cj-note')};
         if(edit)body.id=item.id;
@@ -12004,7 +12003,6 @@
               ${i.boredFor?`<span class="tl-lk">Расточены</span><span>${esc(i.boredFor)}</span>`:''}
               ${i.special?`<span class="tl-lk">Особенность</span><span>${esc(i.special)}</span>`:''}
               <span class="tl-lk">Ø зажима</span><span>${esc(i.clampDia||'—')}</span>
-              <span class="tl-lk">Материал</span><span>${esc(i.material||'—')}</span>
               <span class="tl-lk">Локация</span><span>${esc(i.location||'—')}</span>
             </div>
             <div class="tl-lc-foot">${(i.files&&i.files.length)?cjFileLinks(i.setNo,i.files):'<span class="c-gray" style="font-size:11px">без файлов</span>'}<span style="margin-left:auto;font-size:11px;color:var(--navy)">Открыть →</span></div>

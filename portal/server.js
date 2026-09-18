@@ -8804,6 +8804,9 @@ function toolShape(it) {
     sectionCode: it['Участок (код)'] || '', // K-172: участок приписки оснастки (фильтр в конструкторе МК)
     calDate, calNext: calNextEff, calCert: it['№ свидетельства о поверке'] || '', calOverdue, calSoon,
     calInterval, calMode, responsible, calState, // K-207
+    // K-228: зажимное устройство (патрон и т.п.)
+    isClamp: rigKind === 'Зажимное устройство', clampKind: it['Подвид зажимного'] || '', chuckDia: it['Ø патрона, мм'] != null && it['Ø патрона, мм'] !== '' ? Number(it['Ø патрона, мм']) : null,
+    spindleMount: it['Посадка на шпиндель'] || '', boreDia: it['Проходное отверстие, мм'] != null && it['Проходное отверстие, мм'] !== '' ? Number(it['Проходное отверстие, мм']) : null, maxRpm: it['Макс. обороты'] != null && it['Макс. обороты'] !== '' ? Number(it['Макс. обороты']) : null,
     // K-55: справочный код 1С (БП-000NNNN) — идёт в акт списания / выдачу для бухгалтерии
     code1c: it['Код 1С'] || '',
     // K-55: локация «где лежит / кому передан»
@@ -8829,7 +8832,7 @@ async function buildToolsLive() {
   kpis.rig = tools.filter((t) => t.rig).length;
   return {
     mode: 'live', items: tools, kpis, signals, calSignals, locations: locs,
-    dict: { types: TOOL_TYPES, categories: TOOL_CATEGORIES, opsQty: TOOL_OPS_QTY, opsInv: TOOL_OPS_INV, opsLoc: TOOL_OPS_LOC, ops: TOOL_OPS, rigKinds: ['Державка', 'Приспособление', 'Пресс-форма'], statuses: ['Годен', 'Просрочен', 'В эксплуатации', 'На станке', 'Списан'] },
+    dict: { types: TOOL_TYPES, categories: TOOL_CATEGORIES, opsQty: TOOL_OPS_QTY, opsInv: TOOL_OPS_INV, opsLoc: TOOL_OPS_LOC, ops: TOOL_OPS, rigKinds: TOOL_RIG_KINDS, clampKinds: TOOL_CLAMP_KINDS, statuses: ['Годен', 'Просрочен', 'В эксплуатации', 'На станке', 'Списан'] },
   };
 }
 // GET карточка инструмента: реквизиты + журнал движения по позиции
@@ -8874,10 +8877,17 @@ const TOOL_WRITE = {
   '№ СФ': 'invoiceNo', 'Местоположение': 'location', '№ свидетельства о поверке': 'calCert',
   'Код 1С': 'code1c', // K-55: справочный код 1С (БП-000NNNN)
   'Ответственный': 'responsible', // K-207: за кем закреплён прибор
+  'Подвид зажимного': 'clampKind', 'Посадка на шпиндель': 'spindleMount', // K-228
   'Участок (код)': 'sectionCode', // K-172
 };
 const TOOL_STATUSES = ['Годен', 'Просрочен', 'В эксплуатации', 'На станке', 'Списан'];
-const TOOL_RIG_KINDS = ['Державка', 'Приспособление', 'Пресс-форма'];
+// K-228: «Зажимное устройство» — патроны, цанговые патроны, тиски, планшайбы, люнеты, центры. Патрон — базовое
+// устройство: его переставляют между станками (обычное «Перемещение»), а комплекты кулачков привязаны к патрону.
+const TOOL_RIG_KINDS = ['Державка', 'Приспособление', 'Пресс-форма', 'Зажимное устройство'];
+const TOOL_CLAMP_KINDS = ['Патрон 3-кулачковый самоцентрирующий', 'Патрон 4-кулачковый независимый', 'Патрон 2-кулачковый', 'Патрон 6-кулачковый', 'Патрон цанговый', 'Патрон гидравлический / пневматический', 'Планшайба', 'Тиски', 'Оправка разжимная', 'Люнет', 'Центр', 'Поводковый патрон', 'Прочее'];
+const TOOL_CLAMP_COLS = [['Подвид зажимного', 'SingleLineText'], ['Ø патрона, мм', 'Number'], ['Посадка на шпиндель', 'SingleLineText'], ['Проходное отверстие, мм', 'Number'], ['Макс. обороты', 'Number']];
+let toolClampColsReady = false;
+async function toolEnsureClampCols() { if (toolClampColsReady) return; try { for (const [t, u] of TOOL_CLAMP_COLS) await ncEnsureColumn('tools', t, u); await ncEnsureSelectOption('tools', 'Вид оснастки', 'Зажимное устройство'); toolClampColsReady = true; } catch (e) { console.warn('K-228: колонки зажимных устройств:', e.message); } }
 function toolBuildPatch(body) {
   const patch = {};
   for (const [title, key] of Object.entries(TOOL_WRITE)) if (body[key] != null && body[key] !== '') patch[title] = String(body[key]).trim();
@@ -8886,7 +8896,8 @@ function toolBuildPatch(body) {
   if (TOOL_STATUSES.includes(body.status)) patch['Статус'] = body.status;
   if (TOOL_RIG_KINDS.includes(body.rigKind)) patch['Вид оснастки'] = body.rigKind;
   if (body.minStock != null && body.minStock !== '') patch['Мин. остаток'] = Number(body.minStock);
-  if (SI_CAL_MODES.includes(body.calMode)) patch['Режим поверки'] = body.calMode; // K-207
+  for (const [col, key] of [['Ø патрона, мм', 'chuckDia'], ['Проходное отверстие, мм', 'boreDia'], ['Макс. обороты', 'maxRpm']]) if (body[key] != null && body[key] !== '' && Number.isFinite(Number(String(body[key]).replace(',', '.')))) patch[col] = Number(String(body[key]).replace(',', '.')); // K-228
+  if (SI_MODES.includes(body.calMode)) patch['Режим поверки'] = body.calMode; // K-207 (SI_CAL_MODES удалена при выносе СИ в свой раздел — сохранение инструмента падало с ReferenceError)
   if (body.calInterval != null && body.calInterval !== '') patch['Межповерочный интервал (мес)'] = Number(body.calInterval);
   if (body.calDate) patch['Дата поверки'] = String(body.calDate).slice(0, 10);
   if (body.calNext) patch['След. поверка'] = String(body.calNext).slice(0, 10);
@@ -8895,6 +8906,7 @@ function toolBuildPatch(body) {
 }
 // POST /api/tools/save — создать/обновить инструмент (автонумер ИН-NNNN при создании)
 async function toolSave(body) {
+  if (body && body.rigKind === 'Зажимное устройство') await toolEnsureClampCols(); // K-228
   const rows = await ncListSoft('tools');
   const existing = (body.id != null && body.id !== '' && rows.find((r) => String(r.Id ?? r.id) === String(body.id)))
     || (body.code && rows.find((r) => String(r['Код'] || '').trim() === String(body.code).trim()));
@@ -10677,6 +10689,11 @@ async function deleteSetupCard(id) {
 const CJ_TYPES = ['Сырые', 'Расточенные', 'Закалённые', 'Твёрдые'];
 const CJ_COUNTS = ['2', '3', '4', '6'];
 const CJ_CONDITIONS = ['Годен', 'Износ', 'Списан'];
+// K-228: комплект привязан к ПАТРОНУ (оснастка вида «Зажимное устройство»), станок выводится через патрон — патроны переставляют.
+const CJ_EXEC = ['Прямые', 'Обратные', 'Накладные (сборные)', 'Специальные'];
+const CJ_EXTRA_COLS = [['Патрон (инв. №)', 'SingleLineText'], ['Исполнение', 'SingleLineText'], ['Расточены под Ø', 'SingleLineText'], ['Рифление / крепление', 'SingleLineText'], ['Специальные (описание)', 'SingleLineText']];
+let cjExtraReady = false;
+async function cjEnsureCols() { if (cjExtraReady) return; try { for (const [t, u] of CJ_EXTRA_COLS) await ncEnsureColumn('chuck_jaws', t, u); cjExtraReady = true; } catch (e) { console.warn('K-228: колонки кулачков:', e.message); } }
 const CJ_PHOTO_ROOT = path.join(__dirname, '.data', 'chuck-jaws');
 // каталог файлов комплекта: .data/chuck-jaws/<№ sanitized>/
 function cjDir(setNo, create) {
@@ -10710,6 +10727,7 @@ function cjShape(r, eqById) {
     jawCount: whLinkVal(r['Количество кулачков']) || String(r['Количество кулачков'] || ''),
     compat: r['Совместимость'] || (eq ? cjStationCompat(eq) : ''),
     clampDia: r['Ø зажима'] || '', material: r['Материал'] || '',
+    chuckInv: String(r['Патрон (инв. №)'] || '').trim(), exec: r['Исполнение'] || '', boredFor: r['Расточены под Ø'] || '', serration: r['Рифление / крепление'] || '', special: r['Специальные (описание)'] || '', // K-228
     condition: whLinkVal(r['Состояние']) || String(r['Состояние'] || '') || 'Годен',
     location: r['Локация'] || '', note: r['Примечание'] || '',
     stationId: eqId ?? null,
@@ -10720,9 +10738,16 @@ function cjShape(r, eqById) {
 }
 // GET список комплектов кулачков (+ KPI + список станков с патроном для привязки)
 async function buildChuckJaws() {
-  const [jaws, eqRows] = await Promise.all([ncListSoft('chuck_jaws'), ncListSoft('equipment')]);
+  const [jaws, eqRows, toolRows] = await Promise.all([ncListSoft('chuck_jaws'), ncListSoft('equipment'), ncListSoft('tools')]);
   const eqById = {}; eqRows.forEach((r) => { eqById[String(r.Id ?? r.id)] = eqShape(r); });
-  const items = jaws.map((r) => cjShape(r, eqById)).sort((a, b) => String(a.setNo).localeCompare(String(b.setNo), 'ru'));
+  // K-228: патроны — оснастка вида «Зажимное устройство»; комплект наследует от патрона Ø и текущее место (станок)
+  const chucks = toolRows.map(toolShape).filter((t) => t.isClamp && t.status !== 'Списан')
+    .map((t) => ({ id: t.id, code: t.code, invNo: t.invNo, name: t.name, clampKind: t.clampKind, chuckDia: t.chuckDia, spindleMount: t.spindleMount, where: t.where, label: [t.invNo || t.code, t.name, t.chuckDia ? 'Ø' + t.chuckDia : ''].filter(Boolean).join(' · ') }))
+    .sort((a, b) => String(a.label).localeCompare(String(b.label), 'ru'));
+  const chuckByInv = new Map(chucks.map((c) => [String(c.invNo || c.code), c]));
+  const items = jaws.map((r) => { const it = cjShape(r, eqById); const ch = it.chuckInv ? chuckByInv.get(it.chuckInv) : null;
+    if (ch) { it.chuck = ch.label; it.chuckWhere = ch.where; if (!it.compat || it.compat === it.station) it.compat = `${ch.name}${ch.chuckDia ? ' Ø' + ch.chuckDia : ''}`; }
+    return it; }).sort((a, b) => String(a.setNo).localeCompare(String(b.setNo), 'ru'));
   const kpis = {
     total: items.length,
     ok: items.filter((i) => i.condition === 'Годен').length,
@@ -10733,7 +10758,7 @@ async function buildChuckJaws() {
   // станки с патроном (для выпадашки привязки) — весь реестр оборудования
   const stations = Object.values(eqById).map((e) => ({ id: e.id, name: e.name || e.model || ('ОБ id' + e.id), invNo: e.invNo, model: e.model, chuckDia: e.chuckDia, chuckType: e.chuckTypeEq, compat: cjStationCompat(e) }))
     .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ru'));
-  return { mode: 'live', items, kpis, dict: { types: CJ_TYPES, counts: CJ_COUNTS, conditions: CJ_CONDITIONS }, stations };
+  return { mode: 'live', items, kpis, dict: { types: CJ_TYPES, counts: CJ_COUNTS, conditions: CJ_CONDITIONS, exec: CJ_EXEC }, stations, chucks };
 }
 // upsert комплекта кулачков (уникальность по № комплекта — на уровне эндпоинта) + mm «Станок»
 async function chuckJawSave(body) {
@@ -10745,6 +10770,9 @@ async function chuckJawSave(body) {
   const patch = {};
   const put = (col, v) => { const s = (v == null ? '' : String(v)).trim(); if (s) patch[col] = s; };
   put('Ø зажима', body.clampDia); put('Материал', body.material); put('Локация', body.location); put('Примечание', body.note); put('Совместимость', body.compat);
+  await cjEnsureCols(); // K-228
+  for (const [col, key] of [['Патрон (инв. №)', 'chuckInv'], ['Расточены под Ø', 'boredFor'], ['Рифление / крепление', 'serration'], ['Специальные (описание)', 'special']]) if (body[key] != null) patch[col] = String(body[key]).trim();
+  if (body.exec != null) patch['Исполнение'] = CJ_EXEC.includes(String(body.exec).trim()) ? String(body.exec).trim() : '';
   if (CJ_TYPES.includes(String(body.jawType || '').trim())) patch['Тип кулачков'] = String(body.jawType).trim();
   if (CJ_COUNTS.includes(String(body.jawCount || '').trim())) patch['Количество кулачков'] = String(body.jawCount).trim();
   if (CJ_CONDITIONS.includes(String(body.condition || '').trim())) patch['Состояние'] = String(body.condition).trim();

@@ -11283,6 +11283,13 @@
         fields=`
             <div style="grid-column:span 12">${FLAB('Наименование',true)}<input id="te-name" style="${FINP}" value="${esc(it.name||'')}" placeholder="напр. Оправка BT40-ER32"></div>
             <div style="grid-column:span 4">${FLAB('Вид оснастки')}<select id="te-rigkind" style="${FINP}"><option value="">—</option>${opt(dict.rigKinds||['Державка','Приспособление','Пресс-форма'],it.rigKind)}</select></div>
+            <div id="te-clampbox" style="grid-column:span 12;display:${it.rigKind==='Зажимное устройство'?'grid':'none'};grid-template-columns:repeat(12,1fr);gap:12px;padding:12px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)">
+              <div style="grid-column:span 6">${FLAB('Что это')}<select id="te-clampkind" style="${FINP}"><option value="">—</option>${opt(dict.clampKinds||[],it.clampKind)}</select></div>
+              <div style="grid-column:span 3">${FLAB('Ø патрона, мм')}<input id="te-chuckdia" type="number" min="0" style="${FINP}" value="${esc(it.chuckDia==null?'':it.chuckDia)}"></div>
+              <div style="grid-column:span 3">${FLAB('Проходное отв., мм')}<input id="te-bore" type="number" min="0" style="${FINP}" value="${esc(it.boreDia==null?'':it.boreDia)}"></div>
+              <div style="grid-column:span 6">${FLAB('Посадка на шпиндель')}<input id="te-mount" style="${FINP}" value="${esc(it.spindleMount||'')}" placeholder="A2-8 · D1-6 · фланец"></div>
+              <div style="grid-column:span 6">${FLAB('Макс. обороты, об/мин')}<input id="te-rpm" type="number" min="0" style="${FINP}" value="${esc(it.maxRpm==null?'':it.maxRpm)}"></div>
+            </div>
             <div style="grid-column:span 4">${FLAB('Категория')}<select id="te-cat" style="${FINP}"><option value="">—</option>${opt((dict.categories||[]).filter(c=>['Токарные','Фрезерные','Пресс-формы','Оправки','Прочее'].includes(c)),it.category)}</select></div>
             <div style="grid-column:span 4">${FLAB('Инв. №'+(edit?'':' (авто ОСН-ГГММ-NNN)'))}<input id="te-inv" style="${FINP}" value="${esc(it.invNo||'')}" ${edit?'':'placeholder="присвоится автоматически"'}></div>
             <div style="grid-column:span 4">${FLAB('Код 1С (для списания)')}<input id="te-code1c" style="${FINP}" value="${esc(it.code1c||'')}" placeholder="БП-000NNNN"></div>
@@ -11337,13 +11344,15 @@
         </div>`;
       modal.classList.add('open'); mscrim.classList.add('open');
       document.getElementById('mx').onclick=closeModal; document.getElementById('te-cancel').onclick=closeModal;
+      { const rk=document.getElementById('te-rigkind'), cb=document.getElementById('te-clampbox'); if(rk&&cb)rk.onchange=()=>{ cb.style.display=rk.value==='Зажимное устройство'?'grid':'none'; }; } // K-228
       // K-39 (5a/5b): переключатель подраздела в шапке формы заведения — меняет набор полей
       if(!edit)modal.querySelectorAll('#te-sub button').forEach(b=>b.onclick=()=>{if(b.dataset.sub!==sub)openToolEdit(null,b.dataset.sub);});
       document.getElementById('te-save').onclick=async()=>{
         const err=document.getElementById('te-err'); err.textContent='';
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
         const body={ name:V('te-name'), note:V('te-note'), code1c:V('te-code1c') };
-        if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('te-rigkind'); body.category=V('te-cat'); body.invNo=V('te-inv'); body.invoiceNo=V('te-invoice'); body.location=V('te-loc'); body.status=V('te-status'); body.sectionCode=V('te-sec')||''; }
+        if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('te-rigkind'); body.category=V('te-cat'); body.invNo=V('te-inv'); body.invoiceNo=V('te-invoice'); body.location=V('te-loc'); body.status=V('te-status'); body.sectionCode=V('te-sec')||'';
+          if(body.rigKind==='Зажимное устройство'){ body.clampKind=V('te-clampkind'); body.chuckDia=V('te-chuckdia'); body.boreDia=V('te-bore'); body.spindleMount=V('te-mount'); body.maxRpm=V('te-rpm'); } } // K-228
         else if(sub==='si'){ body.type='Расходный'; body.category='Мерительный/СИ'; body.invNo=V('te-inv'); body.accuracyRange=V('te-acc'); body.unit=V('te-unit'); body.calDate=V('te-cal'); body.calNext=V('te-calnext'); body.calCert=V('te-cert'); body.location=V('te-loc'); body.status=V('te-status');
           body.calMode=V('te-calmode'); body.calInterval=V('te-cali'); body.responsible=V('te-resp'); // K-207
           if(!body.calNext&&body.calDate&&Number(body.calInterval)>0){ const d=new Date(body.calDate+'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth()+Number(body.calInterval)); body.calNext=d.toISOString().slice(0,10); } }
@@ -11771,6 +11780,8 @@
       const cols=[
         {key:'setNo',label:'№ комплекта',w:130,cls:'code',cell:i=>`<b style="color:var(--navy)">${esc(i.setNo||'—')}</b>`,sortVal:i=>i.setNo},
         {key:'type',label:'Тип',w:130,cls:'nw',cell:i=>esc(i.jawType||'—'),sortVal:i=>i.jawType},
+        {key:'exec',label:'Исполнение',w:130,cls:'nw',cell:i=>esc(i.exec||'—')+(i.boredFor?`<div class="c-gray" style="font-size:11px">расточены ${esc(i.boredFor)}</div>`:''),sortVal:i=>i.exec},
+        {key:'chuck',label:'Патрон',w:220,cls:'ell',cell:i=>i.chuck?esc(i.chuck)+(i.chuckWhere&&i.chuckWhere!=='—'?`<div class="c-gray" style="font-size:11px">${esc(i.chuckWhere)}</div>`:''):'<span class="c-gray">не привязан</span>',sortVal:i=>i.chuck||''},
         {key:'cnt',label:'Кол-во',w:74,cls:'nw c-gray',cell:i=>i.jawCount?esc(i.jawCount)+' кул.':'—',sortVal:i=>Number(i.jawCount)||0},
         {key:'compat',label:'Совместимость (патрон / станок)',cls:'ell',cell:i=>esc(i.compat||i.station||'—'),sortVal:i=>i.compat||i.station},
         {key:'clamp',label:'Ø зажима',w:120,cls:'nw c-gray',cell:i=>esc(i.clampDia||'—'),sortVal:i=>i.clampDia},
@@ -11803,7 +11814,12 @@
             <div style="grid-column:span 4">${FLAB('№ комплекта',true)}<input id="cj-setNo" style="${FINP}" value="${esc(edit?item.setNo:'')}" placeholder="напр. К-07"></div>
             <div style="grid-column:span 4">${FLAB('Тип кулачков')}<select id="cj-type" style="${FINP}">${opt(CJ_TYPES,edit?item.jawType:'')}</select></div>
             <div style="grid-column:span 4">${FLAB('Количество кулачков')}<select id="cj-count" style="${FINP}">${opt(CJ_COUNTS,edit?item.jawCount:'3')}</select></div>
-            <div style="grid-column:span 12">${FLAB('Станок / патрон (из «Настроек оборудования»)')}<select id="cj-station" style="${FINP}">${stOpt(edit?item.stationId:'')}</select></div>
+            <div style="grid-column:span 8">${FLAB('Патрон, к которому комплект (оснастка «Зажимное устройство»)')}<select id="cj-chuck" style="${FINP}"><option value="">— не привязан —</option>${(D.chucks||[]).map(c=>`<option value="${esc(c.invNo||c.code)}"${(edit?item.chuckInv:'')===(c.invNo||c.code)?' selected':''}>${esc(c.label)}${c.where&&c.where!=='—'?' · '+esc(c.where):''}</option>`).join('')}</select>${(D.chucks||[]).length?'':'<div class="c-gray" style="font-size:11px;margin-top:3px">Патронов в реестре нет — заведите: «Мастер: завести» → Оснастка → вид «Зажимное устройство».</div>'}</div>
+            <div style="grid-column:span 4">${FLAB('Исполнение')}<select id="cj-exec" style="${FINP}">${opt((D.dict&&D.dict.exec)||['Прямые','Обратные','Накладные (сборные)','Специальные'],edit?item.exec:'')}</select></div>
+            <div style="grid-column:span 4">${FLAB('Расточены под Ø (для сырых)')}<input id="cj-bored" style="${FINP}" value="${esc(edit?(item.boredFor||''):'')}" placeholder="напр. Ø140 H9"></div>
+            <div style="grid-column:span 4">${FLAB('Рифление / крепление')}<input id="cj-serr" style="${FINP}" value="${esc(edit?(item.serration||''):'')}" placeholder="1,5×60° · Т-гайки М16"></div>
+            <div style="grid-column:span 4">${FLAB('Специальные — что именно')}<input id="cj-special" style="${FINP}" value="${esc(edit?(item.special||''):'')}" placeholder="полнообхватные, с насечкой…"></div>
+            <div style="grid-column:span 12">${FLAB('Станок (если патрон не заведён отдельно — старая привязка)')}<select id="cj-station" style="${FINP}">${stOpt(edit?item.stationId:'')}</select></div>
             <div style="grid-column:span 12">${FLAB('Совместимость (авто из патрона станка · можно уточнить)')}<input id="cj-compat" style="${FINP}" value="${esc(edit?(item.compat||''):'')}" placeholder="подтянется из выбранного станка"></div>
             <div style="grid-column:span 6">${FLAB('Ø зажима (диапазон / расточен под Ø/деталь)')}<input id="cj-clamp" style="${FINP}" value="${esc(edit?item.clampDia:'')}" placeholder="напр. Ø80–160 / расточен Ø140 H9"></div>
             <div style="grid-column:span 6">${FLAB('Материал')}<input id="cj-material" style="${FINP}" value="${esc(edit?item.material:'')}" placeholder="напр. сталь 45 / закалённые"></div>
@@ -11818,11 +11834,12 @@
       const stationSel=document.getElementById('cj-station'), compatInp=document.getElementById('cj-compat');
       const stById={}; stations.forEach(s=>stById[String(s.id)]=s);
       stationSel.onchange=()=>{ const s=stById[String(stationSel.value)]; if(s&&s.compat){ compatInp.value=s.compat; } };
+      { const ch=document.getElementById('cj-chuck'); if(ch)ch.onchange=()=>{ const c=(D.chucks||[]).find(x=>(x.invNo||x.code)===ch.value); if(c)compatInp.value=[c.name,c.chuckDia?'Ø'+c.chuckDia:'',c.spindleMount].filter(Boolean).join(' · '); }; } // K-228
       document.getElementById('cj-save').onclick=async()=>{
         const err=document.getElementById('cj-err'); err.textContent='';
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
         const setNo=V('cj-setNo'); if(!setNo){ err.textContent='Укажите № комплекта.'; toast('Укажите № комплекта.','err'); return; }
-        const body={setNo,jawType:V('cj-type'),jawCount:V('cj-count'),stationId:stationSel.value,compat:V('cj-compat'),
+        const body={setNo,jawType:V('cj-type'),jawCount:V('cj-count'),stationId:stationSel.value,compat:V('cj-compat'),chuckInv:V('cj-chuck'),exec:V('cj-exec'),boredFor:V('cj-bored'),serration:V('cj-serr'),special:V('cj-special'),
           clampDia:V('cj-clamp'),material:V('cj-material'),condition:V('cj-cond'),location:V('cj-loc'),note:V('cj-note')};
         if(edit)body.id=item.id;
         const btn=document.getElementById('cj-save'); btn.disabled=true; btn.textContent='Сохранение…';
@@ -11971,7 +11988,7 @@
           <button data-s="mand" class="${tlLibSub==='mand'?'on':''}">Оправки <span class="lit">${mandrels.length}</span></button>
         </div>`;
       const addLbl=tlLibSub==='jaws'?'+ Добавить комплект':'+ Добавить оправку';
-      const note=tlLibSub==='jaws'?'Кулачки — под патрон привязанного станка (из «Настроек оборудования») · эскиз/фото на диске':'Оправки — инвентарная оснастка (штучный учёт по инв.№, перемещение по цеху)';
+      const note=tlLibSub==='jaws'?'Комплект кулачков привязан к патрону (оснастка «Зажимное устройство»); патрон переставляют между станками — место комплекта идёт за патроном':'Оправки — инвентарная оснастка (штучный учёт по инв.№, перемещение по цеху)';
       host.innerHTML=`<div class="filters" style="margin-bottom:var(--gap)">${seg}<span style="font-size:12px;color:var(--sub);margin-left:12px">${note}</span><span style="margin-left:auto"></span>${srcChip(live)}<button class="tbtn green" id="tllib-add" style="margin-left:10px">${addLbl}</button></div>
         <div id="tllib-grid" class="tl-libgrid"></div>`;
       host.querySelectorAll('#tllib-seg button').forEach(b=>b.onclick=()=>{tlLibSub=b.dataset.s;tlLibBody(host);});
@@ -11980,9 +11997,12 @@
       if(tlLibSub==='jaws'){
         if(!jaws.length){ gh.innerHTML='<div class="card pad" style="grid-column:1/-1;color:var(--sub);font-size:12px">'+(live?'Библиотека пуста — «+ Добавить комплект».':'Таблица кулачков появится после миграции (нужен токен NocoDB).')+(D.warning?'<div style="margin-top:6px;color:#b45309">'+esc(D.warning)+'</div>':'')+'</div>'; return; }
         gh.innerHTML=jaws.map((i,ix)=>`<div class="tl-libcard" data-jaw="${ix}">
-            <div class="tl-lc-top"><span class="tl-lc-ic">⚙</span><div style="min-width:0"><div class="tl-lc-no">${esc(i.setNo||'—')}</div><div class="tl-lc-sub">${esc(i.jawType||'кулачки')}${i.jawCount?(' · '+esc(i.jawCount)+' кул.'):''}</div></div><span style="margin-left:auto">${cjCondChip(i.condition)}</span></div>
+            <div class="tl-lc-top"><span class="tl-lc-ic">⚙</span><div style="min-width:0"><div class="tl-lc-no">${esc(i.setNo||'—')}</div><div class="tl-lc-sub">${esc([i.exec,i.jawType||'кулачки'].filter(Boolean).join(' · '))}${i.jawCount?(' · '+esc(i.jawCount)+' кул.'):''}</div></div><span style="margin-left:auto">${cjCondChip(i.condition)}</span></div>
             <div class="tl-lc-body">
-              <span class="tl-lk">Станок / патрон</span><span>${esc(i.compat||i.station||'—')}</span>
+              <span class="tl-lk">Патрон</span><span>${i.chuck?esc(i.chuck):`<span class="c-gray">${esc(i.compat||i.station||'не привязан')}</span>`}</span>
+              ${i.chuckWhere&&i.chuckWhere!=='—'?`<span class="tl-lk">Где патрон</span><span>${esc(i.chuckWhere)}</span>`:''}
+              ${i.boredFor?`<span class="tl-lk">Расточены</span><span>${esc(i.boredFor)}</span>`:''}
+              ${i.special?`<span class="tl-lk">Особенность</span><span>${esc(i.special)}</span>`:''}
               <span class="tl-lk">Ø зажима</span><span>${esc(i.clampDia||'—')}</span>
               <span class="tl-lk">Материал</span><span>${esc(i.material||'—')}</span>
               <span class="tl-lk">Локация</span><span>${esc(i.location||'—')}</span>
@@ -12032,7 +12052,7 @@
       q.oninput=paint; st.onchange=paint; paint(); }
     function tlWizCollect(){
       const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():undefined;};
-      ['name','type','category','subcategory','code1c','unit','cell','minStock','balance','accuracyRange','invNo','calDate','calNext','calCert','location','status','rigKind','invoiceNo','note'].forEach(k=>{const v=V('wz-'+k);if(v!==undefined)tlWizData[k]=v;});
+      ['name','type','category','subcategory','code1c','unit','cell','minStock','balance','accuracyRange','invNo','calDate','calNext','calCert','location','status','rigKind','invoiceNo','note','clampKind','chuckDia','boreDia','spindleMount','maxRpm'].forEach(k=>{const v=V('wz-'+k);if(v!==undefined)tlWizData[k]=v;});
     }
     function tlWizardBody(host){
       const step=tlWizStep, sub=tlWizSub, d=tlWizData;
@@ -12061,7 +12081,15 @@
             <div style="grid-column:span 6">${FLAB('Вид оснастки')}<select id="wz-rigKind" style="${FINP}">${sel(dict.rigKinds||['Державка','Приспособление','Пресс-форма','Оправка'],d.rigKind)}</select></div>
             <div style="grid-column:span 6">${FLAB('Категория')}<select id="wz-category" style="${FINP}">${sel((dict.categories||[]).filter(c=>c!=='Мерительный/СИ'),d.category)}</select></div>
             <div style="grid-column:span 6">${FLAB('Инв. № (авто ОСН-ГГММ-NNN)')}<input id="wz-invNo" style="${FINP}" value="${val('invNo')}" placeholder="присвоится автоматически"></div>
-            <div style="grid-column:span 6">${FLAB('Код 1С (для списания)')}<input id="wz-code1c" style="${FINP}" value="${val('code1c')}" placeholder="БП-000NNNN"></div>`; }
+            <div style="grid-column:span 6">${FLAB('Код 1С (для списания)')}<input id="wz-code1c" style="${FINP}" value="${val('code1c')}" placeholder="БП-000NNNN"></div>
+            <div id="wz-clampbox" style="grid-column:span 12;display:${d.rigKind==='Зажимное устройство'?'grid':'none'};grid-template-columns:repeat(12,1fr);gap:12px;padding:12px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:var(--sl-50)">
+              <div style="grid-column:span 12;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub)">Зажимное устройство <span style="font-weight:400;text-transform:none;letter-spacing:0">— патрон переставляют между станками операцией «Перемещение»; комплекты кулачков привязываются к патрону на вкладке «Кулачки и оправки»</span></div>
+              <div style="grid-column:span 6">${FLAB('Что это')}<select id="wz-clampKind" style="${FINP}">${sel(dict.clampKinds||[],d.clampKind)}</select></div>
+              <div style="grid-column:span 3">${FLAB('Ø патрона, мм')}<input id="wz-chuckDia" type="number" min="0" style="${FINP}" value="${val('chuckDia')}" placeholder="250"></div>
+              <div style="grid-column:span 3">${FLAB('Проходное отв., мм')}<input id="wz-boreDia" type="number" min="0" style="${FINP}" value="${val('boreDia')}" placeholder="76"></div>
+              <div style="grid-column:span 6">${FLAB('Посадка на шпиндель')}<input id="wz-spindleMount" style="${FINP}" value="${val('spindleMount')}" placeholder="напр. A2-8 · D1-6 · фланец Ø…"></div>
+              <div style="grid-column:span 6">${FLAB('Макс. обороты, об/мин')}<input id="wz-maxRpm" type="number" min="0" style="${FINP}" value="${val('maxRpm')}" placeholder="2500"></div>
+            </div>`; }
         else if(sub==='si'){ flds=`
             <div style="grid-column:span 12">${FLAB('Наименование',true)}<input id="wz-name" style="${FINP}" value="${val('name')}" placeholder="напр. Штангенциркуль ШЦ-I-150-0.05"></div>
             <div style="grid-column:span 6">${FLAB('Диапазон / класс точности')}<input id="wz-accuracyRange" style="${FINP}" value="${val('accuracyRange')}" placeholder="0–150 мм / 0.05"></div>
@@ -12126,7 +12154,9 @@
         const bk=host.querySelector('#wz-back'); if(bk)bk.onclick=()=>{tlWizCollect();tlWizStep=step-1;tlWizardBody(host);};
         const nx=host.querySelector('#wz-next'); if(nx)nx.onclick=()=>{tlWizCollect();if(!(tlWizData.name||'').trim()){toast('Укажите наименование.','err');return;}tlWizStep=3;tlWizardBody(host);};
         const fn=host.querySelector('#wz-finish'); if(fn)fn.onclick=()=>tlWizSave(host);
-        if(step===2){ tlWiz1cMount(host); } // K-227: поиск позиции в 1С — наименование и код подставляются сами
+        if(step===2){ tlWiz1cMount(host); const rk=host.querySelector('#wz-rigKind'), cb=host.querySelector('#wz-clampbox'); // K-228
+          if(rk&&cb){ rk.addEventListener('change',()=>{ cb.style.display=rk.value==='Зажимное устройство'?'grid':'none'; });
+            const nm0=host.querySelector('#wz-name'); const guess=()=>{ if(!rk.value&&/^\s*(патрон|тиски|планшайб|люнет|цанг)/i.test(nm0.value)){ rk.value='Зажимное устройство'; rk.dispatchEvent(new Event('change')); } }; if(nm0){ nm0.addEventListener('input',guess); guess(); } } } // K-227: поиск позиции в 1С — наименование и код подставляются сами
         if(step===2&&sub==='cut'&&!tcCache.holders){ tlEnsureAux(()=>{ if(tlTab==='wizard'&&tlWizStep===2&&tlWizSub==='cut'){tlWizCollect();tlWizardBody(host);} }); }
       }
     }
@@ -12136,7 +12166,8 @@
       const V=(k)=>String(d[k]||'').trim();
       if(!V('name')){ toast('Укажите наименование (шаг 2).','err'); tlWizStep=2; tlWizardBody(host); return; }
       const body={ name:V('name'), note:V('note'), code1c:V('code1c') };
-      if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('rigKind'); body.category=V('category'); body.invNo=V('invNo'); body.invoiceNo=V('invoiceNo'); body.location=V('location'); body.status=V('status')||'В эксплуатации'; }
+      if(sub==='osn'){ body.type='Специальный'; body.rigKind=V('rigKind'); body.category=V('category'); body.invNo=V('invNo'); body.invoiceNo=V('invoiceNo'); body.location=V('location'); body.status=V('status')||'В эксплуатации';
+        if(body.rigKind==='Зажимное устройство'){ body.clampKind=V('clampKind'); body.chuckDia=V('chuckDia'); body.boreDia=V('boreDia'); body.spindleMount=V('spindleMount'); body.maxRpm=V('maxRpm'); } } // K-228
       else if(sub==='si'){ body.type='Расходный'; body.category='Мерительный/СИ'; body.invNo=V('invNo'); body.accuracyRange=V('accuracyRange'); body.unit=V('unit')||'шт'; body.calDate=V('calDate'); body.calNext=V('calNext'); body.calCert=V('calCert'); body.location=V('location'); body.status=V('status')||'Годен'; }
       else { body.type=V('type')||'Расходный'; body.category=V('category'); body.subcategory=V('subcategory'); body.unit=V('unit')||'шт'; body.cell=V('cell'); body.minStock=V('minStock'); if(V('balance'))body.balance=Number(V('balance')); }
       const fn=host.querySelector('#wz-finish'); if(fn){fn.disabled=true;fn.textContent='Заведение…';}
@@ -14679,6 +14710,18 @@
     // K-81 доводка: МНОЖЕСТВЕННАЯ оснастка на операцию — чек-лист из справочника (по образцу совместимых пластин), хранится в op.tooling списком «; »
     const rtToolLabels=(op)=>{ const secCode=op?rtOpSecCode(op):''; return ((rtWiz.tools&&rtWiz.tools.items)||[]).filter(t=>t.subdivision==='osn'||t.subdivision==='cut').filter(t=>!secCode||(op&&op._allSec)||String(t.sectionCode||'').trim()===secCode||String(t.shopArea||'').includes(secCode)).map(t=>[t.code,t.name].filter(Boolean).join(' · ')+((op&&op._allSec&&t.sectionCode&&t.sectionCode!==secCode)?' · с '+t.sectionCode:'')); };
     const rtToolSet=(op)=>new Set(String(op.tooling||'').split(/\s*;\s*|\n/).map(s=>s.trim()).filter(Boolean));
+    // K-228: патрон — базовое зажимное устройство, к нему комплект кулачков. В МК пишутся в общий список оснастки операции
+    // (op.tooling) теми же строками, что и остальная оснастка, — поэтому попадают в Ф.13 / Ф.14 без отдельных полей.
+    const rtChuckList=()=>((rtWiz.tools&&rtWiz.tools.items)||[]).filter(t=>t.isClamp&&t.status!=='Списан');
+    const rtChuckLabel=(t)=>[t.code,t.name].filter(Boolean).join(' · ');
+    const rtJawLabel=(j)=>'Кулачки '+[j.setNo,j.exec,j.jawType,j.boredFor?'расточены '+j.boredFor:''].filter(Boolean).join(' · ');
+    const rtOpIsTurning=(op)=>/ТОК|ФРЧ|ФРУ|ШЛ/.test(String((rtOtById(op.opTypeId)||{}).code||''));
+    function rtClampBlockHtml(op,i){ if(!rtOpIsTurning(op))return ''; const chucks=rtChuckList(); const jaws=((rtWiz.jaws&&rtWiz.jaws.items)||[]).filter(j=>j.condition!=='Списан'); const set=rtToolSet(op);
+      const curCh=chucks.find(t=>set.has(rtChuckLabel(t))); const curInv=curCh?(curCh.invNo||curCh.code):''; const fit=jaws.filter(j=>!curCh||!j.chuckInv||j.chuckInv===curInv); const curJ=jaws.find(j=>set.has(rtJawLabel(j)));
+      return `<div class="rt-fld" style="margin-top:11px" data-clamp="${i}"><label>Зажим: патрон и кулачки <span class="rt-rt" style="margin-left:6px">· кулачки показываются совместимые с выбранным патроном</span></label>
+        <div class="rt-g2" style="gap:8px;margin-top:5px"><select class="rt-inp" data-clf="chuck"><option value="">— патрон не указан —</option>${chucks.map(t=>`<option value="${rtEscA(rtChuckLabel(t))}"${curCh===t?' selected':''}>${esc([t.invNo||t.code,t.name,t.chuckDia?'Ø'+t.chuckDia:''].filter(Boolean).join(' · '))}${t.where&&t.where!=='—'?' · '+esc(t.where):''}</option>`).join('')}</select>
+          <select class="rt-inp" data-clf="jaws"><option value="">— кулачки не указаны —</option>${fit.map(j=>`<option value="${rtEscA(rtJawLabel(j))}"${curJ===j?' selected':''}>${esc([j.setNo,j.exec,j.jawType,j.boredFor?'расточены '+j.boredFor:'',j.clampDia].filter(Boolean).join(' · '))}${j.chuckInv?'':' · без привязки к патрону'}</option>`).join('')}</select></div>
+        ${chucks.length?'':'<div class="rt-hint" style="margin-top:4px">Патронов в реестре нет: «Инструмент и оснастка» → «Мастер: завести» → Оснастка → вид «Зажимное устройство».</div>'}</div>`; }
     function rtToolChecklist(op,i){
       const sel=rtToolSet(op), labels=rtToolLabels(op), extra=[...sel].filter(l=>!labels.includes(l)), all=labels.concat(extra);
       const totalTools=((rtWiz.tools&&rtWiz.tools.items)||[]).filter(t=>t.subdivision==='osn'||t.subdivision==='cut').length;
@@ -14748,6 +14791,7 @@
       const cat=await loadRtCat();
       if(!cat||!cat.opTypes||cat.mode==='mock'){ toast('Конструктор МК доступен только в LIVE-режиме (нужен токен NocoDB в «Настройках»).','err'); renderRoutesView(host); return; }
       const [reg,eqReg,tools,setup]=await Promise.all([loadKdRegistry(),loadEquipReg(),loadRtTools(),loadRtSetup()]);
+      let jaws={items:[]}; try{ jaws=await (await fetch('/api/chuck-jaws')).json(); }catch{} // K-228
       // каталог металла — тот же канон, что и в каскаде ЗнЗ (вид проката → размер → марка)
       if(typeof CAT==='undefined'||!CAT){ try{CAT=await (await fetch('/api/catalog')).json();}catch(e){} }
       const catMetal=((typeof CAT!=='undefined'&&CAT&&CAT.items)||[]).filter(i=>i.category==='Металл');
@@ -14762,7 +14806,7 @@
       if(copyFrom!=null){ try{ const d=await (await fetch('/api/route/edit?id='+encodeURIComponent(copyFrom))).json(); if(d&&d.route){ init=d; init.route=Object.assign({},d.route,{mk:'',statusMk:'Черновик',variant:(opts&&opts.variant)||''}); (init.operations||[]).forEach(o=>{ o.ncFiles=[]; o.setupFiles=[]; if(o.coop&&o.coop.returned)o.coop.returned=[]; }); } }catch(e){} }
       const r0=init.route||{};
       rtWiz={ host, routeId, step:1, cat, catMetal, canonAll, stockList, contractors:(cat&&cat.contractors)||[],
-        reg:{projects:(reg&&reg.projects)||[],docs:(reg&&reg.kd)||[]}, eqReg, tools, setup,
+        reg:{projects:(reg&&reg.projects)||[],docs:(reg&&reg.kd)||[]}, eqReg, tools, setup, jaws,
         route:{type:r0.type||'КОМ',name:r0.name||'',designation:r0.designation||'',productType:r0.productType||'',revision:r0.revision||'',material:r0.material||'',statusMk:r0.statusMk||'Черновик',projectDecNo:r0.projectDecNo||'',mk:r0.mk||'',variant:r0.variant||'',variantOf:copyFrom},
         kdSel:((r0.kdDrawings)||[]).slice(),
         bom:((r0.bom)||[]).map(m=>rtBomDefault(m)), // K-160: спецификация материалов изделия
@@ -15259,7 +15303,7 @@
           ${auto}
           <div class="rt-blk"><div class="rt-blk-h">Оборудование <span class="rt-rt">${((rtOtById(op.opTypeId)||{}).equipment||[]).length?'по типу операции: '+esc(((rtOtById(op.opTypeId)||{}).equipment||[]).join(', ')):(rtOpSecCode(op)?'участок '+esc(rtOpSecCode(op)):'участок по типу операции')}</span><label class="rt-rt" style="margin-left:auto;display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" data-allsec="${i}"${op._allSec?' checked':''}> показать все участки</label></div>
           <div class="rt-g2"><div class="rt-fld"><label>Оборудование (из справочника)</label><select class="rt-inp" data-of="equipment">${rtEqOptions(op.equipment,op)}</select></div><div class="rt-fld"><label>Норма, ч/шт <span class="rt-rt">можно оставить пустой — зафиксируете по факту первого прогона</span></label><input class="rt-inp" data-of="norm" value="${rtEscA(op.norm)}" placeholder="по факту"></div></div></div>
-          <div class="rt-blk"><div class="rt-blk-h">Оснастка и инструмент</div>${rtToolChecklist(op,i)}${setupRow}</div>
+          <div class="rt-blk"><div class="rt-blk-h">Оснастка и инструмент</div>${rtClampBlockHtml(op,i)}${rtToolChecklist(op,i)}${setupRow}</div>
           ${rtOpHasNc(op)?`<div class="rt-blk"><div class="rt-blk-h">Как задаются режимы</div><div class="seg" data-byprog="${i}" style="display:inline-flex"><button type="button" data-v="1" class="${rtOpByProgram(op)?'on':''}">По программе ЧПУ</button><button type="button" data-v="0" class="${rtOpByProgram(op)?'':'on'}">Вручную (универсальный станок)</button></div><div class="rt-hint" style="margin-top:6px">${rtOpByProgram(op)?'Режимы задаёт управляющая программа — они разные по участкам детали, поэтому в МК не вписываются и оператору в Ф.14 не навязываются. Прикрепите файл УП ниже.':'Режимы впишите в таблицу — оператор увидит их в карте задачи.'}</div></div>`:''}
           <div class="rt-blk"${rtOpHasNc(op)&&rtOpByProgram(op)?' hidden':''}><div class="rt-blk-h">Режимы и параметры контроля <span class="rt-rt">состав — по типу операции · значения для этого изделия задайте здесь или оставьте пустыми: оператор впишет факт в Ф.14</span></div>${(ot.params&&ot.params.length)?`<div class="tbl-wrap"><table class="dt" style="font-size:12px;width:100%"><thead><tr><th>Параметр</th><th style="width:150px">Норматив</th><th style="width:130px">Допуск</th></tr></thead><tbody>${ot.params.map(pn=>{ const nm=pn&&typeof pn==='object'?(pn.name||pn.title||''):String(pn); const un=pn&&typeof pn==='object'?(pn.unit||''):''; const pp=(op.paramPlan||[]).find(x=>cutSameParam(x.name,nm))||{}; if(/^программа/i.test(nm)&&rtOpHasNc(op))return ''; const hid=CUT_RE_PER.test(nm)&&!(Number(String(pp.norm||'').replace(',','.'))>1)&&!op._showPer; return `<tr${hid?' hidden':''}${CUT_RE_PER.test(nm)?' data-perrow="1"':''}><td>${esc(nm)}${un?` <span class="c-gray">(${esc(un)})</span>`:''}${CUT_RE_PER.test(nm)?'<div class="c-gray" style="font-size:11px">если из одной МК режется несколько одинаковых заготовок на изделие; по умолчанию 1</div>':''}</td><td><input class="rt-inp" data-ppn="${rtEscA(nm)}" value="${rtEscA(pp.norm||'')}" placeholder="по факту"></td><td><input class="rt-inp" data-ppt="${rtEscA(nm)}" value="${rtEscA(pp.tol||'')}" placeholder="±"></td></tr>`; }).join('')}</tbody></table></div>${(ot.params||[]).some(pn=>CUT_RE_PER.test(pn&&typeof pn==='object'?(pn.name||''):String(pn)))&&!op._showPer&&!(Number(String(((op.paramPlan||[]).find(x=>CUT_RE_PER.test(x.name))||{}).norm||'').replace(',','.'))>1)?`<div class="rt-hint" style="margin-top:6px">Шаблон МК — на одно изделие: сколько резать, придёт из заказа. <a href="#" data-showper="${i}" style="color:var(--navy)">Несколько заготовок на одно изделие?</a></div>`:''}`:'<div class="rt-hint">У типа операции параметры не заданы — Настройки → Справочники → Параметры типов.</div>'}</div>
           ${rtNcBlockHtml(op,i)}
@@ -15469,6 +15513,9 @@
             { const cn=(rtWiz.canonAll||[]).find(x=>String(x.id)===String(m.canonId)); const ot0=rtOtById(op.opTypeId)||{}; // K-214: пруток/лист под резку — это заготовка (от роли зависят резерв и списание с карточки металла)
               if(cn&&cn.category==='Металл'&&(m.role||'Материал')==='Материал'&&RT_CUT_TYPES.has(ot0.code||'')&&!rtHasBlank()){ m.role='Заготовка'; toast('Роль изменена на «Заготовка»: металл под резку резервируется и списывается с карточки склада металла.','ok'); } } m.unit=rtCanonKgPerM(m.canonId)?'м':(o?(o.dataset.unit||''):''); m.name=sel.value?String(o.textContent||'').split(' · ')[0].trim():''; rerender(); });
           box.querySelectorAll('[data-pmf="unit"]').forEach(sel=>sel.onchange=()=>{ const k=+sel.dataset.pmi, m=list[k]; if(!m)return; m.unit=sel.value; const u=box.querySelector('[data-pmunit="'+k+'"]'); if(u)u.textContent=rtKgHint(m); refresh(); });
+          node.querySelectorAll('[data-clamp] [data-clf]').forEach(sel0=>sel0.onchange=()=>{ rtReadOps(2); const kind=sel0.dataset.clf; const set=rtToolSet(op); // K-228
+            const all=kind==='chuck'?rtChuckList().map(rtChuckLabel):((rtWiz.jaws&&rtWiz.jaws.items)||[]).map(rtJawLabel); all.forEach(l=>set.delete(l)); if(sel0.value)set.add(sel0.value);
+            op.tooling=[...set].join('; '); rtWiz._keepScroll=true; rtWizRender(); });
           node.querySelectorAll('[data-byprog] button').forEach(b0=>b0.onclick=()=>{ rtReadOps(2); op._byProg=b0.dataset.v==='1'; if(op._byProg)op.paramPlan=(op.paramPlan||[]).filter(x=>/^программа/i.test(x.name||'')); rtWizRender(); });
           { const ncRepaint=()=>{ const b0=node.querySelector('[data-nc]'); if(b0){ b0.outerHTML=rtNcBlockHtml(op,idx); rtPlanWireCard(host,node); } };
             const up=node.querySelector('[data-ncup]'); if(up)up.onchange=async()=>{ const fl=[...(up.files||[])]; if(!fl.length)return; const mk=(rtWiz.route&&rtWiz.route.mk)||'';

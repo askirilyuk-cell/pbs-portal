@@ -12369,7 +12369,7 @@
       const jByU=new Map((t.journal||[]).map(j=>[Number(j.unit),j]));
       const units=Array.from({length:qty},(_,i)=>{ const j=jByU.get(i+1)||{}; return {id:j.id,unit:i+1,executor:j.executor||'',blankNo:j.blankNo||'',self:j.self||'',otk:j.otk||'',date:j.date||'',note:j.note||'',measured:j.measured===''||j.measured==null?'':Number(j.measured),matCode:j.matCode||''}; });
       const st={status:t.status,startedAt:t.startedAt||'',mat:null,matList:[],matConfirmed:false,barLen:null,remMode:'do',blankInfo:null,otkCalled:false,busy:false,
-        si:cutSiParse((t.journal||[]).map(j=>j.si).find(Boolean)||''),siList:[]}; // K-207: чем меряли
+        si:cutSiParse((t.journal||[]).map(j=>j.si).find(Boolean)||''),siList:[],siWanted:String((t.control&&t.control.si)||'').split(/\s*;\s*/).map(x=>x.trim()).filter(Boolean)}; // K-207: чем меряли · K-223: что назвал технолог
       const blankName=String(t.blankText||t.materials||'').replace(/^Заготовка:\s*/i,'').split(' · норма')[0].trim();
       const eq=(t.equipList||[])[0]; const eqTxt=eq?[eq.name||eq.model,eq.invNo].filter(Boolean).join(' · '):(t.equip||'станок не указан');
       const inTol=(v)=>{ if(v===''||v==null)return null; if(lo==null||hi==null)return true; return v>=lo-1e-9&&v<=hi+1e-9; };
@@ -15148,9 +15148,10 @@
     function cutSiDialog(st,done){
       const w=document.createElement('div'); w.className='ui-dlg';
       const paint=(q)=>{ const s0=String(q||'').trim().toLowerCase();
-        const list=(st.siList||[]).filter(x=>!s0||[x.invNo,x.name,x.kind,x.code1c].some(v=>String(v||'').toLowerCase().includes(s0)));
+        const want=(st.siWanted||[]).map(n=>n.toLowerCase()); const byMk=(x)=>want.includes(String(x.name||'').toLowerCase());
+        const list=(st.siList||[]).filter(x=>!s0||[x.invNo,x.name,x.kind,x.code1c].some(v=>String(v||'').toLowerCase().includes(s0))).sort((a,b)=>(byMk(b)-byMk(a)));
         const rows=list.map(x=>{ const on=st.si.includes(x.invNo); const tag=x.calState==='indicative'?'<span class="cut-pill gray">индикаторный</span>':(x.calState==='none'?'<span class="cut-pill warn">нет поверки</span>':(x.calState==='overdue'?'<span class="cut-pill bad">просрочен</span>':(x.calState==='soon'?'<span class="cut-pill warn">скоро поверка</span>':'<span class="cut-pill ok">годен до '+fmt(x.calNext)+'</span>')));
-          return `<button type="button" class="it ${on?'on':''}" data-inv="${esc(x.invNo)}"><span><b>${esc(x.invNo)}</b> · ${esc(x.name)}<br><small>${esc([x.kind,x.range,x.where].filter(Boolean).join(' · '))}</small></span>${tag}</button>`; }).join('');
+          return `<button type="button" class="it ${on?'on':''}" data-inv="${esc(x.invNo)}"><span><b>${esc(x.invNo)}</b> · ${esc(x.name)}${byMk(x)?' <span class="cut-pill wip">по МК</span>':''}<br><small>${esc([x.kind,x.range,x.where].filter(Boolean).join(' · '))}</small></span>${tag}</button>`; }).join('');
         w.querySelector('#si-list').innerHTML=rows||'<div class="cut-note">Ничего не найдено. Приборы заводятся в разделе «Инструмент и оснастка» → СИ.</div>';
         w.querySelectorAll('#si-list .it').forEach(b=>b.onclick=()=>{ const inv=b.dataset.inv; if(st.si.includes(inv))st.si=st.si.filter(x=>x!==inv); else st.si.push(inv); paint(w.querySelector('#si-q').value); });
       };
@@ -15264,16 +15265,33 @@
         </div>
       </div>`;
     }
+    // K-223: СИ в МК — наборный список видов приборов из реестра (несколько на операцию); хранится строкой через «; »
+    const rtSiParse=(v)=>String(v||'').split(/\s*;\s*/).map(x=>x.trim()).filter(Boolean);
+    async function rtSiLoad(){ if(rtWiz.siKinds)return rtWiz.siKinds; let items=[]; try{ const d=await (await fetch('/api/task/si-list')).json(); items=(d&&d.items)||[]; }catch{}
+      const m=new Map(); items.forEach(x=>{ const n=String(x.name||x.kind||'').trim(); if(!n)return; const e=m.get(n)||{name:n,kind:x.kind||'',total:0,ok:0,none:0,ind:0}; e.total++; if(x.calState==='ok'||x.calState==='soon')e.ok++; else if(x.calState==='indicative')e.ind++; else e.none++; m.set(n,e); });
+      rtWiz.siKinds=[...m.values()].sort((a,b)=>String(a.kind).localeCompare(String(b.kind),'ru')||a.name.localeCompare(b.name,'ru')); return rtWiz.siKinds; }
+    async function rtSiPick(op,done){ const kinds=await rtSiLoad(); let sel=rtSiParse(op.si); const w=document.createElement('div'); w.className='ui-dlg';
+      const paint=(q)=>{ const s0=String(q||'').trim().toLowerCase(); const list=kinds.filter(k=>!s0||(k.name+' '+k.kind).toLowerCase().includes(s0));
+        w.querySelector('#rsi-list').innerHTML=list.map(k=>{ const on=sel.includes(k.name); const st=k.ok?`<span class="cut-pill ok">поверенных ${k.ok} из ${k.total}</span>`:(k.ind===k.total?'<span class="cut-pill gray">индикаторный</span>':`<span class="cut-pill warn">в наличии ${k.total}, поверенных нет</span>`);
+          return `<button type="button" class="it ${on?'on':''}" data-n="${rtEscA(k.name)}"><span><b>${esc(k.name)}</b><br><small>${esc(k.kind||'')}</small></span>${st}</button>`; }).join('')||'<div class="c-gray" style="font-size:12px">В реестре такого нет — можно добавить своим названием ниже.</div>';
+        w.querySelectorAll('#rsi-list .it').forEach(b=>b.onclick=()=>{ const n=b.dataset.n; sel=sel.includes(n)?sel.filter(x=>x!==n):sel.concat([n]); paint(w.querySelector('#rsi-q').value); });
+        w.querySelector('#rsi-sel').innerHTML=sel.length?'Выбрано: '+sel.map(esc).join(' · '):'Ничего не выбрано'; };
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="max-width:640px"><div class="ui-dlg-h">Чем меряют на операции</div><div class="ui-dlg-t"><input class="rt-inp" id="rsi-q" placeholder="поиск: штангенциркуль, микрометр, 150…" style="width:100%" autocomplete="off"><div class="si-pick" id="rsi-list" style="margin-top:8px"></div>
+        <div style="display:flex;gap:6px;margin-top:8px"><input class="rt-inp" id="rsi-free" placeholder="нет в реестре — впишите: калибр-пробка М24, шаблон R5…" style="flex:1"><button type="button" class="tbtn" id="rsi-add">Добавить</button></div><div class="c-gray" id="rsi-sel" style="font-size:12px;margin-top:8px"></div></div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn ui-btn--primary" data-d="ok">Готово</button></div></div>`;
+      document.body.appendChild(w); paint(''); const q=w.querySelector('#rsi-q'); q.oninput=()=>paint(q.value); setTimeout(()=>q.focus(),30);
+      w.querySelector('#rsi-add').onclick=()=>{ const f=w.querySelector('#rsi-free'); const n=f.value.trim().replace(/;/g,','); if(n&&!sel.includes(n))sel.push(n); f.value=''; paint(q.value); };
+      w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+      w.querySelector('[data-d="ok"]').onclick=()=>{ op.si=sel.join('; '); w.remove(); if(done)done(); }; }
     // ── шаг 3: контроль (точки С / ОТК · СИ); карта наладки — только внутри операции на шаге 2 (K-218, З-011) ──
     function rtStep3Html(){
       const rows=rtWiz.ops.map((op,i)=>{ const ot=rtOtById(op.opTypeId)||{}; const nm=op.name||ot.name||'Операция';
         return `<tr data-idx="${i}"><td class="ct c-gray">${i+1}</td><td><b style="color:var(--ink)">${esc(nm)}</b><div class="c-gray" style="font-size:11px">${esc(ot.section||'')}</div></td>
           <td><select class="rt-inp" data-of="control">${rtCtrlOptions(op.control)}</select></td>
-          <td><input class="rt-inp" data-of="si" value="${rtEscA(op.si)}" placeholder="из реестра СИ"></td></tr>`;
+          <td><input type="hidden" data-of="si" value="${rtEscA(op.si)}"><div class="chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${rtSiParse(op.si).map(n=>`<span class="si-chip"><span>${esc(n)}</span><b data-sidel="${rtEscA(n)}" title="убрать">×</b></span>`).join('')}<button type="button" class="tbtn" data-sipick="${i}" style="padding:3px 9px">+ СИ</button></div></td></tr>`;
       }).join('')||'<tr><td colspan="4" class="c-gray" style="padding:12px">Операции не заведены — вернитесь на шаг 2.</td></tr>';
       return `<div class="card pad"><div class="rt-cardh">Шаг 3 · Контроль <span class="rt-rt">точки С / ОТК по операциям · чем меряют</span></div>
-        <table class="dt"><thead><tr><th style="width:30px">№</th><th>Операция</th><th style="width:200px">Контроль</th><th style="width:260px">СИ (справочник)</th></tr></thead><tbody>${rows}</tbody></table>
-        <div class="rt-info" style="margin-top:12px">${RT_SVG_INFO}<span>СИ выбираются из реестра средств измерения (с контролем поверки). Карта наладки, оснастка и программа ЧПУ задаются внутри самой операции на шаге 2 (K-218: здесь колонка «Карта наладки» убрана как дубль).</span></div>
+        <table class="dt"><thead><tr><th style="width:30px">№</th><th>Операция</th><th style="width:200px">Контроль</th><th style="width:42%">Чем меряют (СИ из реестра)</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="rt-info" style="margin-top:12px">${RT_SVG_INFO}<span>В МК указывается вид прибора («Штангенциркуль 150 мм»), а не конкретный экземпляр: какой именно прибор взял в руки, оператор отметит на рабочем месте — там же видно, поверен ли он. Карта наладки, оснастка и программа ЧПУ задаются внутри операции на шаге 2.</span></div>
         <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><button class="tbtn primary" id="rt-next" style="margin-left:auto">Далее: проверка и выпуск →</button></div>
       </div>`;
     }
@@ -15420,7 +15438,9 @@
         const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(3);
         const ao=host.querySelector('#rt-addop'); if(ao)ao.onclick=()=>rtAddOp('');
       }
-      if(step===3){ const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(2); const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(4); }
+      if(step===3){ host.querySelectorAll('[data-sipick]').forEach(b=>b.onclick=()=>{ rtReadOps(3); const op=rtWiz.ops[+b.dataset.sipick]; if(op)rtSiPick(op,()=>rtWizRender()); });
+        host.querySelectorAll('[data-sidel]').forEach(x=>x.onclick=()=>{ rtReadOps(3); const tr=x.closest('tr[data-idx]'); const op=tr?rtWiz.ops[+tr.dataset.idx]:null; if(op){ op.si=rtSiParse(op.si).filter(n=>n!==x.dataset.sidel).join('; '); rtWizRender(); } });
+        const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(2); const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(4); }
       if(step===4){ const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(3); const dr=host.querySelector('#rt-draft'); if(dr)dr.onclick=()=>rtWizSave(false);
         const sn=host.querySelector('#rt-send'); if(sn)sn.onclick=async()=>{ const list=await mkLoadApprovers(); if(!list.length){ toast('Список согласующих МК пуст — Настройки → «1С и бухгалтерия».','err'); return; }
           const chain=await mkPickApprovers(list,'Сохранить и отправить'); if(chain)rtWizSave({send:chain}); };

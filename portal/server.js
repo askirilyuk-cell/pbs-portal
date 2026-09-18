@@ -1388,7 +1388,7 @@ async function buildRouteCard(id) {
     const coop = mkCoopParse(op['Входящие материалы']);
     return {
       id: op.Id ?? op.id,
-      n: opN, name: ot['Наименование'] || op['Операция'] || '', opType: ot['Код типа'] || '',
+      n: opN, name: op['Операция'] || ot['Наименование'] || '', opType: ot['Код типа'] || '', // K-237: своё название операции из МК («Токарная обработка (сверловка)»), а не общее название типа
       section: sec['Код'] ? `${sec['Код']}${sec['Участок'] ? ' · ' + sec['Участок'] : ''}` : '', equip: op['Оборудование'] || '',
       params: prm.join('; '), paramPlan: mkParamPlanParse(op['Параметры (план)']), comment: op['Комментарий оператору'] || '', opTypeCode: ot['Код типа'] || '', control: op['Точка контроля'] || '', ri: ot['РИ'] || '', norm: op['Норма времени (ч)'] ?? '', tasks: tNums,
       // K-81 редизайн Ф.13: оснастка из справочника + № привязанной карты наладки (migrate-042; degrade-safe — поля может ещё не быть)
@@ -6449,7 +6449,7 @@ async function buildBoardLive() {
     }
     return {
       id: idOf(t), num: t['№ задачи'], op,
-      title: opType['Наименование'] || '',
+      title: operation['Операция'] || opType['Наименование'] || '', // K-237: название операции из МК, а не общее название типа
       section: secCode ? (secName ? `${secCode} · ${secName}` : secCode) : '',
       sectionCode: secCode, sectionName: secName, sectionSite: section['Площадка'] || '', // K-152: площадка участка
       opTypeCode: opType['Код типа'] || '', opNum: operation['№ операции'] ?? '',

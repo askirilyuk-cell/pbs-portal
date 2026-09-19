@@ -865,9 +865,10 @@ async function kdQuickCreate(body, session) {
   const kd = await ncListSoft('design_kd'); if (kd.some((r) => String(r['Децимальный номер документа'] || '').trim() === doc)) throw new Error(`Запись ${doc} уже есть в реестре.`);
   const projCode = (doc.match(/[А-ЯЁ]{2}\d{4}/) || [''])[0]; const isAsm = !!body.isAsm; const hasFile = designResolveKdFiles(doc).length > 0;
   const row = { 'Децимальный номер документа': doc, 'Децимальный номер проекта': projCode, 'Вид КД': isAsm ? 'СБ' : 'Чертёж детали', 'Тип элемента': body.elemType || (isAsm ? 'П.СБ' : 'Деталь'), 'Наименование': name,
-    'Материал': String(body.material || '').trim(), 'Статус': hasFile ? 'Действует' : 'В разработке', 'Кол-во': 1, 'Примечание': 'Заведено из состава сборки ' + String(body.asm || '') + ((session && session.fio) ? ' · ' + session.fio : '') };
+    'Материал': String(body.material || '').trim(), 'Статус': hasFile ? 'Действует' : 'В разработке', 'Кол-во': 1, 'Примечание': (body.asm ? 'Заведено из состава сборки ' + String(body.asm) : 'Заведено в реестре') + ((session && session.fio) ? ' · ' + session.fio : '') };
+  if (body.projectNo && /^[А-ЯЁA-Z]{2,4}\d{4}$/i.test(String(body.projectNo).trim())) row['Децимальный номер проекта'] = String(body.projectNo).trim();
   const cr = await ncCreateMany('design_kd', [row]); const id = (Array.isArray(cr) ? cr[0] : cr).Id;
-  try { const proj = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === projCode); if (proj && id) await ncLinkRecords('design_kd', 'Проекты разработки', id, [proj.Id ?? proj.id]); } catch (e) { console.warn('K-244: связь КД→проект:', e.message); }
+  try { const proj = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === (row['Децимальный номер проекта'] || projCode)); if (proj && id) await ncLinkRecords('design_kd', 'Проекты разработки', id, [proj.Id ?? proj.id]); } catch (e) { console.warn('K-244: связь КД→проект:', e.message); }
   await kdHistAdd(doc, [{ kind: 'create', what: 'Запись КД заведена' + (body.asm ? ' из состава сборки ' + body.asm : '') }], session);
   return { ok: true, id, docNo: doc, hasFile };
 }
@@ -11948,13 +11949,30 @@ async function bitrixUserName(id) {
     return [u.LAST_NAME, u.NAME, u.SECOND_NAME].filter(Boolean).join(' ').trim() || null;
   } catch { return null; }
 }
+const ROLE_ABOUT = {
+  'Администратор': 'Всё без ограничений: настройки, роли, справочники, исправление статусов и удаление записей. Может смотреть портал «как другая роль».',
+  'Руководство': 'Видит все разделы. Ведёт продажи, оценки выполнимости и бухгалтерский ретро-учёт. Настройки недоступны.',
+  'Продажи': 'Запросы и заказы клиентов, контрагенты, оценки выполнимости, заявки на перевозку. Производственные заказы, склад и чертежи — для справки.',
+  'Конструктор': 'Реестр чертежей: заводит записи КД, загружает и заменяет чертежи (только эта роль и администратор), ведёт спецификации сборок, участки и оборудование. Маршрутные карты и заказы — только просмотр.',
+  'Технолог': 'Маршрутные карты (создание, правка, отправка на согласование), карты наладки, заказы и запуск позиций в производство, доска и порядок очереди участков, рабочее место. Чертежи, инструмент, СИ и склад — просмотр.',
+  'Цех': 'Мастер и рабочие: ведут задачи на рабочем месте под своей учётной записью (старт, замеры, самоконтроль, завершение), заявки на закупку. Очередь участка не переставляют, маршрутные карты и заказы не правят.',
+  'Кладовщик': 'Склад, металл, инструмент и оснастка, средства измерения, каталог, закупки, ежемесячные списания в бухгалтерии.',
+  'Снабжение': 'Закупки, склад, каталог, материалы 1С, перевозки. Бухгалтерия и контрагенты — просмотр.',
+  'ОТК': 'Контроль качества: очередь операций на контроль (годен / брак по единицам), акты входного и приёмочного контроля, несоответствия. Доска, рабочее место, маршрутные карты и чертежи — просмотр.',
+  'Инструментальщик': 'Инструмент, оснастка и средства измерения — ведёт; остальные разделы видит.',
+  'Наблюдатель': 'Видит все разделы, ничего не меняет.',
+};
 async function handleRolesGet(req, res) {
   const s = sessionFromReq(req);
   if (!s || !s.isAdmin) return sendJson(res, 403, { error: 'Управление ролями доступно только администратору.' });
   const ids = Object.keys(ROLE_OVERRIDES);
   const names = await Promise.all(ids.map((id) => bitrixUserName(id))); // best-effort; null при недоступности
   const overrides = ids.map((id, i) => ({ userId: id, role: ROLE_OVERRIDES[id], name: names[i] || null }));
-  return sendJson(res, 200, { overrides, roles: ASSIGNABLE_ROLES });
+  // K-254: справка «что может роль» — разделы считаются из действующей матрицы прав, слова — ROLE_ABOUT
+  const roleInfo = Object.keys(RBAC_MATRIX).map((role) => { const write = [], view = [];
+    for (const sec of RBAC_SECTIONS) { const a = sectionAccess(role, sec); if (a === 'write') write.push(sec); else if (a === 'view') view.push(sec); }
+    return { role, about: ROLE_ABOUT[role] || '', write, view }; });
+  return sendJson(res, 200, { overrides, roles: ASSIGNABLE_ROLES, roleInfo });
 }
 async function handleRolesPost(req, res) {
   const s = sessionFromReq(req);

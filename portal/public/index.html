@@ -4495,6 +4495,30 @@
       gh.querySelectorAll('[data-toprodreg]').forEach(b=>b.onclick=()=>dRegToProd(b.dataset.doc,b.dataset.proj));
       gh.querySelectorAll('[data-opencard]').forEach(el=>el.onclick=()=>{dRegCard=el.dataset.opencard;dRegCardStack=[];dBody();});
     }
+    // K-254: «＋ Чертёж» — запись КД + файл одним диалогом (раньше записи появлялись только из спецификации сборки или правкой базы)
+    function dRegNewKdDialog(){
+      const projs=((DESIGN&&DESIGN.projects)||[]).slice().sort((a,b)=>String(a.decNo).localeCompare(String(b.decNo),'ru'));
+      const w=document.createElement('div'); w.className='ui-dlg'; const ist='width:100%;box-sizing:border-box;border:1px solid var(--sl-300);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;background:#fff'; const lb=(t)=>`<div style="font-size:11px;font-weight:600;color:var(--sl-500);margin:9px 0 3px">${t}</div>`;
+      w.innerHTML=`<div class="ui-dlg-box" style="width:min(560px,94vw)"><div class="ui-dlg-h">Новый чертёж в реестре КД</div>
+        ${lb('Проект')}<select id="nk-proj" style="${ist}"><option value="">— выберите проект —</option>${projs.map(p=>`<option value="${esc(p.decNo)}"${dRegProj===p.decNo?' selected':''}>ПБС.${esc(p.decNo)} · ${esc(p.name)}</option>`).join('')}</select>
+        ${lb('Децимальный номер — как в штампе')}<input id="nk-doc" style="${ist};font-family:var(--mono)" placeholder="ПБС.ПЧ0001.01.004">
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:0 10px"><div>${lb('Наименование')}<input id="nk-name" style="${ist}" placeholder="Кольцо опорное"></div><div>${lb('Что это')}<select id="nk-type" style="${ist}"><option value="Деталь">Деталь</option><option value="П.СБ">Сборка (подсборка)</option><option value="Г.СБ">Главная сборка</option><option value="Оснастка">Оснастка</option></select></div></div>
+        ${lb('Материал (для детали)')}<input id="nk-mat" style="${ist}" placeholder="Сталь 20 ГОСТ 1050-2013">
+        ${lb('Файл чертежа (PDF) — можно добавить позже')}<input id="nk-file" type="file" accept=".pdf" style="font-size:12px">
+        <div class="c-gray" style="font-size:11px;margin-top:6px">Файл сохранится в папке проекта 03-КД под именем «децим. № - наименование.pdf» — по этому имени портал связывает его с записью.</div>
+        <div id="nk-msg" style="font-size:12px;color:#b91c1c;margin-top:6px"></div>
+        <div class="ui-dlg-b"><button class="tbtn" data-d="cancel">Отмена</button><button class="tbtn primary" data-d="ok">Завести</button></div></div>`;
+      document.body.appendChild(w); const $n=(q)=>w.querySelector(q);
+      const pre=()=>{ const pj=$n('#nk-proj').value; const d=$n('#nk-doc'); if(pj&&!d.value.trim())d.value='ПБС.'+pj+'.'; }; $n('#nk-proj').onchange=pre; pre();
+      $n('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+      $n('[data-d="ok"]').onclick=async(e)=>{ const msg=$n('#nk-msg'); const proj=$n('#nk-proj').value, doc=$n('#nk-doc').value.trim(), name=$n('#nk-name').value.trim(), type=$n('#nk-type').value, f=$n('#nk-file').files[0];
+        if(!proj){ msg.textContent='Выберите проект.'; return; } if(!/\d{4}/.test(doc)||doc.endsWith('.')){ msg.textContent='Укажите децимальный номер полностью.'; return; } if(!name){ msg.textContent='Укажите наименование.'; return; }
+        e.target.disabled=true; msg.textContent='';
+        try{ await postJson('/api/design/kd/create',{docNo:doc,name,material:$n('#nk-mat').value.trim(),isAsm:/СБ/.test(type),elemType:type,projectNo:proj});
+          if(f){ const fd=new FormData(); fd.append('proj',proj); fd.append('stage','03-КД'); fd.append('doc',doc); const asm=/СБ/.test(type); fd.append('file',f,`${doc}${asm?' СБ':''} - ${name}.pdf`); const r=await fetch('/api/design/upload',{method:'POST',body:fd}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error('запись заведена, но файл не загрузился: '+(j.error||r.status)); }
+          w.remove(); toast('Чертёж заведён'+(f?' · файл загружен':' · файл можно загрузить из карточки'),'ok'); await dDesignReload(); dRegCard=doc; dRegCardStack=[]; dBody(); }
+        catch(err){ e.target.disabled=false; msg.textContent=String(err.message||err); } };
+    }
     // K-? улучшение 2 «Непривязанные файлы»: PDF из релиз-контура, чьё имя не совпало ни с одной записью КД
     // (см. GET /api/design/orphans, designOrphanFiles на сервере) — свёрнутый блок под таблицей, только просмотр.
     let DESIGN_ORPHANS=null;
@@ -4535,12 +4559,14 @@
       host.innerHTML=`<div class="filters" style="margin-bottom:10px">
           <input id="dreg-q" placeholder="Поиск по децим.№ или наименованию…" value="${esc(dRegQ)}" style="font:inherit;font-size:14px;padding:10px 14px;border:1px solid var(--bd);border-radius:9px;flex:1 1 320px;min-width:220px">
           <select id="dreg-proj" style="font:inherit;font-size:12px;padding:9px 12px;border:1px solid var(--bd);border-radius:9px;max-width:320px">${projOpts}</select>
+          ${rbacAccess('design')==='write'?`<button class="tbtn primary" id="dreg-new" style="padding:9px 14px;white-space:nowrap">＋ Чертёж</button>`:''}
         </div>
         <div id="extkd-panel"></div>
         <div id="dreg-body"></div>
         <div id="dorphans-panel"></div>`;
       renderExtKdPanel();
       renderDesignOrphansPanel();
+      const nk=host.querySelector('#dreg-new'); if(nk)nk.onclick=()=>dRegNewKdDialog();
       const qi=host.querySelector('#dreg-q'); if(qi)qi.oninput=()=>{dRegQ=qi.value;dRegGrid();};
       const psel=host.querySelector('#dreg-proj'); if(psel)psel.onchange=()=>{dRegProj=psel.value;dRegGrid();};
       dRegGrid();
@@ -16373,6 +16399,13 @@
         <div class="stg-msg" id="s_roleMsg"></div>
         <div style="margin-top:6px">${rows}</div>
         <div class="stg-note">Назначение сохраняется на сервере (файл вне Git) и действует независимо от режима enforcement — влияет только на резолв роли пользователя.</div>
+      </div>
+      <div class="stg-card pad" style="margin-top:12px">
+        <div style="font-size:14px;font-weight:700;color:var(--ink)">Что может каждая роль</div>
+        <p style="font-size:12px;color:var(--sub);margin:6px 0 10px;line-height:1.5">«Ведёт» — может создавать и менять записи раздела; «видит» — только просмотр. Разделы, которых нет в списке роли, скрыты из её меню. Списки строятся из действующих прав портала. Отдельно от ролей: согласующие МК и актов, ответственный за поверку СИ задаются здесь же, в Настройках, по людям; пост участка (киоск) работает только с «Рабочим местом» своего участка.</p>
+        ${(d.roleInfo||[]).map(r=>{ const nm=(k)=>String((TITLES[k]||({cabinet:'Мой кабинет',si:'Средства измерения',retro:'Бухгалтерия',metal:'Учёт остатков металла',nc:'Несоответствия',eco:'Экология',ot:'Охрана труда'})[k]||k)).replace(/\s*\(.*?\)\s*/g,''); const all=r.write.length+r.view.length>=24;
+          return `<details style="border-top:1px solid var(--line2);padding:8px 0"><summary style="cursor:pointer;font-size:13px"><b>${esc(r.role)}</b> <span style="color:var(--sub);font-size:12px">— ${esc(r.about)}</span></summary>
+            <div style="font-size:12px;line-height:1.6;margin:6px 0 2px 14px">${r.role==='Администратор'?'<b>Ведёт:</b> все разделы.':`${r.write.length?`<div><b>Ведёт:</b> ${r.write.map(nm).map(esc).join(' · ')}</div>`:''}${r.view.length?`<div style="color:var(--sl-600)"><b>Видит:</b> ${all?'все остальные разделы':r.view.map(nm).map(esc).join(' · ')}</div>`:''}`}</div></details>`; }).join('')}
       </div>`;
       $s('s_roleAdd').onclick=async()=>{ const uid=($s('s_roleUid').value||'').trim(); const role=$s('s_roleSel').value; if(!/^\d+$/.test(uid))return stgMsg('s_roleMsg',false,'Нужен числовой ID пользователя.'); try{ const r=await (await _fetch('/api/admin/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:uid,role})})).json(); if(r.error)return stgMsg('s_roleMsg',false,r.error); stgMsg('s_roleMsg',true,'Назначено'+(r.name?': '+r.name:'')+' → '+role); stgRolesRender(); }catch(e){ stgMsg('s_roleMsg',false,'Сеть: '+(e.message||e)); } };
       wrap.querySelectorAll('[data-roledel]').forEach(b=>b.onclick=async()=>{ try{ const r=await (await _fetch('/api/admin/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:b.dataset.roledel,role:null})})).json(); if(r.error)return stgMsg('s_roleMsg',false,r.error); stgRolesRender(); }catch(e){ stgMsg('s_roleMsg',false,'Сеть: '+(e.message||e)); } }); }

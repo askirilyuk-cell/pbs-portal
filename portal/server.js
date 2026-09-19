@@ -689,7 +689,7 @@ async function buildDesignLive() {
       kind: r['Вид КД'] || '', elemType: r['Тип элемента'] || '', name: r['Наименование'] || '', material: r['Материал'] || '',
       litera: r['Литера'] || '', status: r['Статус'] || '', toProduction: !!r['В производство'], author: r['Разработал'] || '',
       id: r.Id, rev: r['Текущая редакция'] ?? '', updated: r['Дата актуализации'] || '', fileMtime,
-      qty: r['Кол-во'] ?? '', parentId: r['design_kd_id'] ?? null, note: r['Примечание'] || '', files };
+      qty: r['Кол-во'] ?? '', parentId: r['design_kd_id'] ?? null, note: r['Примечание'] || '', files, history: kdHistParse(r['История']) };
   };
   const T = (r) => ({ code: r['Код'] || '', name: r['Наименование'] || '', type: r['Тип'] || '', registry: r['Реестр-источник'] || '', author: r['Автор'] || '', status: r['Статус'] || '' });
   const U = (r) => ({ upNo: r['№ УП'] || '', name: r['Наименование'] || '', machine: r['Станок'] || '', version: r['Версия'] || '',
@@ -704,8 +704,53 @@ async function buildDesignLive() {
         .map((r) => ({ id: r.Id ?? r.id, mk: r['№ МК'] || '', variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], statusMk: r['Статус МК'] || 'Черновик' })); }
   } catch { /* не критично */ }
   let bom = []; try { bom = await bomAll(); } catch { bom = []; }
-  return { mode: 'live', bom, projects: projects.map(P), kd: kdOut, td: td.map(T), ncprog: ncprog.map(U), notices: notices.map(N) };
+  return { mode: 'live', bom, kdReasons: KD_CHANGE_REASONS, kdImpact: KD_CHANGE_IMPACT, projects: projects.map(P), kd: kdOut, td: td.map(T), ncprog: ncprog.map(U), notices: notices.map(N) };
 }
+// ── K-245: история чертежа (колонка «История» у записи КД, JSON [{at,by,what,…}]) и последствия замены для МК ──
+const KD_CHANGE_REASONS = ['Ошибка в КД', 'Замечание производства', 'Требование заказчика', 'Улучшение конструкции', 'Смена материала', 'Другое'];
+const KD_CHANGE_IMPACT = ['Не влияет', 'Доработать задел', 'Забраковать задел', 'Использовать задел до исчерпания'];
+function kdHistParse(raw) { try { const a = JSON.parse(String(raw || '') || '[]'); return Array.isArray(a) ? a.filter((x) => x && x.what) : []; } catch { return []; } }
+async function kdHistAdd(docNo, items, session) {
+  const doc = String(docNo || '').trim(); const list = (Array.isArray(items) ? items : [items]).map((x) => (typeof x === 'string' ? { what: x } : x)).filter((x) => x && String(x.what || '').trim()); if (!doc || !list.length) return;
+  return withKeyLock('kd-hist:' + doc, async () => {
+    try { await ncEnsureColumn('design_kd', 'История', 'LongText');
+      const r = (await ncListSoft('design_kd')).find((x) => String(x['Децимальный номер документа'] || '').trim() === doc); if (!r) return;
+      const by = (session && (session.fio || session.name)) || 'портал', at = new Date().toISOString();
+      await ncUpdate('design_kd', r.Id ?? r.id, { 'История': JSON.stringify(kdHistParse(r['История']).concat(list.map((x) => ({ at, by, ...x }))).slice(-400)) });
+    } catch (e) { console.warn('K-245: история чертежа не записана:', e.message); }
+  });
+}
+const kdCanReplace = (session) => { const roles = sessionPortalRoles(session); return roles.includes('Конструктор') || roles.includes('Администратор') || !!(session && session.isAdmin && !session.effectiveRole); };
+const _kdNorm = (x) => String(x || '').trim().toLowerCase().replace(/^пбс\./, '');
+// замена чертежа: редакция +1, запись в журнал, отметка «чертёж изменён» на всех МК этого чертежа (предупреждение, без блокировки — решение владельца 19.09)
+async function kdVersionApply({ doc, what, reason, impact, chgNo, archived, fileName }, session) {
+  const rec = (await ncListSoft('design_kd')).find((x) => String(x['Децимальный номер документа'] || '').trim() === doc); if (!rec) return { rev: null, mks: [] };
+  const hadFile = (archived || []).length > 0; const prevRev = Number(rec['Текущая редакция'] || 0); const rev = hadFile ? prevRev + 1 : (prevRev || 0);
+  await ncUpdate('design_kd', rec.Id ?? rec.id, { 'Текущая редакция': rev, 'Дата актуализации': whToday(), 'Статус': 'Действует' });
+  await kdHistAdd(doc, [hadFile ? { kind: 'version', what: `Чертёж заменён: ред. ${prevRev} → ${rev}. ${what}`, rev, reason, impact, chgNo: chgNo || '', file: fileName || '', archived: (archived || [])[0] || '' }
+    : { kind: 'upload', what: `Загружен файл чертежа${fileName ? ' — ' + fileName : ''}${what ? '. ' + what : ''}`, rev }], session);
+  const mks = [];
+  if (hadFile) { try { await ncEnsureColumn('routes', 'Чертёж изменён', 'LongText');
+    const routes = await ncListSoft('routes'); const dn = _kdNorm(doc); const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+    for (const r of routes) { if (!(_kdNorm(r['Изделие / обозначение']) === dn || _parseKd(r['Чертежи КД']).some((d) => _kdNorm(d.doc) === dn))) continue;
+      const rid = r.Id ?? r.id; const flag = { doc, rev, prevRev, at: new Date().toISOString(), by: (session && session.fio) || '', what, reason, impact };
+      await ncUpdate('routes', rid, { 'Чертёж изменён': JSON.stringify(flag) });
+      await mkHistAdd(rid, [`Чертёж ${doc} заменён: ред. ${prevRev} → ${rev}. ${what} (причина: ${reason}; задел: ${impact}). МК нужно сверить с новой редакцией.`], session);
+      mks.push(r['№ МК'] || String(rid));
+      const aid = r['Автор (id)'] != null && r['Автор (id)'] !== '' ? Number(r['Автор (id)']) : 0;
+      if (aid && String(aid) !== String(session && session.userId)) { try { await retroDm(aid, `Чертёж ${doc} заменён (ред. ${prevRev} → ${rev}): ${what}. Причина: ${reason}. Задел: ${impact}. Проверьте маршрутную карту ${r['№ МК'] || ''}: ${portal}/#routes/${encodeURIComponent(r['№ МК'] || rid)}`); } catch { /* уведомление не критично */ } }
+    } } catch (e) { console.warn('K-245: отметка МК:', e.message); } }
+  return { rev, prevRev, mks };
+}
+async function mkKdAck(body, session) {
+  const r = (await ncListSoft('routes')).find((x) => String(x.Id ?? x.id) === String(body.id)); if (!r) throw new Error('Маршрут не найден.');
+  let f = null; try { f = JSON.parse(r['Чертёж изменён'] || 'null'); } catch { f = null; } if (!f) return { ok: true, already: true };
+  await ncUpdate('routes', r.Id ?? r.id, { 'Чертёж изменён': '' });
+  await mkHistAdd(r.Id ?? r.id, [`МК сверена с ред. ${f.rev} чертежа ${f.doc}${String(body.comment || '').trim() ? ': ' + String(body.comment).trim() : ''}`], session);
+  await kdHistAdd(f.doc, [{ kind: 'mk-ack', what: `МК ${r['№ МК'] || ''} сверена с ред. ${f.rev}` }], session);
+  return { ok: true };
+}
+const mkKdFlag = (r) => { try { return JSON.parse((r && r['Чертёж изменён']) || 'null'); } catch { return null; } };
 // ── K-244: состав изделия по спецификации ─────────────────────────────────────────────
 // Дерево по децим.№ остаётся составом «по умолчанию»; строки «Состав КД» добавляют количество по СП,
 // заимствованные детали (номер первой сборки сохраняется — решение владельца 19.09) и некодируемые позиции
@@ -729,6 +774,7 @@ async function bomSave(body, session) {
     const old = (await ncListSoft('design_bom')).filter((r) => String(r['Сборка (децим. №)'] || '').trim() === asm).map((r) => r.Id ?? r.id);
     if (old.length) await ncDeleteMany('design_bom', old);
     if (rowsIn.length) await ncCreateMany('design_bom', rowsIn);
+    await kdHistAdd(asm, [{ kind: 'bom', what: `Спецификация сохранена: ${rowsIn.length} поз.${old.length ? ' (было ' + old.length + ')' : ''}` }], session);
     return { ok: true, asm, rows: (await bomAll()).filter((r) => r.asm === asm) };
   });
 }
@@ -798,6 +844,7 @@ async function kdQuickCreate(body, session) {
     'Материал': String(body.material || '').trim(), 'Статус': hasFile ? 'Действует' : 'В разработке', 'Кол-во': 1, 'Примечание': 'Заведено из состава сборки ' + String(body.asm || '') + ((session && session.fio) ? ' · ' + session.fio : '') };
   const cr = await ncCreateMany('design_kd', [row]); const id = (Array.isArray(cr) ? cr[0] : cr).Id;
   try { const proj = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === projCode); if (proj && id) await ncLinkRecords('design_kd', 'Проекты разработки', id, [proj.Id ?? proj.id]); } catch (e) { console.warn('K-244: связь КД→проект:', e.message); }
+  await kdHistAdd(doc, [{ kind: 'create', what: 'Запись КД заведена' + (body.asm ? ' из состава сборки ' + body.asm : '') }], session);
   return { ok: true, id, docNo: doc, hasFile };
 }
 function designMock() {
@@ -1464,7 +1511,7 @@ async function buildRoutesLive() {
       id: rid, mk: r['№ МК'] || '', type: r['Тип МК'] || '', name: r['Наименование'] || '',
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '',
       revision: r['Ревизия'] || '', status: r['Статус'] || '', statusMk: r['Статус МК'] || 'Черновик', author: r['Автор'] || '', approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', opCount: _linkIds(r['Операции маршрута']).length,
-      hasCoop, coopDone: hasCoop ? coopDone : null, coopOverdueDays,
+      hasCoop, coopDone: hasCoop ? coopDone : null, coopOverdueDays, kdChanged: !!mkKdFlag(r), // K-245
       variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], // K-219
     };
   }).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
@@ -1551,7 +1598,7 @@ async function buildRouteCard(id) {
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
       variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], variants: mkVariantsOf(routes, r), // K-219
-      history: mkHistParse(r['История']), // K-239
+      history: mkHistParse(r['История']), kdChanged: mkKdFlag(r), // K-239 / K-245
       drawingFiles: mkOpFiles(r['№ МК'], 0, 'drawing'), // K-240
       approvalQueue: mkQueueParse(r['Согласующие (очередь)']), // K-221
       approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
@@ -2024,7 +2071,7 @@ async function saveRoute(body, session) {
     blankReserve = await syncMkMetalReserve({ routeId, mk, oldStatusMk, newStatusMk: smk, blankRaw: (opsIn[0] && opsIn[0].materials) || '' });
   } catch (e) { console.warn(`МК ${mk}: синхронизация резерва металла по заготовке не выполнена:`, e.message); }
   try { // K-239: история правок
-    if (!histPrevRoute) await mkHistAdd(routeId, ['МК создана'], session);
+    if (!histPrevRoute) { await mkHistAdd(routeId, ['МК создана'], session); for (const d of _parseKd(routeRow['Чертежи КД'])) if (d && d.doc) await kdHistAdd(d.doc, [{ kind: 'mk', what: `Создана маршрутная карта ${mk}` }], session); }
     else if (mkHistShould(histPrevRoute)) { const d = mkHistDiff(histPrevRoute, routeRow, histOldOps, histNewOps);
       if (oldStatusMk && oldStatusMk !== smk) d.unshift(`Статус: «${oldStatusMk}» → «${smk}»`);
       if (d.length) await mkHistAdd(routeId, d, session); }
@@ -6660,7 +6707,7 @@ async function buildBoardLive() {
       startedAt: t['Начато (факт)'] || '', finishedAt: t['Завершено (факт)'] || '', pauseReason: t['Причина приостановки'] || '',
       controlPoint: operation['Точка контроля'] || '', equipList, mk, routeAuthor: route['Автор'] || '',
       // K-216 (З-010): программа ЧПУ и карта наладки операции — оператору прямо в карте задачи
-      drawingFiles: mk ? mkOpFiles(mk, 0, 'drawing') : [], kdDrawings: _parseKd(route['Чертежи КД']), // K-240 / K-242
+      drawingFiles: mk ? mkOpFiles(mk, 0, 'drawing') : [], kdDrawings: _parseKd(route['Чертежи КД']), kdChanged: mkKdFlag(route), // K-240 / K-242 / K-245
       opNo: operation['№ операции'] || '', ncFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'nc') : [], setupFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'setup') : [],
     };
   }
@@ -12497,7 +12544,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/design') {
       if (!isLive()) return sendJson(res, 200, designMock());
-      try { const d = await buildDesignLive(); return sendJson(res, 200, d.projects.length ? d : { ...designMock(), warning: 'таблицы пусты — показаны демо-данные' }); }
+      try { const d = await buildDesignLive(); d.canReplaceKd = kdCanReplace(sessionFromReq(req)); return sendJson(res, 200, d.projects.length ? d : { ...designMock(), warning: 'таблицы пусты — показаны демо-данные' }); }
       catch (e) { return sendJson(res, 200, { ...designMock(), warning: String(e.message || e) }); }
     }
     // просмотр чертежа КД (выпущенный PDF из релиз-контура записей, ДП–Д.1.2 §8)
@@ -12634,6 +12681,15 @@ const server = http.createServer(async (req, res) => {
       // ДО сохранения нового файла (см. designArchiveOld), поэтому новый файл с тем же именем не плодит
       // дубликат «(2)» в saveFileUnique. Без doc (обычная загрузка ТЗ/переписки/КД пачкой) — поведение прежнее.
       const docForVersion = String(fields.doc || '').trim();
+      const verSess = sessionFromReq(req); let verMeta = null;
+      if (docForVersion) { // K-245: замена чертежа — только Конструктор (и Администратор); при замене обязательны «что изменено / причина / влияние на задел»
+        if (!kdCanReplace(verSess)) return sendJson(res, 403, { error: 'Заменять чертёж может только конструктор.' });
+        const willReplace = designResolveKdFiles(docForVersion).length > 0;
+        verMeta = { what: String(fields.what || '').trim(), reason: String(fields.reason || '').trim(), impact: String(fields.impact || '').trim(), chgNo: String(fields.chgNo || '').trim() };
+        if (willReplace) { if (verMeta.what.length < 5) return sendJson(res, 400, { error: 'Опишите, что изменено в чертеже (зачем загружается новая версия).' });
+          if (!KD_CHANGE_REASONS.includes(verMeta.reason)) return sendJson(res, 400, { error: 'Укажите причину изменения.' });
+          if (!KD_CHANGE_IMPACT.includes(verMeta.impact)) return sendJson(res, 400, { error: 'Укажите влияние на задел и выпущенную продукцию.' }); }
+      }
       if (!proj) return sendJson(res, 400, { error: 'Не указан проект (децим.№).' });
       if (!files.length) return sendJson(res, 400, { error: 'Файлы не переданы.' });
       if (stage && !DESIGN_STAGES.includes(stage)) return sendJson(res, 400, { error: 'Недопустимый этап-подпапка.' });
@@ -12662,6 +12718,8 @@ const server = http.createServer(async (req, res) => {
         saved.push({ rel, name: savedName, linked: designMatchesAnyDoc(stem, docNoList) });
       }
       invalidateDesignIndex(); // пересканировать release-PDF → ссылки появятся в реестре КД
+      let version = null;
+      if (docForVersion && saved.length) { try { version = await kdVersionApply({ doc: docForVersion, ...verMeta, archived, fileName: saved[0].name }, verSess); } catch (e) { console.warn('K-245: версия чертежа:', e.message); } }
       // регистрация факта: заполнить «NAS-папка проекта», если пусто (существующее не трогаем)
       try {
         if (saved.length && projRow && !String(projRow['NAS-папка проекта'] || '').trim()) {
@@ -12671,7 +12729,7 @@ const server = http.createServer(async (req, res) => {
           await ncUpdate('design_projects', projRow.Id ?? projRow.id, { 'NAS-папка проекта': relNas });
         }
       } catch {}
-      return sendJson(res, 200, { ok: true, saved, skipped, archived, files: walkDesignFiles(folder), folder: path.basename(folder) });
+      return sendJson(res, 200, { ok: true, saved, skipped, archived, version, files: walkDesignFiles(folder), folder: path.basename(folder) });
     }
     // Удаление файла КД — ТОЛЬКО Администратор (деструктивно). Путь строго внутри папки проекта.
     if (p === '/api/design/file/delete' && req.method === 'POST') {
@@ -13257,6 +13315,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/route/actuals') { try { return sendJson(res, 200, await buildRouteActuals(url.searchParams.get('id'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/route/fix-norms' && req.method === 'POST') { try { return sendJson(res, 200, await fixRouteNorms(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/route/approvers') { try { return sendJson(res, 200, { ok: true, approvers: await mkApprovers(), me: (sessionFromReq(req) || {}).userId || null }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/route/kd-ack' && req.method === 'POST') { try { return sendJson(res, 200, await mkKdAck(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } } // K-245
     if (p === '/api/route/status' && req.method === 'POST') { if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' }); try { return sendJson(res, 200, await mkSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/routes/generate-tasks' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 400, { error: 'Генерация доступна только в режиме LIVE (NocoDB).' });

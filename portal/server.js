@@ -11363,7 +11363,7 @@ const RBAC_MATRIX = {
   // Снабжение — ЗнЗ/Поставщики ✏, Склад-приход ✏, Каталог ✏ (справочник закупок), Контрагенты 👁; Заказы/Документы 👁.
   'Снабжение': { purchase: 'write', warehouse: 'write', catalog: 'write', onec: 'write', retro: 'view', counterparties: 'view', orders: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // ОТК — Входной контроль/Приказы-Штампы-Утверждения ✏; Заказы/КД/Склад/Маршруты/Документы 👁.
-  'ОТК': { control: 'write', orders: 'view', design: 'view', warehouse: 'view', onec: 'view', routes: 'view', docs: 'view' },
+  'ОТК': { control: 'write', board: 'view', station: 'view', orders: 'view', design: 'view', warehouse: 'view', onec: 'view', routes: 'view', docs: 'view' },
   // Инструментальщик — Инструмент ✏; всё остальное 👁; Настройки — нет (Анохин: работает с инструментом, остальное просмотр).
   'Инструментальщик': { _all: 'view', tools: 'write', settings: null },
   // Наблюдатель — всё 👁; Настройки — нет.

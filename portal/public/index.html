@@ -12324,7 +12324,7 @@
       const waitOf=(t)=>{ if(t.status!=='В очереди')return null; const prev=allT.filter(x=>posKey(x)===posKey(t)&&Number(x.opNum)<Number(t.opNum)&&x.status!=='Выполнено').sort((a,b)=>Number(a.opNum)-Number(b.opNum)); return prev.length?prev[prev.length-1]:null; };
       const prioRank={'Высокий':0,'Нормальный':1,'Низкий':2}; const pr=(t)=>prioRank[t.priority]??1; // K-251
       const canPrio=DATA.mode==='live'&&rbacAccess('board')==='write'&&!(ME&&ME.isStation);
-      const tasks=stationTasks().map(t=>({...t,_wait:waitOf(t)})).sort((a,b)=>((ord[a.status]??9)-(ord[b.status]??9))||((a._wait?1:0)-(b._wait?1:0))||(pr(a)-pr(b))||(dnum(a)-dnum(b)));
+      const tasks=stationTasks().map(t=>({...t,_wait:waitOf(t)})).sort((a,b)=>((ord[a.status]??9)-(ord[b.status]??9))||((a._wait?1:0)-(b._wait?1:0))||((a.queueOrder??1e9)-(b.queueOrder??1e9))||(dnum(a)-dnum(b)));
       let qn=0;
       const dueChip=(t)=>{ if(!t.plan)return '<span class="st-due">срок не задан</span>';
         const d=Math.round((Date.parse(String(t.plan).slice(0,10))-Date.parse(new Date().toLocaleDateString('sv')))/864e5); // по календарным дням, не по часам
@@ -12338,9 +12338,9 @@
         <div class="op">${esc(t.op)} · ${esc(t.pz)}${q?`<span class="st-q">${q}-я в очереди</span>`:''}${t._wait?`<span class="st-q" style="background:#eef1f5;color:#5b6b7f">ждёт оп. ${esc(String(t._wait.opNum))}${t._wait.sectionCode&&t._wait.sectionCode!==t.sectionCode?' · '+esc(t._wait.sectionCode):''}</span>`:''}</div>
         ${t.partName?`<div style="font-size:15px;font-weight:700;color:var(--ink);margin:2px 0 1px">${esc(t.partName)}${t.qtyPlan?` · ${esc(String(t.qtyPlan))} шт`:''}</div>`:''}
         <div class="nm">${esc(t.title||'Операция')}</div>
-        <div class="meta">${badge(t.status)}${dueChip(t)}${(t.qtyPlan&&!t.partName)?`<span class="st-due">${esc(String(t.qtyPlan))} шт</span>`:''}${t.priority==='Высокий'?'<span class="st-due red" style="font-weight:700">▲ высокий приоритет</span>':(t.priority==='Низкий'?'<span class="st-due">▽ низкий приоритет</span>':'')}</div>
-        ${(canPrio&&t.status!=='Выполнено')?`<div style="margin-top:8px;display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11px;color:var(--sl-500)" data-noopen><span style="margin-right:2px">Приоритет</span>${['Высокий','Нормальный','Низкий'].map(v=>`<button type="button" class="pill ${((t.priority||'Нормальный')===v)?'on':''}" data-prio="${esc(v)}" data-ptid="${esc(String(t.id))}" style="font-size:10px;padding:2px 7px;white-space:nowrap;display:inline-flex;gap:3px;align-items:center">${v==='Высокий'?'▲':v==='Низкий'?'▽':''}<span>${esc(v.toLowerCase())}</span></button>`).join('')}</div>`:''}</div>`; }).join('')
-        ||`<div class="st-empty">На участке нет задач.<br><span style="font-size:14px;opacity:.75">Как только технолог поставит операцию на ${esc(stationSel)}, она появится здесь. Порядок очереди: сначала высокий приоритет, внутри — у кого ближе срок.</span></div>`;
+        <div class="meta">${badge(t.status)}${dueChip(t)}${(t.qtyPlan&&!t.partName)?`<span class="st-due">${esc(String(t.qtyPlan))} шт</span>`:''}</div>
+        ${(canPrio&&t.status==='В очереди')?`<div style="margin-top:8px;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--sl-500)" data-noopen><span style="margin-right:2px">Очередь</span><button type="button" class="tbtn" data-qmove="top" data-qtid="${esc(String(t.id))}" style="padding:1px 8px;font-size:12px" title="Поставить первой">⤒</button><button type="button" class="tbtn" data-qmove="up" data-qtid="${esc(String(t.id))}" style="padding:1px 8px;font-size:12px" title="Выше">▲</button><button type="button" class="tbtn" data-qmove="down" data-qtid="${esc(String(t.id))}" style="padding:1px 8px;font-size:12px" title="Ниже">▼</button></div>`:''}</div>`; }).join('')
+        ||`<div class="st-empty">На участке нет задач.<br><span style="font-size:14px;opacity:.75">Как только технолог поставит операцию на ${esc(stationSel)}, она появится здесь. Порядок очереди задают технолог и администратор (стрелки на карточке); пока не задан — первой идёт та, у которой ближе срок.</span></div>`;
       host.innerHTML=`<div class="st-top"><span class="title">Рабочее место</span>
         <select id="st-sec" aria-label="Участок" ${kiosk?'disabled':''}>${opts}</select>
         ${kiosk?stationOpBtnHtml():''}
@@ -12349,8 +12349,10 @@
       const sec=document.getElementById('st-sec');
       if(sec)sec.onchange=(e)=>{stationSel=e.target.value;try{localStorage.setItem('pbs-station',stationSel);}catch{} renderStation(host);};
       host.querySelectorAll('.st-card').forEach(c=>c.onclick=(e)=>{ if(e.target.closest('[data-noopen]'))return; renderStationTask(host,c.dataset.tid); });
-      host.querySelectorAll('[data-prio]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); if(b.classList.contains('on'))return; b.disabled=true;
-        try{ await postJson('/api/task/update',{id:Number(b.dataset.ptid),priority:b.dataset.prio}); toast('Приоритет: '+b.dataset.prio.toLowerCase()+' — очередь участка пересчитана.','ok'); await load(); renderStation(host); }catch(err){ b.disabled=false; toast('Не удалось: '+(err.message||err),'err'); } });
+      host.querySelectorAll('[data-qmove]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); const q=tasks.filter(t=>t.status==='В очереди'); const k=q.findIndex(t=>String(t.id)===b.dataset.qtid); if(k<0)return;
+        const to=b.dataset.qmove==='top'?0:(b.dataset.qmove==='up'?k-1:k+1); if(to<0||to>=q.length||to===k)return; const [x]=q.splice(k,1); q.splice(to,0,x);
+        host.querySelectorAll('[data-qmove]').forEach(z=>z.disabled=true);
+        try{ await postJson('/api/task/reorder',{ids:q.map(t=>Number(t.id))}); await load(); renderStation(host); }catch(err){ toast('Не удалось: '+(err.message||err),'err'); renderStation(host); } });
       const ob=host.querySelector('#st-op'); if(ob)ob.onclick=()=>stationOperatorDialog(()=>renderStation(host));
     }
     // ── K-206: оператор поста (личная бирка СОТР-… или выбор из списка + ПИН), бездействие 30 мин ──

@@ -6762,7 +6762,7 @@ async function buildBoardLive() {
       section: secCode ? (secName ? `${secCode} · ${secName}` : secCode) : '',
       sectionCode: secCode, sectionName: secName, sectionSite: section['Площадка'] || '', // K-152: площадка участка
       opTypeCode: opType['Код типа'] || '', opNum: operation['№ операции'] ?? '',
-      status: t['Статус'] || 'В очереди', priority: t['Приоритет'], plan: t['Дата плановая'],
+      status: t['Статус'] || 'В очереди', priority: t['Приоритет'], queueOrder: (t['Порядок в очереди'] != null && t['Порядок в очереди'] !== '') ? Number(t['Порядок в очереди']) : null, plan: t['Дата плановая'],
       equip: t['Оборудование'] || operation['Оборудование'] || '',
       ri: opType['РИ'] || '', normTime: operation['Норма времени (ч)'] ?? '',
       opTypeCode: opType['Код типа'] || '', instructions: t['Указания технолога'] || operation['Комментарий оператору'] || '', blankText: t['Входящие материалы'] || '', // K-186: экран оператора
@@ -13732,6 +13732,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/task/materials' && req.method === 'GET') { try { return sendJson(res, 200, await buildTaskMaterials(url.searchParams.get('taskId'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/task/materials' && req.method === 'POST') { if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' }); try { return sendJson(res, 200, await saveTaskMaterials(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
+    // K-251: ручной порядок очереди участка — администратор и технолог двигают задачи; ids — задачи участка в нужном порядке
+    if (p === '/api/task/reorder' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Только в LIVE-режиме.' });
+      try { const b = await readBody(req); const ids = (Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Number.isFinite); if (!ids.length) return sendJson(res, 400, { error: 'Нет задач.' });
+        const sess = sessionFromReq(req); if (sess && sess.isStation) return sendJson(res, 403, { error: 'Порядок очереди задаёт технолог или администратор.' });
+        await ncEnsureColumn('tasks', 'Порядок в очереди', 'Number'); await ncUpdateMany('tasks', ids.map((Id, i) => ({ Id, 'Порядок в очереди': i + 1 })));
+        return sendJson(res, 200, { ok: true, count: ids.length }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/task/update' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);

@@ -1086,7 +1086,9 @@
     .nbadge{margin-left:auto;background:var(--red,#c0392b);color:#fff;font-size:11px;font-weight:700;border-radius:9px;padding:1px 6px;min-width:18px;text-align:center;line-height:16px;}
     .gsearch{position:relative;flex:1 1 300px;max-width:440px;min-width:200px;margin-left:16px} #h1{white-space:nowrap} .gsearch input{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:7px 12px;border:1px solid var(--sl-300);border-radius:9px;background:var(--page)} .gsearch input:focus{background:#fff;outline:2px solid #cfe0f5}
     .gs-res{position:absolute;left:0;width:max(100%,520px);top:calc(100% + 4px);z-index:150;background:#fff;border:1px solid var(--sl-300);border-radius:10px;box-shadow:0 12px 32px rgba(15,40,70,.18);max-height:420px;overflow:auto;padding:4px} .gs-res a{display:flex;gap:9px;align-items:baseline;padding:7px 9px;border-radius:7px;text-decoration:none;color:var(--ink);font-size:13px} .gs-res a:hover,.gs-res a.on{background:#eef4fb} .gs-res .k{flex:0 0 74px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--sl-500)} .gs-res .s{color:var(--sub);font-size:12px} .gs-res .e{padding:10px;color:var(--sub);font-size:13px}
-    @media(max-width:900px){.gsearch{display:none}}
+    @media(max-width:760px){.rc-head{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+    /* K-262: шапка на узком экране — заголовок целиком, служебные плашки скрыты, поиск второй строкой */
+    @media(max-width:900px){ .top{flex-wrap:wrap;height:auto!important;min-height:56px;row-gap:0;padding-top:8px;padding-bottom:8px} .gsearch{order:9;flex:1 1 100%;max-width:none;margin:8px 0 0} .gs-res{width:100%} #mbadge,.auth-role,.auth-as,.auth-viewas,.top .sub{display:none!important} #h1{white-space:normal;font-size:16px;line-height:1.2} }
     /* K-258 (аудит дизайна): узкий экран — таблицы в карточках прокручиваются внутри карточки, а не сжимаются в столбик по одной букве; селектор участка не вылезает за экран */
     @media(max-width:760px){ .card.pad{overflow-x:auto} .card.pad table.dt{min-width:560px} .st-top{flex-wrap:wrap} .st-top select{max-width:100%;width:100%;min-width:0} #h1{white-space:normal} }
     .ui-dlg{position:fixed;inset:0;z-index:200;background:rgba(12,28,48,.45);display:flex;align-items:center;justify-content:center;padding:16px;animation:uiDlgIn .12s ease-out}
@@ -12487,7 +12489,7 @@
           <td><select class="j-self" ${ro?'disabled':''}>${['','годен','брак'].map(v=>jOpt(v,j.self||'')).join('')}</select></td>
           <td><select class="j-otk" ${ro?'disabled':''}>${['','годен','брак'].map(v=>jOpt(v,j.otk||'')).join('')}</select></td>
           <td><input class="j-date" type="date" value="${esc(String(j.date||'').slice(0,10))}" ${ro?'disabled':''}></td></tr>`;}).join('');
-      const journalBlock=`<div class="st-sec"><div class="lab">§7 Журнал по единицам${t.qtyPlan!==''&&t.qtyPlan!=null?` · по заданию ${esc(t.qtyPlan)} шт`:''}</div>
+      const journalBlock=`<div class="st-sec" data-col="f"><div class="lab">§7 Журнал по единицам${t.qtyPlan!==''&&t.qtyPlan!=null?` · по заданию ${esc(t.qtyPlan)} шт`:''}</div>
         <div class="tbl-wrap"><table class="jt"><thead><tr><th>№</th><th>Исполнитель</th><th>№ заготовки / приёмки</th><th>Самоконтроль</th><th>Контроль ОТК</th><th>Дата</th></tr></thead>
         <tbody>${jrowsHtml}</tbody></table></div></div>`;
       host.innerHTML=`<div class="st-panel">
@@ -12517,7 +12519,7 @@
           ${t.partName?kv('Изделие',t.partName+(t.drawing?` · чертёж ${t.drawing}`:'')+(t.applicability?` · ${t.applicability}`:'')):''}
           ${t.qtyPlan!==''&&t.qtyPlan!=null?kv('Кол-во по заданию',t.qtyPlan+' шт'):''}</div>
         ${ro?'<div class="warn">Демо-режим (нет токена NocoDB): изменения не сохраняются.</div>':''}
-        <div class="st-sec"><div class="lab">Статус задачи</div>
+        <div class="st-sec" data-col="r"><div class="lab">Статус задачи</div>
           ${t.status==='Выполнено'
             ? `<div class="st-closed"><span>✓ Задача закрыта${t.factDate?' · '+fmt(t.factDate):''}</span>${ro?'':'<button class="st-reopen" id="st-reopen">Вернуть в работу</button>'}</div>`
             : `<div class="st-statusrow" id="st-status">${statusBtns}</div>
@@ -12526,9 +12528,9 @@
                  ${ro?'':'<button id="st-close" disabled>✓ Закрыть задачу (Выполнено)</button>'}
                </div>`}
         </div>
-        ${byProg?`<div class="st-sec"><div class="lab">Режимы</div><div style="font-size:15px">По программе ЧПУ${(t.ncFiles||[]).length?' — файл выше, в блоке «Программа ЧПУ»':' — <b style="color:#b45309">файл УП к операции не прикреплён, уточните у технолога</b>'}.</div></div>`:''}
-        ${paramRows?`<div class="st-sec"><div class="lab">Параметры (норматив → факт)</div>${paramRows}</div>`:''}
-        <div class="st-sec"><div class="lab">Факт выполнения</div>
+        ${byProg?`<div class="st-sec" data-col="r"><div class="lab">Режимы</div><div style="font-size:15px">По программе ЧПУ${(t.ncFiles||[]).length?' — файл выше, в блоке «Программа ЧПУ»':' — <b style="color:#b45309">файл УП к операции не прикреплён, уточните у технолога</b>'}.</div></div>`:''}
+        ${paramRows?`<div class="st-sec" data-col="r"><div class="lab">Параметры (норматив → факт)</div>${paramRows}</div>`:''}
+        <div class="st-sec" data-col="r"><div class="lab">Факт выполнения</div>
           <div class="st-fields">
             <div class="fld"><label>Кол-во факт.</label><input id="st-qty" type="number" step="any" value="${esc(t.factQty)}" ${ro?'disabled':''}></div>
             <div class="fld"><label>Время факт. (ч)</label><input id="st-time" type="number" step="any" value="${esc(t.factTime)}" ${ro?'disabled':''}></div>
@@ -12541,9 +12543,13 @@
           <div class="fld" style="margin-top:12px"><label>Примечание</label><textarea id="st-note" ${ro?'disabled':''}>${esc(t.note||'')}</textarea></div>
         </div>
         ${journalBlock}
-        <div class="st-save">${ro?'':'<button class="btn btn-p" id="st-savebtn">Сохранить</button>'}
-          <button class="btn btn-g" id="st-cancel">Назад</button>
+        <div class="st-save">${ro?'':'<button class="btn btn--primary" id="st-savebtn">Сохранить</button>'}
+          <button class="btn" id="st-cancel">Назад</button>
           <span class="msg" id="st-msg"></span></div></div>`;
+      // K-263: на широком экране карта задачи — в две колонки, как экран отрезки: слева «что делать» (чертёж, УП, указания, материалы), справа «что отметить» (статус, режимы, факт); журнал — на всю ширину
+      { const pn=host.querySelector('.st-panel'); if(pn&&window.innerWidth>=1100){ pn.style.maxWidth='1280px'; const kids=[...pn.children]; const isFull=(k)=>k.dataset.col==='f'||k.classList.contains('st-back')||k.classList.contains('st-hd')||k.classList.contains('st-save')||k.classList.contains('warn');
+          const first=kids.find(k=>!isFull(k)); if(first){ const G=document.createElement('div'), L=document.createElement('div'), R=document.createElement('div'); G.style.cssText='display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:14px;align-items:start'; L.style.cssText=R.style.cssText='display:flex;flex-direction:column;gap:14px;min-width:0'; G.append(L,R); pn.insertBefore(G,first);
+            kids.forEach(k=>{ if(isFull(k))return; (k.dataset.col==='r'?R:L).appendChild(k); }); } } }
       let chosen=t.status;
       document.getElementById('st-back').onclick=()=>renderStation(host);
       document.getElementById('st-cancel').onclick=()=>renderStation(host);
@@ -14792,7 +14798,7 @@
         ${(r.variant||(r.variants||[]).length)?`<div class="card pad" id="rc-variants" style="margin-bottom:var(--gap)"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="color:var(--ink)">Способы изготовления по чертежу ${esc(r.designation||'')}</b><span class="st st--${r.isMain?'ok':'neutral'}">эта МК: ${esc(r.variant||'без названия')}${r.isMain?' · основной':''}</span>${!r.isMain?`<button class="tbtn" data-vmain="${r.id}" style="padding:2px 8px;font-size:13px">сделать основным</button>`:''}</div>
           <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">${(r.variants||[]).map(v=>`<div style="display:flex;gap:10px;align-items:center;font-size:13px"><a href="#routes/${v.id}" class="c-blue" style="text-decoration:none;font-weight:600">${esc(v.mk)}</a><span>${esc(v.variant||'без названия')}${v.isMain?' · <b>основной</b>':''}</span><span class="c-gray">${esc(v.statusMk)}</span></div>`).join('')||'<div class="c-gray" style="font-size:13px">Других МК на этот чертёж нет.</div>'}</div>
           <div class="c-gray" style="font-size:13px;margin-top:6px">Каждый способ — отдельная МК со своими нормами, УП и согласованием. Под заказ технолог выбирает, по какой МК делать (и может разделить количество между ними).</div></div>`:''}
-        <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:var(--gap)">
+        <div class="card pad rc-head" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:var(--gap)">
           <div><div style="font-size:12px;color:var(--sl-500)">Изделие / компонент</div><div style="color:var(--ink);font-weight:600">${esc(r.name||'—')}</div></div>
           <div><div style="font-size:12px;color:var(--sl-500)">Чертёж / обозначение</div><div style="font-family:var(--mono)">${esc(r.designation||'—')}</div></div>
           <div><div style="font-size:12px;color:var(--sl-500)">Продукция / линейка</div><div>${esc(r.productType||'—')}</div></div>

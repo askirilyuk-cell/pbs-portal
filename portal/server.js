@@ -1975,6 +1975,7 @@ async function saveRoute(body, session) {
   catch (e) { console.warn('МК: колонка «Автор» недоступна:', e.message); }
   let mk = '';
   let histPrevRoute = null, histOldOps = []; const histNewOps = []; // K-239
+  let reuseOps = [], opColTitles = new Set(); // K-246
   let oldStatusMk = null; // МК-резерв металла (этап 1): нужен статус ДО этого сохранения — иначе не увидеть переход «→ В производстве»
   if (routeId == null) {
     const year = new Date().getFullYear();
@@ -1996,7 +1997,10 @@ async function saveRoute(body, session) {
     const oldOpIds = new Set(ops.filter((o) => o.routes_id === routeId).map((o) => o.Id ?? o.id));
     const oldCompIds = comps.filter((c) => oldOpIds.has(c.operations_id)).map((c) => c.Id ?? c.id);
     if (oldCompIds.length) await ncDeleteMany('components_in', oldCompIds);
-    if (oldOpIds.size) await ncDeleteMany('operations', [...oldOpIds]);
+    // K-246: операции НЕ удаляются заранее — строка с тем же порядковым номером обновляется на месте (id сохраняется),
+    // иначе выданные карты задач теряют связь с операцией (operations_id → null), а обрыв посреди сохранения оставляет МК без операций.
+    reuseOps = histOldOps.slice().sort((a, b) => Number(a['№ операции']) - Number(b['№ операции']));
+    try { opColTitles = new Set(((await ncTableMeta('operations')).columns || []).map((c) => c.title)); } catch { opColTitles = new Set(); }
   }
 
   // K-81 редизайн Ф.13 (migrate-042): оснастка из справочника + № привязанной карты наладки.
@@ -2046,10 +2050,13 @@ async function saveRoute(body, session) {
     if (hasParamPlan) { const pp = mkParamPlanClean(o.paramPlan); opRow['Параметры (план)'] = pp.length ? JSON.stringify(pp) : ''; } // K-182
     if (hasOpComment) opRow['Комментарий оператору'] = String(o.comment || '').trim(); // K-186
     histNewOps.push(opRow);
-    const cr = await ncCreateMany('operations', [opRow]);
-    const co = Array.isArray(cr) ? cr[0] : cr; const opId = co.Id ?? co.id;
-    await ncLinkRecords('routes', 'Операции маршрута', routeId, [opId]);
-    if (opTypeId) { try { await ncLinkRecords('op_types', 'Операции (по типу)', opTypeId, [opId]); } catch (e) { console.warn('МК: связь операция→тип не создана:', e.message); } }
+    let opId; const reuse = reuseOps[opCount] || null; // K-246
+    if (reuse) { opId = reuse.Id ?? reuse.id; const full = {};
+      for (const kx of ['Оборудование', 'Входящие материалы', 'Что контролировать', 'СИ', 'Допуски', 'Норма времени (ч)', 'Оснастка', 'Карта наладки (№)', 'Материалы (план)', 'Параметры (план)', 'Комментарий оператору']) if (opColTitles.has(kx)) full[kx] = null;
+      await ncUpdate('operations', opId, { ...full, ...opRow });
+    } else { const cr = await ncCreateMany('operations', [opRow]); const co = Array.isArray(cr) ? cr[0] : cr; opId = co.Id ?? co.id;
+      await ncLinkRecords('routes', 'Операции маршрута', routeId, [opId]); }
+    if (opTypeId && !(reuse && Number(reuse.op_types_id) === opTypeId)) { try { await ncLinkRecords('op_types', 'Операции (по типу)', opTypeId, [opId]); } catch (e) { console.warn('МК: связь операция→тип не создана:', e.message); } }
     for (const c of (Array.isArray(o.components) ? o.components : [])) {
       const cname = String(c.name || '').trim(); if (!cname) continue;
       const compRow = { 'Компонент': cname };
@@ -2062,6 +2069,7 @@ async function saveRoute(body, session) {
     }
     opCount++;
   }
+  if (reuseOps.length > opCount) { try { await ncDeleteMany('operations', reuseOps.slice(opCount).map((o) => o.Id ?? o.id)); } catch (e) { console.warn('K-246: лишние операции не удалены:', e.message); } }
   // МК-резерв металла (этап 1, утв. владельцем: развилки 1б-2а): заготовка (рекомендация технолога)
   // хранится JSON в «Входящие материалы» ПЕРВОЙ операции маршрута (см. mkBlankParse ниже) — при
   // переходе статуса МК в «В производстве» резервируем металл на складе; при уходе из этого статуса —
@@ -9692,6 +9700,7 @@ async function metalMoveImpl(body) {
     let newStock = stockBase, newRes = resBase, balanceAfter = stockBase;
     if (op === 'Приход') { newStock = stockBase + qty; balanceAfter = newStock; }
     else if (op === 'Расход') { if (qty > avail) { const e = new Error(`Расход ${qty} кг превышает доступно ${avail} кг (${code}; остаток ${stockBase}, резерв ${resBase}). Уменьшите кол-во или снимите резерв.`); e.status = 409; throw e; } newStock = stockBase - qty; balanceAfter = newStock; }
+    if (op === 'Расход' && body.remnant && Number(body.remnantWeight) > (stockBase - qty) + 0.05) { const e = new Error(`Деловой остаток ${Math.round(Number(body.remnantWeight) * 10) / 10} кг больше, чем останется на карточке ${code} после расхода (${Math.round((stockBase - qty) * 10) / 10} кг). Проверьте длину прутка в работе.`); e.status = 409; throw e; } // K-246: фантомный ДО (прогон 19.09: 253,9 кг с карточки на 88,8 кг)
     else if (op === 'Списание') { if (qty > stockBase) { const e = new Error(`Списание ${qty} кг превышает остаток ${stockBase} кг (${code}).`); e.status = 409; throw e; } newStock = stockBase - qty; balanceAfter = newStock; }
     else if (op === 'Инвентаризация') { newStock = qty; balanceAfter = qty; if (newRes > newStock) newRes = newStock; }
     else if (op === 'Резерв') { if (qty > avail) { const e = new Error(`Резерв ${qty} кг превышает доступно ${avail} кг (${code}).`); e.status = 409; throw e; } newRes = resBase + qty; balanceAfter = stockBase; }

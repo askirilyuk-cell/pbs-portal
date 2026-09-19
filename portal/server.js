@@ -706,6 +706,9 @@ async function buildDesignLive() {
   let bom = []; try { bom = await bomAll(); } catch { bom = []; }
   return { mode: 'live', bom, kdReasons: KD_CHANGE_REASONS, kdImpact: KD_CHANGE_IMPACT, projects: projects.map(P), kd: kdOut, td: td.map(T), ncprog: ncprog.map(U), notices: notices.map(N) };
 }
+const OP_TPL_FILE = path.join(__dirname, '.data', 'mk-op-templates.json');
+function opTplRead() { try { const a = JSON.parse(fs.readFileSync(OP_TPL_FILE, 'utf8')); return Array.isArray(a) ? a : []; } catch { return []; } }
+function opTplWrite(list) { fs.mkdirSync(path.dirname(OP_TPL_FILE), { recursive: true }); fs.writeFileSync(OP_TPL_FILE, JSON.stringify(list, null, 1)); }
 // ── K-245: история чертежа (колонка «История» у записи КД, JSON [{at,by,what,…}]) и последствия замены для МК ──
 const KD_CHANGE_REASONS = ['Ошибка в КД', 'Замечание производства', 'Требование заказчика', 'Улучшение конструкции', 'Смена материала', 'Другое'];
 const KD_CHANGE_IMPACT = ['Не влияет', 'Доработать задел', 'Забраковать задел', 'Использовать задел до исчерпания'];
@@ -2538,6 +2541,8 @@ async function generateTasksFromRoute(routeId, opts) {
           // K-217: операция идёт по программе ЧПУ (в МК отметка «по УП») — режимы n/S/t задаёт программа, оператору в Ф.14 пустые параметры не создаём
           const byProgram = opPlan.some((x) => /^программа/i.test(String(x.name || '')) && /^по УП/i.test(String(x.norm || '')));
           if (byProgram && !(planned && (planned.norm || planned.tol)) && !p['Норматив']) continue;
+          // K-252 (П-08): технолог задал параметры операции в МК — в Ф.14 идут только заданные (и с нормативом в справочнике); пустые «введите факт» оператору не нужны
+          if (opPlan.length && !(planned && (planned.norm || planned.tol)) && !p['Норматив']) continue;
           const pvr = await ncCreateMany('task_param_values', [{
             'Параметр': p['Параметр'] || '', 'Единица': p['Единица'] || '',
             'Обязательный': !!p['Обязательный'], 'Норматив': (planned && planned.norm) || p['Норматив'] || '', 'Допуск': (planned && planned.tol) || p['Допуск'] || '', 'Факт': '',
@@ -11424,7 +11429,8 @@ const RBAC_MATRIX = {
   // Технолог — Маршруты/Карты наладки/Произв.доска/Заказы ✏; КД/Инструмент/Оборуд/Склад/Каталог/Документы 👁.
   'Технолог': { routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', retro: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Цех — ЗнЗ ✏ (закупки); Доска/Заказы/Маршруты/Карты наладки/Склад/Инструмент/Каталог/Документы 👁.
-  'Цех': { purchase: 'write', board: 'view', station: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', retro: 'view', docs: 'view' },
+  'Цех': { purchase: 'write', board: 'view', station: 'write', // K-252: мастер/рабочий ведёт задачи под своей учёткой (посты есть не на всех участках)
+    orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', retro: 'view', docs: 'view' },
   // Кладовщик — Склад/Инструмент ✏, ЗнЗ ✏, Каталог ✏; Заказы/Поставщики/Документы 👁.
   'Кладовщик': { warehouse: 'write', tools: 'write', purchase: 'write', catalog: 'write', onec: 'write', retro: 'write', orders: 'view', counterparties: 'view', prodgroups: 'view', docs: 'view' },
   // Снабжение — ЗнЗ/Поставщики ✏, Склад-приход ✏, Каталог ✏ (справочник закупок), Контрагенты 👁; Заказы/Документы 👁.
@@ -11491,7 +11497,7 @@ function sessionPortalRoles(session) {
 const RBAC_API_PREFIX = [
   ['/api/board', 'board'], ['/api/station', 'station'], ['/api/orders', 'orders'],
   ['/api/position', 'orders'], ['/api/control', 'control'], // control → раздел ОТК (DEF-19: вердикт пишет только control-write роль)
-  ['/api/routes', 'routes'], ['/api/route', 'routes'], ['/api/task', 'board'],
+  ['/api/routes', 'routes'], ['/api/route', 'routes'], ['/api/task/reorder', 'board'], ['/api/task', 'station'], ['/api/metal/blank', 'station'], ['/api/metal/find-blank', 'station'], // K-252: работа по задаче — право «Рабочее место»; порядок очереди — «Доска»
   ['/api/setup-cards', 'setup'], ['/api/setup-card', 'setup'], // Конструктор карт наладки (Этап 2b)
   ['/api/tool-catalog', 'tools'], // ISO-каталог пластин/державок (Этап 2a) — под разделом «Инструмент»
   ['/api/equipment', 'equipment'], ['/api/tools', 'tools'], ['/api/si', 'tools'], ['/api/metal', 'metal'], ['/api/warehouse', 'warehouse'],
@@ -13421,6 +13427,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/route/actuals') { try { return sendJson(res, 200, await buildRouteActuals(url.searchParams.get('id'))); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/route/fix-norms' && req.method === 'POST') { try { return sendJson(res, 200, await fixRouteNorms(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/route/approvers') { try { return sendJson(res, 200, { ok: true, approvers: await mkApprovers(), me: (sessionFromReq(req) || {}).userId || null }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    // K-253: шаблоны операций МК (файловый стор, без схемы NocoDB) — «токарная ЧПУ по программе» одной кнопкой
+    if (p === '/api/route/op-templates' && req.method === 'GET') return sendJson(res, 200, { ok: true, items: opTplRead() });
+    if (p === '/api/route/op-templates' && req.method === 'POST') { try { const b = await readBody(req); let list = opTplRead(); const sess = sessionFromReq(req);
+        if (b.action === 'delete') list = list.filter((x) => String(x.id) !== String(b.id));
+        else { const name = String(b.name || '').trim(); if (!name) return sendJson(res, 400, { error: 'Назовите шаблон.' }); const op = b.op && typeof b.op === 'object' ? b.op : null; if (!op || !op.opTypeId) return sendJson(res, 400, { error: 'У операции не выбран тип.' });
+          const keep = {}; for (const k of ['opTypeId', 'name', 'equipment', 'tooling', 'control', 'whatControl', 'si', 'tolerance', 'norm', 'paramPlan', 'comment', 'byProgram']) if (op[k] != null) keep[k] = op[k];
+          list = list.filter((x) => x.name !== name); list.push({ id: Date.now(), name, op: keep, by: (sess && sess.fio) || '', at: whToday() }); }
+        opTplWrite(list); return sendJson(res, 200, { ok: true, items: list }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
     if (p === '/api/route/kd-ack' && req.method === 'POST') { try { return sendJson(res, 200, await mkKdAck(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } } // K-245
     if (p === '/api/route/status' && req.method === 'POST') { if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' }); try { return sendJson(res, 200, await mkSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), needConfirm: !!e.needConfirm }); } }
     if (p === '/api/routes/generate-tasks' && req.method === 'POST') {

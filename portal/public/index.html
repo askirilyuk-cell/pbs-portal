@@ -12388,7 +12388,8 @@
       // «Выполнено» рабочий вручную не ставит — оно производное от приёмки журнала (кнопка «Закрыть задачу»)
       const statusBtns=['В очереди','В работе','Приостановлено'].map(s=>`<button class="st-sbtn ${s===t.status?'on':''}" data-st="${esc(s)}" ${ro?'disabled':''}>${esc(s)}</button>`).join('');
       const normStr=p=>[p.norm,p.tol].filter(x=>x!==''&&x!=null).join(' ');
-      const paramRows=(t.params||[]).map(p=>`<div class="st-param">
+      const byProg=(t.params||[]).some(p=>/^программа/i.test(p.name||'')&&/^по УП/i.test(String(p.norm||''))); // K-252: режимы задаёт программа — оператору нечего вводить
+      const paramRows=(t.params||[]).filter(p=>!(byProg&&/^программа/i.test(p.name||''))).map(p=>`<div class="st-param">
         <div class="st-prow"><div class="pn">${esc(p.name)} <span class="pu">${esc(p.unit||'')}</span></div>
           <div class="pu">${normStr(p)?'норматив <b>'+esc(normStr(p))+'</b>':'норматив не задан'}</div></div>
         ${p.pid!=null?`<input data-pid="${esc(p.pid)}" value="${esc(p.fact)}" placeholder="введите факт" inputmode="decimal" ${ro?'disabled':''}>`:`<span class="pu">${esc(p.fact||'—')}</span>`}</div>`).join('');
@@ -12420,6 +12421,7 @@
         <button class="st-back" id="st-back">← К задачам участка</button>
         <div class="st-hd">
           <div><div class="ht">${esc(t.title||'Операция')}</div>
+            ${t.partName?`<div style="font-size:17px;font-weight:700;margin-top:3px">${esc(t.partName)}${(t.qtyPlan!==''&&t.qtyPlan!=null)?' · '+esc(String(t.qtyPlan))+' шт':''}</div>`:''}
             <div class="hs">${esc(t.section||'')} · ${esc(t.op)} · ${esc(t.num)}</div></div>
           <button class="hbtn" id="st-draw" title="Просмотр чертежа — после ввода базы КД" style="display:inline-flex;align-items:center;gap:5px">${aico('doc',14)} Чертёж${t.drawing?' '+esc(t.drawing):''}</button>
         </div>
@@ -12428,7 +12430,8 @@
           ${t.equip?`<div class="big"><b>Оборудование:</b> ${esc(t.equip)}</div>`:''}
           ${(t.normTime!==''&&t.normTime!=null)?`<div class="big"><b>Норма времени:</b> ${esc(t.normTime)} ч</div>`:''}
           ${t.ri?`<div class="big"><b>РИ:</b> ${esc(t.ri)}</div>`:''}
-          ${ctl?`<div class="ctl"><b>Контроль (§5):</b> ${esc(ctl)}</div>`:''}</div>
+          ${ctl?`<div class="ctl"><b>Контроль (§5):</b> ${esc(ctl)}</div>`:''}
+          <div class="big" style="margin-top:6px"><b>После операции:</b> ${t.nextOp?`оп. ${esc(String(t.nextOp.num))} ${esc(t.nextOp.name||'')}${t.nextOp.section?' → '+esc(t.nextOp.section):''}`:'последняя операция маршрута — сдать на приёмку'}</div></div>
         ${ro?'':'<div class="st-sec" id="st-blank-wrap" style="display:none"><div class="lab">Заготовка → факт (списание со склада)</div><div id="st-blank-body" class="c-gray" style="font-size:12px">Загрузка…</div></div>'}
         ${ro?'':'<div class="st-sec" id="st-mat-wrap" style="display:none"><div class="lab">Материалы на операцию <span class="c-gray" style="font-weight:400;font-size:11px">план из МК × единицы в работе → факт</span></div><div id="st-mat-body" class="c-gray" style="font-size:12px">Загрузка…</div></div>'}
         ${t.kdChanged?`<div class="st-sec" style="border:1px solid #f5c26b;background:#fffaf0;border-radius:10px;padding:10px 12px"><b style="color:#92400e">Внимание: чертёж изменён (ред. ${esc(String(t.kdChanged.rev??''))})</b><div style="font-size:13px;margin-top:3px">${esc(t.kdChanged.what||'')} Маршрутная карта ещё не сверена технологом — работайте по актуальному чертежу ниже, при сомнении уточните у технолога.</div></div>`:''}
@@ -12450,6 +12453,7 @@
                  ${ro?'':'<button id="st-close" disabled>✓ Закрыть задачу (Выполнено)</button>'}
                </div>`}
         </div>
+        ${byProg?`<div class="st-sec"><div class="lab">Режимы</div><div style="font-size:15px">По программе ЧПУ${(t.ncFiles||[]).length?' — файл выше, в блоке «Программа ЧПУ»':' — <b style="color:#b45309">файл УП к операции не прикреплён, уточните у технолога</b>'}.</div></div>`:''}
         ${paramRows?`<div class="st-sec"><div class="lab">Параметры (норматив → факт)</div>${paramRows}</div>`:''}
         <div class="st-sec"><div class="lab">Факт выполнения</div>
           <div class="st-fields">
@@ -15092,6 +15096,25 @@
     function rtPalWire(host){ const box=host.querySelector('#rt-palbox'); if(!box)return; box.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>rtAddOp(b.dataset.add)); const sel=box.querySelector('#rt-palsec'); if(sel)sel.onchange=()=>{ rtWiz.palSec=sel.value; box.innerHTML=rtPalHtml(); rtPalWire(host); }; }
     // K-183: повтор одного типа в маршруте (несколько токарных) — имя по умолчанию «Токарная обработка (2)», технолог уточняет содержанием: черновая / чистовая / со стороны 2
     const rtAutoName=(ot,excludeIdx)=>{ if(!ot||!ot.name)return ''; const same=(rtWiz.ops||[]).filter((o,i)=>i!==excludeIdx&&String(o.opTypeId)===String(ot.id)).length; return same?`${ot.name} (${same+1})`:ot.name; };
+    // K-253: шаблоны операций и «маршрут по образцу другой МК»
+    let RT_OP_TPL=null; async function rtTplLoad(force){ if(RT_OP_TPL&&!force)return RT_OP_TPL; try{ RT_OP_TPL=((await (await fetch('/api/route/op-templates')).json()).items)||[]; }catch(e){ RT_OP_TPL=[]; } return RT_OP_TPL; }
+    async function rtTplWire(host){ const box=host.querySelector('#rt-tplbox'); if(!box)return; const list=await rtTplLoad(); if(!host.querySelector('#rt-tplbox'))return;
+      box.innerHTML=`${list.length?list.map(t=>`<button type="button" class="rt-ptype" data-tpl="${esc(String(t.id))}" title="${esc(((rtOtById(t.op.opTypeId)||{}).name||'')+(t.op.equipment?' · '+t.op.equipment:'')+(t.op.si?' · СИ: '+t.op.si:''))}"><div style="min-width:0"><div class="pn">☆ ${esc(t.name)}</div><div class="pm">${esc([(rtOtById(t.op.opTypeId)||{}).code,t.op.equipment,t.op.byProgram?'по УП':''].filter(Boolean).join(' · '))}</div></div><span class="pp">+</span></button>`).join(''):'<div class="c-gray" style="font-size:12px;margin-bottom:6px">Шаблонов пока нет: настройте операцию и нажмите у неё «☆ в шаблоны».</div>'}
+        <button type="button" class="tbtn" id="rt-fromroute" style="margin-top:6px;width:100%">⧉ Взять операции из другой МК…</button>${list.length?`<div style="margin-top:6px;text-align:right"><a id="rt-tplmanage" class="c-gray" style="font-size:11px;cursor:pointer">удалить шаблон…</a></div>`:''}`;
+      box.querySelectorAll('[data-tpl]').forEach(b=>b.onclick=()=>{ const t=list.find(x=>String(x.id)===b.dataset.tpl); if(!t)return; rtReadOps(2); const ot=rtOtById(t.op.opTypeId)||{}; const first=rtWiz.ops.length===0; const o=JSON.parse(JSON.stringify(t.op));
+        rtWiz.ops.push(Object.assign({opTypeId:'',name:'',equipment:'',tooling:'',setupCardNo:'',planMaterials:[],control:'нет',norm:'',whatControl:'',si:'',tolerance:'',materials:'',blank:first?rtBlankDefault():null,coop:first?null:rtCoopDefault(),components:[],_open:true},o,{name:o.name||rtAutoName(ot,-1),ncFiles:[],setupFiles:[],_byProg:(o.byProgram!=null?!!o.byProgram:undefined)})); rtWiz.step=2; rtWizRender(); toast('Операция добавлена из шаблона «'+t.name+'».','ok'); });
+      const mg=box.querySelector('#rt-tplmanage'); if(mg)mg.onclick=async()=>{ const nm=await uiPrompt('Какой шаблон удалить? Введите название','',{placeholder:list.map(x=>x.name).join(' · ')}); if(!nm)return; const t=list.find(x=>x.name.toLowerCase()===String(nm).trim().toLowerCase()); if(!t){ toast('Такого шаблона нет.','warn'); return; } await postJson('/api/route/op-templates',{action:'delete',id:t.id}); await rtTplLoad(true); rtTplWire(host); };
+      const fr=box.querySelector('#rt-fromroute'); if(fr)fr.onclick=async()=>{ let routes=[]; try{ routes=((await (await fetch('/api/routes')).json()).routes)||[]; }catch(e){}
+        routes=routes.filter(r=>String(r.id)!==String(rtWiz.routeId)); if(!routes.length){ toast('Других МК нет.','warn'); return; }
+        const w=document.createElement('div'); w.className='ui-dlg'; w.innerHTML=`<div class="ui-dlg-box" style="width:min(620px,94vw)"><div class="ui-dlg-h">Взять операции из другой МК</div><div class="ui-dlg-t">Скопируются операции с оборудованием, режимами, контролем и СИ. Файлы УП, карты наладки и заготовка не копируются — они свои у каждой детали.${rtWiz.ops.length?' <b>Текущие операции будут заменены.</b>':''}</div>
+          <select id="fr-sel" class="rt-inp" style="margin-top:10px;width:100%"><option value="">— выберите МК —</option>${routes.map(r=>`<option value="${r.id}">${esc(r.mk)} · ${esc(String(r.name||'').slice(0,70))}${r.statusMk?' · '+esc(r.statusMk):''}</option>`).join('')}</select>
+          <div class="ui-dlg-b"><button class="tbtn" data-d="cancel">Отмена</button><button class="tbtn primary" data-d="ok">Взять операции</button></div></div>`;
+        document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+        w.querySelector('[data-d="ok"]').onclick=async()=>{ const id=w.querySelector('#fr-sel').value; if(!id){ toast('Выберите МК.','warn'); return; }
+          try{ const d=await (await fetch('/api/route/edit?id='+encodeURIComponent(id))).json(); const ops=(d.operations||[]); if(!ops.length){ toast('В этой МК нет операций.','warn'); return; }
+            rtWiz.ops=ops.map((o,i)=>({opTypeId:o.opTypeId!=null?o.opTypeId:'',name:o.name||'',equipment:o.equipment||'',tooling:o.tooling||'',setupCardNo:'',planMaterials:[],control:o.control||'нет',norm:o.norm||'',whatControl:o.whatControl||'',si:o.si||'',tolerance:o.tolerance||'',materials:'',paramPlan:(o.paramPlan||[]).map(x=>({...x})),comment:o.comment||'',blank:i===0?rtBlankDefault():null,coop:i===0?null:rtCoopDefault(),components:[],ncFiles:[],setupFiles:[],_open:false}));
+            w.remove(); rtWiz.step=2; rtWizRender(); toast(`Операции взяты из ${d.route.mk}: ${ops.length}. Проверьте заготовку, режимы и программы.`,'ok'); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } }; };
+    }
     function rtAddOp(id){ if(!rtWiz)return; rtReadOps(2); const ot=rtOtById(id)||{}; const becomesFirst=rtWiz.ops.length===0;
       rtWiz.ops.push({opTypeId:id||'',name:rtAutoName(ot,-1),equipment:'',tooling:'',setupCardNo:'',planMaterials:[],control:'нет',norm:'',whatControl:'',si:'',tolerance:'',materials:'',blank:becomesFirst?rtBlankDefault():null,coop:becomesFirst?null:rtCoopDefault(),components:[],_open:true}); rtWiz.step=2; rtWizRender(); }
     // ── шаг 1: изделие + привязка чертежей КД (реестр, с просмотром выпущенного PDF) ──
@@ -15504,7 +15527,7 @@
           <div style="flex:1;min-width:180px"><div style="font-size:12px;font-weight:600;color:var(--ink)">Карта наладки</div><select class="rt-inp" data-of="setupCardNo" style="margin-top:5px">${rtSetupOptions(op.setupCardNo)}</select></div>
           ${op.setupCardNo?(sid!=null?`<a class="rt-file" href="#setup/${encodeURIComponent(sid)}"><i class=ic-doc></i> Открыть ${esc(op.setupCardNo)}</a>`:`<span class="rt-file"><i class=ic-doc></i> ${esc(op.setupCardNo)}</span>`):'<span class="rt-hint">не привязана — выберите из справочника</span>'}</div>`:'';
       return `<div class="rt-op${op._open?' open':''}" data-idx="${i}">
-        <div class="rt-ohead"><span class="rt-onum">${i+1}</span><div style="min-width:0"><div class="rt-oname">${esc(nm)}</div><div class="rt-osub">${esc(sub)}</div></div>${chip}<span class="rt-omove" style="margin-left:auto;display:inline-flex;gap:4px"><button type="button" class="tbtn" data-opmove="-1" data-opi="${i}" title="Переместить операцию выше" style="padding:2px 8px"${i===0?' disabled':''}>▲</button><button type="button" class="tbtn" data-opmove="1" data-opi="${i}" title="Переместить операцию ниже" style="padding:2px 8px"${i===(rtWiz.ops.length-1)?' disabled':''}>▼</button></span><span class="rt-oarr" style="margin-left:6px">${RT_SVG_ARR}</span></div>
+        <div class="rt-ohead"><span class="rt-onum">${i+1}</span><div style="min-width:0"><div class="rt-oname">${esc(nm)}</div><div class="rt-osub">${esc(sub)}</div></div>${chip}<span class="rt-omove" style="margin-left:auto;display:inline-flex;gap:4px"><button type="button" class="tbtn" data-opmove="-1" data-opi="${i}" title="Переместить операцию выше" style="padding:2px 8px"${i===0?' disabled':''}>▲</button><button type="button" class="tbtn" data-opmove="1" data-opi="${i}" title="Переместить операцию ниже" style="padding:2px 8px"${i===(rtWiz.ops.length-1)?' disabled':''}>▼</button><button type="button" class="tbtn" data-optpl="${i}" title="Сохранить операцию как шаблон — потом добавляется одной кнопкой" style="padding:2px 8px">☆</button></span><span class="rt-oarr" style="margin-left:6px">${RT_SVG_ARR}</span></div>
         <div class="rt-obody">
           <div class="rt-g2" style="margin-bottom:11px"><div class="rt-fld"><label>Тип операции (задаёт участок / РИ / параметры)</label><select class="rt-inp" data-of="opTypeId">${rtOtOptions(op.opTypeId)}</select></div><div class="rt-fld"><label>Операция (наименование) <span class="rt-rt">выберите из типовых или впишите своё</span></label><input class="rt-inp" data-of="name" list="rt-names-${i}" value="${rtEscA(op.name)}" placeholder="по умолч. = тип" autocomplete="off"><datalist id="rt-names-${i}">${(ot.names||[]).map(n=>`<option value="${rtEscA(n)}">`).join('')}</datalist></div></div>
           ${auto}
@@ -15559,6 +15582,7 @@
           <div class="tl-wnav"><button class="tbtn" id="rt-back">← Назад</button><button class="tbtn primary" id="rt-next" style="margin-left:auto">Далее: контроль →</button></div>
         </div>
         <div>
+          <div class="card pad" style="margin-bottom:var(--gap)"><div class="rt-cardh">Быстрый набор <span class="rt-rt">шаблоны операций · маршрут по образцу</span></div><div id="rt-tplbox" class="rt-pal"><span class="c-gray" style="font-size:12px">загрузка…</span></div></div>
           <div class="card pad"><div class="rt-cardh">Типы операций <span class="rt-rt">выберите участок → тип</span></div><div class="rt-pal" id="rt-palbox">${pal}</div></div>
           <div class="card pad" style="margin-top:12px"><div id="rt-summbox">${rtSummaryHtml()}</div></div>
         </div>
@@ -15632,6 +15656,11 @@
         rtPalWire(host);
         host.querySelectorAll('[data-oprem]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); rtReadOps(2); rtWiz.ops.splice(+b.dataset.oprem,1); rtWiz._keepScroll=true; rtWizRender(); });
         // K-222: порядок операций меняется стрелками ▲▼ (заготовка остаётся за первой операцией, кооперация — только не у первой)
+        rtTplWire(host);
+        host.querySelectorAll('[data-optpl]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); rtReadOps(2); const op=rtWiz.ops[+b.dataset.optpl]; if(!op||!op.opTypeId){ toast('Сначала выберите тип операции.','warn'); return; }
+          const nm=await uiPrompt('Название шаблона операции',op.name||'',{placeholder:'например: Токарная ЧПУ по программе'}); if(!nm)return;
+          const byProgram=!!(rtOpHasNc(op)&&rtOpByProgram(op)); const pp=byProgram?[{name:rtOpNcParamName(op),norm:'по УП',tol:''}]:(op.paramPlan||[]);
+          try{ await postJson('/api/route/op-templates',{name:String(nm).trim(),op:{opTypeId:op.opTypeId,name:op.name,equipment:op.equipment,tooling:op.tooling,control:op.control,whatControl:op.whatControl,si:op.si,tolerance:op.tolerance,norm:op.norm,paramPlan:pp,comment:op.comment,byProgram}}); await rtTplLoad(true); rtTplWire(host); toast('Шаблон сохранён — он в блоке «Быстрый набор».','ok'); }catch(err){ toast('Не сохранено: '+(err.message||err),'err'); } });
         host.querySelectorAll('[data-opmove]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); rtReadOps(2); const i=+b.dataset.opi, j=i+(+b.dataset.opmove), ops=rtWiz.ops; if(j<0||j>=ops.length)return;
           const hadFiles=[ops[i],ops[j]].some(o=>(o.ncFiles||[]).length||String(o.setupCardNo||'').trim());
           [ops[i],ops[j]]=[ops[j],ops[i]]; ops.forEach((o,k)=>{ if(k>0)o.blank=null; else o.coop=null; }); rtBomApply();

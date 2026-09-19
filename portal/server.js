@@ -695,7 +695,14 @@ async function buildDesignLive() {
     status: r['Статус'] || '', trial: [r['Опробование — дата'], r['Опробование — результат']].filter(Boolean).join(' · ') });
   const N = (r) => ({ noticeNo: r['№ извещения'] || '', date: r['Дата'] || '', docSection: r['Документ / раздел'] || '',
     changeDesc: r['Описание изменения'] || '', reason: r['Причина'] || '', impact: r['Влияние на выпущенную продукцию'] || '', status: r['Статус'] || '' });
-  return { mode: 'live', projects: projects.map(P), kd: kd.map(K), td: td.map(T), ncprog: ncprog.map(U), notices: notices.map(N) };
+  const kdOut = kd.map(K);
+  try { // K-242: к чертежу — все МК, которые на него ссылаются (обозначение = децим.№ или чертёж привязан к МК); вариантов изготовления может быть несколько
+    const routes = await ncListSoft('routes'); const norm = (x) => String(x || '').trim().toLowerCase().replace(/^пбс\./, '');
+    for (const k of kdOut) { const dn = norm(k.docNo); if (!dn) { k.mks = []; continue; }
+      k.mks = routes.filter((r) => norm(r['Изделие / обозначение']) === dn || _parseKd(r['Чертежи КД']).some((d) => norm(d.doc) === dn))
+        .map((r) => ({ id: r.Id ?? r.id, mk: r['№ МК'] || '', variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], statusMk: r['Статус МК'] || 'Черновик' })); }
+  } catch { /* не критично */ }
+  return { mode: 'live', projects: projects.map(P), kd: kdOut, td: td.map(T), ncprog: ncprog.map(U), notices: notices.map(N) };
 }
 function designMock() {
   try { return { mode: 'mock', ...JSON.parse(fs.readFileSync(path.join(__dirname, 'mock', 'design.json'), 'utf8')) }; }
@@ -773,6 +780,20 @@ function pgDefaultSalesLinks() {
 }
 function readPgMeta() {
   try { return JSON.parse(fs.readFileSync(PG_META_FILE, 'utf8')) || {}; } catch { return {}; }
+}
+// K-241: «Тип продукции» МК и заказа — из классификатора ДП–Д.1.2 (группа · подгруппа); старые значения остаются допустимыми
+async function prodTypeOptions() {
+  const [groups, subs] = await Promise.all([ncListSoft('dict_product_groups'), ncListSoft('dict_product_subgroups')]);
+  const ord = (a, b) => Number(a['Порядок'] || 0) - Number(b['Порядок'] || 0);
+  return groups.slice().sort(ord).map((g) => { const code = String(g['Код'] || '').trim(), name = String(g['Значение'] || '').trim();
+    return { code, name, label: `${code} · ${name}`, subs: subs.filter((x) => String(x['Группа'] || '').trim() === code).sort(ord).map((x) => { const sc = String(x['Код'] || '').trim(), sn = String(x['Значение'] || '').trim(); return { code: sc, name: sn, label: `${code} · ${sc} ${sn}` }; }) }; }).filter((g) => g.code);
+}
+async function prodTypeCheck(val, legacy) {
+  const v = String(val == null ? '' : val).trim(); if (!v) return '';
+  if ((legacy || []).includes(v)) return v;
+  const ok = (await prodTypeOptions()).some((g) => g.label === v || g.subs.some((x) => x.label === v));
+  if (!ok) throw new Error(`Недопустимый тип продукции «${v}» — выберите группу / подгруппу из классификатора.`);
+  return v;
 }
 async function buildProductGroups() {
   const [groups, subs, projects] = await Promise.all([
@@ -1474,7 +1495,7 @@ async function buildRoutesCatalog() {
     .filter((c) => c.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ru'));
   return {
     mode: 'live', opTypes: types,
-    productTypes: MK_PRODUCT_TYPES, mkTypes: ['КОМ', 'СБР'],
+    productTypes: MK_PRODUCT_TYPES, productGroups: await prodTypeOptions(), mkTypes: ['КОМ', 'СБР'],
     controlPoints: ['нет', 'С', 'ОТК'], statuses: MK_STATUS,
     contractors,
   };
@@ -1760,7 +1781,7 @@ async function saveRoute(body, session) {
   const routeRow = { 'Тип МК': type, 'Наименование': name };
   if (body.designation) routeRow['Изделие / обозначение'] = String(body.designation).trim();
   const pt = String(body.productType || '').trim();
-  if (pt) { if (!MK_PRODUCT_TYPES.includes(pt)) throw new Error(`Недопустимый тип продукции «${pt}».`); routeRow['Тип продукции'] = pt; }
+  if (pt) routeRow['Тип продукции'] = await prodTypeCheck(pt, MK_PRODUCT_TYPES); // K-241
   if (body.revision) routeRow['Ревизия'] = String(body.revision).trim();
   if (body.variant != null || body.variantOf != null) { // K-219
     try { await ncEnsureColumn('routes', 'Вариант', 'SingleLineText'); await ncEnsureColumn('routes', 'Основной вариант', 'Checkbox');
@@ -4987,7 +5008,7 @@ async function createOrder(body, who) {
 
   const orderRow = { '№ ПЗ': numPz, 'Заказчик / Инициатор': customer, 'Дата размещения': datePlaced };
   orderRow['Тип заказа'] = opt('Тип заказа', body.orderType, true);
-  const pt = opt('Тип продукции', body.productType, false); if (pt) orderRow['Тип продукции'] = pt;
+  const pt = await prodTypeCheck(body.productType, ORDER_OPTS['Тип продукции']); if (pt) orderRow['Тип продукции'] = pt; // K-241
   orderRow['Статус'] = opt('Статус', body.status, true, 'Размещён');
   orderRow['Приоритет'] = opt('Приоритет', body.priority, true, 'Нормальный');
   const tt = opt('Тип задачи', body.taskType, false, 'Производство'); if (tt) orderRow['Тип задачи'] = tt;
@@ -6256,7 +6277,7 @@ async function updateOrder(body, who) {
   for (const [key, col, kind] of ORDER_EDIT_FIELDS) {
     if (typeof body[key] !== 'string') continue; // поле не прислали — не трогаем
     let nv = String(body[key]).trim();
-    if (kind === 'opt') nv = opt(col, nv);
+    if (kind === 'opt') nv = col === 'Тип продукции' ? await prodTypeCheck(nv, ORDER_OPTS[col]) : opt(col, nv); // K-241
     if (kind === 'date') nv = nv ? nv.slice(0, 10) : '';
     const ov = String(o[col] == null ? '' : o[col]).trim();
     if (nv === ov) continue;
@@ -6543,7 +6564,7 @@ async function buildBoardLive() {
       startedAt: t['Начато (факт)'] || '', finishedAt: t['Завершено (факт)'] || '', pauseReason: t['Причина приостановки'] || '',
       controlPoint: operation['Точка контроля'] || '', equipList, mk, routeAuthor: route['Автор'] || '',
       // K-216 (З-010): программа ЧПУ и карта наладки операции — оператору прямо в карте задачи
-      drawingFiles: mk ? mkOpFiles(mk, 0, 'drawing') : [], // K-240
+      drawingFiles: mk ? mkOpFiles(mk, 0, 'drawing') : [], kdDrawings: _parseKd(route['Чертежи КД']), // K-240 / K-242
       opNo: operation['№ операции'] || '', ncFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'nc') : [], setupFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'setup') : [],
     };
   }
@@ -12006,6 +12027,7 @@ const server = http.createServer(async (req, res) => {
       catch (e) { console.warn('[settings] сохранение отклонено:', e.message); return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
       return sendJson(res, 200, settingsView());
     }
+    if (p === '/api/dict/product-types' && req.method === 'GET') { try { return sendJson(res, 200, { ok: true, groups: await prodTypeOptions() }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } } // K-241
     if (p === '/api/dict' && req.method === 'GET') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', dicts: [] });
       const out = [];

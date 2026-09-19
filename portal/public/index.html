@@ -1084,6 +1084,9 @@
     /* K-161: бейдж кабинета в меню и поле-поиск (МК, канон) */
     .navme{padding:4px 0 2px;margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,.06);} /* K-161: пункт без группы — не .navg, иначе initNav ищет заголовок .ngrp */
     .nbadge{margin-left:auto;background:var(--red,#c0392b);color:#fff;font-size:10px;font-weight:700;border-radius:9px;padding:1px 6px;min-width:18px;text-align:center;line-height:16px;}
+    .gsearch{position:relative;flex:0 1 340px;min-width:180px;margin-left:16px} .gsearch input{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:7px 12px;border:1px solid var(--sl-300);border-radius:9px;background:var(--page)} .gsearch input:focus{background:#fff;outline:2px solid #cfe0f5}
+    .gs-res{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:150;background:#fff;border:1px solid var(--sl-300);border-radius:10px;box-shadow:0 12px 32px rgba(15,40,70,.18);max-height:420px;overflow:auto;padding:4px} .gs-res a{display:flex;gap:9px;align-items:baseline;padding:7px 9px;border-radius:7px;text-decoration:none;color:var(--ink);font-size:13px} .gs-res a:hover,.gs-res a.on{background:#eef4fb} .gs-res .k{flex:0 0 74px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--sl-500)} .gs-res .s{color:var(--sub);font-size:11px} .gs-res .e{padding:10px;color:var(--sub);font-size:12px}
+    @media(max-width:900px){.gsearch{display:none}}
     .ui-dlg{position:fixed;inset:0;z-index:200;background:rgba(12,28,48,.45);display:flex;align-items:center;justify-content:center;padding:16px;animation:uiDlgIn .12s ease-out}
     @keyframes uiDlgIn{from{opacity:0}to{opacity:1}}
     .ui-dlg-box{background:var(--card,#fff);color:var(--ink);border-radius:var(--r-m);box-shadow:0 24px 64px rgba(0,0,0,.28);width:min(460px,100%);padding:18px 20px 16px;border:1px solid var(--bd)}
@@ -1363,6 +1366,7 @@
         <button id="burger" aria-label="Меню"><i class=ic-menu></i></button>
         <h1 id="h1">Производственная доска</h1>
         <span class="sub" id="today"></span>
+        <div class="gsearch" id="gsearch"><input id="gs-q" type="search" placeholder="Найти: ПЗ, МК, чертёж, СИ, деталь…" autocomplete="off"><div id="gs-res" class="gs-res" hidden></div></div>
         <div class="right"><span id="mbadge" class="mbadge m-mock">…</span>
           <span id="authbox" class="authbox"></span>
         </div>
@@ -14415,6 +14419,27 @@
 
     // --- создание ПЗ из портала (форма Ф.1–П.2) -------------------------------
     const PZ_ORDER_TYPES=['Клиентский','Внутренний (склад)','ОПИ','Сервис-ремонт'];
+    // K-256: общий поиск в шапке — заказы и позиции, МК, чертежи КД, средства измерения. Источники подгружаются лениво, недоступные роли — пропускаются.
+    (function(){ const inp=document.getElementById('gs-q'), box=document.getElementById('gs-res'); if(!inp||!box)return; let cache=null, at=0, cur=-1;
+      const get=async(u)=>{ try{ const r=await fetch(u); if(!r.ok)return null; return await r.json(); }catch(e){ return null; } };
+      let pending=null; const load=()=>{ if(cache&&Date.now()-at<60000)return Promise.resolve(cache); if(!pending)pending=loadNow().finally(()=>{pending=null;}); return pending; };
+      const loadNow=async()=>{ const [rt,ds,si]=await Promise.all([get('/api/routes'),get('/api/design'),get('/api/si')]); const out=[];
+        ((typeof DATA!=='undefined'&&DATA&&DATA.orders)||[]).forEach(o=>{ out.push({k:'Заказ',t:o.numPz,s:[o.customer,o.status].filter(Boolean).join(' · '),h:'#orders/'+encodeURIComponent(o.numPz)}); (o.positions||[]).forEach(p=>out.push({k:'Позиция',t:`${o.numPz} / ${p.numPos||''} · ${p.name||''}`,s:[p.drawing,p.qty?p.qty+' '+(p.unit||'шт'):'',p.mk].filter(Boolean).join(' · '),h:'#orders/'+encodeURIComponent(o.numPz)})); (o.tasks||[]).forEach(t=>out.push({k:'Задача',t:t.num,s:[t.title,t.sectionCode,t.status].filter(Boolean).join(' · '),h:'#station'})); });
+        ((rt&&rt.routes)||[]).forEach(r=>out.push({k:'МК',t:r.mk+' · '+(r.name||''),s:[r.designation,r.statusMk].filter(Boolean).join(' · '),h:'#routes/'+encodeURIComponent(r.mk||r.id)}));
+        ((ds&&ds.kd)||[]).forEach(k=>out.push({k:'Чертёж',t:k.docNo+' · '+(k.name||''),s:[k.material,k.status,(k.mks||[]).map(m=>m.mk).join(', ')].filter(Boolean).join(' · '),h:'#design/'+encodeURIComponent(k.docNo)}));
+        ((ds&&ds.projects)||[]).forEach(p=>out.push({k:'Проект',t:'ПБС.'+p.decNo+' · '+(p.name||''),s:[p.grp,p.stage].filter(Boolean).join(' · '),h:'#design'}));
+        ((si&&si.items)||[]).forEach(x=>out.push({k:'СИ',t:x.invNo+' · '+(x.short||x.name||''),s:[x.serial?'зав. № '+x.serial:'',x.calNext?'поверен до '+String(x.calNext).slice(0,10):'поверки нет',x.place].filter(Boolean).join(' · '),h:'#si/'+encodeURIComponent(x.invNo)}));
+        cache=out.map(x=>({...x,_n:(x.t+' '+x.s).toLowerCase().replace(/ё/g,'е')})); at=Date.now(); return cache; };
+      const paint=(list,q)=>{ cur=-1; if(!q){ box.hidden=true; return; } box.hidden=false; box.innerHTML=list.length?list.slice(0,14).map(x=>`<a href="${esc(x.h)}"><span class="k">${esc(x.k)}</span><span style="min-width:0"><span>${esc(x.t)}</span>${x.s?`<div class="s">${esc(x.s)}</div>`:''}</span></a>`).join('')+(list.length>14?`<div class="e">ещё ${list.length-14} — уточните запрос</div>`:''):'<div class="e">Ничего не найдено. Ищу по номерам ПЗ, МК, децимальным номерам, инвентарным номерам СИ и наименованиям.</div>';
+        box.querySelectorAll('a').forEach(a=>a.onclick=()=>{ box.hidden=true; inp.value=''; }); };
+      let tm=null; inp.addEventListener('input',()=>{ clearTimeout(tm); tm=setTimeout(async()=>{ const q=inp.value.trim().toLowerCase().replace(/ё/g,'е'); if(q.length<2){ paint([],''); return; } if(!cache){ box.hidden=false; box.innerHTML='<div class="e">Ищу…</div>'; } const all=await load(); if(inp.value.trim().toLowerCase().replace(/ё/g,'е')!==q)return; const words=q.split(/\s+/); paint(all.filter(x=>words.every(w=>x._n.includes(w))),q); },180); });
+      inp.addEventListener('keydown',(e)=>{ const as=[...box.querySelectorAll('a')]; if(e.key==='Escape'){ box.hidden=true; inp.blur(); return; } if(!as.length)return;
+        if(e.key==='ArrowDown'||e.key==='ArrowUp'){ e.preventDefault(); cur=(cur+(e.key==='ArrowDown'?1:-1)+as.length)%as.length; as.forEach((a,i)=>a.classList.toggle('on',i===cur)); as[cur].scrollIntoView({block:'nearest'}); }
+        else if(e.key==='Enter'){ e.preventDefault(); (as[cur<0?0:cur]).click(); location.hash=(as[cur<0?0:cur]).getAttribute('href'); } });
+      inp.addEventListener('focus',()=>{ load(); });
+      document.addEventListener('mousedown',(e)=>{ if(!e.target.closest('#gsearch'))box.hidden=true; });
+      document.addEventListener('keydown',(e)=>{ if(e.key==='/'&&!/input|textarea|select/i.test((document.activeElement||{}).tagName||'')){ e.preventDefault(); inp.focus(); } });
+    })();
     // K-241: «Тип продукции» — группа · подгруппа из классификатора ДП–Д.1.2; прежнее значение, которого нет в классификаторе, остаётся отдельной строкой
     let PROD_GROUPS=null; async function prodGroupsLoad(){ if(PROD_GROUPS)return PROD_GROUPS; try{ const j=await (await fetch('/api/dict/product-types')).json(); if((j.groups||[]).length)PROD_GROUPS=j.groups; return j.groups||[]; }catch(e){ return []; } }
     function prodOptionsHtml(groups,cur){ cur=String(cur||''); let seen=false; const o=(l,t)=>{ const on=l===cur; if(on)seen=true; return `<option value="${esc(l)}"${on?' selected':''}>${esc(t)}</option>`; };

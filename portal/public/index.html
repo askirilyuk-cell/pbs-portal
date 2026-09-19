@@ -12813,6 +12813,7 @@
       try{ d=await (await fetch('/api/metal/blank-candidates?taskId='+encodeURIComponent(t.id))).json(); }
       catch(e){ wrap.style.display='none'; return; }
       if(!d||d.error||!d.isBlankOp){ wrap.style.display='none'; return; }
+      if(!d.blank){ wrap.style.display='none'; return; } // K-257: у первой операции без заготовки (сборка, контроль, давальческая деталь) пустой блок не показываем
       wrap.style.display='';
       if(!d.blank){ wrap.innerHTML=`<div class="lab">Заготовка → факт</div><div class="c-gray" style="font-size:12px">${esc(d.note||'Заготовка не указана на первой операции МК.')}</div>`; return; }
       stBlankRenderForm(wrap,t,d);
@@ -16650,7 +16651,7 @@
               ${canWrite?`<button class="tbtn ${open?'':'primary'}" data-otk-open="${esc(t.num)}">${open?'Свернуть':'Принять'}</button>`:''}</div>
             ${open?`<div style="margin-top:9px;background:var(--page);border-radius:var(--r-m);padding:10px 12px">
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><button class="tbtn" data-otk-all="годен">Все годны</button><span class="c-gray" style="font-size:11px">или по единицам; для брака обязательно «что не так»</span></div>
-              ${pend.map(u=>`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0" data-otk-unit="${esc(String(u.unit))}" data-jid="${u.id??''}"><b style="min-width:42px">№ ${esc(String(u.unit))}</b><span class="c-gray" style="font-size:11px;min-width:150px">${u.measured!==''&&u.measured!=null?'замер '+esc(String(u.measured))+' · ':''}${esc(u.executor||'')}</span>
+              ${pend.map(u=>`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0" data-otk-unit="${esc(String(u.unit))}" data-jid="${u.id??''}"><b style="min-width:42px">№ ${esc(String(u.unit))}</b><span class="c-gray" style="font-size:11px;min-width:150px">${u.measured!==''&&u.measured!=null?'замер '+esc(String(Math.round(Number(u.measured)*1000)/1000))+' · ':''}${esc(u.executor||'')}</span>
                 <label class="pill" style="cursor:pointer"><input type="radio" name="otk-${esc(t.num)}-${esc(String(u.unit))}" value="годен" hidden> годен</label><label class="pill" style="cursor:pointer"><input type="radio" name="otk-${esc(t.num)}-${esc(String(u.unit))}" value="брак" hidden> брак</label>
                 <input data-otk-note placeholder="что не так (для брака)" style="flex:1;min-width:180px;border:1px solid var(--sl-300);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px"></div>`).join('')}
               <div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="tbtn primary" data-otk-save="${esc(t.num)}">Записать заключение</button><span id="otk-msg" class="c-gray" style="font-size:12px"></span></div></div>`:''}

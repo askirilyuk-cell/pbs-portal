@@ -159,6 +159,7 @@ const KEY2TITLE = {
   dict_sources: 'Источники запросов', dict_req_types: 'Типы запросов', dict_product_lines: 'Продуктовые линейки',
   dict_deal_nature: 'Характер сделки', dict_product_groups: 'Продуктовые группы', dict_product_subgroups: 'Продуктовые подгруппы',
   casing_sizes: 'Типоразмеры колонн', // справочник Ø/стенок колонн (GF/FMT/MAGNA) для конструктора обозначения ПЧ
+  design_bom: 'Состав КД',            // K-244: строки спецификации «сборка → позиция, кол-во» (в т.ч. заимствованные детали)
   events: 'События',                  // лента событий портала (концепт №5, migrate-047); таблицы может ещё не быть до APPLY
 };
 let _tm = null, _tmKey = '';
@@ -702,7 +703,102 @@ async function buildDesignLive() {
       k.mks = routes.filter((r) => norm(r['Изделие / обозначение']) === dn || _parseKd(r['Чертежи КД']).some((d) => norm(d.doc) === dn))
         .map((r) => ({ id: r.Id ?? r.id, mk: r['№ МК'] || '', variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], statusMk: r['Статус МК'] || 'Черновик' })); }
   } catch { /* не критично */ }
-  return { mode: 'live', projects: projects.map(P), kd: kdOut, td: td.map(T), ncprog: ncprog.map(U), notices: notices.map(N) };
+  let bom = []; try { bom = await bomAll(); } catch { bom = []; }
+  return { mode: 'live', bom, projects: projects.map(P), kd: kdOut, td: td.map(T), ncprog: ncprog.map(U), notices: notices.map(N) };
+}
+// ── K-244: состав изделия по спецификации ─────────────────────────────────────────────
+// Дерево по децим.№ остаётся составом «по умолчанию»; строки «Состав КД» добавляют количество по СП,
+// заимствованные детали (номер первой сборки сохраняется — решение владельца 19.09) и некодируемые позиции
+// (стандартные, материалы). Ввод — руками или черновиком из OCR спецификации (Yandex Cloud, модель table).
+const BOM_SECTIONS = ['Сборочные единицы', 'Детали', 'Стандартные изделия', 'Прочие изделия', 'Материалы', 'Приспособления', 'Комплекты'];
+const bomShape = (r) => ({ id: r.Id ?? r.id, asm: String(r['Сборка (децим. №)'] || '').trim(), item: String(r['Позиция (децим. №)'] || '').trim(), name: r['Наименование'] || '',
+  section: r['Раздел'] || '', pos: r['Поз.'] || '', qty: r['Кол-во'] ?? '', unit: r['Ед.'] || '', note: r['Примечание'] || '', canonId: r['Канон (id)'] ?? null, ord: Number(r['Порядок'] || 0) });
+async function bomAll() { return (await ncListSoft('design_bom')).map(bomShape).sort((a, b) => a.asm.localeCompare(b.asm, 'ru') || a.ord - b.ord); }
+async function bomSave(body, session) {
+  const asm = String(body.asm || '').trim(); if (!asm) throw new Error('Не указана сборка (децим. №).');
+  const kd = await ncListSoft('design_kd'); if (!kd.some((r) => String(r['Децимальный номер документа'] || '').trim() === asm)) throw new Error(`Запись КД ${asm} не найдена.`);
+  const rowsIn = (Array.isArray(body.rows) ? body.rows : []).map((x, i) => {
+    const item = String(x.item || '').trim(), name = String(x.name || '').trim(); if (!item && !name) return null;
+    if (item && item === asm) throw new Error('Сборка не может входить сама в себя.');
+    const q = String(x.qty == null ? '' : x.qty).replace(',', '.').trim(); const qty = q === '' || isNaN(Number(q)) ? null : Number(q);
+    const sec = BOM_SECTIONS.includes(x.section) ? x.section : (item ? 'Детали' : 'Прочие изделия');
+    return { 'Сборка (децим. №)': asm, 'Позиция (децим. №)': item, 'Наименование': name, 'Раздел': sec, 'Поз.': String(x.pos || '').trim(), 'Кол-во': qty, 'Ед.': String(x.unit || '').trim(),
+      'Примечание': String(x.note || '').trim(), 'Канон (id)': (x.canonId != null && x.canonId !== '') ? Number(x.canonId) : null, 'Порядок': i + 1, 'Внёс': (session && session.fio) || '' };
+  }).filter(Boolean);
+  return withKeyLock('bom:' + asm, async () => {
+    const old = (await ncListSoft('design_bom')).filter((r) => String(r['Сборка (децим. №)'] || '').trim() === asm).map((r) => r.Id ?? r.id);
+    if (old.length) await ncDeleteMany('design_bom', old);
+    if (rowsIn.length) await ncCreateMany('design_bom', rowsIn);
+    return { ok: true, asm, rows: (await bomAll()).filter((r) => r.asm === asm) };
+  });
+}
+// расстояние Левенштейна (короткие строки обозначений)
+function _lev(a, b) { const m = a.length, n = b.length; if (!m) return n; if (!n) return m; let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[n]; }
+// приведение распознанного обозначения к известному: записи КД + имена release-файлов (ГОСТ-шрифт: «ПЧ»→«П4/ПУ», теряются точки)
+function bomFixDesignation(raw, known, projCode) {
+  let t = String(raw || '').replace(/\s+/g, '').replace(/[—–]/g, '-'); if (!t) return { value: '', fixed: false, known: false };
+  const canon = (x) => String(x).toUpperCase().replace(/\s+/g, '');
+  const hit = known.find((k) => canon(k) === canon(t)); if (hit) return { value: hit, fixed: hit !== raw, known: true };
+  const tail = (x) => { const m = String(x).match(/((?:\.\d+)+)$/); return m ? m[1] : ''; }; // числовой хвост (.01.002) обязан совпасть точно — «чинятся» только буквы кода проекта
+  let best = null, bestD = 99; for (const k of known) { if (tail(k) !== tail(t)) continue; const d = _lev(canon(k), canon(t)); if (d < bestD) { bestD = d; best = k; } }
+  if (best && bestD <= Math.max(2, Math.round(canon(best).length * 0.18))) return { value: best, fixed: true, known: true };
+  if (projCode) { const dg = projCode.slice(2); t = t.replace(new RegExp('[A-ZА-ЯЁ0-9]{2}' + dg, 'gi'), projCode); if (/^П?БС/i.test(t)) t = t.replace(/^П?БС\.?/i, 'ПБС.'); }
+  return { value: t, fixed: t !== raw, known: false };
+}
+function bomParseOcrTable(tables) {
+  const out = []; let section = '';
+  for (const t of tables || []) {
+    const grid = []; for (const c of t.cells || []) { const r = Number(c.rowIndex || 0), col = Number(c.columnIndex || 0); (grid[r] = grid[r] || [])[col] = String(c.text || '').replace(/\s*\n\s*/g, ' ').trim(); }
+    const hi = grid.findIndex((r) => r && r.some((x) => /обозначени/i.test(x || '')) && r.some((x) => /наименовани/i.test(x || ''))); if (hi < 0) continue;
+    const H = grid[hi]; const ci = (re) => H.findIndex((x) => re.test(x || '')); const cDes = ci(/обозначени/i), cName = ci(/наименовани/i), cQty = ci(/^кол/i), cNote = ci(/приме/i), cPos = ci(/поз/i);
+    for (let r = hi + 1; r < grid.length; r++) { const row = grid[r] || []; const g = (i) => (i >= 0 ? String(row[i] || '').trim() : '');
+      if (row.some((x) => /^(изм\.?|№ докум|разраб|лист$|листов)/i.test(String(x || '').trim()))) break;
+      const des = g(cDes), name = g(cName), qtyRaw = g(cQty), note = g(cNote); const posM = g(cPos).match(/(\d+)\s*[—-]?\s*$/); const pos = posM ? posM[1] : '';
+      if (!des && !name && !qtyRaw) continue;
+      const secHit = !des && !qtyRaw && ['Документация', ...BOM_SECTIONS].find((sx) => name.toLowerCase().replace(/[^а-яё ]/g, '').trim().startsWith(sx.toLowerCase().slice(0, 7)));
+      if (secHit) { section = secHit; continue; }
+      if (section === 'Документация') continue;
+      if (!des && !qtyRaw && !pos && out.length && name) { out[out.length - 1].name = (out[out.length - 1].name + ' ' + name).trim(); continue; } // продолжение наименования
+      const qn = qtyRaw.replace(',', '.').match(/\d+(?:\.\d+)?/); out.push({ section: section || 'Детали', pos, item: des, name, qty: qn ? Number(qn[0]) : '', note });
+    }
+  }
+  return out;
+}
+async function bomOcrDraft(body) {
+  const asm = String(body.asm || '').trim(); if (!asm) throw new Error('Не указана сборка.');
+  const files = designResolveKdFiles(asm); const sp = files.find((f) => f.kind === 'СП'); if (!sp) throw new Error('У записи нет файла спецификации: имя должно быть «<децим.№> СП - Спецификация.pdf» в папке 03-КД проекта.');
+  const c = cfg(); if (!c.YC_OCR) throw new Error('Не задан ключ Yandex Cloud OCR (Настройки).');
+  const root = path.resolve(c.DESIGN_ROOT), abs = path.resolve(c.DESIGN_ROOT, sp.rel); if (!abs.startsWith(root + path.sep)) throw new Error('Недопустимый путь файла.');
+  const buf = fs.readFileSync(abs);
+  const res = await fetch('https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText', { method: 'POST', headers: { 'Authorization': `Api-Key ${c.YC_OCR}`, 'x-data-logging-enabled': 'false', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mimeType: 'application/pdf', languageCodes: ['ru', 'en'], model: 'table', content: buf.toString('base64') }) });
+  if (!res.ok) { try { await res.text(); } catch { /* noop */ } throw new Error(`Распознавание не удалось (HTTP ${res.status}). Многостраничная спецификация пока не поддерживается — внесите состав вручную.`); }
+  const data = await res.json(); const ta = (data.result && data.result.textAnnotation) || {};
+  const rows = bomParseOcrTable(ta.tables); if (!rows.length) throw new Error('Таблица спецификации не распознана — внесите состав вручную.');
+  const kd = await ncListSoft('design_kd'); const kdNo = kd.map((r) => String(r['Децимальный номер документа'] || '').trim()).filter(Boolean);
+  const idx = designFileIndex(); const fileNo = Object.values(idx).map((n) => String(n).replace(/\.pdf$/i, '').split(/\s+/)[0]).filter((x) => /\d{4}/.test(x));
+  const known = [...new Set([...kdNo, ...fileNo])].filter((x) => x !== asm); const projCode = (asm.match(/[А-ЯЁ]{2}\d{4}/) || [''])[0];
+  const kdBy = new Map(kd.map((r) => [String(r['Децимальный номер документа'] || '').trim(), r]));
+  for (const r of rows) { if (!r.item) continue;
+    // обозначением считаем только первый «децимальный» токен (ПБС.… / XX0000…); остальное — размер/марка, уходит в наименование (стандартные, материалы)
+    { const toks = String(r.item).split(/\s+/); const looks = (x) => /^П?БС[.\d]/i.test(x) || /[A-ZА-ЯЁ0-9]{2}\d{4}\.\d/i.test(x);
+      if (looks(toks[0])) { const rest = toks.slice(1).join(' '); r.item = toks[0]; if (rest) r.name = (rest + ' ' + r.name).trim(); }
+      else { r.name = (r.name + ' ' + r.item).trim(); r.item = ''; continue; } }
+    const raw = r.item; const fx = bomFixDesignation(raw, known, projCode); r.item = fx.value; r.itemRaw = raw; r.itemFixed = fx.fixed; r.inRegistry = kdBy.has(fx.value); r.hasFile = fx.known && !r.inRegistry;
+    if (r.inRegistry && !r.name) r.name = kdBy.get(fx.value)['Наименование'] || ''; }
+  return { ok: true, asm, rows, spRel: sp.rel };
+}
+// K-244: быстрая запись КД из черновика состава (деталь есть в спецификации и файлом в 03-КД, а записи в реестре нет)
+async function kdQuickCreate(body, session) {
+  const doc = String(body.docNo || '').trim(), name = String(body.name || '').trim(); if (!doc || !name) throw new Error('Нужны децим. № и наименование.');
+  const kd = await ncListSoft('design_kd'); if (kd.some((r) => String(r['Децимальный номер документа'] || '').trim() === doc)) throw new Error(`Запись ${doc} уже есть в реестре.`);
+  const projCode = (doc.match(/[А-ЯЁ]{2}\d{4}/) || [''])[0]; const isAsm = !!body.isAsm; const hasFile = designResolveKdFiles(doc).length > 0;
+  const row = { 'Децимальный номер документа': doc, 'Децимальный номер проекта': projCode, 'Вид КД': isAsm ? 'СБ' : 'Чертёж детали', 'Тип элемента': body.elemType || (isAsm ? 'П.СБ' : 'Деталь'), 'Наименование': name,
+    'Материал': String(body.material || '').trim(), 'Статус': hasFile ? 'Действует' : 'В разработке', 'Кол-во': 1, 'Примечание': 'Заведено из состава сборки ' + String(body.asm || '') + ((session && session.fio) ? ' · ' + session.fio : '') };
+  const cr = await ncCreateMany('design_kd', [row]); const id = (Array.isArray(cr) ? cr[0] : cr).Id;
+  try { const proj = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === projCode); if (proj && id) await ncLinkRecords('design_kd', 'Проекты разработки', id, [proj.Id ?? proj.id]); } catch (e) { console.warn('K-244: связь КД→проект:', e.message); }
+  return { ok: true, id, docNo: doc, hasFile };
 }
 function designMock() {
   try { return { mode: 'mock', ...JSON.parse(fs.readFileSync(path.join(__dirname, 'mock', 'design.json'), 'utf8')) }; }
@@ -12405,6 +12501,10 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 200, { ...designMock(), warning: String(e.message || e) }); }
     }
     // просмотр чертежа КД (выпущенный PDF из релиз-контура записей, ДП–Д.1.2 §8)
+    // K-244: состав по спецификации
+    if (p === '/api/design/bom/save' && req.method === 'POST') { try { return sendJson(res, 200, await bomSave(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
+    if (p === '/api/design/bom/ocr' && req.method === 'POST') { try { return sendJson(res, 200, await bomOcrDraft(await readBody(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
+    if (p === '/api/design/kd/create' && req.method === 'POST') { try { return sendJson(res, 200, await kdQuickCreate(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
     if (p === '/api/design/kd/file') {
       const root = cfg().DESIGN_ROOT;
       if (!root) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Путь к записям РКД не задан (DESIGN_ROOT / RECORDS_ROOT).'); }

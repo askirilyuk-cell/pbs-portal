@@ -3586,6 +3586,7 @@
         .dkt tbody tr.dreg-phead:hover{background:var(--page)}
         /* K-? этап B: карточка чертежа (dRegCardView) — превью PDF слева, паспорт/действия/версии/состав справа */
         .dcard-wrap{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr);gap:16px;align-items:start}
+        .dcard-wrap.bom-edit{grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr)} .dcard-wrap.bom-edit .dcard-pdf{position:sticky;top:8px}
         @media(max-width:1100px){.dcard-wrap{grid-template-columns:1fr}}
         .dcard-pdf{background:#eef1f4;border:1px solid var(--bd);border-radius:var(--radius);overflow:hidden;min-height:560px;display:flex;flex-direction:column}
         .dcard-pdf iframe{flex:1;border:0;min-height:640px;background:#fff}
@@ -3689,6 +3690,12 @@
         // стандартные/покупные (без децим.№) — вкладываем по BOM-связи parentId (design_kd_id)
         if(!parent&&n.parentId!=null&&byId[n.parentId]&&byId[n.parentId]!==n)parent=byId[n.parentId];
         if(parent)parent._children.push(n);else roots.push(n);});
+      // K-244: строки спецификации — количество у «своих» позиций и заимствованные детали (номер чужой сборки, входят сюда)
+      const bomRows=(DESIGN&&DESIGN.bom)||[]; const allKd=(DESIGN&&DESIGN.kd)||[];
+      nodes.forEach(n=>{ bomRows.filter(b=>b.asm===n.docNo&&b.item).forEach(b=>{ const own=n._children.find(c=>c.docNo===b.item);
+        if(own){ if(b.qty!==''&&b.qty!=null)own.qty=b.qty; return; }
+        const rec=allKd.find(x=>x.docNo===b.item); if(!rec)return;
+        n._children.push({...rec,_key:n._key+'⟵'+structKey(rec.docNo),_children:[],_borrowed:true,qty:(b.qty!==''&&b.qty!=null)?b.qty:1,name:rec.name+' · заимств.'}); }); });
       const srt=(a,b)=>String(a.docNo).localeCompare(String(b.docNo),'ru');
       (function s(arr){arr.sort(srt);arr.forEach(n=>s(n._children));})(roots);
       return roots;
@@ -4612,8 +4619,10 @@
               <div class="dcard-sec-h">Состав</div>
               ${children.length?children.map(c=>dCardChildRow(c,0)).join(''):'<div style="color:var(--sub);font-size:12px">Состав пуст.</div>'}
             </div>`:''}
+            ${(asmLike||isAsm)?`<div class="card pad dcard-sec" id="dc-bom"></div>`:''}
             <div class="card pad dcard-sec" id="dcard-apply">
               <div class="dcard-sec-h">Применяемость</div>
+              ${((D.bom||[]).filter(b=>b.item===k.docNo&&!ancestors.some(a=>a.docNo===b.asm))).map(b=>{const a=(D.kd||[]).find(x=>x.docNo===b.asm);return `<div class="dcard-child" data-doc="${esc(b.asm)}" title="Входит по спецификации (заимствованная деталь)"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a?a.name:b.asm)} <span class="badge b-gray" style="font-size:9px">заимств.</span></span><span style="color:var(--sub);font-size:11px;flex:0 0 auto">Кол. ${esc(String(b.qty===''||b.qty==null?1:b.qty))}</span><span style="color:var(--sub);font-family:var(--mono);font-size:11px;flex:0 0 auto">${esc(String(b.asm).replace('ПБС.',''))}</span></div>`;}).join('')}
               ${ancestors.length?ancestors.slice().reverse().map(a=>`<div class="dcard-child" data-doc="${esc(a.docNo)}"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name)}</span><span style="color:var(--sub);font-family:var(--mono);font-size:11px;flex:0 0 auto">${esc(String(a.docNo).replace('ПБС.',''))}</span></div>`).join(''):'<div style="color:var(--sub);font-size:12px">Не входит в состав других сборок (по данным проекта).</div>'}
             </div>
           </div>
@@ -4628,6 +4637,55 @@
       host.querySelectorAll('#dcard-apply .dcard-child[data-doc]').forEach(el=>el.onclick=()=>{dRegCard=el.dataset.doc;dBody();});
       const nb=host.querySelector('#dc-newver'); if(nb)nb.onclick=()=>dCardUplToggle(k.docNo,projDecNo);
       loadKdVersions(k.docNo);
+      if(host.querySelector('#dc-bom'))dBomRender(k);
+    }
+    // ── K-244: спецификация сборки — строки «позиция, кол-во»; ввод руками или черновиком из OCR (Yandex Cloud) ──
+    const BOM_SECTIONS=['Сборочные единицы','Детали','Стандартные изделия','Прочие изделия','Материалы','Приспособления','Комплекты'];
+    let dBom=null; // {doc, rows, edit, ocr}
+    async function dDesignReload(){ try{ const nd=await (await fetch('/api/design')).json(); if(nd&&nd.projects)DESIGN=nd; }catch(e){} }
+    function dBomRender(k){
+      const box=document.getElementById('dc-bom'); if(!box)return;
+      if(!dBom||dBom.doc!==k.docNo)dBom={doc:k.docNo,rows:((DESIGN&&DESIGN.bom)||[]).filter(b=>b.asm===k.docNo).map(b=>({...b})),edit:false,ocr:false};
+      const kdAll=(DESIGN&&DESIGN.kd)||[]; const hasSp=(k.files||[]).some(f=>f.kind==='СП'); const R=dBom.rows;
+      const head=`<div class="dcard-sec-h" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">Спецификация <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub)">· ${R.length?R.length+' поз.':'не внесена'}</span>
+        <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">${dBom.edit?`<button class="tbtn" id="bom-add">＋ позиция</button><button class="tbtn primary" id="bom-save">Сохранить</button><button class="tbtn" id="bom-cancel">Отмена</button>`:`<button class="tbtn" id="bom-edit">✎ ${R.length?'Изменить':'Внести вручную'}</button><button class="tbtn" id="bom-ocr"${hasSp?'':' disabled title="Нет файла «… СП - Спецификация.pdf» у этой записи"'}>Разобрать спецификацию</button>`}</span></div>`;
+      const ist='width:100%;box-sizing:border-box;border:1px solid var(--sl-300);border-radius:6px;padding:4px 6px;font:inherit;font-size:12px;background:#fff';
+      let body='';
+      if(dBom.edit){
+        body=`${dBom.ocr?`<div class="rt-info" style="margin:6px 0 8px;font-size:12px">Черновик из распознавания — сверьте с PDF слева. <b style="background:#fff3c4;padding:0 4px;border-radius:3px">Жёлтым</b> — исправленное автоматически обозначение и количество (цифры на чертёжном шрифте читаются с ошибками). Ничего не записано, пока не нажмёте «Сохранить».</div>`:''}
+          <datalist id="bom-kdlist">${kdAll.filter(x=>x.docNo&&x.docNo!==k.docNo).map(x=>`<option value="${esc(x.docNo)}">${esc(x.name)}</option>`).join('')}</datalist>
+          <div style="overflow-x:auto"><table class="dt" style="min-width:680px;table-layout:fixed"><thead><tr><th style="width:44px">Поз.</th><th style="width:130px">Раздел</th><th style="width:190px">Обозначение</th><th>Наименование</th><th style="width:58px">Кол.</th><th style="width:120px">Примечание</th><th style="width:28px"></th></tr></thead><tbody>
+          ${R.map((r,i)=>{const inReg=r.item&&kdAll.some(x=>x.docNo===r.item);return `<tr data-i="${i}"><td><input data-f="pos" value="${esc(String(r.pos||''))}" style="${ist}"></td>
+            <td><select data-f="section" style="${ist}">${BOM_SECTIONS.map(x=>`<option${x===(r.section||'Детали')?' selected':''}>${x}</option>`).join('')}</select></td>
+            <td><input data-f="item" list="bom-kdlist" value="${esc(r.item||'')}" placeholder="децим. № (если есть чертёж)" style="${ist};font-family:var(--mono);font-size:11px${r.itemFixed?';background:#fff3c4':''}"${r.itemRaw&&r.itemFixed?` title="Распознано: ${esc(r.itemRaw)}"`:''}>${r.item?(inReg?'<div style="font-size:10px;color:#16a34a">есть в реестре КД</div>':`<div style="font-size:10px;color:#b45309">нет в реестре${r.hasFile?' · файл в папке есть':''} · <a data-mk-kd="${i}" class="c-blue" style="cursor:pointer">завести запись</a></div>`):''}</td>
+            <td><input data-f="name" value="${esc(r.name||'')}" style="${ist}"></td>
+            <td><input data-f="qty" value="${esc(String(r.qty===null||r.qty===undefined?'':r.qty))}" style="${ist};text-align:right${dBom.ocr&&r._ocr?';background:#fff3c4':''}"></td>
+            <td><input data-f="note" value="${esc(r.note||'')}" style="${ist}"></td>
+            <td><b data-del="${i}" class="c-gray" style="cursor:pointer" title="Убрать строку">✕</b></td></tr>`;}).join('')||'<tr><td colspan="7" class="c-gray" style="padding:10px">Строк нет — «＋ позиция».</td></tr>'}
+          </tbody></table></div>`;
+      } else if(R.length){
+        let sec=''; body='<div style="margin-top:4px">'+R.map(r=>{ const rec=r.item?kdAll.find(x=>x.docNo===r.item):null; const h=(r.section!==sec)?`<div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${esc(sec=r.section)}</div>`:'';
+          return h+`<div class="dcard-child"${rec?` data-doc="${esc(r.item)}"`:' style="cursor:default"'}><span style="flex:0 0 22px;color:var(--sub);font-size:11px">${esc(String(r.pos||''))}</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}${r.note?' · '+esc(r.note):''}">${esc(r.name||r.item)}</span>${r.item?`<span style="color:var(--sub);font-family:var(--mono);font-size:11px;flex:0 0 auto">${esc(String(r.item).replace('ПБС.',''))}</span>`:''}<span style="color:var(--sub);font-size:11px;flex:0 0 auto">Кол. ${esc(String(r.qty===''||r.qty==null?'—':r.qty))}${r.unit?' '+esc(r.unit):''}</span>${r.item&&!rec?'<span class="badge b-amber" style="font-size:9px" title="Обозначение есть в спецификации, записи в реестре КД нет">нет в реестре</span>':''}</div>`; }).join('')+'</div>';
+      } else body='<div style="color:var(--sub);font-size:12px;margin-top:4px">Состав по спецификации не внесён. Дерево выше строится по децимальным номерам; спецификация добавляет количество, заимствованные детали (из других сборок), стандартные изделия и материалы.</div>';
+      box.innerHTML=head+body;
+      { const wrap=document.querySelector('.dcard-wrap'); if(wrap){ wrap.classList.toggle('bom-edit',!!dBom.edit); if(dBom.edit&&box.parentElement&&box.parentElement.firstElementChild!==box)box.parentElement.insertBefore(box,box.parentElement.firstElementChild); } }
+      const $b=(q)=>box.querySelector(q); const pull=()=>{ box.querySelectorAll('tr[data-i]').forEach(tr=>{ const r=dBom.rows[+tr.dataset.i]; if(!r)return; tr.querySelectorAll('[data-f]').forEach(el=>{ r[el.dataset.f]=el.value; }); }); };
+      if($b('#bom-edit'))$b('#bom-edit').onclick=()=>{ dBom.edit=true; dBomRender(k); };
+      if($b('#bom-cancel'))$b('#bom-cancel').onclick=()=>{ dBom=null; dBomRender(k); };
+      if($b('#bom-add'))$b('#bom-add').onclick=()=>{ pull(); dBom.rows.push({pos:'',section:'Детали',item:'',name:'',qty:1,note:''}); dBomRender(k); const ins=box.querySelectorAll('input[data-f="item"]'); if(ins.length)ins[ins.length-1].focus(); };
+      box.querySelectorAll('[data-del]').forEach(x=>x.onclick=()=>{ pull(); dBom.rows.splice(+x.dataset.del,1); dBomRender(k); });
+      box.querySelectorAll('input[data-f="item"]').forEach(inp=>inp.onchange=()=>{ pull(); const r=dBom.rows[+inp.closest('tr').dataset.i]; const rec=kdAll.find(x=>x.docNo===String(r.item).trim()); if(rec&&!String(r.name||'').trim())r.name=rec.name; r.itemFixed=false; dBomRender(k); });
+      box.querySelectorAll('[data-mk-kd]').forEach(a=>a.onclick=async()=>{ pull(); const r=dBom.rows[+a.dataset.mkKd]; if(!String(r.name||'').trim()){ toast('Сначала укажите наименование позиции.','err'); return; }
+        if(!(await uiConfirm({title:'Новая запись КД',text:`Завести в реестре КД запись «${r.name}» (${r.item})? Файл чертежа подцепится по номеру, если лежит в папке проекта.`,ok:'Завести'})))return;
+        try{ const j=await postJson('/api/design/kd/create',{docNo:r.item,name:r.name,asm:k.docNo,isAsm:r.section==='Сборочные единицы',elemType:r.section==='Приспособления'?'Оснастка':undefined}); toast('Запись КД заведена'+(j.hasFile?' · файл найден':' · файла пока нет'),'ok'); const keep=dBom; await dDesignReload(); dBom=keep; dBomRender(k); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } });
+      if($b('#bom-save'))$b('#bom-save').onclick=async()=>{ pull(); const btn=$b('#bom-save'); btn.disabled=true;
+        try{ await postJson('/api/design/bom/save',{asm:k.docNo,rows:dBom.rows}); toast('Спецификация сохранена.','ok'); dBom=null; await dDesignReload(); dBody(); }catch(e){ toast('Не сохранено: '+(e.message||e),'err'); btn.disabled=false; } };
+      if($b('#bom-ocr'))$b('#bom-ocr').onclick=async()=>{ if(R.length&&!(await uiConfirm({title:'Разобрать спецификацию',text:'Внесённые строки будут заменены черновиком из распознавания (до «Сохранить» в базе ничего не меняется). Продолжить?',ok:'Разобрать'})))return;
+        const btn=$b('#bom-ocr'); btn.disabled=true; btn.textContent='Распознаю…';
+        try{ const j=await postJson('/api/design/bom/ocr',{asm:k.docNo}); dBom.rows=(j.rows||[]).map(r=>({...r,_ocr:true})); dBom.edit=true; dBom.ocr=true; dBomRender(k);
+          const fr=document.querySelector('.dcard-pdf iframe'); if(fr&&j.spRel)fr.src='/api/design/kd/file?rel='+encodeURIComponent(j.spRel); toast('Черновик готов — слева открыта спецификация, сверьте.','ok'); }
+        catch(e){ toast(String(e.message||e),'err'); btn.disabled=false; btn.textContent='Разобрать спецификацию'; } };
+      box.querySelectorAll('.dcard-child[data-doc]').forEach(el=>el.onclick=()=>{dRegCardStack.push(k.docNo);dRegCard=el.dataset.doc;dBom=null;dBody();});
     }
     // строка компактного дерева «Состав» в карточке чертежа: имя+тип+кол-во+галка наличия файла, клик → её карточка
     function dCardChildRow(n,depth){

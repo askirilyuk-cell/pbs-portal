@@ -4381,13 +4381,13 @@
       const nmHtml=(asmLike?`<b>${esc(k.name)}</b>${isAsm?` <span style="color:var(--sub);font-size:11px">· сборка</span>`:''}`:esc(k.name))
         +(c?` <span class="dkt-cnt" title="Файлов по составу: загружено/всего позиций сборки">${c.have}/${c.total} файлов</span>`:'');
       const href=kdMainFileHref(k);
-      const pdfCell=href?`<a class="tbtn" href="${href}" target="_blank" rel="noopener" style="padding:3px 9px;font-size:11px;text-decoration:none"><i class=ic-doc></i> PDF</a>`:'<span class="dkt-dash">—</span>';
+      const pdfCell=href?`<a class="tbtn" href="${href}" target="_blank" rel="noopener" style="padding:3px 9px;font-size:11px;text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center;gap:4px"><i class=ic-doc></i> PDF</a>`:'<span class="dkt-dash">—</span>';
       // K-243: МК на этот чертёж (способов изготовления может быть несколько) + «＋ МК»
       const mkBadges=(k.mks||[]).map(m=>`<a href="#routes/${m.id}" class="badge b-navy" style="font-size:9px;text-decoration:none;margin-right:3px" title="Маршрутная карта · ${esc(m.statusMk)}${m.variant?' · способ: '+esc(m.variant):''}">${esc(String(m.mk).replace('МК-',''))}</a>`).join('')+(k.docNo?`<a href="#routes/new-kd:${encodeURIComponent(k.docNo)}" class="badge b-gray" style="font-size:9px;text-decoration:none;margin-right:6px" title="${(k.mks||[]).length?'Ещё один способ изготовления — новая МК на этот чертёж':'Создать маршрутную карту на этот чертёж'}">＋ МК</a>`:'');
       const prodBtn0=asmLike
         ? `<button class="tbtn primary" data-toprodreg data-doc="${esc(k.docNo)}" data-proj="${esc(projDecNo)}" style="padding:4px 11px;font-size:11px">⚙ В производство</button>`
         : `<button class="tbtn" data-toprodreg data-doc="${esc(k.docNo)}" data-proj="${esc(projDecNo)}" title="В производство" style="padding:3px 8px;font-size:12px">⚙</button>`;
-      const prodBtn=mkBadges+prodBtn0;
+      const prodBtn=`<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px">${mkBadges}${prodBtn0}</span>`;
       // K-? этап B: клик по децим.№/наименованию → карточка чертежа (фуллскрин, dRegCardView)
       const docAttr=`data-opencard="${esc(k.docNo)}"`;
       // владелец (msg): «почему в номере отсутствует ПБС.ПЧ0001?» — показываем децим.№ ПОЛНОСТЬЮ, как есть (без replace)

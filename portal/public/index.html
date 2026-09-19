@@ -4387,7 +4387,7 @@
       const prodBtn0=asmLike
         ? `<button class="tbtn primary" data-toprodreg data-doc="${esc(k.docNo)}" data-proj="${esc(projDecNo)}" style="padding:4px 11px;font-size:11px">⚙ В производство</button>`
         : `<button class="tbtn" data-toprodreg data-doc="${esc(k.docNo)}" data-proj="${esc(projDecNo)}" title="В производство" style="padding:3px 8px;font-size:12px">⚙</button>`;
-      const prodBtn=`<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px">${mkBadges}${prodBtn0}</span>`;
+      const prodBtn=`<span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 3px">${mkBadges}${prodBtn0}</span>`;
       // K-? этап B: клик по децим.№/наименованию → карточка чертежа (фуллскрин, dRegCardView)
       const docAttr=`data-opencard="${esc(k.docNo)}"`;
       // владелец (msg): «почему в номере отсутствует ПБС.ПЧ0001?» — показываем децим.№ ПОЛНОСТЬЮ, как есть (без replace)
@@ -4481,7 +4481,7 @@
       const isTree=!q&&dRegChip==='all';
       const tableRows=isTree?dRegTreeRows(rows,compl):rows.map(k=>dRegRowHtml(k,compl)).join('');
       gh.innerHTML=chipsHtml+`<div class="card" style="overflow:hidden"><div class="tbl-wrap"><table class="dkt">
-        <colgroup><col style="width:250px"><col><col style="width:150px"><col style="width:112px"><col style="width:92px"><col style="width:66px"><col style="width:154px"></colgroup>
+        <colgroup><col style="width:250px"><col><col style="width:150px"><col style="width:112px"><col style="width:92px"><col style="width:88px"><col style="width:250px"></colgroup>
         <thead><tr><th>Децим.№</th><th>Наименование</th><th>Проект</th><th>Статус</th><th>Обновлён</th><th>Файл</th><th>Произв.</th></tr></thead>
         <tbody>${tableRows}</tbody></table></div></div>`;
       gh.querySelectorAll('.pill[data-c]').forEach(b=>b.onclick=()=>{dRegChip=b.dataset.c;dRegGrid();});

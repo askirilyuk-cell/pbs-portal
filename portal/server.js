@@ -1435,6 +1435,7 @@ async function buildRouteCard(id) {
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
       variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], variants: mkVariantsOf(routes, r), // K-219
       history: mkHistParse(r['История']), // K-239
+      drawingFiles: mkOpFiles(r['№ МК'], 0, 'drawing'), // K-240
       approvalQueue: mkQueueParse(r['Согласующие (очередь)']), // K-221
       approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
       normsFixed: r['Нормы зафиксированы'] || '', // K-175
@@ -1528,7 +1529,9 @@ async function buildRouteEdit(id) {
 // (операции удаляются и заводятся заново), поэтому имена файлов в БД не храним — состав выводим прямо с
 // диска, как фото деловых остатков. Механизм общий для ЛЮБОЙ операции (особенно нужен токарной).
 const MK_FILE_ROOT = path.join(__dirname, '.data', 'mk-files');
-const MK_OP_KINDS = { nc: 'nc', setup: 'setup' };            // nc = ЧПУ-программа, setup = карта наладки
+const MK_OP_KINDS = { nc: 'nc', setup: 'setup', drawing: 'drawing' }; // K-240: drawing — чертёж файлом на МК в целом (op=0), до привязки через реестр КД
+const MK_KIND_LABEL = { nc: 'программы ЧПУ', setup: 'карты наладки', drawing: 'чертежа' };
+const mkFileWhere = (op) => (String(op) === '0' ? 'МК' : 'Оп. ' + op);            // nc = ЧПУ-программа, setup = карта наладки
 const MK_NC_EXT = /\.[a-z0-9]{1,10}$/i;                       // ЧПУ-программа: любой разумный тип (.nc/.txt/.mpf/.pdf…)
 const MK_SETUP_EXT = /\.(pdf|png|jpe?g|gif|webp|bmp|tiff?|heic)$/i; // карта наладки: PDF / изображение
 function _mkSafe(s) { return String(s == null ? '' : s).replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim(); }
@@ -6540,6 +6543,7 @@ async function buildBoardLive() {
       startedAt: t['Начато (факт)'] || '', finishedAt: t['Завершено (факт)'] || '', pauseReason: t['Причина приостановки'] || '',
       controlPoint: operation['Точка контроля'] || '', equipList, mk, routeAuthor: route['Автор'] || '',
       // K-216 (З-010): программа ЧПУ и карта наладки операции — оператору прямо в карте задачи
+      drawingFiles: mk ? mkOpFiles(mk, 0, 'drawing') : [], // K-240
       opNo: operation['№ операции'] || '', ncFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'nc') : [], setupFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'setup') : [],
     };
   }
@@ -13159,14 +13163,14 @@ const server = http.createServer(async (req, res) => {
       if (!files.length) return sendJson(res, 400, { error: 'Файлы не переданы.' });
       const dir = mkOpDir(mk, op, kind, true);
       if (!dir) return sendJson(res, 400, { error: 'Не удалось создать папку вложений операции.' });
-      const extRe = kind === 'setup' ? MK_SETUP_EXT : MK_NC_EXT;
+      const extRe = kind === 'nc' ? MK_NC_EXT : MK_SETUP_EXT;
       const saved = [], skipped = [];
       for (const f of files) {
         if (!extRe.test(String(f.filename))) { skipped.push(String(f.filename)); continue; }
         const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(String(f.filename));
       }
-      if (saved.length) await mkHistFile(mk, `Оп. ${op}: прикреплён файл ${kind === 'setup' ? 'карты наладки' : 'программы ЧПУ'} — ${saved.join(', ')}`, sessionFromReq(req)); // K-239
+      if (saved.length) await mkHistFile(mk, `${mkFileWhere(op)}: прикреплён файл ${MK_KIND_LABEL[kind]} — ${saved.join(', ')}`, sessionFromReq(req)); // K-239
       return sendJson(res, 200, { ok: true, mk, op, kind, saved, skipped, files: mkOpFiles(mk, op, kind) });
     }
     // K-238: удаление ошибочно привязанного вложения операции. Файл не стирается, а уходит в подпапку _deleted (в списках не виден).
@@ -13186,7 +13190,7 @@ const server = http.createServer(async (req, res) => {
         const bin = path.join(dir, '_deleted'); fs.mkdirSync(bin, { recursive: true });
         fs.renameSync(target, path.join(bin, Date.now() + '__' + path.basename(target)));
         console.log(`[mk-files] удалено вложение ${mk} оп.${op} ${kind}: ${path.basename(target)} — ${(session && session.name) || '?'}`);
-        await mkHistFile(mk, `Оп. ${op}: убран файл ${kind === 'setup' ? 'карты наладки' : 'программы ЧПУ'} — ${path.basename(target)}`, session); // K-239
+        await mkHistFile(mk, `${mkFileWhere(op)}: убран файл ${MK_KIND_LABEL[kind]} — ${path.basename(target)}`, session); // K-239
         return sendJson(res, 200, { ok: true, mk, op, kind, files: mkOpFiles(mk, op, kind) });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }

@@ -751,6 +751,27 @@ async function mkKdAck(body, session) {
   return { ok: true };
 }
 const mkKdFlag = (r) => { try { return JSON.parse((r && r['Чертёж изменён']) || 'null'); } catch { return null; } };
+// ── K-249: вердикт ОТК по единицам операции ──
+async function otkVerdict(body, session) {
+  const taskNum = String(body.taskNum || '').trim(); if (!taskNum) throw new Error('Не указан № задачи.');
+  const task = (await ncListSoft('tasks')).find((t) => String(t['№ задачи'] || '').trim() === taskNum); if (!task) throw new Error(`Задача ${taskNum} не найдена.`);
+  const items = (Array.isArray(body.units) ? body.units : []).map((u) => ({ id: u.id != null && u.id !== '' ? Number(u.id) : null, unit: u.unit != null && u.unit !== '' ? Number(u.unit) : null, otk: u.otk === 'годен' || u.otk === 'брак' ? u.otk : null, note: String(u.note || '').trim() })).filter((u) => u.otk && (u.id != null || u.unit != null));
+  if (!items.length) throw new Error('Нет единиц с заключением (годен / брак).');
+  for (const u of items) if (u.otk === 'брак' && !u.note) throw new Error(`Ед. №${u.unit ?? '?'}: для брака укажите, что не так.`);
+  const who = (session && (session.fio || session.name)) || 'ОТК'; const today = whToday();
+  try { await ncEnsureColumn('journal', 'Контролёр ОТК', 'SingleLineText'); await ncEnsureColumn('journal', 'Дата ОТК', 'Date'); } catch (e) { console.warn('K-249: колонки журнала:', e.message); }
+  return withKeyLock('otk:' + taskNum, async () => {
+    const jr = (await ncListSoft('journal')).filter((j) => String(j['№ задачи'] || '').trim() === taskNum);
+    const upd = [], crt = [];
+    for (const u of items) { const row = u.id != null ? jr.find((j) => (j.Id ?? j.id) === u.id) : jr.find((j) => Number(j['№ единицы']) === u.unit);
+      const patch = { 'Контроль ОТК': u.otk, 'Контролёр ОТК': who, 'Дата ОТК': today }; if (u.note) patch['Примечание'] = [row && row['Примечание'], 'ОТК: ' + u.note].filter(Boolean).join(' · ');
+      if (row) upd.push({ Id: row.Id ?? row.id, ...patch }); else crt.push({ '№ задачи': taskNum, '№ единицы': u.unit, 'Дата': today, ...patch }); }
+    if (upd.length) await ncUpdateMany('journal', upd); if (crt.length) await ncCreateMany('journal', crt);
+    const bad = items.filter((u) => u.otk === 'брак');
+    logEvent({ type: 'комментарий', obj: 'Задача', objNum: taskNum, who, details: `ОТК: годен ${items.length - bad.length}, брак ${bad.length}${bad.length ? ' (' + bad.map((u) => '№' + u.unit + ' — ' + u.note).join('; ') + ')' : ''}` });
+    return { ok: true, taskNum, accepted: items.length - bad.length, rejected: bad.length };
+  });
+}
 // ── K-244: состав изделия по спецификации ─────────────────────────────────────────────
 // Дерево по децим.№ остаётся составом «по умолчанию»; строки «Состав КД» добавляют количество по СП,
 // заимствованные детали (номер первой сборки сохраняется — решение владельца 19.09) и некодируемые позиции
@@ -2396,11 +2417,56 @@ async function makeRoutesFromPositions(body) {
   return { ok: true, numPz, created };
 }
 
+// ── K-250: запуск позиции заказа в производство ──
+const _desNorm = (x) => String(x || '').trim().toLowerCase().replace(/^пбс\./, '').replace(/\s+/g, ' ');
+async function positionLaunchOptions(id) {
+  const posId = Number(id); const [positions, routes, tasks] = await Promise.all([ncListSoft('positions'), ncListSoft('routes'), ncListSoft('tasks')]);
+  const pos = positions.find((x) => (x.Id ?? x.id) === posId); if (!pos) throw new Error('Позиция не найдена.');
+  const dn = _desNorm(pos['Чертёж / ТУ']); const nm = _desNorm(pos['Наименование / обозначение']);
+  const shape = (r, why) => ({ id: r.Id ?? r.id, mk: r['№ МК'] || '', name: r['Наименование'] || '', designation: r['Изделие / обозначение'] || '', statusMk: r['Статус МК'] || 'Черновик', variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], why, ready: ['Утверждена', 'В производстве'].includes(String(r['Статус МК'] || '')) });
+  const byDes = dn ? routes.filter((r) => { const d = _desNorm(r['Изделие / обозначение']); return d && (d === dn || dn.includes(d) || d.includes(dn)); }) : [];
+  const cands = byDes.map((r) => shape(r, 'по чертежу'));
+  if (pos.routes_id != null && !cands.some((c) => c.id === Number(pos.routes_id))) { const r = routes.find((x) => (x.Id ?? x.id) === Number(pos.routes_id)); if (r) cands.unshift(shape(r, 'привязана к позиции')); }
+  cands.sort((a, b) => (b.ready - a.ready) || (b.isMain - a.isMain) || String(a.mk).localeCompare(String(b.mk), 'ru'));
+  const posNum = String(pos['№ позиции'] || ''); const numPz = String(pos['Позиция'] || '').split(' · ')[0];
+  const hasTasks = tasks.some((t) => String(t['№ задачи'] || '').startsWith(`${numPz}/${posNum}-`));
+  return { ok: true, position: { id: posId, numPz, posNum, name: pos['Наименование / обозначение'] || '', drawing: pos['Чертёж / ТУ'] || '', qty: Number(pos['Кол-во']) || 0, unit: pos['Ед.'] || 'шт', routeId: pos.routes_id ?? null, hasTasks },
+    candidates: cands, others: routes.filter((r) => !cands.some((c) => c.id === (r.Id ?? r.id)) && ['Утверждена', 'В производстве'].includes(String(r['Статус МК'] || ''))).map((r) => shape(r, '')) };
+}
+async function positionLaunch(body, session) {
+  const posId = Number(body.positionId); const parts = (Array.isArray(body.parts) ? body.parts : []).map((x) => ({ routeId: Number(x.routeId), qty: Number(x.qty) })).filter((x) => Number.isFinite(x.routeId) && x.qty > 0);
+  if (!parts.length) throw new Error('Не выбрана маршрутная карта.');
+  if (new Set(parts.map((x) => x.routeId)).size !== parts.length) throw new Error('Одна и та же МК указана дважды.');
+  return withKeyLock('pos-launch:' + posId, async () => {
+    const [positions, routes, tasks, orders] = await Promise.all([ncListSoft('positions'), ncListSoft('routes'), ncListSoft('tasks'), ncListSoft('orders')]);
+    const pos = positions.find((x) => (x.Id ?? x.id) === posId); if (!pos) throw new Error('Позиция не найдена.');
+    const numPz = String(pos['Позиция'] || '').split(' · ')[0]; const posNum = String(pos['№ позиции'] || ''); const qty = Number(pos['Кол-во']) || 0;
+    if (tasks.some((t) => String(t['№ задачи'] || '').startsWith(`${numPz}/${posNum}-`))) throw new Error('По этой позиции задачи уже выданы — делить и перезапускать её нельзя.');
+    for (const x of parts) { const r = routes.find((y) => (y.Id ?? y.id) === x.routeId); if (!r) throw new Error('МК не найдена.'); if (!['Утверждена', 'В производстве'].includes(String(r['Статус МК'] || ''))) throw new Error(`МК ${r['№ МК']} в статусе «${r['Статус МК'] || 'Черновик'}» — задачи формируются только по утверждённой.`); }
+    const sum = parts.reduce((a, x) => a + x.qty, 0); if (qty > 0 && Math.abs(sum - qty) > 1e-9) throw new Error(`Количество по МК (${sum}) не равно количеству позиции (${qty}).`);
+    const posIds = [posId];
+    if (parts.length > 1) { // деление: исходная позиция становится N.1, остальные части — новые позиции N.2, N.3… того же заказа
+      const base = posNum.replace(/\.0$/, ''); const taken = new Set(positions.filter((x) => String(x['Позиция'] || '').startsWith(numPz + ' ·')).map((x) => String(x['№ позиции'] || '')));
+      const nums = []; let k = 1; while (nums.length < parts.length) { const n = `${base}.${k++}`; if (!taken.has(n) || n === posNum) nums.push(n); }
+      await ncUpdate('positions', posId, { '№ позиции': nums[0], 'Позиция': `${numPz} · поз. ${nums[0]}`, 'Кол-во': parts[0].qty });
+      const order = orders.find((o) => String(o['№ ПЗ'] || '').trim() === numPz);
+      for (let i = 1; i < parts.length; i++) { const row = { 'Позиция': `${numPz} · поз. ${nums[i]}`, '№ позиции': nums[i], 'Наименование / обозначение': pos['Наименование / обозначение'] || '', 'Чертёж / ТУ': pos['Чертёж / ТУ'] || '', 'Ед.': pos['Ед.'] || '', 'Кол-во': parts[i].qty, 'Статус': 'В очереди' };
+        if (pos['Срок готовности']) row['Срок готовности'] = pos['Срок готовности'];
+        const cr = await ncCreateMany('positions', [row]); const nid = (Array.isArray(cr) ? cr[0] : cr).Id; posIds.push(nid);
+        if (order) await ncLinkRecords('orders', 'Позиции', order.Id ?? order.id, [nid]); }
+    }
+    const out = [];
+    for (let i = 0; i < parts.length; i++) { await linkPositionRoute({ positionId: posIds[i], routeId: parts[i].routeId }); }
+    for (const rid of [...new Set(parts.map((x) => x.routeId))]) { const g = await generateTasksFromRoute(rid, { onlyPositionIds: posIds.filter((_, i) => parts[i].routeId === rid) }); out.push({ mk: g.mk, created: g.created, skipped: g.skipped }); }
+    logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who: (session && session.fio) || '', details: `позиция ${posNum} запущена в производство: ${parts.map((x, i) => `${x.qty} шт по ${(routes.find((y) => (y.Id ?? y.id) === x.routeId) || {})['№ МК'] || x.routeId}`).join(', ')}` });
+    return { ok: true, numPz, split: parts.length > 1, positions: posIds, generated: out };
+  });
+}
 // генерация карт задач (Ф.14) из МК: по позициям, привязанным к маршруту (routes_id),
 // создаём Задачу на участок по каждой операции + копируем «Значения параметров задачи»
 // из типа операции. Идемпотентно по «№ задачи» = ПЗ/позиция-опN (порт generate-tasks.mjs).
-async function generateTasksFromRoute(routeId) {
-  const rid = Number(routeId);
+async function generateTasksFromRoute(routeId, opts) {
+  const rid = Number(routeId); const onlyPos = opts && Array.isArray(opts.onlyPositionIds) ? new Set(opts.onlyPositionIds.map(Number)) : null; // K-250: запуск одной позиции не должен выдавать задачи по чужим позициям той же МК
   const [routes, positions, orders, ops, opTypes, params, tasks] = await Promise.all([
     ncListSoft('routes'), ncListSoft('positions'), ncListSoft('orders'),
     ncListSoft('operations'), ncListSoft('op_types'), ncListSoft('op_params'), ncListSoft('tasks'),
@@ -2417,7 +2483,7 @@ async function generateTasksFromRoute(routeId) {
   const routeOps = ops.filter((o) => o.routes_id === rid)
     .sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
   if (!routeOps.length) throw new Error('В маршруте нет операций — сначала заведите операции.');
-  const linkedPos = positions.filter((p) => p.routes_id === rid);
+  const linkedPos = positions.filter((p) => p.routes_id === rid && (!onlyPos || onlyPos.has(Number(p.Id ?? p.id))));
   if (!linkedPos.length) throw new Error('К маршруту не привязана ни одна позиция ПЗ. Привяжите маршрут к позиции заказа (поле «Маршрут» позиции), затем повторите.');
   const existingNums = new Set(tasks.map((t) => String(t['№ задачи'])));
 
@@ -6603,6 +6669,7 @@ function buildTaskPatch(body) {
     if (!STATUSES.includes(body.status)) throw new Error(`Недопустимый статус: ${body.status}`);
     patch['Статус'] = body.status;
   }
+  if (typeof body.priority === 'string' && body.priority) { if (!ORDER_OPTS['Приоритет'].includes(body.priority)) throw new Error(`Недопустимый приоритет: ${body.priority}`); patch['Приоритет'] = body.priority; } // K-251: приоритет задачи на участке задают администратор и технолог
   if ('factDate' in body) patch['Дата факт.'] = body.factDate ? String(body.factDate).slice(0, 10) : null;
   const num = (v) => (v === '' || v == null ? null : Number(v));
   if ('factQty' in body) patch['Кол-во факт.'] = num(body.factQty);
@@ -12408,6 +12475,11 @@ const server = http.createServer(async (req, res) => {
     }
     // ── ОТК-приёмка: WRITE-путь (DEF-02 Ф.4 приёмка · DEF-03 Ф.3 входной контроль) ──
     // GET-модель актов отдаётся через /api/board (controls.*). Ниже — POST-создание.
+    // K-249: очередь ОТК — вердикт контролёра по единицам операции (точка контроля «ОТК» в МК). Пишет роль с правом записи в «Контроль качества».
+    if (p === '/api/control/otk-verdict' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' });
+      try { return sendJson(res, 200, await otkVerdict(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/control/acceptance/create' && req.method === 'POST') { // Ф.4 акт приёмки
       if (!isLive()) return sendJson(res, 501, { error: 'Приёмка доступна только в LIVE-режиме: задайте токен NocoDB.' });
       try { return sendJson(res, 200, await createAcceptance(await readBody(req))); }
@@ -13427,6 +13499,9 @@ const server = http.createServer(async (req, res) => {
       return s.pipe(res);
     }
     // K-72 / Узел 8: привязка позиции ПЗ к маршруту (МК) — предпосылка генерации задач Ф.14
+    // K-250: «В производство» из позиции заказа — подбор МК по чертежу, деление количества между способами изготовления (З-012), задачи сразу
+    if (p === '/api/position/launch-options' && req.method === 'GET') { try { return sendJson(res, 200, await positionLaunchOptions(url.searchParams.get('id'))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
+    if (p === '/api/position/launch' && req.method === 'POST') { if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' }); try { return sendJson(res, 200, await positionLaunch(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/position/route' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 400, { error: 'Привязка доступна только в режиме LIVE (NocoDB).' });
       try { return sendJson(res, 200, await linkPositionRoute(await readBody(req))); }

@@ -12322,7 +12322,9 @@
       // K-247: операция, у которой не закончена предыдущая по той же позиции, не прячется, а показывается «ждёт оп. N» (решение владельца 19.09)
       const allT=DATA.orders.flatMap(o=>o.tasks); const posKey=(t)=>String(t.num||'').replace(/-оп\d+$/,'');
       const waitOf=(t)=>{ if(t.status!=='В очереди')return null; const prev=allT.filter(x=>posKey(x)===posKey(t)&&Number(x.opNum)<Number(t.opNum)&&x.status!=='Выполнено').sort((a,b)=>Number(a.opNum)-Number(b.opNum)); return prev.length?prev[prev.length-1]:null; };
-      const tasks=stationTasks().map(t=>({...t,_wait:waitOf(t)})).sort((a,b)=>((ord[a.status]??9)-(ord[b.status]??9))||((a._wait?1:0)-(b._wait?1:0))||(dnum(a)-dnum(b)));
+      const prioRank={'Высокий':0,'Нормальный':1,'Низкий':2}; const pr=(t)=>prioRank[t.priority]??1; // K-251
+      const canPrio=DATA.mode==='live'&&rbacAccess('board')==='write'&&!(ME&&ME.isStation);
+      const tasks=stationTasks().map(t=>({...t,_wait:waitOf(t)})).sort((a,b)=>((ord[a.status]??9)-(ord[b.status]??9))||((a._wait?1:0)-(b._wait?1:0))||(pr(a)-pr(b))||(dnum(a)-dnum(b)));
       let qn=0;
       const dueChip=(t)=>{ if(!t.plan)return '<span class="st-due">срок не задан</span>';
         const d=Math.round((Date.parse(String(t.plan).slice(0,10))-Date.parse(new Date().toLocaleDateString('sv')))/864e5); // по календарным дням, не по часам
@@ -12336,8 +12338,9 @@
         <div class="op">${esc(t.op)} · ${esc(t.pz)}${q?`<span class="st-q">${q}-я в очереди</span>`:''}${t._wait?`<span class="st-q" style="background:#eef1f5;color:#5b6b7f">ждёт оп. ${esc(String(t._wait.opNum))}${t._wait.sectionCode&&t._wait.sectionCode!==t.sectionCode?' · '+esc(t._wait.sectionCode):''}</span>`:''}</div>
         ${t.partName?`<div style="font-size:15px;font-weight:700;color:var(--ink);margin:2px 0 1px">${esc(t.partName)}${t.qtyPlan?` · ${esc(String(t.qtyPlan))} шт`:''}</div>`:''}
         <div class="nm">${esc(t.title||'Операция')}</div>
-        <div class="meta">${badge(t.status)}${dueChip(t)}${t.qtyPlan?`<span class="st-due">${esc(String(t.qtyPlan))} шт</span>`:''}</div></div>`; }).join('')
-        ||`<div class="st-empty">На участке нет задач.<br><span style="font-size:14px;opacity:.75">Как только технолог поставит операцию на ${esc(stationSel)}, она появится здесь — первой будет та, у которой ближе срок.</span></div>`;
+        <div class="meta">${badge(t.status)}${dueChip(t)}${(t.qtyPlan&&!t.partName)?`<span class="st-due">${esc(String(t.qtyPlan))} шт</span>`:''}${t.priority==='Высокий'?'<span class="st-due red" style="font-weight:700">▲ высокий приоритет</span>':(t.priority==='Низкий'?'<span class="st-due">▽ низкий приоритет</span>':'')}</div>
+        ${(canPrio&&t.status!=='Выполнено')?`<div style="margin-top:8px;display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11px;color:var(--sl-500)" data-noopen><span style="margin-right:2px">Приоритет</span>${['Высокий','Нормальный','Низкий'].map(v=>`<button type="button" class="pill ${((t.priority||'Нормальный')===v)?'on':''}" data-prio="${esc(v)}" data-ptid="${esc(String(t.id))}" style="font-size:10px;padding:2px 7px;white-space:nowrap;display:inline-flex;gap:3px;align-items:center">${v==='Высокий'?'▲':v==='Низкий'?'▽':''}<span>${esc(v.toLowerCase())}</span></button>`).join('')}</div>`:''}</div>`; }).join('')
+        ||`<div class="st-empty">На участке нет задач.<br><span style="font-size:14px;opacity:.75">Как только технолог поставит операцию на ${esc(stationSel)}, она появится здесь. Порядок очереди: сначала высокий приоритет, внутри — у кого ближе срок.</span></div>`;
       host.innerHTML=`<div class="st-top"><span class="title">Рабочее место</span>
         <select id="st-sec" aria-label="Участок" ${kiosk?'disabled':''}>${opts}</select>
         ${kiosk?stationOpBtnHtml():''}
@@ -12345,7 +12348,9 @@
         <div class="st-grid" style="margin-top:8px">${cards}</div>`;
       const sec=document.getElementById('st-sec');
       if(sec)sec.onchange=(e)=>{stationSel=e.target.value;try{localStorage.setItem('pbs-station',stationSel);}catch{} renderStation(host);};
-      host.querySelectorAll('.st-card').forEach(c=>c.onclick=()=>renderStationTask(host,c.dataset.tid));
+      host.querySelectorAll('.st-card').forEach(c=>c.onclick=(e)=>{ if(e.target.closest('[data-noopen]'))return; renderStationTask(host,c.dataset.tid); });
+      host.querySelectorAll('[data-prio]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); if(b.classList.contains('on'))return; b.disabled=true;
+        try{ await postJson('/api/task/update',{id:Number(b.dataset.ptid),priority:b.dataset.prio}); toast('Приоритет: '+b.dataset.prio.toLowerCase()+' — очередь участка пересчитана.','ok'); await load(); renderStation(host); }catch(err){ b.disabled=false; toast('Не удалось: '+(err.message||err),'err'); } });
       const ob=host.querySelector('#st-op'); if(ob)ob.onclick=()=>stationOperatorDialog(()=>renderStation(host));
     }
     // ── K-206: оператор поста (личная бирка СОТР-… или выбор из списка + ПИН), бездействие 30 мин ──
@@ -13036,7 +13041,13 @@
     // «Ждут ОТК» — ОДНО определение на все экраны (доска / реестр ПЗ / контроль качества):
     //  операция требует ОТК по МК И работа по ней закончена, т.е. контролёру есть что смотреть.
     //  Задача «В работе» контроля не ждёт — предъявлять ещё нечего.
-    const waitsOtk=(t)=>!!t.otk&&taskDone(t.status);
+    // K-249: «ждёт ОТК» — операция с точкой контроля «ОТК» по МК, по которой есть что предъявить: единицы, принятые самоконтролем,
+    //  без заключения ОТК (можно смотреть, не дожидаясь конца партии); если журнал не вёлся — вся партия после «Выполнено».
+    const otkRequired=(t)=>((t.control&&t.control.point)==='ОТК')||!!t.otk;
+    function otkPending(t){ if(!otkRequired(t))return []; const j=(t.journal||[]).filter(r=>r.unit!==''&&r.unit!=null);
+      if(j.length)return j.filter(r=>r.self==='годен'&&!r.otk).map(r=>({id:r.id,unit:r.unit,executor:r.executor,measured:r.measured,note:r.note}));
+      if(taskDone(t.status)){ const n=Number(t.factQty||t.qtyPlan)||0; return Array.from({length:n},(_,i)=>({id:null,unit:i+1,executor:'',measured:'',note:''})); } return []; }
+    const waitsOtk=(t)=>otkPending(t).length>0;
     const countWaitsOtk=(orders)=>(orders||[]).reduce((s,o)=>s+(o.tasks||[]).filter(waitsOtk).length,0);
     // «следующая операция»: первая в работе, иначе первая в очереди
     function nextOp(o){const tk=o.tasks||[];const t=tk.find(x=>x.status==='В работе')||tk.find(x=>x.status==='В очереди');
@@ -13077,10 +13088,36 @@
       if(!p||DATA.mode!=='live'||p.id==null) return p&&p.mk?`<span class="mk-tag" style="font-family:var(--mono);color:var(--navy);font-size:12px">${esc(p.mk)}</span>`:'';
       const list=BOARD_RT||[];
       const opts=['<option value="">— МК не привязана —</option>'].concat(list.map(r=>`<option value="${r.id}"${String(r.id)===String(p.routeId)?' selected':''}>${esc(r.mk)}${r.name?' · '+esc(r.name):''}</option>`)).join('');
-      return `<select class="pos-route" data-pid="${p.id}" title="Маршрутная карта позиции" style="font:inherit;font-size:12px;padding:2px 6px;border:1px solid var(--sl-300);border-radius:var(--r-m);background:#fff;max-width:220px">${opts}</select>`;
+      const launchBtn=(rbacAccess('orders')==='write'||rbacAccess('routes')==='write')?`<button class="tbtn pos-launch" data-launch="${p.id}" style="padding:2px 9px;font-size:11px;margin-left:6px;white-space:nowrap" title="Подобрать МК по чертежу, при необходимости поделить количество между способами изготовления и сразу сформировать карты задач">▶ В производство</button>`:'';
+      return `<select class="pos-route" data-pid="${p.id}" title="Маршрутная карта позиции" style="font:inherit;font-size:12px;padding:2px 6px;border:1px solid var(--sl-300);border-radius:var(--r-m);background:#fff;max-width:220px">${opts}</select>${launchBtn}`;
+    }
+    // K-250: диалог запуска позиции — МК подбираются по чертежу; несколько МК = деление количества (исходная позиция N.0 → N.1, N.2…)
+    async function posLaunchDialog(pid,onDone){
+      let d; try{ d=await (await fetch('/api/position/launch-options?id='+encodeURIComponent(pid))).json(); if(d.error)throw new Error(d.error); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); return; }
+      const P=d.position; if(P.hasTasks){ toast('По этой позиции задачи уже выданы.','warn'); return; }
+      const all=d.candidates.concat(d.others); const ready=d.candidates.filter(c=>c.ready);
+      const w=document.createElement('div'); w.className='ui-dlg';
+      let rows=ready.length?[{routeId:ready[0].id,qty:P.qty}]:[{routeId:'',qty:P.qty}];
+      const optHtml=(cur)=>`<option value="">— выберите МК —</option>${d.candidates.length?`<optgroup label="По чертежу ${esc(P.drawing||'')}">${d.candidates.map(c=>`<option value="${c.id}"${String(c.id)===String(cur)?' selected':''}${c.ready?'':' disabled'}>${esc(c.mk)}${c.variant?' · '+esc(c.variant):''}${c.isMain?' · основной':''}${c.ready?'':' — '+esc(c.statusMk)+', не утверждена'}</option>`).join('')}</optgroup>`:''}${d.others.length?`<optgroup label="Другие утверждённые МК">${d.others.map(c=>`<option value="${c.id}"${String(c.id)===String(cur)?' selected':''}>${esc(c.mk)} · ${esc(c.name)}</option>`).join('')}</optgroup>`:''}`;
+      const paint=()=>{ const sum=rows.reduce((a,r)=>a+(Number(r.qty)||0),0); const okSum=!P.qty||Math.abs(sum-P.qty)<1e-9;
+        w.innerHTML=`<div class="ui-dlg-box" style="width:min(640px,94vw)"><div class="ui-dlg-h" style="margin-bottom:8px">В производство · ${esc(P.numPz)} / ${esc(P.posNum)}</div>
+          <div style="font-size:13px;margin-bottom:10px"><b>${esc(P.name)}</b>${P.drawing?' · '+esc(P.drawing):''} · ${esc(String(P.qty))} ${esc(P.unit)}</div>
+          ${!d.candidates.length?`<div class="rt-info" style="margin-bottom:10px;font-size:12px">По обозначению чертежа маршрутная карта не нашлась — выберите из утверждённых или сначала создайте МК на этот чертёж.</div>`:(!ready.length?`<div class="rt-info" style="margin-bottom:10px;font-size:12px">МК на этот чертёж есть (${d.candidates.map(c=>esc(c.mk)+' — '+esc(c.statusMk)).join(', ')}), но не утверждена — задачи формируются только по утверждённой карте.</div>`:'')}
+          <div style="display:flex;flex-direction:column;gap:6px">${rows.map((r,i)=>`<div style="display:flex;gap:8px;align-items:center"><select data-lr="${i}" style="flex:1;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--sl-300);border-radius:8px;background:#fff">${optHtml(r.routeId)}</select><input data-lq="${i}" value="${esc(String(r.qty))}" inputmode="decimal" style="width:80px;text-align:right;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--sl-300);border-radius:8px"><span class="c-gray" style="font-size:12px">${esc(P.unit)}</span>${rows.length>1?`<b data-ld="${i}" class="c-gray" style="cursor:pointer;padding:0 4px">✕</b>`:'<span style="width:17px"></span>'}</div>`).join('')}</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px"><button class="tbtn" data-ladd style="font-size:12px">＋ ещё способом (поделить количество)</button><span style="font-size:12px;margin-left:auto;color:${okSum?'var(--sub)':'#b91c1c'}">итого ${sum} из ${P.qty}</span></div>
+          ${rows.length>1?`<div class="c-gray" style="font-size:12px;margin-top:8px">Позиция ${esc(P.posNum)} будет разделена на ${rows.map((_,i)=>esc(String(P.posNum).replace(/\.0$/,''))+'.'+(i+1)).join(', ')} — у каждой части своя МК и свои карты задач.</div>`:''}
+          <div class="ui-dlg-b"><button class="tbtn" data-d="cancel">Отмена</button><button class="tbtn primary" data-d="ok"${okSum&&rows.every(r=>r.routeId)?'':' disabled'}>Сформировать задачи</button></div></div>`;
+        w.querySelectorAll('[data-lr]').forEach(el=>el.onchange=()=>{ rows[+el.dataset.lr].routeId=el.value; paint(); });
+        w.querySelectorAll('[data-lq]').forEach(el=>el.onchange=()=>{ rows[+el.dataset.lq].qty=Number(String(el.value).replace(',','.'))||0; paint(); });
+        w.querySelectorAll('[data-ld]').forEach(el=>el.onclick=()=>{ rows.splice(+el.dataset.ld,1); paint(); });
+        const add=w.querySelector('[data-ladd]'); if(add)add.onclick=()=>{ const used=rows.reduce((a,r)=>a+(Number(r.qty)||0),0); const next=ready.find(c=>!rows.some(r=>String(r.routeId)===String(c.id))); rows.push({routeId:next?next.id:'',qty:Math.max(0,P.qty-used)}); paint(); };
+        w.querySelector('[data-d="cancel"]').onclick=()=>w.remove();
+        w.querySelector('[data-d="ok"]').onclick=async(e)=>{ e.target.disabled=true; try{ const j=await postJson('/api/position/launch',{positionId:P.id,parts:rows.map(r=>({routeId:Number(r.routeId),qty:Number(r.qty)}))}); w.remove(); toast('Задачи сформированы: '+j.generated.map(g=>g.mk+' — '+g.created).join(', ')+(j.split?' · позиция разделена':''),'ok'); BOARD_RT=null; RT=null; await load(); if(onDone)onDone(); }catch(err){ e.target.disabled=false; toast('Не запущено: '+(err.message||err),'err'); } }; };
+      document.body.appendChild(w); paint(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
     }
     // навесить обработчики на select-ы привязки маршрута внутри scope; onReload — перерисовать источник
     function wirePosRoutes(scope,onReload){
+      scope.querySelectorAll('[data-launch]').forEach(b=>b.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); posLaunchDialog(Number(b.dataset.launch),onReload); });
       scope.querySelectorAll('select.pos-route').forEach(sel=>{ sel.onchange=async()=>{
         const pid=Number(sel.dataset.pid), rid=sel.value?Number(sel.value):null; sel.disabled=true;
         try{ const r=await fetch('/api/position/route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({positionId:pid,routeId:rid})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
@@ -16354,7 +16391,9 @@
           <button class="pill ${ctlBad?'on':''}" data-cbad="1" style="margin-left:auto"><span class="dot d-red" style="margin-right:5px"></span>только брак</button>
           ${srcChip(DATA.mode==='live')}
         </div>
+        <div id="ctl-otkq" style="margin-bottom:var(--gap)"></div>
         <div id="ctl-blocks" style="display:flex;flex-direction:column;gap:var(--gap)"></div>`;
+      ctlOtkQueueDraw(host);
       const q=document.getElementById('ctl-q');
       // ручная правка поиска снимает deep-link-адрес акта из хеша (иначе адрес врал бы)
       if(q)q.oninput=()=>{ctlQ=q.value;if(location.hash.startsWith('#control/'))try{history.replaceState(null,'','#control');}catch{} ctlDrawBlocks();};
@@ -16494,6 +16533,44 @@
           closeModal(); load();
         }catch(e){ err.textContent=e.message; toast('Акт не создан: '+e.message,'err'); btn.disabled=false; btn.textContent='Провести входной контроль'; }
       };
+    }
+    // ── K-249: очередь ОТК — что предъявлено на контроль, где лежит, по какому чертежу и чем мерить; заключение по единицам прямо отсюда ──
+    let ctlOtkOpen='';
+    function ctlOtkQueueDraw(host){
+      const box=document.getElementById('ctl-otkq'); if(!box)return;
+      const canWrite=rbacAccess('control')==='write'&&DATA.mode==='live';
+      const rows=(DATA.orders||[]).flatMap(o=>(o.tasks||[]).map(t=>({t,o,pend:otkPending(t)}))).filter(x=>x.pend.length)
+        .sort((a,b)=>String(a.t.plan||'9').localeCompare(String(b.t.plan||'9'))||String(a.t.num).localeCompare(String(b.t.num),'ru'));
+      if(!rows.length){ box.innerHTML=`<div class="card pad"><div class="sec-h" style="margin-bottom:4px">Очередь ОТК</div><div class="c-gray" style="font-size:12px">Сейчас на контроль ничего не предъявлено. Сюда попадают операции с точкой контроля «ОТК» по маршрутной карте — как только оператор принял единицы самоконтролем.</div></div>`; return; }
+      const total=rows.reduce((s,x)=>s+x.pend.length,0);
+      box.innerHTML=`<div class="card pad" style="border:1px solid #f5c26b"><div class="sec-h" style="margin-bottom:8px">Очередь ОТК <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub)">· операций ${rows.length} · единиц ${total}</span></div>
+        ${rows.map(({t,o,pend})=>{ const open=ctlOtkOpen===t.num; const C=t.control||{}; const kd=(t.kdDrawings||[])[0];
+          return `<div style="border-top:1px solid var(--line2);padding:9px 0" data-otk-row="${esc(t.num)}">
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+              <div style="flex:1;min-width:260px"><div style="font-weight:700;color:var(--ink)">${esc(t.partName||'—')} <span style="font-weight:400;color:var(--sub)">· ${esc(t.title||'операция')}</span></div>
+                <div style="font-size:12px;color:var(--sub);margin-top:2px"><span class="code">${esc(t.num)}</span> · ${esc(t.sectionCode||'')}${t.equip?' · '+esc(t.equip):''}${t.status?' · '+esc(t.status):''}</div>
+                ${(C.what||C.tol||C.si)?`<div style="font-size:12px;margin-top:3px">${C.what?esc(C.what)+' · ':''}${C.tol?'допуск '+esc(C.tol)+' · ':''}${C.si?'<b>чем мерить:</b> '+esc(C.si):''}</div>`:''}</div>
+              <span class="badge b-amber" style="font-size:11px">ждут: ${pend.length} ед.</span>
+              ${kd?`<a class="tbtn" target="_blank" rel="noopener" href="/api/design/kd/file?doc=${encodeURIComponent(kd.doc||'')}" style="text-decoration:none">Чертёж</a>`:(t.drawing?`<span class="c-gray" style="font-size:11px">${esc(t.drawing)}</span>`:'')}
+              ${t.kdChanged?`<span class="badge b-amber" style="font-size:10px" title="${esc(t.kdChanged.what||'')}">чертёж изменён, ред. ${esc(String(t.kdChanged.rev??''))}</span>`:''}
+              ${canWrite?`<button class="tbtn ${open?'':'primary'}" data-otk-open="${esc(t.num)}">${open?'Свернуть':'Принять'}</button>`:''}</div>
+            ${open?`<div style="margin-top:9px;background:var(--page);border-radius:var(--r-m);padding:10px 12px">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><button class="tbtn" data-otk-all="годен">Все годны</button><span class="c-gray" style="font-size:11px">или по единицам; для брака обязательно «что не так»</span></div>
+              ${pend.map(u=>`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0" data-otk-unit="${esc(String(u.unit))}" data-jid="${u.id??''}"><b style="min-width:42px">№ ${esc(String(u.unit))}</b><span class="c-gray" style="font-size:11px;min-width:150px">${u.measured!==''&&u.measured!=null?'замер '+esc(String(u.measured))+' · ':''}${esc(u.executor||'')}</span>
+                <label class="pill" style="cursor:pointer"><input type="radio" name="otk-${esc(t.num)}-${esc(String(u.unit))}" value="годен" hidden> годен</label><label class="pill" style="cursor:pointer"><input type="radio" name="otk-${esc(t.num)}-${esc(String(u.unit))}" value="брак" hidden> брак</label>
+                <input data-otk-note placeholder="что не так (для брака)" style="flex:1;min-width:180px;border:1px solid var(--sl-300);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px"></div>`).join('')}
+              <div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="tbtn primary" data-otk-save="${esc(t.num)}">Записать заключение</button><span id="otk-msg" class="c-gray" style="font-size:12px"></span></div></div>`:''}
+          </div>`; }).join('')}</div>`;
+      box.querySelectorAll('[data-otk-open]').forEach(b=>b.onclick=()=>{ ctlOtkOpen=ctlOtkOpen===b.dataset.otkOpen?'':b.dataset.otkOpen; ctlOtkQueueDraw(host); });
+      const paintPills=()=>box.querySelectorAll('label.pill input[type=radio]').forEach(r=>{ r.parentElement.classList.toggle('on',r.checked); });
+      box.querySelectorAll('label.pill input[type=radio]').forEach(r=>r.onchange=paintPills);
+      box.querySelectorAll('[data-otk-all]').forEach(b=>b.onclick=()=>{ box.querySelectorAll('[data-otk-unit] input[value="годен"]').forEach(r=>{r.checked=true;}); paintPills(); });
+      box.querySelectorAll('[data-otk-save]').forEach(b=>b.onclick=async()=>{ const msg=box.querySelector('#otk-msg');
+        const units=[...box.querySelectorAll('[data-otk-unit]')].map(el=>{ const c=el.querySelector('input[type=radio]:checked'); return c?{id:el.dataset.jid||null,unit:el.dataset.otkUnit,otk:c.value,note:(el.querySelector('[data-otk-note]').value||'').trim()}:null; }).filter(Boolean);
+        if(!units.length){ if(msg)msg.textContent='Отметьте заключение хотя бы по одной единице.'; return; }
+        const noNote=units.find(u=>u.otk==='брак'&&!u.note); if(noNote){ if(msg)msg.textContent=`Ед. № ${noNote.unit}: укажите, что не так.`; return; }
+        b.disabled=true; try{ const j=await postJson('/api/control/otk-verdict',{taskNum:b.dataset.otkSave,units}); toast(`ОТК: годен ${j.accepted}${j.rejected?', брак '+j.rejected:''}`,'ok'); ctlOtkOpen=''; await load(); renderControlView(host); }
+        catch(e){ b.disabled=false; if(msg)msg.textContent='Не записано: '+(e.message||e); } });
     }
     function ctlDrawBlocks(){
       const wrap=document.getElementById('ctl-blocks'); if(!wrap)return;

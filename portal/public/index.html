@@ -15143,7 +15143,8 @@
         if(step===2)op._open=node.classList.contains('open'); });
     }
     // K-178: палитра типов операций — сначала участок, потом типы этого участка (Александр: «сбоку всё в кучке»)
-    function rtPalSections(){ const m=new Map(); ((rtWiz.cat&&rtWiz.cat.opTypes)||[]).forEach(t=>{ const sec=String(t.section||'').trim(); const code=sec.split(' · ')[0].trim(); const key=code||'—'; if(!m.has(key))m.set(key,{code:key,name:sec.split(' · ').slice(1).join(' · ')||(code?'':'без участка (общие)'),types:[]}); m.get(key).types.push(t); });
+    // K-259 (решение владельца 19.09): отдельная операция «Контроль ОТК» в МК не нужна — контроль задаётся точкой на операции (шаг 3) и попадает в очередь ОТК; тип скрыт из набора
+    function rtPalSections(){ const m=new Map(); ((rtWiz.cat&&rtWiz.cat.opTypes)||[]).filter(t=>String(t.code||'')!=='ОП-ОТК').forEach(t=>{ const sec=String(t.section||'').trim(); const code=sec.split(' · ')[0].trim(); const key=code||'—'; if(!m.has(key))m.set(key,{code:key,name:sec.split(' · ').slice(1).join(' · ')||(code?'':'без участка (общие)'),types:[]}); m.get(key).types.push(t); });
       return [...m.values()].sort((a,b)=>{ const pa=a.code.startsWith('ПБС')?0:a.code.startsWith('ЕНД')?1:2, pb=b.code.startsWith('ПБС')?0:b.code.startsWith('ЕНД')?1:2; return pa-pb||a.code.localeCompare(b.code,'ru',{numeric:true}); }); }
     function rtPalHtml(){ const secs=rtPalSections(); if(!secs.length)return '<div class="rt-hint">Справочник типов операций пуст.</div>';
       // K-185: пока в маршруте нет операций — по умолчанию заготовительный участок (Александр: «чаще всего сначала он»); дальше палитра помнит выбор

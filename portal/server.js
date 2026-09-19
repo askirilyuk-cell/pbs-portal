@@ -7970,6 +7970,20 @@ async function fixRouteNorms(body, session) {
   return { ok: true, changed };
 }
 // K-161: кабинет сотрудника — документы, ждущие его решения (пока акты выпуска; дальше — ЗнЗ, ЛОВ, КД и т.д.)
+// K-255: сводка МК для согласующего — чтобы не утверждать вслепую
+async function mkApproveSummary(routeId) {
+  const [routes, ops] = await Promise.all([ncListSoft('routes'), ncListSoft('operations')]); const r = routes.find((x) => String(x.Id ?? x.id) === String(routeId)); if (!r) return null;
+  const list = ops.filter((o) => o.routes_id === (r.Id ?? r.id)).sort((a, b) => Number(a['№ операции']) - Number(b['№ операции']));
+  const opsOut = list.map((o) => { const pp = mkParamPlanParse(o['Параметры (план)']); const byProg = pp.some((x) => /^программа/i.test(x.name || '') && /^по УП/i.test(String(x.norm || ''))); const nc = mkOpFiles(r['№ МК'], o['№ операции'], 'nc').length;
+    return { n: o['№ операции'], name: o['Операция'] || '', equipment: o['Оборудование'] || '', control: o['Точка контроля'] || 'нет', norm: o['Норма времени (ч)'] ?? '', si: !!String(o['СИ'] || '').trim(), byProg, nc }; });
+  const warn = []; const kd = _parseKd(r['Чертежи КД']);
+  if (!kd.length && !mkOpFiles(r['№ МК'], 0, 'drawing').length) warn.push('чертёж не привязан');
+  const noNc = opsOut.filter((o) => o.byProg && !o.nc); if (noNc.length) warn.push('нет файла УП: оп. ' + noNc.map((o) => o.n).join(', '));
+  const noSi = opsOut.filter((o) => o.control !== 'нет' && !o.si); if (noSi.length) warn.push('контроль без СИ: оп. ' + noSi.map((o) => o.n).join(', '));
+  const noNorm = opsOut.filter((o) => o.norm === '' || o.norm == null); if (noNorm.length) warn.push('без нормы времени: ' + noNorm.length + ' из ' + opsOut.length);
+  if (mkKdFlag(r)) warn.push('чертёж изменён после составления МК');
+  return { ops: opsOut, warn, kd: kd.map((d) => d.doc), history: mkHistParse(r['История']).slice(-3).map((h) => ({ at: h.at, by: h.by, what: h.what })) };
+}
 async function buildCabinet(session) {
   const meId = session && session.userId != null ? String(session.userId) : '';
   const fio = (session && session.fio) || '';
@@ -8001,10 +8015,21 @@ async function buildCabinet(session) {
     } catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'ЗнЗ: ' + String(e.message || e); }
     out.purchases.sort((x, y) => String(x.date).localeCompare(String(y.date)));
   }
+  // K-255: лента «что от меня ждут» — не только согласования: чертёж изменён (автору МК), очередь ОТК (контролёру), приостановленные задачи (технологу)
+  out.todo = [];
+  try { const roles = sessionPortalRoles(session); const [routesRaw, opsRaw, tasksRaw, jrRaw] = await Promise.all([ncListSoft('routes'), ncListSoft('operations'), ncListSoft('tasks'), ncListSoft('journal')]);
+    for (const r of routesRaw) { const f = mkKdFlag(r); if (!f) continue; if (!(isAdmin || String(r['Автор'] || '').trim() === fio)) continue;
+      out.todo.push({ tone: 'amber', title: `Чертёж изменён — сверьте ${r['№ МК'] || 'МК'}`, sub: `${f.doc}: ред. ${f.prevRev ?? ''} → ${f.rev ?? ''}. ${f.what || ''}${f.impact ? ' · задел: ' + f.impact : ''}`, url: '#routes/' + encodeURIComponent(r['№ МК'] || (r.Id ?? r.id)), action: 'Открыть МК' }); }
+    if (isAdmin || roles.includes('ОТК')) { const opById = new Map(opsRaw.map((o) => [o.Id ?? o.id, o])); let ops = 0, units = 0;
+      for (const t of tasksRaw) { const op = opById.get(t.operations_id); if (!op || String(op['Точка контроля'] || '') !== 'ОТК') continue; const n = jrRaw.filter((j) => String(j['№ задачи'] || '') === String(t['№ задачи'] || '') && j['Самоконтроль'] === 'годен' && !j['Контроль ОТК']).length; if (n) { ops++; units += n; } }
+      if (ops) out.todo.push({ tone: 'amber', title: `Очередь ОТК: операций ${ops}, единиц ${units}`, sub: 'Предъявлено на контроль — примите или забракуйте по единицам.', url: '#control', action: 'К очереди ОТК' }); }
+    if (isAdmin || roles.includes('Технолог')) for (const t of tasksRaw) { if (String(t['Статус'] || '') !== 'Приостановлено') continue;
+      out.todo.push({ tone: 'red', title: `Задача приостановлена: ${t['№ задачи'] || ''}`, sub: String(t['Причина приостановки'] || 'причина не указана') + (t['Примечание'] ? ' · ' + String(t['Примечание']).slice(0, 120) : ''), url: '#station', action: 'На участок' }); }
+  } catch (e) { console.warn('K-255: лента кабинета:', e.message); }
   // K-166/K-171: черновики МК автора (с пометкой возврата) и МК на согласовании у меня
   try { const rl = await buildRoutesLive(); for (const r of ((rl && rl.routes) || [])) { const item = { kind: 'mk', kindLabel: 'Маршрутная карта', section: 'Маршруты (Ф.13)', id: r.id, no: r.mk, title: r.name, sub: `${r.type || ''}${r.designation ? ' · ' + r.designation : ''}${r.productType ? ' · ' + r.productType : ''} · операций ${r.opCount || 0}`, status: r.statusMk, date: '', by: r.sentBy || r.author || '', approver: r.approverName || '', url: '#routes/' + encodeURIComponent(r.mk || r.id), returned: r.returnedAt ? { by: r.approverName, at: r.returnedAt, comment: r.approverComment } : null };
       if (r.statusMk === 'Черновик' && String(r.author || '').trim() === fio) out.drafts.push(item);
-      if (r.statusMk === 'На согласовании' && (String(r.approverId ?? '') === meId || (isAdmin && !r.approverId))) out.approvals.push(item);
+      if (r.statusMk === 'На согласовании' && (String(r.approverId ?? '') === meId || (isAdmin && !r.approverId))) { try { item.summary = await mkApproveSummary(r.id); } catch { /* сводка не критична */ } out.approvals.push(item); }
       else if (r.statusMk === 'На согласовании' && r.sentBy === fio) out.sent.push(item); } }
   catch (e) { out.warning = (out.warning ? out.warning + '; ' : '') + 'черновики МК: ' + String(e.message || e); }
   // K-165: мои черновики в других разделах — ЗнЗ «Новая», где я инициатор

@@ -12319,18 +12319,22 @@
       const ord={'В работе':0,'В очереди':1,'Приостановлено':2,'Выполнено':3};
       // K-209: внутри статуса — по сроку (что горит, то и первое); очередь пронумерована
       const dnum=(t)=>t.plan?(Date.parse(t.plan)||8e15):8e15;
-      const tasks=stationTasks().sort((a,b)=>((ord[a.status]??9)-(ord[b.status]??9))||(dnum(a)-dnum(b)));
+      // K-247: операция, у которой не закончена предыдущая по той же позиции, не прячется, а показывается «ждёт оп. N» (решение владельца 19.09)
+      const allT=DATA.orders.flatMap(o=>o.tasks); const posKey=(t)=>String(t.num||'').replace(/-оп\d+$/,'');
+      const waitOf=(t)=>{ if(t.status!=='В очереди')return null; const prev=allT.filter(x=>posKey(x)===posKey(t)&&Number(x.opNum)<Number(t.opNum)&&x.status!=='Выполнено').sort((a,b)=>Number(a.opNum)-Number(b.opNum)); return prev.length?prev[prev.length-1]:null; };
+      const tasks=stationTasks().map(t=>({...t,_wait:waitOf(t)})).sort((a,b)=>((ord[a.status]??9)-(ord[b.status]??9))||((a._wait?1:0)-(b._wait?1:0))||(dnum(a)-dnum(b)));
       let qn=0;
       const dueChip=(t)=>{ if(!t.plan)return '<span class="st-due">срок не задан</span>';
-        const d=Math.round((Date.parse(t.plan)-Date.now())/864e5);
+        const d=Math.round((Date.parse(String(t.plan).slice(0,10))-Date.parse(new Date().toLocaleDateString('sv')))/864e5); // по календарным дням, не по часам
         if(t.status==='Выполнено')return `<span class="st-due">срок ${fmt(t.plan)}</span>`;
         if(d<0)return `<span class="st-due red">просрочено на ${-d} дн · ${fmt(t.plan)}</span>`;
         if(d===0)return `<span class="st-due red">срок сегодня</span>`;
         if(d<=2)return `<span class="st-due amber">срок через ${d} дн · ${fmt(t.plan)}</span>`;
         return `<span class="st-due">срок ${fmt(t.plan)} · через ${d} дн</span>`; };
-      const cards=tasks.map(t=>{ const q=t.status==='В очереди'?++qn:0;
-        return `<div class="st-card ${TKCLASS[t.status]||'work'}" data-tid="${esc(t.id??t.num)}">
-        <div class="op">${esc(t.op)} · ${esc(t.pz)}${q?`<span class="st-q">${q}-я в очереди</span>`:''}</div>
+      const cards=tasks.map(t=>{ const q=(t.status==='В очереди'&&!t._wait)?++qn:0;
+        return `<div class="st-card ${TKCLASS[t.status]||'work'}" data-tid="${esc(t.id??t.num)}"${t._wait?' style="opacity:.62"':''}>
+        <div class="op">${esc(t.op)} · ${esc(t.pz)}${q?`<span class="st-q">${q}-я в очереди</span>`:''}${t._wait?`<span class="st-q" style="background:#eef1f5;color:#5b6b7f">ждёт оп. ${esc(String(t._wait.opNum))}${t._wait.sectionCode&&t._wait.sectionCode!==t.sectionCode?' · '+esc(t._wait.sectionCode):''}</span>`:''}</div>
+        ${t.partName?`<div style="font-size:15px;font-weight:700;color:var(--ink);margin:2px 0 1px">${esc(t.partName)}${t.qtyPlan?` · ${esc(String(t.qtyPlan))} шт`:''}</div>`:''}
         <div class="nm">${esc(t.title||'Операция')}</div>
         <div class="meta">${badge(t.status)}${dueChip(t)}${t.qtyPlan?`<span class="st-due">${esc(String(t.qtyPlan))} шт</span>`:''}</div></div>`; }).join('')
         ||`<div class="st-empty">На участке нет задач.<br><span style="font-size:14px;opacity:.75">Как только технолог поставит операцию на ${esc(stationSel)}, она появится здесь — первой будет та, у которой ближе срок.</span></div>`;
@@ -12619,8 +12623,10 @@
               </div></div>
               <div class="cut-card"><div class="h">Остаток после резки</div><div class="c">
                 <div class="cut-kv"><span class="k">Отрезано (по замерам)</span><span class="cut-mono">${Math.round(consumedMm()*10)/10} мм, ${units.filter(u=>u.measured!=='').length} шт с пропилами</span><span class="k">Расчётный остаток</span><span class="cut-mono">${rem!=null?(rem>=0?'<b>'+rem+' мм</b>':'<b style="color:#b91c1c">'+rem+' мм — длина прутка меньше отрезанного</b>'):'укажите длину прутка'}</span></div>
-                <div class="cut-btns"><label class="cut-btn sm ${st.remMode==='do'?'pri':''}"><input type="radio" name="cut-rem" value="do" ${st.remMode==='do'?'checked':''} hidden>Деловой остаток → бирка</label><label class="cut-btn sm ${st.remMode==='scrap'?'pri':''}"><input type="radio" name="cut-rem" value="scrap" ${st.remMode==='scrap'?'checked':''} hidden>В обрезь</label><label class="cut-btn sm ghost ${st.remMode==='none'?'pri':''}"><input type="radio" name="cut-rem" value="none" ${st.remMode==='none'?'checked':''} hidden>Пруток остаётся</label></div>
-                <div class="cut-note">«Деловой остаток» создаст запись ДО на складе металла с длиной остатка. «В обрезь» — остаток списывается в отход. «Пруток остаётся» — списываются только отрезанные заготовки.</div>
+                <div class="cut-btns"><label class="cut-btn sm ${st.remMode==='do'?'pri':''}"><input type="radio" name="cut-rem" value="do" ${st.remMode==='do'?'checked':''} hidden>Деловой остаток → бирка</label><label class="cut-btn sm ${st.remMode==='scrap'?'pri':''}"><input type="radio" name="cut-rem" value="scrap" ${st.remMode==='scrap'?'checked':''} hidden>В обрезь</label><label class="cut-btn sm ${st.remMode==='none'?'pri':'ghost'}"><input type="radio" name="cut-rem" value="none" ${st.remMode==='none'?'checked':''} hidden>Пруток остаётся</label></div>
+                ${(()=>{ const R=(st.blankInfo&&st.blankInfo.remRules)||{doMinMm:30,keepMinMm:500}; const sug=rem==null||rem<=0?'':(rem>=R.keepMinMm?'none':(rem>=R.doMinMm?'do':'scrap')); const nm={none:'Пруток остаётся',do:'Деловой остаток → бирка',scrap:'В обрезь'};
+                  return `<div class="cut-note" style="margin-top:6px"><b>Как решить:</b> остаток от ${R.keepMinMm} мм — <b>пруток остаётся</b> на карточке (металла просто стало меньше); от ${R.doMinMm} до ${R.keepMinMm} мм — <b>деловой остаток</b>: кусок уходит с карточки на стеллаж ДО с биркой; меньше ${R.doMinMm} мм — <b>в обрезь</b> (списывается).${sug?` По расчёту ${rem} мм → <b>${nm[sug]}</b>${sug!==st.remMode?' <span style="color:#b45309">(выбрано другое — так и надо?)</span>':''}.`:''}</div>`; })()}
+                
               </div></div>
               <div class="cut-card"><div class="h">Ход операции</div><div class="c">
                 <div class="cut-kv"><span class="k">Начата</span><span>${st.startedAt?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+cutElapsed(st.startedAt):'—'}</span><span class="k">Норма / факт</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'} / ${st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10+' ч':'—'}</span></div>
@@ -12656,8 +12662,8 @@
         host.querySelectorAll('[data-si-del]').forEach(b0=>b0.onclick=()=>{ readInputs(); st.si=st.si.filter(x=>x!==b0.dataset.siDel); paint(); });
         host.querySelectorAll('[data-meas]').forEach(i=>i.addEventListener('change',()=>{ readInputs(); paint(); }));
         host.querySelectorAll('[data-otk]').forEach(o=>o.addEventListener('change',async()=>{ readInputs(); const u=units[Number(o.dataset.otk)-1]; if(u&&u.otk){ u.note=(u.note?u.note+'; ':'')+'ОТК '+u.otk+' '+(meName||'')+' '+new Date().toLocaleString('ru-RU'); } paint(); try{ await saveJournal(); }catch(e){ setMsg('Ошибка: '+e.message,true); } }));
-        host.querySelectorAll('input[name="cut-rem"]').forEach(r=>r.addEventListener('change',()=>{ readInputs(); paint(); }));
-        const bl=host.querySelector('#cut-barlen'); if(bl)bl.addEventListener('change',()=>{ readInputs(); paint(); });
+        host.querySelectorAll('input[name="cut-rem"]').forEach(r=>r.addEventListener('change',()=>{ st.remManual=true; readInputs(); paint(); }));
+        const bl=host.querySelector('#cut-barlen'); if(bl)bl.addEventListener('change',()=>{ readInputs(); if(!st.remManual&&st.barLen>0){ const R=(st.blankInfo&&st.blankInfo.remRules)||{doMinMm:30,keepMinMm:500}; const rr=st.barLen-consumedMm(); if(rr>0)st.remMode=rr>=R.keepMinMm?'none':(rr>=R.doMinMm?'do':'scrap'); } paint(); });
         host.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{ readInputs(); const u=units[Number(b.dataset.u)-1]; if(!u)return;
           if(b.dataset.act==='ok'){ if(!st.matConfirmed){ toast('Сначала подтвердите карточку металла (скан бирки).','err'); return; } u.self='годен'; }
           else { const ok=await uiConfirm(`Заготовка №${u.unit}: длина ${u.measured} мм вне допуска. Отметить как брак?`,{ok:'Брак',danger:true}); if(!ok)return; u.self='брак'; }
@@ -12674,15 +12680,15 @@
         const fin=host.querySelector('#cut-finish'); if(fin)fin.onclick=async()=>{ readInputs(); if(st.busy)return;
           const n=units.filter(u=>u.measured!==''&&u.self).length; const mm=Math.round(consumedMm()*10)/10; const rem=(st.barLen!=null&&st.barLen>0)?Math.round((st.barLen-mm)*10)/10:null;
           const m=st.mat; const lines=[`Принято ${accepted()} шт${units.some(u=>unitState(u)==='x')?', брак '+units.filter(u=>unitState(u)==='x').length+' шт':''}.`];
-          if(m&&st.blankInfo&&st.blankInfo.isBlankOp){ lines.push(`Списать ${mm} мм (${n} шт с пропилами) с карточки ${m.code}.`); if(st.remMode==='do'&&rem!=null&&rem>0)lines.push(`Остаток ${rem} мм оприходовать как деловой остаток (ДО).`); else if(st.remMode==='scrap'&&rem!=null&&rem>0)lines.push(`Остаток ${rem} мм — в обрезь.`); else lines.push('Остаток прутка остаётся на карточке.'); }
+          if(m&&st.blankInfo&&st.blankInfo.isBlankOp){ lines.push(`Списать ${mm} мм (${n} шт с пропилами) с карточки ${m.code}.`); if(st.remMode==='do'&&rem!=null&&rem>0)lines.push(`Остаток ${rem} мм уйдёт с карточки в деловой остаток (ДО) — повесьте бирку.`); else if(st.remMode==='scrap'&&rem!=null&&rem>0)lines.push(`Остаток ${rem} мм — в обрезь, спишется с карточки.`); else lines.push('Остаток прутка остаётся на карточке — металла просто стало меньше.'); if(st.remMode!=='none'&&!(rem>0))lines.push('Длина прутка не указана — остаток не оформляется, пруток остаётся на карточке.'); }
           else lines.push('Списание металла: карточка не выбрана или операция не первая по МК — списания не будет.');
           lines.push(t.nextOp?`Задача закроется, оп. ${t.nextOp.num} ${t.nextOp.name} встанет в очередь${t.nextOp.section?' на '+t.nextOp.section:''}.`:'Задача закроется.');
           const ok=await uiConfirm(lines.join('\n'),{title:'Завершить операцию',ok:'Завершить'}); if(!ok)return; st.busy=true; fin.disabled=true; setMsg('Завершение…');
           try{ await saveJournal();
             if(m&&st.blankInfo&&st.blankInfo.isBlankOp&&mm>0){ const body={taskId:t.id,itemKind:m.kind,itemId:Number(m.id),partsCount:n,perPart:false,unit:m.kind==='remnant'?'кг':'мм',qtyValue:mm,author:meName};
               if(m.kind==='remnant'){ const w=Number(m.weight)||0; const bl=st.barLen||0; body.qtyValue=bl>0?Math.round(w*mm/bl*1000)/1000:w; if(st.remMode==='do'&&rem!=null&&rem>0&&bl>0){ body.scrapValue=Math.round(w*rem/bl*1000)/1000; body.scrapUnit='кг'; } }
-              else if(st.remMode==='do'&&rem!=null&&rem>0){ body.scrapValue=rem; body.scrapUnit='мм'; }
-              const j=await postJson('/api/metal/blank/issue',body); toast(`Списано ${mtNum(j.qtyKg)} кг (${j.code||m.code})${j.remnant?' · деловой остаток '+j.remnant.code:''}`,'ok'); }
+              else if((st.remMode==='do'||st.remMode==='scrap')&&rem!=null&&rem>0){ body.scrapValue=rem; body.scrapUnit='мм'; body.remMode=st.remMode; } else body.remMode='keep';
+              const j=await postJson('/api/metal/blank/issue',body); toast(`Списано ${mtNum(j.qtyKg)} кг (${j.code||m.code})${j.remnant?' · деловой остаток '+j.remnant.code:''}${j.scrapKg?' · в обрезь '+mtNum(j.scrapKg)+' кг':''}`,'ok'); }
             const hours=st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10:null;
             await saveTask({status:'Выполнено',factQty:accepted(),factTime:(t.factTime!==''&&t.factTime!=null)?t.factTime:(hours||''),finishedAt:cutNow(),note:(t.note||'')+(units.some(u=>unitState(u)==='x')?' брак: '+units.filter(u=>unitState(u)==='x').map(u=>'№'+u.unit).join(', '):'')});
             st.status='Выполнено'; setMsg('Операция завершена ✓'); paint();
@@ -14659,6 +14665,7 @@
           ${(r.kdDrawings&&r.kdDrawings.length)?`<div style="display:flex;flex-direction:column">${r.kdDrawings.map(d=>`<div style="display:flex;align-items:center;gap:10px;font-size:12px;padding:5px 0;border-top:1px solid var(--line2)"><span class="code" style="font-family:var(--mono)">${esc(String(d.doc).replace('ПБС.',''))}</span><span class="ell" style="flex:1;color:var(--ink)">${esc(d.name||'')}</span>${d.vid?`<span class="c-gray" style="font-size:11px;white-space:nowrap">${esc(d.vid)}</span>`:''}<a class="tbtn" href="${d.rel?('/api/design/kd/file?rel='+encodeURIComponent(d.rel)):('/api/design/kd/file?doc='+encodeURIComponent(d.doc))}" target="_blank" rel="noopener" title="Открыть выпущенный PDF из записей 03-КД" style="padding:2px 10px;font-size:12px;text-decoration:none">Просмотр</a></div>`).join('')}</div>`:'<div class="c-gray" style="font-size:12px">Чертежи не привязаны — откройте «✎ Редактировать» и выберите из реестра КД.</div>'}
         </div>`:''}
         ${d.mode==='live'?`<div class="card pad" style="margin-bottom:var(--gap)"><div class="sec-h" style="margin-bottom:8px">Чертёж файлом <span class="c-gray" style="font-weight:400;font-size:12px;text-transform:none;letter-spacing:0">· временно, до привязки через реестр КД; оператор видит его в карте задачи</span></div><div>${attSlot(r.mk,0,'drawing','Чертёж (PDF или изображение)',r.drawingFiles)}</div></div>`:''}
+        ${r.metalSummary?`<div class="card pad" style="margin-bottom:var(--gap)"><div class="sec-h" style="margin-bottom:8px">Металл по МК — факт</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 18px;font-size:12px"><div><div style="font-size:11px;color:var(--sl-500)">Ушло в детали</div><div style="font-weight:700;color:var(--ink);font-size:15px">${rtNum(r.metalSummary.partsKg)} кг</div></div><div><div style="font-size:11px;color:var(--sl-500)">В деловой остаток</div><div style="font-weight:700;color:var(--ink);font-size:15px">${rtNum(r.metalSummary.remnantKg)} кг${(r.metalSummary.remnants||[]).length?` <span style="font-weight:400;font-size:11px;color:var(--sub)">· ${esc(r.metalSummary.remnants.join(', '))}</span>`:''}</div></div><div><div style="font-size:11px;color:var(--sl-500)">В обрезь</div><div style="font-weight:700;color:var(--ink);font-size:15px">${rtNum(r.metalSummary.scrapKg)} кг</div></div></div></div>`:''}
         ${isKom?`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Маршрут операций</div>${opsTable}<div style="margin-top:9px;font-size:11px;color:var(--sl-500)"><b>С</b> — самоконтроль · <b style="color:var(--amber,#b45309)">ОТК</b> — контролёр · ✓ выполнено · ⧖ в работе · • в очереди</div></div>
         <div class="card pad" id="rc-actuals"><div class="sec-h" style="margin-bottom:6px">Нормы по факту прогонов</div><div class="c-gray" style="font-size:12px">загружаю…</div></div>`
           :`<div style="display:flex;flex-direction:column;gap:var(--gap)"><div class="card pad"><div class="sec-h" style="margin-bottom:10px">Входящие компоненты</div>${rdySummary}${compTable}<div style="margin-top:9px;font-size:11px;color:var(--sl-500)">Готовность — по статусу задач подобранного МК-КОМ (индикация; сборку не блокирует).</div></div><div class="card pad"><div class="sec-h" style="margin-bottom:10px">Маршрут сборки</div>${opsTable}</div></div>`}
@@ -14669,7 +14676,7 @@
       { const ab=host.querySelector('#rc-kdack'); if(ab)ab.onclick=async()=>{ const c=await uiPrompt('МК сверена с новой редакцией чертежа','',{placeholder:'что проверили / что поправили в МК (необязательно)'}); if(c===null||c===undefined)return; try{ await postJson('/api/route/kd-ack',{id:r.id,comment:c||''}); RT=null; toast('Отметка снята, запись внесена в историю МК и чертежа.','ok'); openRouteCard(host,r.id); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } }; }
       { const vb=host.querySelector('#rc-variant'); if(vb)vb.onclick=async()=>{ const nm=await uiPrompt('Как назвать этот способ изготовления','',{placeholder:'напр.: универсал + фрезер'}); if(nm===null)return; openRouteBuilder(host,null,{copyFrom:r.id,variant:String(nm||'').trim()}); }; // K-219
         const vbox=host.querySelector('#rc-variants'); if(vbox)vbox.querySelectorAll('[data-vmain]').forEach(b0=>b0.onclick=async()=>{ try{ await postJson('/api/route/variant',{id:Number(b0.dataset.vmain),isMain:true}); toast('Основной маршрут изменён.','ok'); RT=null; openRouteCard(host,r.id); }catch(e){ toast(e.message,'err'); } }); }
-      rtApprovalWire(host,r); // K-171
+      r._ops=d.operations||[]; rtApprovalWire(host,r); // K-171
       rtActualsLoad(host,r); // K-175
       const gb=host.querySelector('#rc-gen'); if(gb)gb.onclick=()=>genRouteTasks(host,r.id);
       // Доработка Этапа 1: просмотр вложения-PDF/картинки во встроенном вьювере (модалка iframe/img)
@@ -14779,7 +14786,7 @@
       if(st==='Утверждена'&&mkIsApprover())h+='<button class="tbtn" id="rc-return" title="Вернуть в черновик для правок">Вернуть в черновик</button>';
       if(AUTH&&AUTH.isAdmin)h+=`<select class="rt-inp" id="rc-force" title="Исправить статус (только администратор)" style="max-width:170px"><option value="">исправить статус…</option>${['Черновик','На согласовании','Утверждена','В производстве','Выполнена'].filter(x=>x!==st).map(x=>`<option>${x}</option>`).join('')}</select>`;
       return h; }
-    async function mkStatusPost(host,r,body,okMsg){ try{ const res=await fetch('/api/route/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id,...body})}); const j=await res.json().catch(()=>({})); if(!res.ok||j.error)throw new Error(j.error||('HTTP '+res.status)); toast(j.partial?`Согласовано. Карта ушла следующему: ${j.next}`:okMsg,'ok'); if(j.blankReserve&&(j.blankReserve.reserved||j.blankReserve.note))setTimeout(()=>toast(j.blankReserve.reserved?`Резерв металла: ${j.blankReserve.reserved.code} · ${j.blankReserve.reserved.qty} кг`:j.blankReserve.note,'ok'),300); RT=null; openRouteCard(host,r.id); try{cabBadgeRefresh();}catch{} }catch(e){ toast('Не выполнено: '+e.message,'err'); } }
+    async function mkStatusPost(host,r,body,okMsg){ try{ const res=await fetch('/api/route/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id,...body})}); const j=await res.json().catch(()=>({})); if(res.status===409&&j.needConfirm){ if(await uiConfirm({title:'По МК идут задачи',text:j.error,ok:'Всё равно сменить статус',danger:true}))return mkStatusPost(host,r,{...body,force:true},okMsg); const f0=host.querySelector('#rc-force'); if(f0)f0.value=''; return; } if(!res.ok||j.error)throw new Error(j.error||('HTTP '+res.status)); toast(j.partial?`Согласовано. Карта ушла следующему: ${j.next}`:okMsg,'ok'); if(j.blankReserve&&(j.blankReserve.reserved||j.blankReserve.note))setTimeout(()=>toast(j.blankReserve.reserved?`Резерв металла: ${j.blankReserve.reserved.code} · ${j.blankReserve.reserved.qty} кг`:j.blankReserve.note,'ok'),300); RT=null; openRouteCard(host,r.id); try{cabBadgeRefresh();}catch{} }catch(e){ toast('Не выполнено: '+e.message,'err'); } }
     // K-221 (З-014): несколько согласующих — по очереди, в порядке отметки
     function mkPickApprovers(list,okLabel){ return new Promise(res=>{ let last=[]; try{ last=JSON.parse(localStorage.getItem('mk.approvers')||'[]'); }catch{} let order=last.filter(id=>list.some(u=>String(u.id)===String(id))).map(String);
       if(!order.length){ let one=''; try{ one=localStorage.getItem('mk.approver')||''; }catch{} if(one&&list.some(u=>String(u.id)===one))order=[one]; }
@@ -14791,10 +14798,14 @@
       document.body.appendChild(w); paint(); const close=(v)=>{ w.remove(); res(v); };
       w.querySelector('[data-d="cancel"]').onclick=()=>close(null); w.onclick=(e)=>{ if(e.target===w)close(null); };
       w.querySelector('[data-d="ok"]').onclick=()=>{ if(!order.length){ toast('Отметьте согласующего.','warn'); return; } try{ localStorage.setItem('mk.approvers',JSON.stringify(order)); }catch{} close(order.map(id=>{ const u=list.find(x=>String(x.id)===id); return {id:u.id,name:u.name}; })); }; }); }
+    // K-247 (П-04): операция «по программе ЧПУ» без файла УП — предупреждение, не запрет (программа не всегда есть заранее)
+    async function mkNoNcConfirm(ops,pendOf){ const bad=(ops||[]).map((o,i)=>({n:o.n||i+1,name:o.name||'',byProg:(o.paramPlan||[]).some(p=>/^по УП/i.test(String(p.norm||''))),files:((o.ncFiles||[]).length+(pendOf?pendOf(o):0))})).filter(x=>x.byProg&&!x.files);
+      if(!bad.length)return true; return await uiConfirm({title:'Программа ЧПУ не прикреплена',text:`У операций «по программе» нет файла УП:\n${bad.map(x=>'оп. '+x.n+' — '+x.name).join('\n')}\n\nМожно отправить так и прикрепить программу позже — оператор до этого увидит «по УП» без файла.`,ok:'Отправить без УП',cancel:'Вернуться'}); }
     async function rtApprovalWire(host,r){
       await mkLoadApprovers();
       const on=(id,fn)=>{ const el=host.querySelector('#'+id); if(el)el.onclick=fn; };
       on('rc-send',async()=>{ const list=await mkLoadApprovers(); if(!list.length){ toast('Список согласующих МК пуст — Настройки → «1С и бухгалтерия».','err'); return; }
+        if(!(await mkNoNcConfirm(r._ops)))return;
         const chain=await mkPickApprovers(list,'Отправить'); if(!chain)return; mkStatusPost(host,r,{status:'На согласовании',approvers:chain},'МК отправлена на согласование: '+chain.map(u=>u.name).join(' → ')); });
       on('rc-approve',()=>mkStatusPost(host,r,{status:'Утверждена'},'МК утверждена.'));
       on('rc-return',async ()=>{ const c=(await uiPrompt('Что доработать (увидит автор):','')); if(c===null)return; mkStatusPost(host,r,{status:'Черновик',comment:c},'МК возвращена в черновик.'); });
@@ -15704,6 +15715,7 @@
         const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(2); const nx=host.querySelector('#rt-next'); if(nx)nx.onclick=()=>rtWizGo(4); }
       if(step===4){ const bk=host.querySelector('#rt-back'); if(bk)bk.onclick=()=>rtWizGo(3); const dr=host.querySelector('#rt-draft'); if(dr)dr.onclick=()=>rtWizSave(false);
         const sn=host.querySelector('#rt-send'); if(sn)sn.onclick=async()=>{ const list=await mkLoadApprovers(); if(!list.length){ toast('Список согласующих МК пуст — Настройки → «1С и бухгалтерия».','err'); return; }
+          if(!(await mkNoNcConfirm(rtWiz.ops.map((o,i)=>({n:i+1,name:o.name,ncFiles:o.ncFiles,_ncPending:o._ncPending,paramPlan:(rtOpHasNc(o)&&rtOpByProgram(o))?[{norm:'по УП'}]:[]})),(o)=>(o._ncPending||[]).length)))return;
           const chain=await mkPickApprovers(list,'Сохранить и отправить'); if(chain)rtWizSave({send:chain}); };
         mkLoadApprovers().then(()=>{ const b0=host.querySelector('#rt-release'); if(b0&&mkIsApprover())b0.hidden=false; });
         const rl=host.querySelector('#rt-release'); if(rl)rl.onclick=()=>rtWizSave({approve:true}); }

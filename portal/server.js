@@ -1598,7 +1598,7 @@ async function buildRouteCard(id) {
       designation: r['Изделие / обозначение'] || '', productType: r['Тип продукции'] || '', revision: r['Ревизия'] || '', status: r['Статус'] || '',
       material: r['Материал'] || '', author: r['Автор'] || '', statusMk: r['Статус МК'] || 'Черновик', // K-166
       variant: r['Вариант'] || '', isMain: !!r['Основной вариант'], variants: mkVariantsOf(routes, r), // K-219
-      history: mkHistParse(r['История']), kdChanged: mkKdFlag(r), // K-239 / K-245
+      history: mkHistParse(r['История']), kdChanged: mkKdFlag(r), metalSummary: await mkMetalSummary(r['№ МК']).catch(() => null), // K-239 / K-245 / K-247
       drawingFiles: mkOpFiles(r['№ МК'], 0, 'drawing'), // K-240
       approvalQueue: mkQueueParse(r['Согласующие (очередь)']), // K-221
       approverId: r['Согласующий (id)'] ?? null, approverName: r['Согласующий'] || '', sentBy: r['Отправил на согласование'] || '', sentAt: r['Дата отправки'] || '', approvedBy: r['Утвердил'] || '', approvedAt: r['Дата утверждения'] || '', returnedAt: r['Дата возврата'] || '', approverComment: r['Комментарий согласующего'] || '', // K-171
@@ -1862,6 +1862,11 @@ async function mkSetStatusCore(body, session) {
   const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, ''); const link = `${portal}/#routes/${encodeURIComponent(r['№ МК'] || r.Id)}`;
   const allowed = { 'Черновик': ['На согласовании', 'Утверждена'], 'На согласовании': ['Утверждена', 'Черновик'], 'Утверждена': ['Черновик', 'В производстве', 'Выполнена'], 'В производстве': ['Выполнена', 'Утверждена'], 'Выполнена': ['В производстве'] };
   if (!admin && !(allowed[from] || []).includes(to)) { const e = new Error(`Переход «${from}» → «${to}» не разрешён.`); e.status = 400; throw e; }
+  // K-247 (П-06): уход из «В производстве» назад (в черновик/утверждена) при незакрытых задачах — только с явным подтверждением
+  if (from === 'В производстве' && ['Черновик', 'Утверждена', 'На согласовании'].includes(to) && !body.force) { const rid = r.Id ?? r.id;
+    const posIds = new Set((await ncListSoft('positions')).filter((x) => Number(x.routes_id) === Number(rid)).map((x) => x.Id ?? x.id));
+    const live = (await ncListSoft('tasks')).filter((t) => posIds.has(t.positions_id) && String(t['Статус'] || '') !== 'Выполнено');
+    if (live.length) { const e = new Error(`По этой МК выдано незакрытых задач: ${live.length} (в работе: ${live.filter((t) => /работе/i.test(String(t['Статус'] || ''))).length}). Смена статуса на «${to}» не отзовёт их с участков — операторы продолжат видеть задачи.`); e.status = 409; e.needConfirm = true; throw e; } }
   await mkEnsureApprovalCols();
   const patch = {};
   if (to === 'На согласовании') {
@@ -1981,6 +1986,8 @@ async function saveRoute(body, session) {
     const year = new Date().getFullYear();
     mk = await nextMkNumber(type, year);
     routeRow['№ МК'] = mk;
+    // K-247 (П-10): номер удалённой МК выдаётся повторно — чужую папку вложений убираем в сторону, чтобы новая МК её не унаследовала
+    try { const old = path.join(MK_FILE_ROOT, _mkSafe(mk)); if (fs.existsSync(old)) fs.renameSync(old, old + '__прежняя_' + Date.now()); } catch (e) { console.warn('K-247: папка вложений прежней МК:', e.message); }
     routeRow['Статус'] = 'Действует';
     const cr = await ncCreateMany('routes', [routeRow]);
     const c = Array.isArray(cr) ? cr[0] : cr; routeId = c.Id ?? c.id;
@@ -2477,7 +2484,7 @@ async function generateTasksFromRoute(routeId) {
     }
     perPos.push({ pz: numPz, pos: posNum, created: posCreated });
   }
-  let statusChange = null; if (created > 0 && stMk !== 'В производстве') { try { statusChange = await setMkStatus(rid, 'В производстве'); } catch (e) { console.warn('МК: статус «В производстве» не поставлен:', e.message); } }
+  let statusChange = null; if (created > 0 && stMk !== 'В производстве') { try { statusChange = await setMkStatus(rid, 'В производстве'); await mkHistAdd(rid, [`Статус: «${stMk}» → «В производстве» — сформированы карты задач: ${created}`], null); } catch (e) { console.warn('МК: статус «В производстве» не поставлен:', e.message); } }
   return { ok: true, mk, created, skipped, positions: perPos, statusChange };
 }
 
@@ -9697,10 +9704,12 @@ async function metalMoveImpl(body) {
     const stockBase = jb != null ? jb : whNum(it['Остаток']);
     const resBase = metalReserveFor(code, movements, it['Резерв']);
     const avail = stockBase - resBase;
+    const r3 = (x) => Math.round(x * 1000) / 1000; // K-247: без хвостов 298.59900000000005
     let newStock = stockBase, newRes = resBase, balanceAfter = stockBase;
     if (op === 'Приход') { newStock = stockBase + qty; balanceAfter = newStock; }
     else if (op === 'Расход') { if (qty > avail) { const e = new Error(`Расход ${qty} кг превышает доступно ${avail} кг (${code}; остаток ${stockBase}, резерв ${resBase}). Уменьшите кол-во или снимите резерв.`); e.status = 409; throw e; } newStock = stockBase - qty; balanceAfter = newStock; }
-    if (op === 'Расход' && body.remnant && Number(body.remnantWeight) > (stockBase - qty) + 0.05) { const e = new Error(`Деловой остаток ${Math.round(Number(body.remnantWeight) * 10) / 10} кг больше, чем останется на карточке ${code} после расхода (${Math.round((stockBase - qty) * 10) / 10} кг). Проверьте длину прутка в работе.`); e.status = 409; throw e; } // K-246: фантомный ДО (прогон 19.09: 253,9 кг с карточки на 88,8 кг)
+    if (op === 'Расход' && body.remnant && body.remnantFromQty && Number(body.remnantWeight) > qty + 0.05) { const e = new Error('Деловой остаток не может быть больше списываемого с карточки.'); e.status = 409; throw e; }
+    if (op === 'Расход' && body.remnant && !body.remnantFromQty && Number(body.remnantWeight) > (stockBase - qty) + 0.05) { const e = new Error(`Деловой остаток ${Math.round(Number(body.remnantWeight) * 10) / 10} кг больше, чем останется на карточке ${code} после расхода (${Math.round((stockBase - qty) * 10) / 10} кг). Проверьте длину прутка в работе.`); e.status = 409; throw e; } // K-246: фантомный ДО (прогон 19.09: 253,9 кг с карточки на 88,8 кг)
     else if (op === 'Списание') { if (qty > stockBase) { const e = new Error(`Списание ${qty} кг превышает остаток ${stockBase} кг (${code}).`); e.status = 409; throw e; } newStock = stockBase - qty; balanceAfter = newStock; }
     else if (op === 'Инвентаризация') { newStock = qty; balanceAfter = qty; if (newRes > newStock) newRes = newStock; }
     else if (op === 'Резерв') { if (qty > avail) { const e = new Error(`Резерв ${qty} кг превышает доступно ${avail} кг (${code}).`); e.status = 409; throw e; } newRes = resBase + qty; balanceAfter = stockBase; }
@@ -9708,7 +9717,7 @@ async function metalMoveImpl(body) {
 
     const row = {
       'Проводка': `${code} · ${op.toLowerCase()} · ${whRuDate(dateIso)}`,
-      'Код': code, 'Дата': dateIso, 'Операция': op, 'Кол-во': qty, 'Остаток после': balanceAfter,
+      'Код': code, 'Дата': dateIso, 'Операция': op, 'Кол-во': qty, 'Остаток после': r3(balanceAfter),
     };
     const put = (col, v) => { const s = (v == null ? '' : String(v)).trim(); if (s) row[col] = s; };
     put('Раскрой / формат', body.format); put('Поставщик', body.supplier); put('№ счёта', body.invoiceNo);
@@ -9723,6 +9732,7 @@ async function metalMoveImpl(body) {
     if (body.znzId != null && body.znzId !== '') { try { await ncLinkRecords('procurement_requests', 'Движения металла (ЗнЗ)', Number(body.znzId), [movementId]); } catch { /* soft */ } }
     if (body.pzId != null && body.pzId !== '') { try { await ncLinkRecords('orders', 'Движения металла (расход)', Number(body.pzId), [movementId]); } catch { /* soft */ } }
 
+    newStock = r3(newStock); newRes = r3(newRes);
     // кэш реестра (остаток авторитетен из журнала — при сбое ncUpdate самовосстановится)
     let sync = true;
     try { await ncUpdate('metal_stock', itemId, { 'Остаток': newStock, 'Резерв': newRes }); }
@@ -9940,6 +9950,18 @@ function kdHrefForDecNo(decNo) {
   catch { return null; }
 }
 // «уже списано по этой МК» + «остаток по норме» — общая сводка для GET-кандидатов и ответа POST-списания
+// K-247: что делать с остатком прутка после резки (решение владельца 19.09): длинный — остаётся на карточке (просто стало меньше),
+// короткий годный кусок — деловой остаток с биркой (уходит с карточки в ДО), совсем короткий — обрезь (списывается). Пороги — рантайм.
+function cutRemRules() { const n = (k, d) => { const v = Number(runtime[k] != null ? runtime[k] : process.env[k]); return Number.isFinite(v) && v > 0 ? v : d; }; return { doMinMm: n('CUT_DO_MIN_MM', 30), keepMinMm: n('CUT_KEEP_MIN_MM', 500) }; }
+// итог по МК: сколько металла ушло в детали / в деловой остаток / в обрезь (для карточки МК)
+async function mkMetalSummary(mk) {
+  const mkNo = String(mk || '').trim(); if (!mkNo) return null;
+  const mv = (await ncListSoft('metal_movements')).filter((m) => String(m['Позиция ПЗ'] || '').trim() === mkNo); if (!mv.length) return null;
+  const sum = (f) => Math.round(mv.filter(f).reduce((a, m) => a + whNum(m['Кол-во']), 0) * 100) / 100; const b = (m) => String(m['Основание / комментарий'] || ''); const op = (m) => String(m['Операция'] || '').trim();
+  const doRows = mv.filter((m) => op(m) === 'Расход' && b(m).startsWith('Перевод в деловой остаток'));
+  return { partsKg: sum((m) => op(m) === 'Расход' && b(m).includes(`по МК-${mkNo}`)), remnantKg: sum((m) => doRows.includes(m)), scrapKg: sum((m) => op(m) === 'Списание' && b(m).startsWith('Обрезь после резки')),
+    remnants: doRows.map((m) => (b(m).match(/ДО-\d+/) || [''])[0]).filter(Boolean) };
+}
 async function metalBlankIssueSummary(ctx) {
   const [stock, canon, movements] = await Promise.all([ncListSoft('metal_stock'), ncListSoft('catalog_canon'), ncListSoft('metal_movements')]);
   const marker = `по МК-${ctx.mk}`;
@@ -10141,13 +10163,16 @@ async function metalBlankIssue(body) {
     let scrapKg = null;
     if (scrapValue != null && scrapValue > 0) scrapKg = Math.round(toKg(scrapUnit, scrapValue) * 1000) / 1000;
 
-    const mv = await metalMove({
-      itemId: it.Id ?? it.id, operation: 'Расход', qty: totalKg, basis, author,
-      pzLine: ctx.mk, part: decLabel,
-      remnant: (scrapKg > 0) ? true : undefined, remnantWeight: scrapKg > 0 ? scrapKg : undefined,
-      remnantLocation: it['Ячейка'] || '',
-    });
+    if (scrapKg > 0 && ['do', 'scrap'].includes(body.remMode || 'do') && scrapKg > whNum(it['Остаток']) - totalKg + 0.05) throw new Error(`Остаток прутка ${Math.round(scrapKg * 10) / 10} кг больше, чем останется на карточке ${it['Код']} после резки (${Math.round((whNum(it['Остаток']) - totalKg) * 10) / 10} кг). Проверьте длину прутка в работе — ничего не списано.`); // проверка ДО первой проводки: иначе расход запишется, а остаток — нет
+    // K-247: остаток прутка — отдельной проводкой, чтобы металл не считался дважды (раньше ДО создавался, а с карточки не уходил)
+    const remMode = ['do', 'scrap', 'keep'].includes(body.remMode) ? body.remMode : (scrapKg > 0 ? 'do' : 'keep');
+    const mv = await metalMove({ itemId: it.Id ?? it.id, operation: 'Расход', qty: totalKg, basis, author, pzLine: ctx.mk, part: decLabel });
     const release = await releaseMkReserveOnConsumption(ctx.mk, it['Код'], totalKg);
+    if (scrapKg > 0 && remMode === 'do') { const code = await metalNextRemnantCode();
+      const mv2 = await metalMove({ itemId: it.Id ?? it.id, operation: 'Расход', qty: scrapKg, basis: `Перевод в деловой остаток ${code} после резки · ${ctx.mk} · ${decLabel}${scrapUnit === 'мм' ? ' · ' + scrapValue + ' мм' : ''}`, author, pzLine: ctx.mk, part: decLabel,
+        remnant: true, remnantWeight: scrapKg, remnantFromQty: true, remnantLocation: it['Ячейка'] || '', remnantSizes: scrapUnit === 'мм' ? `${size} × ${scrapValue} мм` : undefined });
+      mv.remnant = mv2.remnant || null; mv.balance = mv2.balance; mv.reserved = mv2.reserved; mv.available = mv2.available; }
+    else if (scrapKg > 0 && remMode === 'scrap') { const mv3 = await metalMove({ itemId: it.Id ?? it.id, operation: 'Списание', qty: scrapKg, basis: `Обрезь после резки · ${ctx.mk} · ${decLabel}${scrapUnit === 'мм' ? ' · ' + scrapValue + ' мм' : ''}`, author, pzLine: ctx.mk, part: decLabel }); mv.balance = mv3.balance; mv.available = mv3.available; mv.scrapKg = scrapKg; }
     const summary = await metalBlankIssueSummary(ctx);
     logEvent({ type: 'комментарий', obj: 'МК', objNum: String(ctx.mk || ''), who: author,
       details: `выдача заготовки: списано ${totalKg} кг со склада (${mv.code}) на ${decLabel}, деталей: ${partsCount}` });
@@ -13325,7 +13350,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/route/fix-norms' && req.method === 'POST') { try { return sendJson(res, 200, await fixRouteNorms(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/route/approvers') { try { return sendJson(res, 200, { ok: true, approvers: await mkApprovers(), me: (sessionFromReq(req) || {}).userId || null }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     if (p === '/api/route/kd-ack' && req.method === 'POST') { try { return sendJson(res, 200, await mkKdAck(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } } // K-245
-    if (p === '/api/route/status' && req.method === 'POST') { if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' }); try { return sendJson(res, 200, await mkSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
+    if (p === '/api/route/status' && req.method === 'POST') { if (!isLive()) return sendJson(res, 400, { error: 'Только в режиме LIVE.' }); try { return sendJson(res, 200, await mkSetStatus(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), needConfirm: !!e.needConfirm }); } }
     if (p === '/api/routes/generate-tasks' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 400, { error: 'Генерация доступна только в режиме LIVE (NocoDB).' });
       try { const b = await readBody(req); return sendJson(res, 200, await generateTasksFromRoute(b.id ?? b.routeId)); }
@@ -14067,7 +14092,7 @@ const server = http.createServer(async (req, res) => {
     // ── МК-резерв металла, этап 2: экран оператора «Заготовка → факт» (Рабочее место) ──
     if (p === '/api/metal/blank-candidates') { // кандидаты складских карточек/деловых остатков под заготовку задачи
       if (!isLive()) return sendJson(res, 200, { ok: true, isBlankOp: false });
-      try { return sendJson(res, 200, await buildMetalBlankCandidates(url.searchParams.get('taskId'))); }
+      try { const d = await buildMetalBlankCandidates(url.searchParams.get('taskId')); if (d && typeof d === 'object') d.remRules = cutRemRules(); return sendJson(res, 200, d); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/metal/blank/issue' && req.method === 'POST') { // факт расхода по МК — списание («Расход») + частичное снятие резерва

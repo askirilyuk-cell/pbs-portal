@@ -4162,7 +4162,7 @@
       // K-100: карточка-хаб — порядок сверху вниз = жизненный цикл изделия:
       // Шапка → Карточка проекта → ТЗ → Состав КД → Состав ТД → Изменения (если есть) → Производство → Файлы (полоска, низ)
       return `<div class="card pad"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span style="font-size:16px;font-weight:700;color:var(--navy);line-height:1.2;min-width:0">${esc(o.name)}</span>
-          <span class="dnochip" title="Децимальный № проекта">ПБС.${esc(o.decNo)}</span><span class="dstchip" title="Стадия проекта (этап ОКР ${cur} из ${total}${D_STEPS[cur-1]?' · '+esc(D_STEPS[cur-1]):''})">эт. ${cur}/${total}</span>
+          <span class="dnochip" title="Децимальный № проекта">ПБС.${esc(o.decNo)}</span>
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${btns}${linkBtn('#design/'+encodeURIComponent(o.decNo))}</span></div></div>
         ${dProjCoverHtml(o,kdOf)}
         <div class="card pad"><div class="sec-h" style="margin-bottom:8px">Карточка проекта</div>

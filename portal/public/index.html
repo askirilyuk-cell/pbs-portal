@@ -1313,6 +1313,29 @@
     .ic-arrdown{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M10 4v12M5 11l5 5 5-5'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M10 4v12M5 11l5 5 5-5'/></svg>");}
     .ic-totop{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M4 3.5h12M10 17V7M5.5 11.5L10 7l4.5 4.5'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M4 3.5h12M10 17V7M5.5 11.5L10 7l4.5 4.5'/></svg>");}
     .ic-play{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6 4l10 6-10 6z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6 4l10 6-10 6z'/></svg>");}
+    /* K-277: досье проекта */
+    .dlg-form>label.full{font-size:var(--fs-s);display:flex;gap:var(--sp-2);align-items:flex-start;color:var(--sl-800)} .dlg-form>label.full>input{margin-top:3px;flex:0 0 auto}
+    .dos-head{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-2)}
+    .dos-filters{display:flex;gap:var(--sp-1);flex-wrap:wrap;margin-bottom:var(--sp-3)}
+    .dos-chip{font:inherit;font-size:var(--fs-xs);border:1px solid var(--sl-300);background:#fff;color:var(--sl-700);border-radius:var(--r-full);padding:3px 10px;cursor:pointer}
+    .dos-chip.on{background:var(--c-brand);border-color:var(--c-brand);color:#fff}
+    .dos-rec{border-top:1px solid var(--line2);padding:var(--sp-3) 0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--sp-1) var(--sp-3)}
+    .dos-rec:first-child{border-top:0}
+    .dos-title{font-size:var(--fs-m);font-weight:600;color:var(--ink);min-width:0;overflow-wrap:anywhere}
+    .dos-meta{font-size:var(--fs-xs);color:var(--sub);display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:center}
+    .dos-no{font-family:var(--mono);color:var(--navy);font-weight:600}
+    .dos-kind{font-size:var(--fs-xs);font-weight:600;color:var(--navy);background:var(--bl-50);border-radius:var(--r-s);padding:1px 7px;white-space:nowrap}
+    .dos-sum{grid-column:1/-1;font-size:var(--fs-s);color:var(--sl-800);white-space:pre-wrap;overflow-wrap:anywhere}
+    .dos-files{grid-column:1/-1;display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:flex-start}
+    .dos-file{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--c-brand);text-decoration:none;border:1px solid var(--sl-200);border-radius:var(--r-s);padding:3px 8px;max-width:100%;overflow-wrap:anywhere}
+    .dos-file:hover{background:var(--bl-50)}
+    .dos-thumb{display:block;width:112px;height:84px;border-radius:var(--r-s);border:1px solid var(--sl-200);overflow:hidden;background:var(--sl-100)}
+    .dos-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+    .dos-acts{display:flex;gap:var(--sp-1);align-items:flex-start}
+    .dos-empty{font-size:var(--fs-s);color:var(--sub)}
+    .dos-drop{border:1px dashed var(--sl-300);border-radius:var(--r-s);padding:var(--sp-3);font-size:var(--fs-s);color:var(--sub);text-align:center}
+    .dos-picked{font-size:var(--fs-xs);color:var(--sl-700);margin-top:var(--sp-1);overflow-wrap:anywhere}
+    @media(max-width:560px){.dos-rec{grid-template-columns:minmax(0,1fr)}.dos-thumb{width:96px;height:72px}}
     /* ══ K-260: дизайн-система, шаг 1 (аудит дизайна 19.09.2026) ═══════════════════════════════════════
        Шкалы: кегль 12 / 13 / 15 / 18 / 24 (ничего мельче 11), отступы --sp-1…6, радиусы --r-s / --r-m / --r-full, цвета — только переменные.
        Правило для новых экранов: класс btn / field / dlg-form, без inline-цветов, кеглей и отступов.
@@ -2168,7 +2191,7 @@
 
     // --- роутер по разделам навигации (hash) ----------------------------------
     const TITLES={board:'Производственная доска',station:'Рабочее место',orders:'Заказы (ПЗ)',routes:'Маршруты (Ф.13)',setup:'Карты наладки',control:'Контроль качества',
-      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Бухгалтерия · производство',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',si:'Средства измерения (СИ)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
+      counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Бухгалтерия · производство',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',dossier:'Досье проекта (расчёты, испытания, фото)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',si:'Средства измерения (СИ)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
     // заглушки блоков ИСМ — тексты по утверждённым процедурам/Руководству ИСМ (ИСМ-РК)
     const STUBS={
       nc:{tag:'Качество · ДП–У.2 · ISO 9001 п.8.7/10.2',
@@ -4151,6 +4174,8 @@
         <div id="dprod-panel"></div>
         <div class="card pad" id="dtd-block" data-proj="${esc(o.decNo)}"><div class="row" style="margin-bottom:8px"><span class="sec-h"><i class=ic-wrench></i> Состав ТД</span><span class="spacer"></span><span id="dtd-cnt" style="font-size:13px;color:var(--sub)"></span></div>
           <div id="dtd-body" style="font-size:13px;color:var(--sub)">Загрузка маршрутов…</div></div>
+        <div class="card pad" id="ddos-block" data-proj="${esc(o.decNo)}"><div class="dos-head"><span class="sec-h"><i class=ic-folder></i> Досье проекта</span><span class="c-gray" id="ddos-cnt"></span><span class="spacer"></span><span id="ddos-add"></span></div>
+          <div id="ddos-body" class="dos-empty">Загрузка досье…</div></div>
         ${dNoticesBlock(o)}
         ${dProdOrdersBlock(o)}
         <div class="extkd-wrap empty" id="dfiles-wrap" style="margin-top:var(--gap)">
@@ -4163,6 +4188,59 @@
             <div id="dfiles" data-proj="${esc(o.decNo)}"><div style="font-size:13px;color:var(--sub)">Загрузка файлов…</div></div>
           </div>
         </div>`;
+    }
+    // ── K-277: досье проекта — расчёты, испытания, фото, методики; единый классификатор, файлы на NAS по папкам ИСМ, уведомление в чат Bitrix
+    let dosFilter='';
+    const dosIsImg=(n)=>/\.(png|jpe?g|webp|gif)$/i.test(n), dosFileUrl=(proj,f)=>`/api/design/file?proj=${encodeURIComponent(proj)}&rel=${encodeURIComponent(f.rel)}`;
+    const dosSize=(b)=>b>=1048576?(b/1048576).toFixed(1).replace('.',',')+' МБ':Math.max(1,Math.round(b/1024))+' КБ';
+    async function loadDossier(proj){
+      const block=document.getElementById('ddos-block'); if(!block||block.dataset.proj!==proj)return;
+      let d; try{ d=await (await fetch('/api/design/dossier?proj='+encodeURIComponent(proj))).json(); }catch(e){ d={error:String(e.message||e)}; }
+      if(!block.isConnected||block.dataset.proj!==proj)return;
+      const body=document.getElementById('ddos-body'), cnt=document.getElementById('ddos-cnt'), add=document.getElementById('ddos-add');
+      if(d.error){ body.textContent='Досье недоступно: '+d.error; return; }
+      const recs=d.records||[]; cnt.textContent=recs.length?`· записей: ${recs.length}`:'';
+      add.innerHTML=d.canAdd?`<button class="btn btn--primary btn--sm" id="ddos-addbtn">＋ Добавить запись</button>`:'';
+      const ab=document.getElementById('ddos-addbtn'); if(ab)ab.onclick=()=>dossierAddDialog(proj,d);
+      if(!recs.length){ body.className='dos-empty'; body.innerHTML=d.canAdd?'Записей пока нет. Сюда складываются расчёты, результаты испытаний, фото, методики и протоколы по проекту — файлы ложатся в папку проекта на NAS, запись уходит в чат проекта.':'Записей пока нет.'; return; }
+      const used=(d.kinds||[]).filter(k=>recs.some(r=>r.kind===k.code)); if(dosFilter&&!used.some(k=>k.code===dosFilter))dosFilter='';
+      const shown=dosFilter?recs.filter(r=>r.kind===dosFilter):recs;
+      body.className=''; body.innerHTML=`<div class="dos-filters"><button class="dos-chip ${dosFilter?'':'on'}" data-dosf="">Все · ${recs.length}</button>${used.map(k=>`<button class="dos-chip ${dosFilter===k.code?'on':''}" data-dosf="${esc(k.code)}">${esc(k.label)} · ${recs.filter(r=>r.kind===k.code).length}</button>`).join('')}</div>
+        ${shown.map(r=>{ const imgs=(r.files||[]).filter(f=>dosIsImg(f.name)), rest=(r.files||[]).filter(f=>!dosIsImg(f.name)); const canDel=d.isAdmin||(d.canAdd&&d.me&&d.me===String(r.authorId||''));
+          return `<div class="dos-rec"><div><div class="dos-title">${esc(r.title)}</div><div class="dos-meta"><span class="dos-no">${esc(r.no)}</span><span class="dos-kind">${esc(r.kindLabel)}</span><span>${esc(fmt(r.date))}</span><span>${esc(r.author||'')}</span>${r.link?`<span>связь: ${esc(r.link)}</span>`:''}${r.chat?`<span title="Отправлено в чат проекта ${esc(r.chat)}"><i class=ic-chat></i> в чате</span>`:''}</div></div>
+            <div class="dos-acts">${d.canAdd&&d.hasChat?`<button class="btn btn--ghost btn--sm" data-dosre="${r.id}" title="${r.chat?'Отправить в чат проекта ещё раз':'Отправить в чат проекта'}"><i class=ic-chat></i></button>`:''}${canDel?`<button class="btn btn--ghost btn--sm" data-dosdel="${r.id}" title="Удалить запись (файлы уйдут в _deleted)"><i class=ic-trash></i></button>`:''}</div>
+            ${r.summary?`<div class="dos-sum">${esc(r.summary)}</div>`:''}
+            ${(r.files||[]).length?`<div class="dos-files">${imgs.map(f=>`<a class="dos-thumb" href="${dosFileUrl(proj,f)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img loading="lazy" src="${dosFileUrl(proj,f)}" alt="${esc(f.name)}"></a>`).join('')}${rest.map(f=>`<a class="dos-file" href="${dosFileUrl(proj,f)}" target="_blank" rel="noopener"><i class=ic-doc></i>${esc(f.name)} <span class="c-gray">${dosSize(f.size||0)}</span></a>`).join('')}</div>`:''}</div>`; }).join('')}`;
+      body.querySelectorAll('[data-dosf]').forEach(b=>b.onclick=()=>{ dosFilter=b.dataset.dosf; loadDossier(proj); });
+      body.querySelectorAll('[data-dosdel]').forEach(b=>b.onclick=async()=>{ const r=recs.find(x=>String(x.id)===b.dataset.dosdel); if(!(await uiConfirm(`Удалить запись ${r.no} «${r.title}»? Файлы будут перенесены в папку _deleted проекта.`,{ok:'Удалить',danger:true})))return; try{ await postJson('/api/dossier/delete',{id:r.id}); toast('Запись удалена.','ok'); loadDossier(proj); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } });
+      body.querySelectorAll('[data-dosre]').forEach(b=>b.onclick=async()=>{ const r=recs.find(x=>String(x.id)===b.dataset.dosre); if(r.chat&&!(await uiConfirm(`Запись ${r.no} уже отправлялась в чат (${r.chat}). Отправить ещё раз?`,{ok:'Отправить'})))return; b.disabled=true; try{ await postJson('/api/dossier/resend',{id:r.id}); toast('Отправлено в чат проекта.','ok'); loadDossier(proj); }catch(e){ toast(String(e.message||e),'err'); b.disabled=false; } });
+    }
+    function dossierAddDialog(proj,d){
+      const w=document.createElement('div'); w.className='ui-dlg'; const today=new Date().toISOString().slice(0,10);
+      w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Новая запись в досье · ПБС.${esc(proj)}</div>
+        <div class="dlg-form">
+          <div class="field"><label>Тип записи</label><select id="dos-kind"><option value="">— выберите —</option>${(d.kinds||[]).map(k=>`<option value="${esc(k.code)}">${esc(k.label)}</option>`).join('')}</select><span class="hint" id="dos-dir"></span></div>
+          <div class="field"><label>Дата</label><input type="date" id="dos-date" value="${today}"></div>
+          <div class="field full"><label>Название</label><input id="dos-title" maxlength="200" placeholder="Например: Расчёт прочности корпуса при 70 МПа"></div>
+          <div class="field full"><label>Вывод / результат</label><textarea id="dos-sum" rows="3" placeholder="Коротко: что получили, к чему пришли"></textarea></div>
+          <div class="field full"><label>Связь (необязательно)</label><input id="dos-link" placeholder="Чертёж, МК, ПЗ или партия — например ПБС.ПЧ0007.01, ПЗ-2026-009"></div>
+          <div class="field full"><label>Файлы</label><div class="dos-drop"><input type="file" id="dos-files" multiple accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ppt,.pptx,.txt,.csv,.cdw,.m3d,.a3d,.dwg,.dxf,.step,.stp,.igs,.iges,.stl,.zip,.7z,.rar,.heic,.html"><div class="dos-picked" id="dos-picked">С телефона можно снять фото или видео прямо отсюда. До 256 МБ на запись.</div></div></div>
+          <label class="full"><input type="checkbox" id="dos-notify" ${d.hasChat?'checked':'disabled'}> Сообщить в чат проекта в Bitrix24${d.hasChat?' — фото и PDF до 20 МБ прикладываются, остальное ссылкой':' (у проекта нет чата — создайте его кнопкой в шапке карточки)'}</label>
+        </div>
+        <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Зарегистрировать</button></div></div>`;
+      document.body.appendChild(w); const $$=(q)=>w.querySelector(q);
+      $$('[data-d="cancel"]').onclick=()=>w.remove();
+      $$('#dos-kind').onchange=()=>{ const k=(d.kinds||[]).find(x=>x.code===$$('#dos-kind').value); $$('#dos-dir').textContent=k?'Файлы лягут в папку проекта: '+k.dir:''; };
+      $$('#dos-files').onchange=()=>{ const fs=[...$$('#dos-files').files]; $$('#dos-picked').textContent=fs.length?fs.map(f=>f.name+' ('+dosSize(f.size)+')').join(', '):'Файлы не выбраны'; };
+      $$('[data-d="ok"]').onclick=async()=>{ const kind=$$('#dos-kind').value, title=$$('#dos-title').value.trim(), files=[...$$('#dos-files').files];
+        if(!kind){ toast('Выберите тип записи.','warn'); return; } if(title.length<3){ toast('Дайте записи название.','warn'); return; }
+        if(!files.length&&$$('#dos-sum').value.trim().length<5){ toast('Приложите файл или напишите вывод.','warn'); return; }
+        if(files.reduce((a,f)=>a+f.size,0)>250*1048576){ toast('Файлы больше 250 МБ — разбейте на несколько записей.','warn'); return; }
+        const fd=new FormData(); fd.append('proj',proj); fd.append('kind',kind); fd.append('title',title); fd.append('date',$$('#dos-date').value); fd.append('summary',$$('#dos-sum').value); fd.append('link',$$('#dos-link').value); fd.append('notify',$$('#dos-notify').checked?'1':'0'); files.forEach(f=>fd.append('files',f,f.name));
+        const ok=$$('[data-d="ok"]'); ok.disabled=true; ok.textContent='Загрузка…';
+        try{ const r=await fetch('/api/dossier/add',{method:'POST',body:fd}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+          w.remove(); toast(`Зарегистрировано: ${j.record.no}`+(j.chat&&j.chat.sent?' · отправлено в чат':(j.chat&&j.chat.reason&&$$?'':'')),'ok'); if(j.chat&&!j.chat.sent&&j.chat.reason&&j.chat.reason!=='отправка отключена')toast('В чат не отправлено: '+j.chat.reason,'warn'); loadDossier(proj); }
+        catch(e){ toast('Не удалось: '+(e.message||e),'err'); ok.disabled=false; ok.textContent='Зарегистрировать'; } };
     }
     // позиции КД проекта
     const kdOfProj=(decNo)=>((DESIGN&&DESIGN.kd)||[]).filter(k=>kdProj(k.docNo)===decNo||(k.projectNo&&kdProj(k.projectNo)===decNo));
@@ -4193,6 +4271,7 @@
     // <i class=ic-wrench></i> Состав ТД: маршрутные карты (МК) проекта — лениво, из кэша ensureRoutesList()/BOARD_RT (K-72).
     // Совпадение designation ↔ проект: без «ПБС.», trim, lower — начинается с децим.№ ИЛИ kdProj(designation)===decNo.
     async function loadProjRoutes(proj){
+      loadDossier(proj); // K-277
       const block=document.getElementById('dtd-block'); if(!block||block.dataset.proj!==proj)return;
       const all=await ensureRoutesList();
       if(!block.isConnected||block.dataset.proj!==proj)return; // карточка сменилась за время await

@@ -159,6 +159,7 @@ const KEY2TITLE = {
   dict_sources: 'Источники запросов', dict_req_types: 'Типы запросов', dict_product_lines: 'Продуктовые линейки',
   dict_deal_nature: 'Характер сделки', dict_product_groups: 'Продуктовые группы', dict_product_subgroups: 'Продуктовые подгруппы',
   casing_sizes: 'Типоразмеры колонн', // справочник Ø/стенок колонн (GF/FMT/MAGNA) для конструктора обозначения ПЧ
+  design_dossier: 'Досье проекта',    // K-277: записи досье проекта разработки (расчёты, испытания, фото, методики…)
   design_bom: 'Состав КД',            // K-244: строки спецификации «сборка → позиция, кол-во» (в т.ч. заимствованные детали)
   events: 'События',                  // лента событий портала (концепт №5, migrate-047); таблицы может ещё не быть до APPLY
 };
@@ -1247,10 +1248,115 @@ function designProjectFolder(decNo, opts) {
   const projDir = path.join(base, name ? `${dec} ${name}` : dec);
   try { fs.mkdirSync(projDir, { recursive: true }); return projDir; } catch { return null; }
 }
+// ── K-277: досье проекта разработки ─────────────────────────────────────────────
+// Единый классификатор записей (одинаков для всех проектов) → папка этапа ИСМ (ДП–Д.1.2 §8), куда ложатся файлы.
+// «15-Фото и медиа» — единственная папка вне перечня ИСМ: для фото/видео этапа в раскладке нет.
+const DOSSIER_KINDS = [
+  { code: 'РС', label: 'Расчёт', dir: '02-Анализ выполнимости' },
+  { code: 'ИС', label: 'Результаты испытаний', dir: '07-Верификация и валидация' },
+  { code: 'МТ', label: 'Методика / программа испытаний', dir: '07-Верификация и валидация' },
+  { code: 'ПП', label: 'Пробная партия (отчёт, замеры)', dir: '06-Пробная партия' },
+  { code: 'ФТ', label: 'Фото и видео продукции', dir: '15-Фото и медиа' },
+  { code: 'БР', label: 'Брошюра / презентация', dir: '10-Паспорт и этикетка' },
+  { code: 'ПР', label: 'Протокол / акт / решение', dir: '08-Утверждение' },
+  { code: 'АН', label: 'Аналоги и кросс-референс', dir: '12-Кросс-референс' },
+  { code: 'ДР', label: 'Прочее', dir: '13-Переписка' },
+];
+const DOSSIER_EXT = /\.(pdf|docx?|xlsx?|xlsm|pptx?|txt|csv|png|jpe?g|heic|webp|gif|tiff?|bmp|mp4|mov|avi|mkv|cdw|m3d|a3d|dwg|dxf|step|stp|igs|iges|stl|zip|7z|rar|html?)$/i;
+const DOSSIER_CHAT_ATTACH = /\.(pdf|png|jpe?g|webp|gif|heic)$/i; // в чат прикладываем фото и PDF ≤ 20 МБ, остальное — ссылкой
+const DOSSIER_CHAT_MAX = 20 * 1024 * 1024;
+const dossierJson = (v) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+const dossierShape = (r) => { const k = DOSSIER_KINDS.find((x) => x.code === r['Тип']) || { code: r['Тип'] || '', label: r['Тип'] || '' };
+  return { id: r.Id ?? r.id, no: r['№ записи'] || '', proj: r['Проект (децим. №)'] || '', kind: k.code, kindLabel: k.label, title: r['Название'] || '', summary: r['Вывод'] || '', date: r['Дата'] || '',
+    author: r['Автор'] || '', authorId: r['Автор (id)'] || '', link: r['Связь'] || '', folder: r['Папка'] || '', files: dossierJson(r['Файлы']), chat: r['Чат'] || '', created: r.CreatedAt || '' }; };
+async function dossierList(proj) {
+  return (await ncListSoft('design_dossier')).filter((r) => String(r['Проект (децим. №)'] || '').trim() === proj && !String(r['Удалена'] || '').trim()).map(dossierShape)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.no).localeCompare(String(a.no), 'ru'));
+}
+const dossierCanWrite = (session) => !!session && sessionPortalRoles(session).some((r) => r === 'Администратор' || (RBAC_MATRIX[r] && RBAC_MATRIX[r] !== '*' && RBAC_MATRIX[r].dossier === 'write') || RBAC_MATRIX[r] === '*');
+const dossierChatId = (projRow) => { const m = /IM_DIALOG=chat(\d+)/i.exec(String((projRow && projRow['Ссылка на чат (Bitrix)']) || '')); return m ? m[1] : ''; };
+// сообщение в чат проекта: текст + вложения (фото / PDF до 20 МБ), прочие файлы — ссылками на портал
+async function dossierNotify(rec, projRow, folder) {
+  const chat = dossierChatId(projRow); if (!chat || !cfg().BITRIX) return { sent: false, reason: chat ? 'вебхук Bitrix не задан' : 'у проекта нет чата' };
+  const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+  const fileUrl = (f) => `${portal}/api/design/file?proj=${encodeURIComponent(rec.proj)}&rel=${encodeURIComponent(f.rel)}`;
+  const attach = [], linked = [];
+  for (const f of rec.files) { (DOSSIER_CHAT_ATTACH.test(f.name) && f.size <= DOSSIER_CHAT_MAX ? attach : linked).push(f); }
+  const L = [`[B]Зарегистрировано в досье проекта ПБС.${rec.proj}[/B]`, `${rec.no} · ${rec.kindLabel}`, `«${rec.title}»`,
+    rec.summary ? `Вывод: ${rec.summary}` : '', rec.link ? `Связь: ${rec.link}` : '', `${rec.author || 'портал'} · ${ruDate(rec.date)}`,
+    `Карточка проекта: ${portal}/#design/${encodeURIComponent(rec.proj)}`,
+    linked.length ? 'Файлы (ссылкой, открываются из сети офиса / VPN):\n' + linked.map((f) => ` • ${f.name} — ${fileUrl(f)}`).join('\n') : ''].filter(Boolean);
+  const text = L.join('\n');
+  let attached = 0, warn = '';
+  try {
+    if (attach.length) {
+      const fo = await bitrixCall('im.disk.folder.get', { CHAT_ID: Number(chat) }); const folderId = fo && (fo.ID || fo.id); if (!folderId) throw new Error('папка чата не получена');
+      for (const f of attach) {
+        const buf = fs.readFileSync(path.join(folder, f.rel));
+        const up = await bitrixCall('disk.folder.uploadfile', { id: folderId, data: { NAME: f.name }, fileContent: [f.name, buf.toString('base64')], generateUniqueName: true });
+        const fid = up && (up.ID || up.id); if (!fid) throw new Error('файл не загружен: ' + f.name);
+        await bitrixCall('im.disk.file.commit', { CHAT_ID: Number(chat), UPLOAD_ID: fid, MESSAGE: attached === 0 ? text : `${rec.no} · ${f.name}` }); attached++;
+      }
+    }
+  } catch (e) { warn = String(e.message || e); console.warn('K-277: вложение в чат:', warn); }
+  if (!attached) { try { await bitrixCall('im.message.add', { DIALOG_ID: 'chat' + chat, MESSAGE: text + (attach.length ? '\nФайлы: ' + attach.map((f) => ` • ${f.name} — ${fileUrl(f)}`).join('\n') : '') }); } catch (e) { return { sent: false, reason: String(e.message || e) }; } }
+  return { sent: true, attached, linked: linked.length, warn };
+}
+async function dossierAdd(fields, files, session) {
+  if (!dossierCanWrite(session)) { const e = new Error('Добавлять записи в досье могут конструктор, технолог, ОТК и администратор.'); e.status = 403; throw e; }
+  const proj = String(fields.proj || '').trim(); const kind = DOSSIER_KINDS.find((k) => k.code === String(fields.kind || '').trim());
+  const title = String(fields.title || '').trim().slice(0, 200);
+  if (!/^[A-Za-zА-Яа-я]{2,4}\d{4}$/.test(proj)) throw new Error('Не указан проект (децим. №).');
+  if (!kind) throw new Error('Выберите тип записи.');
+  if (title.length < 3) throw new Error('Дайте записи название.');
+  const good = files.filter((f) => f && f.filename && f.data && f.data.length), bad = good.filter((f) => !DOSSIER_EXT.test(String(f.filename)));
+  if (bad.length) throw new Error('Недопустимый тип файла: ' + bad.map((f) => f.filename).join(', '));
+  if (!good.length && String(fields.summary || '').trim().length < 5) throw new Error('Приложите файл или напишите вывод / результат.');
+  const projRow = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === proj); if (!projRow) throw new Error(`Проект ${proj} не найден.`);
+  const folder = designProjectFolder(proj, { create: true, grp: String(projRow['Группа'] || '').trim(), subCode: (proj.match(/^[A-Za-zА-Яа-я]{2}/) || [''])[0], name: String(projRow['Наименование изделия'] || '').trim() });
+  if (!folder) throw new Error(`Не удалось определить / создать папку проекта ${proj}.`);
+  return withKeyLock('dossier:' + proj, async () => {
+    const all = (await ncListSoft('design_dossier')).filter((r) => String(r['Проект (децим. №)'] || '').trim() === proj);
+    const n = all.reduce((m, r) => Math.max(m, Number((String(r['№ записи'] || '').match(/-Д-(\d+)$/) || [])[1]) || 0), 0) + 1;
+    const no = `${proj}-Д-${String(n).padStart(3, '0')}`;
+    const safe = title.normalize('NFC').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const recDir = path.join(folder, kind.dir, `${no} ${safe}`);
+    const saved = [];
+    for (const f of good) { const rel = await saveFileUnique(folder, recDir, path.basename(String(f.filename)), f.data); if (rel) saved.push({ name: path.basename(rel), rel, size: f.data.length }); }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(fields.date || '')) ? String(fields.date) : new Date().toISOString().slice(0, 10);
+    const row = { '№ записи': no, 'Проект (децим. №)': proj, 'Тип': kind.code, 'Название': title, 'Вывод': String(fields.summary || '').trim().slice(0, 4000), 'Дата': date,
+      'Автор': (session && session.fio) || '', 'Автор (id)': session && session.userId != null ? String(session.userId) : '', 'Связь': String(fields.link || '').trim().slice(0, 300),
+      'Папка': path.relative(folder, recDir).split(path.sep).join('/'), 'Файлы': JSON.stringify(saved) };
+    const cr = await ncCreateMany('design_dossier', [row]); const created = Array.isArray(cr) ? cr[0] : cr;
+    const rec = dossierShape({ ...row, Id: created.Id ?? created.id });
+    let chat = { sent: false, reason: 'отправка отключена' };
+    if (String(fields.notify || '1') !== '0') { chat = await dossierNotify(rec, projRow, folder); if (chat.sent) { const mark = `${new Date().toISOString().slice(0, 16).replace('T', ' ')}${chat.attached ? ' · вложений ' + chat.attached : ''}`; try { await ncUpdate('design_dossier', rec.id, { 'Чат': mark }); rec.chat = mark; } catch {} } }
+    logEvent({ type: 'создан', obj: 'Досье', objNum: no, who: (session && session.fio) || '', details: `${kind.label}: ${title}; файлов: ${saved.length}` });
+    return { ok: true, record: rec, chat };
+  });
+}
+async function dossierDelete(body, session) {
+  const id = Number(body.id); const r = (await ncListSoft('design_dossier')).find((x) => (x.Id ?? x.id) === id); if (!r) { const e = new Error('Запись не найдена.'); e.status = 404; throw e; }
+  const isAdmin = session && session.isAdmin && !session.effectiveRole; const own = session && session.userId != null && String(session.userId) === String(r['Автор (id)'] || '');
+  if (!isAdmin && !(own && dossierCanWrite(session))) { const e = new Error('Удалить запись может её автор или администратор.'); e.status = 403; throw e; }
+  const proj = String(r['Проект (децим. №)'] || '').trim(); const folder = designProjectFolder(proj); const relDir = String(r['Папка'] || '');
+  if (folder && relDir) { const src = path.normalize(path.join(folder, relDir)); if (src.startsWith(folder + path.sep) && fs.existsSync(src)) { const bin = path.join(folder, '_deleted'); try { fs.mkdirSync(bin, { recursive: true }); fs.renameSync(src, path.join(bin, `${Date.now()}__${path.basename(src)}`)); } catch (e) { console.warn('K-277: перенос в _deleted:', e.message); } } }
+  await ncUpdate('design_dossier', id, { 'Удалена': `${new Date().toISOString().slice(0, 10)} · ${(session && session.fio) || ''}` });
+  logEvent({ type: 'удалён', obj: 'Досье', objNum: r['№ записи'] || '', who: (session && session.fio) || '', details: r['Название'] || '' });
+  return { ok: true };
+}
+async function dossierResend(body, session) {
+  if (!dossierCanWrite(session)) { const e = new Error('Нет права на досье.'); e.status = 403; throw e; }
+  const id = Number(body.id); const r = (await ncListSoft('design_dossier')).find((x) => (x.Id ?? x.id) === id); if (!r) { const e = new Error('Запись не найдена.'); e.status = 404; throw e; }
+  const rec = dossierShape(r); const projRow = (await ncListSoft('design_projects')).find((x) => String(x['Децимальный номер'] || '').trim() === rec.proj); const folder = designProjectFolder(rec.proj);
+  const chat = await dossierNotify(rec, projRow, folder); if (!chat.sent) throw new Error('В чат не отправлено: ' + (chat.reason || ''));
+  const mark = `${new Date().toISOString().slice(0, 16).replace('T', ' ')}${chat.attached ? ' · вложений ' + chat.attached : ''}`; await ncUpdate('design_dossier', id, { 'Чат': mark });
+  return { ok: true, chat, mark };
+}
 // рекурсивный список файлов папки проекта (как walkSalesFiles, по DESIGN_ROOT)
 function walkDesignFiles(folder) {
   const out = [];
-  const SKIP = /^(@eaDir|#recycle|#snapshot|_архив|\.)/i; // архивные версии (см. designArchiveOld) не светятся в общем списке файлов проекта
+  const SKIP = /^(@eaDir|#recycle|#snapshot|_архив|_deleted|\.)/i; // архивные версии (см. designArchiveOld) не светятся в общем списке файлов проекта
   const walk = (dir) => {
     let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
@@ -4664,6 +4770,7 @@ const FILE_MIME = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   doc: 'application/msword', xls: 'application/vnd.ms-excel',
+  mp4: 'video/mp4', mov: 'video/quicktime', heic: 'image/heic', // K-277: фото/видео досье открываются в браузере
 };
 // папка запроса: <RECORDS>/6.1-Продажи/<год>/<ЗП-ГГГГ-NNN[ суффикс]>
 function salesFolder(zp) {
@@ -11462,7 +11569,7 @@ function resolveRole(user) { return resolvePortalRoles(user)[0] || 'guest'; }
 //  Уровни доступа к разделу: 'write' (✏ запись), 'view' (👁 просмотр), отсутствие
 //  ключа = нет доступа (—). Спецключ _all задаёт дефолт для всех разделов роли.
 // ════════════════════════════════════════════════════════════════════════════
-const RBAC_SECTIONS = ['cabinet', 'board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'onec', 'retro', 'warehouse', 'design', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
+const RBAC_SECTIONS = ['cabinet', 'board', 'station', 'orders', 'routes', 'setup', 'control', 'equipment', 'tools', 'metal', 'counterparties', 'sales', 'lov', 'purchase', 'catalog', 'onec', 'retro', 'warehouse', 'design', 'dossier', 'prodgroups', 'logistics', 'nc', 'eco', 'ot', 'docs', 'settings'];
 const RBAC_MATRIX = {
   // Администратор — всё ✏ (обрабатывается отдельно как '*').
   'Администратор': '*',
@@ -11471,9 +11578,9 @@ const RBAC_MATRIX = {
   // Продажи — Продажи(sales/lov/kp) ✏, Контрагенты ✏; Заказы/Склад/КД/Документы 👁; Каталог 👁.
   'Продажи': { sales: 'write', lov: 'write', counterparties: 'write', orders: 'view', warehouse: 'view', catalog: 'view', onec: 'view', design: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // Конструктор — КД/Проектирование/Оборудование ✏; Заказы/Маршруты/Склад/Инструмент/Каталог/Документы 👁.
-  'Конструктор': { design: 'write', equipment: 'write', prodgroups: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', docs: 'view' },
+  'Конструктор': { dossier: 'write', design: 'write', equipment: 'write', prodgroups: 'view', orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Технолог — Маршруты/Карты наладки/Произв.доска/Заказы ✏; КД/Инструмент/Оборуд/Склад/Каталог/Документы 👁.
-  'Технолог': { routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', retro: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', onec: 'view', docs: 'view' },
+  'Технолог': { dossier: 'write', routes: 'write', setup: 'write', board: 'write', station: 'write', orders: 'write', retro: 'write', design: 'view', prodgroups: 'view', tools: 'view', equipment: 'view', warehouse: 'view', catalog: 'view', onec: 'view', docs: 'view' },
   // Цех — ЗнЗ ✏ (закупки); Доска/Заказы/Маршруты/Карты наладки/Склад/Инструмент/Каталог/Документы 👁.
   'Цех': { purchase: 'write', board: 'view', station: 'write', // K-252: мастер/рабочий ведёт задачи под своей учёткой (посты есть не на всех участках)
     orders: 'view', routes: 'view', setup: 'view', warehouse: 'view', tools: 'view', catalog: 'view', onec: 'view', retro: 'view', docs: 'view' },
@@ -11482,7 +11589,7 @@ const RBAC_MATRIX = {
   // Снабжение — ЗнЗ/Поставщики ✏, Склад-приход ✏, Каталог ✏ (справочник закупок), Контрагенты 👁; Заказы/Документы 👁.
   'Снабжение': { purchase: 'write', warehouse: 'write', catalog: 'write', onec: 'write', retro: 'view', counterparties: 'view', orders: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // ОТК — Входной контроль/Приказы-Штампы-Утверждения ✏; Заказы/КД/Склад/Маршруты/Документы 👁.
-  'ОТК': { control: 'write', board: 'view', station: 'view', orders: 'view', design: 'view', warehouse: 'view', onec: 'view', routes: 'view', docs: 'view' },
+  'ОТК': { dossier: 'write', control: 'write', board: 'view', station: 'view', orders: 'view', design: 'view', warehouse: 'view', onec: 'view', routes: 'view', docs: 'view' },
   // Инструментальщик — Инструмент ✏; всё остальное 👁; Настройки — нет (Анохин: работает с инструментом, остальное просмотр).
   'Инструментальщик': { _all: 'view', tools: 'write', settings: null },
   // Наблюдатель — всё 👁; Настройки — нет.
@@ -11541,6 +11648,7 @@ function sessionPortalRoles(session) {
 // владеющему разделу из body.key), '@print' печать (view по разделу документа).
 // Не сопоставленный эндпоинт → null (общий бакет: /api/me|health|test|admin).
 const RBAC_API_PREFIX = [
+  ['/api/dossier', 'dossier'], // K-277: запись в досье проекта (чтение идёт через /api/design/dossier — право «КД»)
   ['/api/board', 'board'], ['/api/station', 'station'], ['/api/orders', 'orders'],
   ['/api/position', 'orders'], ['/api/control', 'control'], // control → раздел ОТК (DEF-19: вердикт пишет только control-write роль)
   ['/api/routes', 'routes'], ['/api/route', 'routes'], ['/api/task/reorder', 'board'], ['/api/task', 'station'], ['/api/metal/blank', 'station'], ['/api/metal/find-blank', 'station'], // K-252: работа по задаче — право «Рабочее место»; порядок очереди — «Доска»
@@ -12851,6 +12959,22 @@ const server = http.createServer(async (req, res) => {
       return res.end(zipBuf);
     }
     // --- файлы КД проекта (records 6.7-РТД): список / загрузка / отдача / office→PDF ---
+    // K-277: досье проекта. Чтение — право «КД» (view), запись — раздел dossier (/api/dossier/*).
+    if (p === '/api/design/dossier' && req.method === 'GET') {
+      const proj = String(url.searchParams.get('proj') || '').trim(); const sD = sessionFromReq(req);
+      try { const projRow = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === proj);
+        return sendJson(res, 200, { ok: true, kinds: DOSSIER_KINDS.map((k) => ({ code: k.code, label: k.label, dir: k.dir })), records: await dossierList(proj), canAdd: dossierCanWrite(sD), isAdmin: !!(sD && sD.isAdmin && !sD.effectiveRole), me: sD && sD.userId != null ? String(sD.userId) : '', hasChat: !!dossierChatId(projRow) }); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/dossier/add' && req.method === 'POST') {
+      const ct = String(req.headers['content-type'] || ''); const bm = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ct);
+      if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
+      let raw; try { raw = await readRawBody(req, 256 * 1024 * 1024); } catch (e) { return sendJson(res, 413, { error: 'Файлы слишком большие (предел 256 МБ на запись). ' + String(e.message || e) }); }
+      try { const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim()); return sendJson(res, 200, await dossierAdd(fields, files, sessionFromReq(req))); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/dossier/delete' && req.method === 'POST') { try { return sendJson(res, 200, await dossierDelete(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
+    if (p === '/api/dossier/resend' && req.method === 'POST') { try { return sendJson(res, 200, await dossierResend(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/design/files') {
       if (!cfg().DESIGN_ROOT) return sendJson(res, 200, { files: [], warning: 'Путь к записям РКД не задан (DESIGN_ROOT / RECORDS_ROOT).' });
       const proj = url.searchParams.get('proj') || '';

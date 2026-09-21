@@ -1327,6 +1327,9 @@
     .dp-ev{display:grid;grid-template-columns:118px minmax(0,1fr) auto;gap:var(--sp-3);padding:6px 0;border-top:1px solid var(--line2);font-size:var(--fs-s)} .dp-ev:first-child{border-top:0}
     .dp-evd{color:var(--sub);font-size:var(--fs-xs);white-space:nowrap} .dp-evt{overflow-wrap:anywhere} .dp-evw{color:var(--sub);font-size:var(--fs-xs);text-align:right}
     @media(max-width:560px){.dp-ev{grid-template-columns:minmax(0,1fr)} .dp-evw{text-align:left}}
+    #dpgrid{overflow-x:auto}
+    #dp-tabs,#rc-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    @media(max-width:700px){.dp-kdt{--tbl-min:0px!important;min-width:0!important} .dp-kdt colgroup,.dp-kdt thead{display:none} .dp-kdt tr{display:block;padding:var(--sp-2) 0;border-top:1px solid var(--line2)} .dp-kdt td{display:block;border:0!important;padding:2px 0!important;white-space:normal!important}}
     /* K-277: досье проекта */
     .dlg-form>label.full{font-size:var(--fs-s);display:flex;gap:var(--sp-2);align-items:flex-start;color:var(--sl-800)} .dlg-form>label.full>input{margin-top:3px;flex:0 0 auto}
     .dos-head{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-2)}

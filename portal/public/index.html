@@ -14088,6 +14088,7 @@
         {key:'numPz',label:'№ ПЗ',w:120,cls:'code',cell:r=>esc(r.o.numPz),sortVal:r=>r.o.numPz},
         {key:'customer',label:'Заказчик',w:230,cls:'ell',cell:r=>`<span title="${esc(r.o.customer||'')}">${esc(r.o.customer||'')}</span>`,sortVal:r=>r.o.customer},
         {key:'brief',label:'Что это',cls:'ell',cell:r=>{ const b=String(r.o.brief||'').trim(); const auto=(r.o.positions||[]).map(p=>String(p.name||'').trim()+(p.qty?` ×${p.qty}`:'')).filter(Boolean); const t=b||(auto.slice(0,2).join('; ')+(auto.length>2?` (+${auto.length-2})`:'')); return `<span title="${esc(b?b+(auto.length?' · '+auto.join('; '):''):auto.join('; '))}"${b?'':' class="c-gray"'}>${esc(t||'—')}</span>`; },sortVal:r=>r.o.brief||''},
+        ...((typeof ME!=='undefined'&&ME&&ME.isAdmin&&!ME.viewAs)?[{key:'zp',label:'ЗП · сумма',w:190,cls:'nw',cell:r=>{ const L=r.o.zpLinks||[]; const own=r.o.orderSum; if(!L.length&&own==null)return '<span class="c-gray">—</span>'; const sum=own!=null?own:L.reduce((a,z)=>a+(z.sum||0),0); if(!L.length)return `<b style="font-family:var(--mono);font-weight:600">${Number(sum).toLocaleString('ru-RU',{maximumFractionDigits:0})} ₽</b>`; return `<a href="#sales/${encodeURIComponent(L[0].numZp)}" class="code c-blue" style="text-decoration:none" title="${esc(L.map(z=>z.numZp+(z.name?' · '+z.name:'')).join('\n'))}">${esc(L[0].numZp.replace('ЗП-',''))}${L.length>1?' +'+(L.length-1):''}</a>${sum?` <b style="font-family:var(--mono);font-weight:600" title="${own!=null?'сумма заказа':'сумма КП запроса'}">${Number(sum).toLocaleString('ru-RU',{maximumFractionDigits:0})} ₽</b>${own==null?'<span class="c-gray" title="сумма КП запроса, у заказа своя не задана"> ·КП</span>':''}`:''}`; },sortVal:r=>r.o.orderSum!=null?r.o.orderSum:(r.o.zpLinks||[]).reduce((a,z)=>a+(z.sum||0),0)}]:[]),
         {key:'type',label:'Тип',w:120,cls:'nw c-gray',cell:r=>esc(r.o.orderType||'—'),sortVal:r=>r.o.orderType},
         {key:'prio',label:'Приоритет',w:118,cls:'nw',cell:r=>prioCell(r.o.priority),sortVal:r=>r.o.priority},
         {key:'plan',label:'Срок',w:152,cls:'nw',cell:r=>r.late?`<span class="c-red" style="font-weight:600">${esc(fmt(r.o.plan))} · просрочен</span>`:esc(fmt(r.o.plan)),sortVal:r=>String(r.o.plan||'')},
@@ -14127,7 +14128,17 @@
       const mono=(v)=>v?`<span style="font-family:var(--mono)">${esc(v)}</span>`:'<span class="c-gray">—</span>';
       const txt=(v)=>v?esc(v):'<span class="c-gray">—</span>';
       const filled=[o.numZp,o.numZkz,o.productType,o.taskType,o.basis,o.terms].filter(x=>String(x||'').trim()).length;
-      return `<div class="card pad" style="padding-top:9px;padding-bottom:9px">
+      const money=(v)=>Number(v).toLocaleString('ru-RU',{maximumFractionDigits:0})+' ₽';
+      const zpSum=(o.zpLinks||[]).reduce((a,z)=>a+(z.sum||0),0);
+      const zpCard=o.adminSales?`<div class="card pad" style="margin-bottom:var(--gap);border-left:3px solid var(--navy)" id="od-sales"><div class="sec-h" style="margin-bottom:6px">Продажи <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub);font-size:12px">· видно только администратору</span></div>
+        ${(o.zpLinks||[]).length?o.zpLinks.map(z=>z.missing?`<div style="font-size:13px;display:flex;gap:10px" class="c-gray"><span style="flex:1">${esc(z.numZp)} — запрос не найден в реестре продаж</span><b data-zpun="${esc(z.numZp)}" style="cursor:pointer" title="Отвязать">✕</b></div>`:`<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;font-size:13px;padding:3px 0"><a href="#sales/${encodeURIComponent(z.numZp)}" class="code c-blue" style="text-decoration:none">${esc(z.numZp)}</a><span style="flex:1;min-width:200px">${esc(z.name||'')}</span>${z.kpResult?`<span class="badge ${/Выигр|Соглас/.test(z.kpResult)?'b-green':'b-gray'}" style="font-size:10px">${esc(z.kpResult)}</span>`:''}<span class="c-gray" style="font-family:var(--mono)">${z.sum?'КП: '+money(z.sum)+(z.partial?' (выигранная часть)':''):'сумма КП не указана'}</span><b data-zpun="${esc(z.numZp)}" class="c-gray" style="cursor:pointer" title="Отвязать запрос от заказа">✕</b></div>`).join(''):'<div class="c-gray" style="font-size:13px">Запрос продаж к заказу не привязан.</div>'}
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:10px;border-top:1px solid var(--line2);padding-top:10px">
+          <div class="field" style="flex:1 1 280px"><label>Заказчик</label><input id="od-cust" value="${esc(o.customer||'')}" placeholder="например: ООО «ПБС» (на склад) → реальный заказчик после договора"></div>
+          <div class="field" style="flex:0 0 200px"><label>Сумма этого заказа, ₽</label><input id="od-sum" inputmode="decimal" value="${o.orderSum!=null?esc(String(o.orderSum)):''}" placeholder="${zpSum?'по запросу: '+Number(zpSum).toLocaleString('ru-RU'):'не указана'}"></div>
+          <button class="btn btn--sm" id="od-sumsave">Сохранить</button>
+          <span style="flex:1"></span><button class="btn btn--sm" id="od-zplink">Привязать запрос (ЗП)…</button></div>
+        <div class="c-gray" style="font-size:12px;margin-top:6px">${o.orderSum!=null?'В реестре показывается сумма заказа.':(zpSum?'Сумма заказа не задана — в реестре показывается сумма КП запроса. Если запрос разбит на несколько заказов, укажите сумму каждого.':'')}</div></div>`:'';
+      return zpCard+`<div class="card pad" style="padding-top:9px;padding-bottom:9px">
         <div data-odreq style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
           <span style="color:var(--sl-500);font-size:12px">${odReqOpen?'▾':'▸'}</span>
           <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--sl-600)">Реквизиты задания</span>
@@ -14196,6 +14207,20 @@
       const zb=host.querySelector('#od-znz-btn'); if(zb)zb.onclick=()=>odToggleZnzPanel(o);
       const eb=host.querySelector('#od-edit-btn'); if(eb)eb.onclick=()=>{ openCreateOrder(o); const pn=document.getElementById('ocreate-panel'); if(pn)pn.scrollIntoView({behavior:'smooth',block:'start'}); };
       host.querySelectorAll('[data-odreq]').forEach(el=>el.onclick=()=>{ odReqOpen=!odReqOpen; odShowDetail(o.numPz); });
+      // K-273: блок «Продажи» в карточке ПЗ (только администратор): сумма этого заказа, привязка / отвязка запроса
+      { const sb=host.querySelector('#od-sales'); if(sb){ const again=async()=>{ await load(); odShowDetail(o.numPz); };
+          const post=async(body)=>{ await postJson('/api/orders/sales-link',{numPz:o.numPz,...body}); };
+          const ss=sb.querySelector('#od-sumsave'); if(ss)ss.onclick=async()=>{ ss.disabled=true; try{ await post({sum:sb.querySelector('#od-sum').value,customer:sb.querySelector('#od-cust').value}); toast('Сохранено.','ok'); again(); }catch(e){ ss.disabled=false; toast('Не сохранено: '+(e.message||e),'err'); } };
+          sb.querySelectorAll('[data-zpun]').forEach(x=>x.onclick=async()=>{ if(!(await uiConfirm(`Отвязать запрос ${x.dataset.zpun} от заказа ${o.numPz}?`,{ok:'Отвязать'})))return; try{ await post({zp:x.dataset.zpun,unlink:true}); toast('Запрос отвязан.','ok'); again(); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } });
+          const lk=sb.querySelector('#od-zplink'); if(lk)lk.onclick=async()=>{ let reqs=[]; try{ reqs=((await (await fetch('/api/sales')).json()).requests)||[]; }catch(e){}
+            reqs=reqs.filter(z=>!(o.zpLinks||[]).some(l=>l.numZp===z.numZp)); if(!reqs.length){ toast('Запросов для привязки нет.','warn'); return; }
+            const words=String(o.customer||'').toLowerCase().replace(/[«»"]/g,'').split(/\s+/).filter(w=>w.length>3); const sc=(z)=>words.filter(w=>String(z.customer||'').toLowerCase().includes(w)).length+(/Выигр|Соглас/.test((z.kp&&z.kp.status)||'')?0.5:0);
+            reqs.sort((a,b2)=>sc(b2)-sc(a)||String(b2.numZp).localeCompare(String(a.numZp),'ru'));
+            const w=document.createElement('div'); w.className='ui-dlg'; w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Привязать запрос продаж к ${esc(o.numPz)}</div><div class="ui-dlg-t">Сверху — запросы того же заказчика и выигранные. Номер запроса запишется в реквизит «№ ЗП» заказа.</div>
+              <div class="field" style="margin-top:var(--sp-3)"><label>Запрос (ЗП)</label><select id="zl-sel" size="9" style="height:auto">${reqs.map(z=>`<option value="${esc(z.numZp)}">${esc(z.numZp)} · ${esc(z.customer||'—')} · ${esc(String(z.name||'').slice(0,60))}${(z.kp&&z.kp.status)?' · '+esc(z.kp.status):''}${z.sumKp?' · '+esc(String(z.sumKp)):''}</option>`).join('')}</select></div>
+              <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Привязать</button></div></div>`;
+            document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+            w.querySelector('[data-d="ok"]').onclick=async()=>{ const v=w.querySelector('#zl-sel').value; if(!v){ toast('Выберите запрос.','warn'); return; } try{ await post({zp:v}); w.remove(); toast(`${v} привязан к ${o.numPz}.`,'ok'); again(); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } }; }; } }
       host.querySelectorAll('[data-odfull]').forEach(el=>el.onclick=()=>{ const k=el.dataset.odfull;
         el.replaceWith(Object.assign(document.createElement('span'),{textContent:String((k==='terms'?o.terms:o.basis)||''),style:'white-space:pre-wrap'})); });
       const db=host.querySelector('#od-del-btn');

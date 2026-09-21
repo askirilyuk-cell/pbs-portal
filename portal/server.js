@@ -12488,6 +12488,16 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await sendKp(await readBody(req))); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), ...(e.signer ? { signer: e.signer, subtotal: e.subtotal } : {}) }); }
     }
+    // K-273: из карточки ПЗ — привязка к запросу продаж и сумма именно этого заказа. Только администратор.
+    if (p === '/api/orders/sales-link' && req.method === 'POST') { const sA = sessionFromReq(req); if (!(sA && sA.isAdmin && !sA.effectiveRole)) return sendJson(res, 403, { error: 'Связь с продажами и сумму заказа задаёт администратор.' });
+      try { const b = await readBody(req); const numPz = String(b.numPz || '').trim(); const o = (await ncListSoft('orders')).find((x) => String(x['№ ПЗ'] || '').trim() === numPz); if (!o) return sendJson(res, 404, { error: 'Заказ не найден.' });
+        const patch = {}; if (b.zp !== undefined && String(b.zp || '').trim()) { const zp = String(b.zp).trim(); if (!(await findSalesRequest(zp))) return sendJson(res, 400, { error: `Запрос «${zp}» не найден.` });
+          const cur = String(o['№ ЗП'] || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean); patch['№ ЗП'] = (b.unlink ? cur.filter((x) => x !== zp) : [...new Set([...cur, zp])]).join(', '); }
+        if (b.sum !== undefined) { await ncEnsureColumn('orders', 'Сумма заказа, ₽', 'Decimal'); const v = String(b.sum == null ? '' : b.sum).replace(/\s/g, '').replace(',', '.'); if (v !== '' && !(Number(v) >= 0)) return sendJson(res, 400, { error: 'Сумма должна быть числом.' }); patch['Сумма заказа, ₽'] = v === '' ? null : Number(v); }
+        if (typeof b.customer === 'string') { const c = b.customer.trim(); if (!c) return sendJson(res, 400, { error: 'Заказчик не может быть пустым.' }); if (c !== String(o['Заказчик / Инициатор'] || '').trim()) { patch['Заказчик / Инициатор'] = c; try { await ncEnsureColumn('orders', 'Кратко', 'SingleLineText'); const was = String(o['Заказчик / Инициатор'] || '').trim(); const br = String(o['Кратко'] || '').trim(); if (was && !br.includes(was)) patch['Кратко'] = (br ? br + ' · ' : '') + 'ранее: ' + was; } catch { /* пометка не критична */ } } }
+        if (!Object.keys(patch).length) return sendJson(res, 400, { error: 'Нечего менять.' }); await ncUpdate('orders', o.Id ?? o.id, patch);
+        logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who: sA.fio || '', details: 'связь с продажами: ' + Object.keys(patch).join(', ') });
+        return sendJson(res, 200, { ok: true, numPz, numZp: patch['№ ЗП'] ?? o['№ ЗП'] ?? '' }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
     if (p === '/api/sales/linkable-orders' && req.method === 'GET') { try { return sendJson(res, 200, { ok: true, orders: await salesLinkableOrders() }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
     if (p === '/api/sales/link-order' && req.method === 'POST') { try { return sendJson(res, 200, await salesLinkOrder(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
     if (p === '/api/sales/kp/result' && req.method === 'POST') {
@@ -12541,7 +12551,13 @@ const server = http.createServer(async (req, res) => {
       // Внешние чертежи размещаются НАСТОЯЩИМ ПЗ (createOrder → NocoDB) и попадают
       // в «Заказы (ПЗ)» штатно через buildBoardLive — демо-оверлей больше не нужен.
       if (!isLive()) return sendJson(res, 200, boardMock());
-      try { return sendJson(res, 200, await buildBoardLive()); }
+      try { const bd = await buildBoardLive();
+        // K-272: связь ПЗ → запрос продаж и сумма сделки — только администратору (решение владельца 21.09: коммерческие суммы производству не показываем)
+        const sessB = sessionFromReq(req); if (sessB && sessB.isAdmin && !sessB.effectiveRole) { try { const reqs = await ncListSoft('sales_requests'); const rawOrd = new Map((await ncListSoft('orders')).map((x) => [String(x['№ ПЗ'] || '').trim(), x])); const byNo = new Map(reqs.map((z) => [String(z['№ запроса'] || '').trim(), z]));
+          for (const o of bd.orders || []) { o.adminSales = true; const ro = rawOrd.get(String(o.numPz || '').trim()); const os = ro ? Number(ro['Сумма заказа, ₽']) : NaN; o.orderSum = Number.isFinite(os) && os > 0 ? os : null; o.zpLinks = String(o.numZp || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean).map((no) => { const z = byNo.get(no); if (!z) return { numZp: no, missing: true };
+            const part = String(z['Результат КП'] || '') === 'Выиграли частично'; const sum = part ? Number(z['Сумма выигранной части']) || null : (Number(z['Сумма КП, руб.']) || null);
+            return { numZp: no, name: z['Наименование запроса'] || '', customer: z['Заказчик'] || '', kpResult: z['Результат КП'] || '', status: z['Статус'] || '', sum, partial: part }; }); } } catch (e) { console.warn('K-272: связь ПЗ→ЗП:', e.message); } }
+        return sendJson(res, 200, bd); }
       catch (e) { return sendJson(res, 200, { ...boardMock(), mode: 'mock', warning: 'LIVE недоступен: ' + String(e.message || e) }); }
     }
     // ── ОТК-приёмка: WRITE-путь (DEF-02 Ф.4 приёмка · DEF-03 Ф.3 входной контроль) ──

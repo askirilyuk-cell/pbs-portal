@@ -5081,7 +5081,8 @@
         const r=await fetch('/api/design/chat/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decNo,title:`ПБС.${decNo} · ${p.name}`,description:`Чат проекта ОКР ПБС.${decNo}`})});
         const j=await r.json().catch(()=>({}));
         if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-        (await uiPrompt('Чат создан ✓ Скопируйте ссылку в поле «Ссылка на чат (Bitrix)» проекта в NocoDB:',j.url));
+        if(j.saved){ toast('Чат проекта создан и привязан к проекту.','ok'); p.chat=j.url; DESIGN=null; renderDesign(document.getElementById('view'),decNo); }
+        else (await uiPrompt('Чат создан, но ссылку не удалось сохранить в проект. Скопируйте её в поле «Ссылка на чат (Bitrix)»:',j.url));
       }catch(e){uiAlert('Не удалось создать чат: '+e.message);}
     }
     // K-?: вкладка «ТД» — сквозной реестр техдокументации (концепт v2): маршрутные карты + карты наладки +

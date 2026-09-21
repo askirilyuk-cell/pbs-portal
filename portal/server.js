@@ -13854,7 +13854,10 @@ const server = http.createServer(async (req, res) => {
       try {
         const chatId = await bitrixCall('im.chat.add', { TYPE: 'CHAT', TITLE: title, DESCRIPTION: String(body.description || ''), USERS: users });
         const url = `${bitrixPortal()}/online/?IM_DIALOG=chat${chatId}`;
-        return sendJson(res, 200, { ok: true, chatId, url });
+        // K-278: ссылка на чат сразу пишется в проект — раньше её просили скопировать в NocoDB вручную, и портал о чате не знал
+        let saved = false; const decNo = String(body.decNo || '').trim();
+        if (decNo) { try { const pr = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === decNo); if (pr) { await ncUpdate('design_projects', pr.Id ?? pr.id, { 'Ссылка на чат (Bitrix)': url }); saved = true; } } catch (e) { console.warn('K-278: ссылка на чат не сохранена:', e.message); } }
+        return sendJson(res, 200, { ok: true, chatId, url, saved });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
     // состав отдела продаж (по умолчанию деп. 81) → участники чата ЗП (чекбоксы формы)

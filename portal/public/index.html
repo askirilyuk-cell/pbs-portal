@@ -14112,16 +14112,17 @@
     function ordersPrintDialog(){
       const w=document.createElement('div'); w.className='ui-dlg';
       w.innerHTML=`<div class="ui-dlg-box"><div class="ui-dlg-h">Печать сводки по заказам</div><div class="ui-dlg-t">Сводка по заказчикам с суммами и подробный перечень заказов. Суммы — без НДС, по полю «Сумма этого заказа» в карточке ПЗ.</div>
-        <div class="dlg-form"><label class="full"><input type="checkbox" id="op-closed" checked> Включать закрытые и отменённые</label><label class="full"><input type="checkbox" id="op-basis" checked> Показывать договор / основание</label><label class="full"><input type="checkbox" id="op-pos" checked> Показывать позиции заказа</label></div>
+        <div class="dlg-form"><label class="full"><input type="checkbox" id="op-closed" checked> Включать закрытые и отменённые</label><label class="full"><input type="checkbox" id="op-basis" checked> Показывать договор / основание</label><label class="full"><input type="checkbox" id="op-pos" checked> Показывать позиции заказа</label><label class="full"><input type="checkbox" id="op-vat"> Суммы с НДС 22 % (по умолчанию — без НДС)</label></div>
         <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Открыть для печати</button></div></div>`;
       document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
-      w.querySelector('[data-d="ok"]').onclick=()=>{ const o={closed:w.querySelector('#op-closed').checked,basis:w.querySelector('#op-basis').checked,pos:w.querySelector('#op-pos').checked}; w.remove(); ordersPrint(o); };
+      w.querySelector('[data-d="ok"]').onclick=()=>{ const o={closed:w.querySelector('#op-closed').checked,basis:w.querySelector('#op-basis').checked,pos:w.querySelector('#op-pos').checked,vat:w.querySelector('#op-vat').checked}; w.remove(); ordersPrint(o); };
     }
     function ordersPrint(opt){
       const money0=(v)=>v==null?'—':Number(v).toLocaleString('ru-RU',{maximumFractionDigits:0});
       const isDone=(st)=>['Выполнен','Ожидает перевозки','Отгружен','Закрыт'].includes(st), isCancel=(st)=>st==='Отменён';
       let list=(DATA.orders||[]).filter(o=>!/ТЕСТ/i.test(String(o.numPz||'')));
       if(!opt.closed)list=list.filter(o=>!['Закрыт','Отменён'].includes(o.status));
+      if(opt.vat)list=list.map(o=>o.orderSum!=null?{...o,orderSum:Math.round(o.orderSum*1.22*100)/100}:o); const vatLbl=opt.vat?'с НДС 22 %':'без НДС';
       const custKey=(o)=>String(o.customer||'— не указан —').trim();
       const groups=new Map(); list.forEach(o=>{ const k=custKey(o); if(!groups.has(k))groups.set(k,[]); groups.get(k).push(o); });
       const agg=[...groups.entries()].map(([cust,os])=>{ const live=os.filter(o=>!isCancel(o.status)); const act=live.filter(o=>!isDone(o.status)), dn=live.filter(o=>isDone(o.status)); const sum=(a)=>a.reduce((x,o)=>x+(o.orderSum||0),0);
@@ -14133,7 +14134,7 @@
         ${agg.map(g=>`<tr><td>${esc(g.cust)}${g.noSum?` <span class="mut">· без суммы: ${g.noSum}</span>`:''}</td><td class="r">${g.n}</td><td class="r">${g.actN||'—'}</td><td class="r">${g.actSum?money0(g.actSum):'—'}</td><td class="r">${g.dnN||'—'}</td><td class="r">${g.dnSum?money0(g.dnSum):'—'}</td><td class="r b">${g.total?money0(g.total):'—'}</td><td class="r">${T.total&&g.total?Math.round(g.total/T.total*100)+' %':'—'}</td></tr>`).join('')}
         </tbody><tfoot><tr><td>Итого</td><td class="r">${T.n}</td><td class="r">${T.actN}</td><td class="r">${money0(T.actSum)}</td><td class="r">${T.dnN}</td><td class="r">${money0(T.dnSum)}</td><td class="r">${money0(T.total)}</td><td class="r">100 %</td></tr></tfoot></table>`;
       const detail=agg.map(g=>`<h3>${esc(g.cust)} <span class="mut">· заказов: ${g.n}${g.total?' · '+money0(g.total)+' ₽':''}</span></h3>
-        <table class="det"><thead><tr><th style="width:30mm">№ ПЗ</th><th style="width:23mm">Размещён</th><th>Что это</th><th style="width:30mm">Запрос</th><th style="width:23mm">Срок</th><th style="width:24mm">Статус</th><th style="width:17mm" class="r">Готово</th><th style="width:26mm" class="r">Сумма, ₽</th></tr></thead><tbody>
+        <table class="det"><thead><tr><th style="width:30mm">№ ПЗ</th><th style="width:23mm">Размещён</th><th>Что это</th><th style="width:30mm">Запрос</th><th style="width:23mm">Срок</th><th style="width:24mm">Статус</th><th style="width:17mm" class="r">Готово</th><th style="width:26mm" class="r">Сумма ${vatLbl}, ₽</th></tr></thead><tbody>
         ${g.os.map(o=>{ const tot=(o.tasks||[]).length, dn=doneCount(o); const pos=(o.positions||[]).filter(p=>String(p.name||'').trim());
           return `<tr class="${isCancel(o.status)?'cx':''}"><td class="mono b nw">${esc(o.numPz)}</td><td>${esc(fmt(o.datePlaced)||'—')}</td><td><div class="b">${esc(o.brief||(pos[0]&&pos[0].name)||'—')}</div>
             ${opt.pos&&pos.length?`<div class="sm">${pos.map(p=>`${esc(p.numPos||'')} ${esc(p.name)}${p.qty?` — <b>${esc(String(p.qty))} ${esc(p.unit||'шт')}</b>`:''}${p.mk?` · ${esc(p.mk)}`:''}`).join('<br>')}</div>`:''}
@@ -14150,7 +14151,7 @@
         table.det{table-layout:fixed} table.det tr{break-inside:avoid} .foot{margin-top:5mm;font-size:8.5pt;color:#555}
         @media screen{body{background:#e9ecef;padding:8mm}.sheet{background:#fff;max-width:277mm;margin:0 auto;padding:10mm;box-shadow:0 1px 6px rgba(0,0,0,.2)} .bar{max-width:277mm;margin:0 auto 4mm;display:flex;gap:3mm;justify-content:flex-end} .bar button{font:inherit;padding:2mm 5mm;cursor:pointer}} @media print{.bar{display:none}}
         </style></head><body><div class="bar"><button onclick="window.print()">Печать</button></div><div class="sheet">
-        <h1>Производственные заказы ООО «ПБС» — сводка</h1><div class="sub">По состоянию на ${today.toLocaleDateString('ru-RU')} · суммы в рублях без НДС · ${opt.closed?'все заказы, включая закрытые':'без закрытых и отменённых'} · источник: портал ИСМ, реестр ПЗ</div>
+        <h1>Производственные заказы ООО «ПБС» — сводка</h1><div class="sub">По состоянию на ${today.toLocaleDateString('ru-RU')} · суммы в рублях ${vatLbl} · ${opt.closed?'все заказы, включая закрытые':'без закрытых и отменённых'} · источник: портал ИСМ, реестр ПЗ</div>
         <div class="kpi"><div><b>${T.n}</b><span>заказов всего</span></div><div><b>${T.actN}</b><span>в производстве</span></div><div><b>${money0(T.actSum)} ₽</b><span>сумма в производстве</span></div><div><b>${money0(T.dnSum)} ₽</b><span>изготовлено / отгружено</span></div><div><b>${money0(T.total)} ₽</b><span>итого по заказам</span></div>${T.noSum?`<div><b>${T.noSum}</b><span>заказов без суммы</span></div>`:''}</div>
         <h2>Суммы по заказчикам</h2>${sumTbl}
         <div class="foot">«В производстве» — статусы «Размещён», «В работе», «Приостановлен». «Изготовлено / отгружено» — «Выполнен», «Ожидает перевозки», «Отгружен», «Закрыт». Отменённые заказы в суммы не входят. Заказы «без суммы» — внутренние (склад, собственные нужды) или договор ещё не оформлен.</div>

@@ -14104,9 +14104,59 @@
         del:DATA.mode==='live'?{key:'orders',idOf:r=>r.o.id,reload:()=>load()}:undefined,
         info:`${srcChip(DATA.mode==='live')}<span>Всего: <b style="color:var(--ink)">${rows.length}</b></span>${lateN?`<span class="c-red">Просрочено: <b>${lateN}</b></span>`:''}${otkN?`<span class="c-amber">Ждут ОТК: <b>${otkN}</b></span>`:''}`,
         empty:{text:'Производственных заданий пока нет',sub:'Первое ПЗ создаётся кнопкой «+ Создать ПЗ» или размещением заказа из продаж.'},
-        toolbar:[{label:'+ Создать ПЗ',cls:'primary',onClick:()=>openCreateOrder()}],
+        toolbar:[{label:'+ Создать ПЗ',cls:'primary',onClick:()=>openCreateOrder()},...((typeof ME!=='undefined'&&ME&&ME.isAdmin&&!ME.viewAs)?[{label:'Печать сводки',onClick:()=>ordersPrintDialog()}]:[])],
       });
       odShowDetail(ordSel);
+    }
+    // ── K-274: печатная сводка по заказам для обсуждения с руководством — суммы по заказчикам + подробный перечень. Только администратор (коммерческие суммы).
+    function ordersPrintDialog(){
+      const w=document.createElement('div'); w.className='ui-dlg';
+      w.innerHTML=`<div class="ui-dlg-box"><div class="ui-dlg-h">Печать сводки по заказам</div><div class="ui-dlg-t">Сводка по заказчикам с суммами и подробный перечень заказов. Суммы — без НДС, по полю «Сумма этого заказа» в карточке ПЗ.</div>
+        <div class="dlg-form"><label class="full"><input type="checkbox" id="op-closed" checked> Включать закрытые и отменённые</label><label class="full"><input type="checkbox" id="op-basis" checked> Показывать договор / основание</label><label class="full"><input type="checkbox" id="op-pos" checked> Показывать позиции заказа</label></div>
+        <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Открыть для печати</button></div></div>`;
+      document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+      w.querySelector('[data-d="ok"]').onclick=()=>{ const o={closed:w.querySelector('#op-closed').checked,basis:w.querySelector('#op-basis').checked,pos:w.querySelector('#op-pos').checked}; w.remove(); ordersPrint(o); };
+    }
+    function ordersPrint(opt){
+      const money0=(v)=>v==null?'—':Number(v).toLocaleString('ru-RU',{maximumFractionDigits:0});
+      const isDone=(st)=>['Выполнен','Ожидает перевозки','Отгружен','Закрыт'].includes(st), isCancel=(st)=>st==='Отменён';
+      let list=(DATA.orders||[]).filter(o=>!/ТЕСТ/i.test(String(o.numPz||'')));
+      if(!opt.closed)list=list.filter(o=>!['Закрыт','Отменён'].includes(o.status));
+      const custKey=(o)=>String(o.customer||'— не указан —').trim();
+      const groups=new Map(); list.forEach(o=>{ const k=custKey(o); if(!groups.has(k))groups.set(k,[]); groups.get(k).push(o); });
+      const agg=[...groups.entries()].map(([cust,os])=>{ const live=os.filter(o=>!isCancel(o.status)); const act=live.filter(o=>!isDone(o.status)), dn=live.filter(o=>isDone(o.status)); const sum=(a)=>a.reduce((x,o)=>x+(o.orderSum||0),0);
+        return {cust,os:os.slice().sort((a,b)=>String(a.numPz).localeCompare(String(b.numPz),'ru')),n:os.length,actN:act.length,actSum:sum(act),dnN:dn.length,dnSum:sum(dn),total:sum(live),noSum:live.filter(o=>o.orderSum==null).length}; }).sort((a,b)=>b.total-a.total||a.cust.localeCompare(b.cust,'ru'));
+      const T=agg.reduce((t,g)=>({n:t.n+g.n,actN:t.actN+g.actN,actSum:t.actSum+g.actSum,dnN:t.dnN+g.dnN,dnSum:t.dnSum+g.dnSum,total:t.total+g.total,noSum:t.noSum+g.noSum}),{n:0,actN:0,actSum:0,dnN:0,dnSum:0,total:0,noSum:0});
+      const today=new Date();
+      const late=(o)=>o.plan&&String(o.plan).slice(0,10)<today.toISOString().slice(0,10)&&!orderFinished(o.status);
+      const sumTbl=`<table><thead><tr><th>Заказчик</th><th class="r">Заказов</th><th class="r">В производстве, шт</th><th class="r">В производстве, ₽</th><th class="r">Изготовлено / отгружено, шт</th><th class="r">Изготовлено / отгружено, ₽</th><th class="r">Итого, ₽</th><th class="r">Доля</th></tr></thead><tbody>
+        ${agg.map(g=>`<tr><td>${esc(g.cust)}${g.noSum?` <span class="mut">· без суммы: ${g.noSum}</span>`:''}</td><td class="r">${g.n}</td><td class="r">${g.actN||'—'}</td><td class="r">${g.actSum?money0(g.actSum):'—'}</td><td class="r">${g.dnN||'—'}</td><td class="r">${g.dnSum?money0(g.dnSum):'—'}</td><td class="r b">${g.total?money0(g.total):'—'}</td><td class="r">${T.total&&g.total?Math.round(g.total/T.total*100)+' %':'—'}</td></tr>`).join('')}
+        </tbody><tfoot><tr><td>Итого</td><td class="r">${T.n}</td><td class="r">${T.actN}</td><td class="r">${money0(T.actSum)}</td><td class="r">${T.dnN}</td><td class="r">${money0(T.dnSum)}</td><td class="r">${money0(T.total)}</td><td class="r">100 %</td></tr></tfoot></table>`;
+      const detail=agg.map(g=>`<h3>${esc(g.cust)} <span class="mut">· заказов: ${g.n}${g.total?' · '+money0(g.total)+' ₽':''}</span></h3>
+        <table class="det"><thead><tr><th style="width:30mm">№ ПЗ</th><th style="width:23mm">Размещён</th><th>Что это</th><th style="width:30mm">Запрос</th><th style="width:23mm">Срок</th><th style="width:24mm">Статус</th><th style="width:17mm" class="r">Готово</th><th style="width:26mm" class="r">Сумма, ₽</th></tr></thead><tbody>
+        ${g.os.map(o=>{ const tot=(o.tasks||[]).length, dn=doneCount(o); const pos=(o.positions||[]).filter(p=>String(p.name||'').trim());
+          return `<tr class="${isCancel(o.status)?'cx':''}"><td class="mono b nw">${esc(o.numPz)}</td><td>${esc(fmt(o.datePlaced)||'—')}</td><td><div class="b">${esc(o.brief||(pos[0]&&pos[0].name)||'—')}</div>
+            ${opt.pos&&pos.length?`<div class="sm">${pos.map(p=>`${esc(p.numPos||'')} ${esc(p.name)}${p.qty?` — <b>${esc(String(p.qty))} ${esc(p.unit||'шт')}</b>`:''}${p.mk?` · ${esc(p.mk)}`:''}`).join('<br>')}</div>`:''}
+            ${opt.basis&&o.basis?`<div class="sm mut">${esc(o.basis)}</div>`:''}<div class="sm mut">${esc([o.orderType,o.productType].filter(Boolean).join(' · '))}</div></td>
+            <td class="mono">${esc(String(o.numZp||'—').replace(/,\s*/g,'\n'))}</td><td>${o.plan?esc(fmt(o.plan))+(late(o)?'<div class="red">просрочен</div>':''):'—'}</td><td>${esc(o.status||'')}</td><td class="r">${tot?dn+' / '+tot:'—'}</td><td class="r b">${o.orderSum!=null?money0(o.orderSum):'<span class="mut">не опр.</span>'}</td></tr>`; }).join('')}
+        </tbody></table>`).join('');
+      const win=window.open('','_blank'); if(!win){ toast('Браузер заблокировал окно печати — разрешите всплывающие окна.','warn'); return; }
+      win.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Заказы ПБС — сводка ${today.toLocaleDateString('ru-RU')}</title><style>
+        @page{size:A4 landscape;margin:12mm 10mm 12mm 12mm} *{box-sizing:border-box} body{margin:0;font:10pt/1.35 "Segoe UI",system-ui,Arial,sans-serif;color:#111}
+        h1{font-size:16pt;margin:0 0 1mm} h2{font-size:12pt;margin:7mm 0 2mm;border-bottom:.3mm solid #111;padding-bottom:1mm} h3{font-size:10.5pt;margin:5mm 0 1.5mm;break-after:avoid}
+        .sub{color:#555;font-size:9pt} .kpi{display:flex;gap:9mm;margin:4mm 0 0;flex-wrap:wrap} .kpi div{border-left:.6mm solid #1f4e79;padding:0 0 0 2.5mm} .kpi b{display:block;font-size:13pt;font-variant-numeric:tabular-nums} .kpi span{font-size:8.5pt;color:#555}
+        table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums} th,td{border:.2mm solid #999;padding:1.2mm 1.6mm;vertical-align:top;text-align:left} th{background:#eef1f5;font-size:8.5pt;font-weight:600} tfoot td{font-weight:700;background:#f5f6f8}
+        .r{text-align:right;white-space:nowrap} .b{font-weight:600} .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:9pt;white-space:pre-line} .sm{font-size:8.5pt;margin-top:.8mm} .mut{color:#666;font-weight:400} .red{color:#b00020;font-size:8.5pt} .nw{white-space:nowrap} tr.cx td{color:#888;text-decoration:line-through}
+        table.det{table-layout:fixed} table.det tr{break-inside:avoid} .foot{margin-top:5mm;font-size:8.5pt;color:#555}
+        @media screen{body{background:#e9ecef;padding:8mm}.sheet{background:#fff;max-width:277mm;margin:0 auto;padding:10mm;box-shadow:0 1px 6px rgba(0,0,0,.2)} .bar{max-width:277mm;margin:0 auto 4mm;display:flex;gap:3mm;justify-content:flex-end} .bar button{font:inherit;padding:2mm 5mm;cursor:pointer}} @media print{.bar{display:none}}
+        </style></head><body><div class="bar"><button onclick="window.print()">Печать</button></div><div class="sheet">
+        <h1>Производственные заказы ООО «ПБС» — сводка</h1><div class="sub">По состоянию на ${today.toLocaleDateString('ru-RU')} · суммы в рублях без НДС · ${opt.closed?'все заказы, включая закрытые':'без закрытых и отменённых'} · источник: портал ИСМ, реестр ПЗ</div>
+        <div class="kpi"><div><b>${T.n}</b><span>заказов всего</span></div><div><b>${T.actN}</b><span>в производстве</span></div><div><b>${money0(T.actSum)} ₽</b><span>сумма в производстве</span></div><div><b>${money0(T.dnSum)} ₽</b><span>изготовлено / отгружено</span></div><div><b>${money0(T.total)} ₽</b><span>итого по заказам</span></div>${T.noSum?`<div><b>${T.noSum}</b><span>заказов без суммы</span></div>`:''}</div>
+        <h2>Суммы по заказчикам</h2>${sumTbl}
+        <div class="foot">«В производстве» — статусы «Размещён», «В работе», «Приостановлен». «Изготовлено / отгружено» — «Выполнен», «Ожидает перевозки», «Отгружен», «Закрыт». Отменённые заказы в суммы не входят. Заказы «без суммы» — внутренние (склад, собственные нужды) или договор ещё не оформлен.</div>
+        <h2>Заказы подробно</h2>${detail}
+        <div class="foot">Сформировано ${today.toLocaleString('ru-RU')} · ${esc((ME&&ME.name)||'')}</div></div></body></html>`);
+      win.document.close();
     }
     // ── K-123: реквизиты Ф.1–П.2 в карточке + правка/удаление ──────────────────
     //  Раньше карточка показывала только заказчика и тип: № ЗП/ЗКЗ, дата размещения,

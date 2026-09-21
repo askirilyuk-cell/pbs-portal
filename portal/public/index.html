@@ -4287,7 +4287,7 @@
         body.innerHTML=`Маршрутов пока нет. <a href="#routes" style="color:var(--blue)">Маршруты →</a>`;
         return;
       }
-      const rows=list.map(r=>`<tr><td class="code"><a href="#routes/${encodeURIComponent(r.mk)}" style="color:var(--blue);font-weight:600;text-decoration:none">${esc(r.mk)}</a></td><td class="nowrap">${rtTypeChip(r.type)}</td><td class="name" title="${esc(r.name||'')}">${esc(r.name||'—')}</td><td class="nowrap" style="text-align:center">${r.type==='СБР'?'<span class="c-gray">сборка</span>':String(r.opCount||0)}</td><td class="nowrap">${rtStatus(r.status)}</td></tr>`).join('');
+      const rows=list.map(r=>`<tr><td class="code"><a href="#routes/${encodeURIComponent(r.mk)}" style="color:var(--blue);font-weight:600;text-decoration:none">${esc(r.mk)}</a></td><td class="nowrap">${rtTypeChip(r.type)}</td><td class="name" title="${esc(r.name||'')}">${esc(r.name||'—')}</td><td class="nowrap" style="text-align:center">${r.type==='СБР'?'<span class="c-gray">сборка</span>':String(r.opCount||0)}</td><td class="nowrap">${rtStatus(r.statusMk||r.status)}</td></tr>`).join('');
       const table=`<div class="tbl-wrap"><table class="dt" style="--tbl-min:600px"><colgroup><col style="width:160px"><col style="width:74px"><col><col style="width:82px"><col style="width:150px"></colgroup>
         <thead><tr><th>№ МК</th><th>Тип</th><th>Наименование</th><th style="text-align:center">Операций</th><th>Статус</th></tr></thead><tbody>${rows}</tbody></table></div>`;
       // подсветка разрыва: детали состава КД (elemType='Деталь'), для чьего docNo нет отдельной МК
@@ -4318,7 +4318,7 @@
       if(!host.isConnected||host.dataset.proj!==proj)return; // карточка сменилась за время await
       const setupItems=(rtstp&&rtstp.items)||[], lib=(DESIGN&&DESIGN.td)||[], up=(DESIGN&&DESIGN.ncprog)||[];
       const docs=[];
-      (routes||[]).forEach(r=>docs.push({kind:'mk',no:r.mk||'',name:r.name||'',desig:r.designation||'',status:r.status||'',sub:r.type,href:r.mk?('#routes/'+encodeURIComponent(r.mk)):''}));
+      (routes||[]).forEach(r=>docs.push({kind:'mk',no:r.mk||'',name:r.name||'',desig:r.designation||'',status:r.statusMk||r.status||'',sub:r.type,href:r.mk?('#routes/'+encodeURIComponent(r.mk)):''}));
       setupItems.forEach(r=>docs.push({kind:'kn',no:r.no||'',name:r.name||'',desig:r.part||'',status:r.status||'',href:r.id!=null?('#setup/'+encodeURIComponent(r.id)):''}));
       up.forEach(u=>docs.push({kind:'up',no:u.upNo||'',name:u.name||'',desig:'',status:u.status||'',href:''}));
       lib.forEach(t=>docs.push({kind:'doc',no:t.code||'',name:t.name||'',desig:'',status:t.status||'',href:''}));
@@ -5096,7 +5096,7 @@
       if(d.kind==='up')return '<span class="badge b-gray">УП</span>';
       return '<span class="badge b-gray">Док</span>';
     }
-    const tdStatusBadge=(s)=>{const m={'Утверждена':'b-green','Действует':'b-green','В работе':'b-navy','Черновик':'b-gray','Заведена':'b-gray','Опробование':'b-amber','На пересмотре':'b-amber','Архив':'b-gray'};return `<span class="badge ${m[s]||'b-gray'}">${esc(s||'—')}</span>`;};
+    const tdStatusBadge=(s)=>{const m={'На согласовании':'b-amber','В производстве':'b-navy','Выполнена':'b-gray','Утверждена':'b-green','Действует':'b-green','В работе':'b-navy','Черновик':'b-gray','Заведена':'b-gray','Опробование':'b-amber','На пересмотре':'b-amber','Архив':'b-gray'};return `<span class="badge ${m[s]||'b-gray'}">${esc(s||'—')}</span>`;};
     // совпадение «изделие/децим.№» ↔ проект — та же логика, что в loadProjRoutes (K-72): без «ПБС.», trim, lower,
     // строка начинается с децим.№ ИЛИ содержит код проекта (kdProj — 2 буквы+4 цифры)
     const tdDesigMatch=(str,proj)=>{if(!proj)return true; const np=decNorm(proj), nd=decNorm(str); return (!!nd&&!!np&&nd.indexOf(np)===0)||kdProj(str)===proj;};
@@ -5110,7 +5110,7 @@
       const D=DESIGN, routes=BOARD_RT||[], setupItems=(RTSTP&&RTSTP.items)||[], lib=D.td||[], up=D.ncprog||[];
       // унифицированный список документов из 4 источников
       const docs=[];
-      routes.forEach(r=>docs.push({kind:'mk',no:r.mk||'',name:r.name||'',desig:r.designation||'',status:r.status||'',sub:r.type,href:r.mk?('#routes/'+encodeURIComponent(r.mk)):''}));
+      routes.forEach(r=>docs.push({kind:'mk',no:r.mk||'',name:r.name||'',desig:r.designation||'',status:r.statusMk||r.status||'',sub:r.type,href:r.mk?('#routes/'+encodeURIComponent(r.mk)):''}));
       setupItems.forEach(r=>docs.push({kind:'kn',no:r.no||'',name:r.name||'',desig:r.part||'',status:r.status||'',href:r.id!=null?('#setup/'+encodeURIComponent(r.id)):''}));
       up.forEach(u=>docs.push({kind:'up',no:u.upNo||'',name:u.name||'',desig:'',status:u.status||'',href:''}));
       lib.forEach(t=>docs.push({kind:'doc',no:t.code||'',name:t.name||'',desig:'',status:t.status||'',href:''}));

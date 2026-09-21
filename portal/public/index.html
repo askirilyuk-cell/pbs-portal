@@ -5125,7 +5125,8 @@
       });
     }
     // K-06 состояния для воронки продаж: ЗП раскладывается в бакет по статусу (5 активных + 2 терминала)
-    function zpBucket(s){ s=String(s||'');
+    // K-270: результат КП сильнее статуса запроса — «Выиграли / Согласовано» сразу переносит запрос в «выигранные», даже если статус остался «Новый» или «На оценке» (статуса «Выигран» в базе нет; «Принят (→ЗКЗ)» ставится при создании заказа)
+    function zpBucket(x){ let s=x; if(x&&typeof x==='object'){ const kr=String((x.kp&&x.kp.status)||''); const st=String(x.status||''); if(!/Отклон|Отозв|В архиве|Закрыт без/.test(st)){ if(/^(Согласовано|Выиграли)/.test(kr)||((x.prodOrders||[]).length&&!/^(Проиграли|Отказались)/.test(kr)))return 'won'; /* есть заказ на производство — сделка в работе */ if(/^(Проиграли|Отказались)/.test(kr))return 'rej'; } s=st; } s=String(s||'');
       if(/Отклон|Проигран|Отозв/.test(s)) return 'rej';
       if(/В архиве|Закрыт без/.test(s)) return 'closed';
       if(/Принят|Согласовано|Выигран|В работе \(договор/.test(s)) return 'won';   // стадия договора = КП согласовано (server salesStep: шаг 4 «Договор / заказ»), не «Новый»
@@ -5222,12 +5223,12 @@
       const B=[['new','Новый','gray'],['lov','На оценке','navy'],['prep','КП готовится','blue'],['sent','КП отправлено','amber'],['won','Согласовано / Выиграли','green']];
       const T=[['rej','Отклонён / проигран','red'],['closed','Закрыт без сделки','gray']];
       const cnt={}; [...B,...T].forEach(([k])=>cnt[k]=0);
-      all.forEach(r=>{cnt[zpBucket(r.status)]=(cnt[zpBucket(r.status)]||0)+1;});
+      all.forEach(r=>{cnt[zpBucket(r)]=(cnt[zpBucket(r)]||0)+1;});
       const CB={gray:'#9ca3af',navy:'var(--navy)',blue:'var(--blue)',amber:'var(--amber)',green:'var(--green)',red:'var(--red)'};
       // ── KPI дашборда ──
       const nWon=cnt.won, conv=all.length?Math.round(nWon/all.length*100):0;
-      const sumWork=all.filter(r=>['prep','sent'].includes(zpBucket(r.status))).reduce((s,r)=>s+moneyVal(r.sumKp),0);
-      const stale=all.filter(r=>zpBucket(r.status)==='sent'&&r.kpStale).length;
+      const sumWork=all.filter(r=>['prep','sent'].includes(zpBucket(r))).reduce((s,r)=>s+moneyVal(r.sumKp),0);
+      const stale=all.filter(r=>zpBucket(r)==='sent'&&r.kpStale).length;
       const m=(lbl,num,col,sub,subcol)=>`<div class="m"><div class="lbl">${lbl}</div><div class="num"${col?` style="color:${col}"`:''}>${num}</div>${sub?`<div style="font-size:11px;color:${subcol||'var(--red)'};margin-top:1px">${sub}</div>`:''}</div>`;
       const funnel=B.map(([k,lbl,c])=>`<div class="fseg${salesFilter===k?' on':''}" data-f="${k}"><div class="fn"${c!=='gray'?` style="color:${CB[c]}"`:''}>${cnt[k]}</div><div class="fl"><i style="background:${CB[c]}"></i>${esc(lbl)}</div></div>`).join('');
       const terms=T.map(([k,lbl,c])=>`<b class="c-${c}${salesFilter===k?' on':''}" data-f="${k}">${esc(lbl)} · ${cnt[k]}</b>`).join('<span style="color:#cbd5e1">·</span>');
@@ -5255,7 +5256,7 @@
       const gh=document.getElementById('sgrid'); if(!gh)return;
       const all=(SALES&&SALES.requests)||[];
       let rows=all.slice();
-      if(salesFilter) rows=rows.filter(r=>zpBucket(r.status)===salesFilter);
+      if(salesFilter) rows=rows.filter(r=>zpBucket(r)===salesFilter);
       rows.sort((a,b)=>String(b.numZp).localeCompare(String(a.numZp),'ru'));   // по умолчанию № ЗП ↓
       if(!rows.length){ gh.innerHTML=emptyCard('Запросов по текущему фильтру нет',{sub:'Снимите фильтр или создайте новый запрос.'}); return; }
       if(!salesSelZp||!rows.some(r=>r.numZp===salesSelZp)) salesSelZp=rows[0].numZp;
@@ -5267,7 +5268,7 @@
         {key:'sumKp',label:'Сумма КП',w:126,align:'right',cls:'nw',cell:r=>{const n=moneyVal(r.sumKp);return n?kpMoney(n)+' ₽':'<span class="c-gray">—</span>';},sortVal:r=>moneyVal(r.sumKp)},
         {key:'owner',label:'Ответственный',w:148,cls:'nw',cell:r=>r.owner?esc(r.owner):'<span class="c-gray">не назначен</span>',sortVal:r=>r.owner},
         {key:'replyDue',label:'Ответ до',w:120,cls:'nw',cell:zpReplyDue,sortVal:r=>{const d=zpReplyParse(r);return d?d.getTime():8e15;}},
-        {key:'status',label:'Статус',w:150,cls:'nw',cell:r=>zpCell(r.status)+((zpBucket(r.status)==='sent'&&!(r.kp&&r.kp.status))?` <span title="Укажите результат КП" style="margin-left:6px;font-size:11px;font-weight:700;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-m);padding:1px 6px">!</span>`:''),sortVal:r=>r.status},
+        {key:'status',label:'Статус',w:190,cls:'nw',cell:r=>zpCell(r.status)+((r.kp&&/^(Согласовано|Выиграли)/.test(r.kp.status||'')&&!/Принят/.test(r.status||''))?` <span class="badge b-green" style="font-size:10px" title="Результат КП">${esc(r.kp.status)}</span>`:'')+((r.prodOrders||[]).length?` <span class="badge b-navy" style="font-size:10px" title="Заказы на производство: ${esc(r.prodOrders.map(o=>o.numPz).join(', '))}">ПЗ · ${r.prodOrders.length}</span>`:'')+((zpBucket(r)==='sent'&&!(r.kp&&r.kp.status))?` <span title="Укажите результат КП" style="margin-left:6px;font-size:11px;font-weight:700;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-m);padding:1px 6px">!</span>`:''),sortVal:r=>r.status},
       ];
       erpGrid(gh,{key:'sales-req',cols,rows,
         onRow:r=>{ salesSelZp=r.numZp; salesOpenZp=r.numZp; try{history.replaceState(null,'','#sales/'+encodeURIComponent(r.numZp));}catch{} renderSales(document.getElementById('view')); },
@@ -5926,7 +5927,7 @@
       }
       // DEF-34: видимый шаг «Результат КП» прямо на карточке ЗП (раньше был спрятан внизу конструктора, ниже сгиба).
       const KP_RES_OPTS=['','Отправлено','Согласовано','Выиграли','Выиграли частично','Проиграли','Отказались'];
-      const kpBkt=zpBucket(z.status), kpSent=['sent','won','rej','closed'].includes(kpBkt), kpCur=(z.kp&&z.kp.status)||'';
+      const kpBkt=zpBucket(z), kpSent=['sent','won','rej','closed'].includes(kpBkt), kpCur=(z.kp&&z.kp.status)||'';
       const kpResOptsHtml=KP_RES_OPTS.map(o=>`<option value="${esc(o)}"${o===kpCur?' selected':''}>${o||'— не задан —'}</option>`).join('');
       // гейт «доступно после отправки КП» снят по запросу ДпП (2026-07-14): селектор активен всегда
       const kpResSelStyle='font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--sl-300);border-radius:var(--r-s);min-width:190px;color:#1f3a52;background:#fff';
@@ -5954,6 +5955,9 @@
       // Гейт 3 K-06 (§5.4): заказ (ЗКЗ) при «Результат КП» ∈ {Согласовано, Выиграли}. gates — из /api/sales (live); фолбэк на старую эвристику в mock.
       const canOrder=z.gates?!!z.gates.order:(/Принято/.test(z.status)||(z.lov&&z.lov.decision&&/Принято/.test(z.lov.decision.result)));
       const canKp=z.gates?!!z.gates.kp:true; // K-33: КП без ЛОВ — конструктор доступен всегда
+      const prodCard=`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">Производство <span style="font-weight:400;color:var(--sub);font-size:12px;text-transform:none;letter-spacing:0">· заказы (ПЗ) по этому запросу</span></div>
+        ${(z.prodOrders||[]).length?z.prodOrders.map(o=>`<div style="display:flex;gap:10px;align-items:center;font-size:13px;padding:5px 0;border-top:1px solid var(--line2)"><a href="#orders/${encodeURIComponent(o.numPz)}" class="code c-blue" style="text-decoration:none">${esc(o.numPz)}</a><span class="c-gray" style="flex:1">${esc(o.status||'')}${o.plan?' · срок '+esc(fmt(o.plan)):''}</span>${rbacAccess('sales')==='write'?`<b data-pzunlink="${esc(o.numPz)}" class="c-gray" style="cursor:pointer" title="Отвязать заказ от запроса">✕</b>`:''}</div>`).join(''):'<div class="c-gray" style="font-size:13px">Заказ на производство к запросу не привязан.</div>'}
+        ${rbacAccess('sales')==='write'?`<div style="margin-top:8px"><button class="btn btn--sm" data-act="pzlink">Привязать заказ на производство…</button></div>`:''}</div>`;
       const filesCard=`<div class="card pad"><div class="sec-h" style="margin-bottom:6px">Файлы запроса <span style="font-weight:400;color:var(--sub);font-size:12px">· из папки на NAS</span></div><div id="reqfiles"><div style="font-size:13px;color:var(--sub)">Загрузка…</div></div></div>`;
       const actBtns=`<!-- кнопка «Оценка выполнимости (ЛОВ)» / «Запросить оценку» скрыта по запросу ДпП (2026-07-14); обработчик lovFromReq оставлен в коде -->
             <button class="tbtn" data-act="project">Создать проект разработки →</button>
@@ -5966,6 +5970,7 @@
             <div class="card pad"><div style="display:flex;flex-wrap:wrap">${track}</div></div>
             ${reqCard}
             ${kp}
+            ${prodCard}
             ${filesCard}
           </div>
           <aside class="rail">
@@ -5981,6 +5986,7 @@
           <div class="card pad" style="margin-bottom:var(--gap)"><div style="display:flex;flex-wrap:wrap">${track}</div></div>
           ${reqCard}<div style="height:var(--gap)"></div>
           ${kp}<div style="height:var(--gap)"></div>
+          ${prodCard}<div style="height:var(--gap)"></div>
           ${hist}
           <div style="margin-top:var(--gap)">${filesCard}</div>
           <div style="margin-top:var(--gap);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">${actBtns}</div></div>`;
@@ -5989,6 +5995,16 @@
     function wireReqCard(z,root){
       const canOrder=z.gates?!!z.gates.order:(/Принято/.test(z.status)||(z.lov&&z.lov.decision&&/Принято/.test(z.lov.decision.result)));
       const canKp=z.gates?!!z.gates.kp:true; // K-33: КП без ЛОВ — конструктор доступен всегда
+      const relink=async()=>{ salesSelZp=z.numZp; SALES=null; renderSales(document.getElementById('view')); };
+      root.querySelectorAll('[data-pzunlink]').forEach(x=>x.onclick=async()=>{ if(!(await uiConfirm(`Отвязать ${x.dataset.pzunlink} от запроса ${z.numZp}?`,{ok:'Отвязать'})))return; try{ await postJson('/api/sales/link-order',{zp:z.numZp,numPz:x.dataset.pzunlink,unlink:true}); toast('Заказ отвязан.','ok'); relink(); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } });
+      const pzl=root.querySelector('[data-act="pzlink"]'); if(pzl)pzl.onclick=async()=>{ let list=[]; try{ list=((await (await fetch('/api/sales/linkable-orders')).json()).orders)||[]; }catch(e){}
+        list=list.filter(o=>!(z.prodOrders||[]).some(p=>p.numPz===o.numPz)); if(!list.length){ toast('Нет заказов для привязки.','warn'); return; }
+        const cust=String(z.customer||'').toLowerCase().replace(/[«»"]/g,'').split(/\s+/).filter(w=>w.length>3); const score=(o)=>cust.filter(w=>String(o.customer||'').toLowerCase().includes(w)).length; list.sort((a,b)=>score(b)-score(a)||String(b.numPz).localeCompare(String(a.numPz),'ru'));
+        const w=document.createElement('div'); w.className='ui-dlg'; w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Привязать заказ на производство</div><div class="ui-dlg-t">Запрос ${esc(z.numZp)} · ${esc(z.customer||'')}. Сверху — заказы того же заказчика. У заказа заполнится поле «№ ЗП»; один заказ можно привязать к нескольким запросам.</div>
+          <div class="field" style="margin-top:var(--sp-3)"><label>Заказ (ПЗ)</label><select id="pzl-sel" size="8" style="height:auto">${list.map(o=>`<option value="${esc(o.numPz)}">${esc(o.numPz)} · ${esc(o.customer||'—')} · ${esc(o.status||'')}${o.items.length?' · '+esc(o.items.join('; ').slice(0,70)):''}${o.numZp?' · уже: '+esc(o.numZp):''}</option>`).join('')}</select></div>
+          <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Привязать</button></div></div>`;
+        document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+        w.querySelector('[data-d="ok"]').onclick=async()=>{ const v=w.querySelector('#pzl-sel').value; if(!v){ toast('Выберите заказ.','warn'); return; } try{ await postJson('/api/sales/link-order',{zp:z.numZp,numPz:v}); w.remove(); toast(`${v} привязан к ${z.numZp}.`,'ok'); relink(); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } }; };
       const lovb=root.querySelector('[data-act="lov"]'); if(lovb)lovb.onclick=()=>lovFromReq(z.numZp,lovb);
       const prjb=root.querySelector('[data-act="project"]'); if(prjb)prjb.onclick=()=>openProjectFromReq(z);
       const kpb=root.querySelector('[data-act="kp"]'); if(kpb&&canKp)kpb.onclick=()=>openKpConstructor(z.numZp);
@@ -14070,7 +14086,8 @@
       const otkN=countWaitsOtk(DATA.orders);
       const cols=[
         {key:'numPz',label:'№ ПЗ',w:120,cls:'code',cell:r=>esc(r.o.numPz),sortVal:r=>r.o.numPz},
-        {key:'customer',label:'Заказчик',cls:'ell',cell:r=>`<span title="${esc(r.o.customer||'')}">${esc(r.o.customer||'')}</span>`,sortVal:r=>r.o.customer},
+        {key:'customer',label:'Заказчик',w:230,cls:'ell',cell:r=>`<span title="${esc(r.o.customer||'')}">${esc(r.o.customer||'')}</span>`,sortVal:r=>r.o.customer},
+        {key:'brief',label:'Что это',cls:'ell',cell:r=>{ const b=String(r.o.brief||'').trim(); const auto=(r.o.positions||[]).map(p=>String(p.name||'').trim()+(p.qty?` ×${p.qty}`:'')).filter(Boolean); const t=b||(auto.slice(0,2).join('; ')+(auto.length>2?` (+${auto.length-2})`:'')); return `<span title="${esc(b?b+(auto.length?' · '+auto.join('; '):''):auto.join('; '))}"${b?'':' class="c-gray"'}>${esc(t||'—')}</span>`; },sortVal:r=>r.o.brief||''},
         {key:'type',label:'Тип',w:120,cls:'nw c-gray',cell:r=>esc(r.o.orderType||'—'),sortVal:r=>r.o.orderType},
         {key:'prio',label:'Приоритет',w:118,cls:'nw',cell:r=>prioCell(r.o.priority),sortVal:r=>r.o.priority},
         {key:'plan',label:'Срок',w:152,cls:'nw',cell:r=>r.late?`<span class="c-red" style="font-weight:600">${esc(fmt(r.o.plan))} · просрочен</span>`:esc(fmt(r.o.plan)),sortVal:r=>String(r.o.plan||'')},
@@ -14590,6 +14607,7 @@
             <div>${lbl('№ ЗП (необяз.)')}<input id="o-zp" style="${ist}" value="${ev('numZp')}" placeholder="ЗП-2026-…"></div>
             <div>${lbl('№ ЗКЗ (необяз.)')}<input id="o-zkz" style="${ist}" value="${ev('numZkz')}" placeholder="ЗКЗ-2026-…"></div>
             <div style="grid-column:1/-1">${lbl('Договор / основание')}<textarea id="o-basis" rows="2" style="${ist};resize:vertical">${ev('basis')}</textarea></div>
+            <div style="grid-column:1/-1">${lbl('Кратко: что это за заказ (видно в реестре)')}<input id="o-brief" style="${ist}" maxlength="160" value="${E?ev('brief'):''}" placeholder="например: собственные нужды производства · задел под ЗП-2026-044 · опытная партия"></div>
             <div style="grid-column:1/-1">${lbl('Условия')}<textarea id="o-terms" rows="${E?6:2}" style="${ist};resize:vertical">${ev('terms')}</textarea></div>
           </div>
           <div style="margin-top:var(--gap)">
@@ -14695,7 +14713,7 @@
         const positions=[...posBody.querySelectorAll('[data-prow]')].map(tr=>{const g=(f)=>{const el=tr.querySelector(`[data-pf="${f}"]`);return el?el.value.trim():'';};
           const o={posNum:g('posNum'),name:g('name'),drawing:g('drawing'),unit:g('unit'),qty:g('qty'),dateReady:g('dateReady')};
           if(tr.dataset.pid)o.id=tr.dataset.pid; return o;}).filter(p=>p.name);
-        const body={ orderType:val('o-type'), productType:document.getElementById('o-prod').value, customer:val('o-cust'), taskType:document.getElementById('o-task').value, priority:document.getElementById('o-prio').value, status:'Размещён' /* создал = разместил (правка Александра 22.07) */, datePlaced:val('o-placed'), datePlan:val('o-plan'), numZp:val('o-zp'), numZkz:val('o-zkz'), basis:val('o-basis'), terms:val('o-terms'), positions };
+        const body={ orderType:val('o-type'), productType:document.getElementById('o-prod').value, customer:val('o-cust'), taskType:document.getElementById('o-task').value, priority:document.getElementById('o-prio').value, status:'Размещён' /* создал = разместил (правка Александра 22.07) */, datePlaced:val('o-placed'), datePlan:val('o-plan'), numZp:val('o-zp'), numZkz:val('o-zkz'), basis:val('o-basis'), terms:val('o-terms'), brief:val('o-brief'), positions };
         if(!body.customer){errEl.textContent='Укажите заказчика / инициатора.';return;}
         const btn=document.getElementById('o-save'); btn.disabled=true; btn.textContent=E?'Сохранение…':'Создание…';
         // K-123: при правке статус НЕ трогаем (он живёт своим рельсом /api/orders/status) и шлём № ПЗ

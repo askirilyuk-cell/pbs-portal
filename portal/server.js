@@ -1300,6 +1300,7 @@ const salesStep = (st) => { const s = String(st || ''); if (/Принят/.test(
 
 // раздел «Продажи» из NocoDB (таблицы Запросы продаж / Заказы продаж) → форма портала
 async function buildSalesLive() {
+  const prodOrders = await ncListSoft('orders'); // K-270: заказы на производство (ПЗ), привязанные к запросу по «№ ЗП»
   const [creq, cord, grpRows, subRows] = await Promise.all([
     ncListSoft('sales_requests'), ncListSoft('sales_orders'),
     ncListSoft('dict_product_groups'), ncListSoft('dict_product_subgroups'),
@@ -1361,6 +1362,7 @@ async function buildSalesLive() {
       // Остаётся Г3 заказ (ЗКЗ) по «Результат КП» — это гейт по согласованию, не по ЛОВ.
       gates: { kp: true, lovOk: lovPositive(z), order: kpOrderGateOpen(kpRes, z['Сумма выигранной части']) }, // DEF-29: для «Выиграли частично» гейт ЗКЗ открыт только когда сумма выигранной части задана
       note: z['Примечание'] || '', orderNo: '', chat: z['Чат Bitrix'] || '',
+      prodOrders: prodOrders.filter((o) => String(o['№ ЗП'] || '').split(/[,;\s]+/).includes(String(z['№ запроса'] || '').trim()) && String(z['№ запроса'] || '').trim()).map((o) => ({ numPz: o['№ ПЗ'] || '', status: o['Статус'] || '', plan: o['Плановый срок'] || '', customer: o['Заказчик / Инициатор'] || '' })), // K-270
     };
   });
   requests.forEach((r) => { if (orderBySrc[r.numZp]) r.orderNo = orderBySrc[r.numZp]; });
@@ -5245,6 +5247,7 @@ async function createOrder(body, who) {
   if (body.datePlan) orderRow['Плановый срок'] = String(body.datePlan).slice(0, 10);
   if (body.basis) orderRow['Договор / основание'] = String(body.basis);
   if (body.terms) orderRow['Условия'] = String(body.terms);
+  if (String(body.brief || '').trim()) { try { await ncEnsureColumn('orders', 'Кратко', 'SingleLineText'); orderRow['Кратко'] = String(body.brief).trim(); } catch (e) { console.warn('K-271: колонка «Кратко»:', e.message); } } // K-271: краткий комментарий «что это за заказ» — для реестра ПЗ
   if (body.numZp) orderRow['№ ЗП'] = String(body.numZp).trim();
   if (body.numZkz) orderRow['№ ЗКЗ'] = String(body.numZkz).trim();
 
@@ -5755,6 +5758,22 @@ async function sendKp(body) {
   };
   await ncUpdate('sales_requests', reqRow.Id ?? reqRow.id, patch);
   return { ok: true, zp, numKp, signer, subtotal: totals.subtotal, vat: totals.vat, total: totals.total, validUntil, status: 'КП отправлено' };
+}
+// K-270: привязка уже созданного заказа на производство (ПЗ) к запросу продаж — через поле «№ ЗП» заказа (оно же печатается в Ф.1–П.2)
+async function salesLinkableOrders() {
+  const [orders, positions] = await Promise.all([ncListSoft('orders'), ncListSoft('positions')]);
+  return orders.filter((o) => !/ТЕСТ/i.test(String(o['№ ПЗ'] || ''))).map((o) => ({ numPz: o['№ ПЗ'] || '', numZp: o['№ ЗП'] || '', customer: o['Заказчик / Инициатор'] || '', status: o['Статус'] || '', date: o['Дата размещения'] || '',
+    items: positions.filter((p) => p.orders_id === (o.Id ?? o.id)).map((p) => p['Наименование / обозначение'] || '').filter(Boolean).slice(0, 3) })).sort((a, b) => String(b.numPz).localeCompare(String(a.numPz), 'ru'));
+}
+async function salesLinkOrder(body, session) {
+  const zp = String(body.zp || '').trim(), numPz = String(body.numPz || '').trim(); if (!zp || !numPz) throw new Error('Нужны № запроса и № заказа.');
+  const req = await findSalesRequest(zp); if (!req) throw new Error(`Запрос «${zp}» не найден.`);
+  const o = (await ncListSoft('orders')).find((x) => String(x['№ ПЗ'] || '').trim() === numPz); if (!o) throw new Error(`Заказ «${numPz}» не найден.`);
+  const cur = String(o['№ ЗП'] || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+  const next = body.unlink ? cur.filter((x) => x !== zp) : [...new Set([...cur, zp])];
+  await ncUpdate('orders', o.Id ?? o.id, { '№ ЗП': next.join(', ') });
+  logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who: (session && session.fio) || '', details: body.unlink ? `отвязан от запроса ${zp}` : `привязан к запросу ${zp}` });
+  return { ok: true, zp, numPz, numZp: next.join(', ') };
 }
 // исход КП (§5.3.7/§5.4) — проставляется вручную продажами; двигает статус ЗП по канону.
 async function setKpResult(body) {
@@ -6471,7 +6490,7 @@ const ORDER_EDIT_FIELDS = [
   ['orderType', 'Тип заказа', 'opt'], ['productType', 'Тип продукции', 'opt'],
   ['customer', 'Заказчик / Инициатор', 'str'], ['taskType', 'Тип задачи', 'opt'],
   ['priority', 'Приоритет', 'opt'], ['datePlaced', 'Дата размещения', 'date'],
-  ['datePlan', 'Плановый срок', 'date'], ['numZp', '№ ЗП', 'str'], ['numZkz', '№ ЗКЗ', 'str'],
+  ['datePlan', 'Плановый срок', 'date'], ['numZp', '№ ЗП', 'str'], ['numZkz', '№ ЗКЗ', 'str'], ['brief', 'Кратко', 'str'],
   ['basis', 'Договор / основание', 'str'], ['terms', 'Условия', 'str'],
 ];
 // задачи Ф.14 и МК, привязанные к позиции — такую позицию менять нельзя (производство уже пошло)
@@ -6487,6 +6506,7 @@ function posLockedSet(numPz, tasks) {
 }
 async function updateOrder(body, who) {
   const numPz = String(body.numPz || '').trim();
+  if (typeof body.brief === 'string') { try { await ncEnsureColumn('orders', 'Кратко', 'SingleLineText'); } catch (e) { console.warn('K-271: колонка «Кратко»:', e.message); } }
   if (!numPz) throw new Error('Не указан № ПЗ.');
   const orders = await ncList('orders');
   const o = orders.find((r) => String(r['№ ПЗ'] || '').trim() === numPz);
@@ -6821,7 +6841,7 @@ async function buildBoardLive() {
       status: derivedStatus, statusStored: o['Статус'], priority: o['Приоритет'], plan: o['Плановый срок'],
       // K-123: реквизиты Ф.1–П.2, которых не было в выдаче — карточка и форма правки их не видели,
       //        хотя в печатной форме они есть. Пустые отдаём пустой строкой, а не undefined.
-      numZp: o['№ ЗП'] || '', numZkz: o['№ ЗКЗ'] || '', datePlaced: o['Дата размещения'] || '',
+      numZp: o['№ ЗП'] || '', numZkz: o['№ ЗКЗ'] || '', datePlaced: o['Дата размещения'] || '', brief: o['Кратко'] || '',
       productType: o['Тип продукции'] || '', taskType: o['Тип задачи'] || '',
       basis: o['Договор / основание'] || '', terms: o['Условия'] || '',
       positions: pos, tasks: tk, routes: mks.map((mk) => ({ mk, name: routeByMk.get(mk)?.['Наименование'] || '' })),
@@ -12468,6 +12488,8 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await sendKp(await readBody(req))); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), ...(e.signer ? { signer: e.signer, subtotal: e.subtotal } : {}) }); }
     }
+    if (p === '/api/sales/linkable-orders' && req.method === 'GET') { try { return sendJson(res, 200, { ok: true, orders: await salesLinkableOrders() }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
+    if (p === '/api/sales/link-order' && req.method === 'POST') { try { return sendJson(res, 200, await salesLinkOrder(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
     if (p === '/api/sales/kp/result' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Фиксация исхода КП доступна только в LIVE-режиме: задайте токен NocoDB.' });
       try { return sendJson(res, 200, await setKpResult(await readBody(req))); }

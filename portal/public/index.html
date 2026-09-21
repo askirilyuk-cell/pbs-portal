@@ -1313,6 +1313,20 @@
     .ic-arrdown{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M10 4v12M5 11l5 5 5-5'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M10 4v12M5 11l5 5 5-5'/></svg>");}
     .ic-totop{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M4 3.5h12M10 17V7M5.5 11.5L10 7l4.5 4.5'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M4 3.5h12M10 17V7M5.5 11.5L10 7l4.5 4.5'/></svg>");}
     .ic-play{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6 4l10 6-10 6z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6 4l10 6-10 6z'/></svg>");}
+    /* K-279: проекты — реестр + карточка с вкладками */
+    .dp-split{display:grid;grid-template-columns:minmax(470px,1fr) minmax(0,1.3fr);gap:var(--gap);align-items:start}
+    .dp-split>*{min-width:0}
+    @media(max-width:1350px){.dp-split{grid-template-columns:minmax(0,1fr)}}
+    .dp-title{font-size:var(--fs-l);font-weight:700;color:var(--navy);line-height:1.2;min-width:0;overflow-wrap:anywhere}
+    .dp-sum{display:flex;gap:var(--sp-4);flex-wrap:wrap;margin-top:var(--sp-2);font-size:var(--fs-s);color:var(--sub)} .dp-sum b{color:var(--ink);font-size:var(--fs-m)}
+    .dp-kdt td{vertical-align:top} .dp-kdname{font-weight:600;color:var(--ink);overflow-wrap:anywhere} .dp-kdno{font-family:var(--mono);font-size:var(--fs-xs);color:var(--sub)}
+    .dp-mks{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .dp-mk{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--sl-200);border-radius:var(--r-s);padding:2px 8px;font-size:var(--fs-xs);text-decoration:none;color:var(--navy);background:#fff} .dp-mk:hover{background:var(--bl-50)} .dp-mk b{font-family:var(--mono)}
+    .dp-mkst{font-weight:600} .dp-mkst--ok{color:var(--green)} .dp-mkst--run{color:var(--blue)} .dp-mkst--wait{color:var(--amber)} .dp-mkst--draft{color:var(--sl-500)}
+    .dp-mkadd{font-size:var(--fs-xs);color:var(--sub);text-decoration:none;border:1px dashed var(--sl-300);border-radius:var(--r-s);padding:2px 8px} .dp-mkadd:hover{color:var(--navy);border-color:var(--navy)}
+    .dp-ev{display:grid;grid-template-columns:118px minmax(0,1fr) auto;gap:var(--sp-3);padding:6px 0;border-top:1px solid var(--line2);font-size:var(--fs-s)} .dp-ev:first-child{border-top:0}
+    .dp-evd{color:var(--sub);font-size:var(--fs-xs);white-space:nowrap} .dp-evt{overflow-wrap:anywhere} .dp-evw{color:var(--sub);font-size:var(--fs-xs);text-align:right}
+    @media(max-width:560px){.dp-ev{grid-template-columns:minmax(0,1fr)} .dp-evw{text-align:left}}
     /* K-277: досье проекта */
     .dlg-form>label.full{font-size:var(--fs-s);display:flex;gap:var(--sp-2);align-items:flex-start;color:var(--sl-800)} .dlg-form>label.full>input{margin-top:3px;flex:0 0 auto}
     .dos-head{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-2)}
@@ -3980,7 +3994,7 @@
       const projs=((DESIGN&&DESIGN.projects)||[]).slice().sort(dSorters[designSort]||dSorters.dec);
       if(!designSel){ try{designSel=localStorage.getItem('pbs-dproj-sel')||'';}catch{} } // восстановить выбор
       designSyncHash(); // dProj перерисовывается и напрямую (смена проекта/папки/сортировки) — хеш держим свежим
-      const sortOpts=[['dec','Децим. №'],['name','Наименование'],['stage','Этап (дальше → выше)'],['opened','Дата открытия (новые)']].map(s=>`<option value="${s[0]}" ${designSort===s[0]?'selected':''}>${s[1]}</option>`).join('');
+      const sortOpts=[['dec','Децим. №'],['name','Наименование'],['opened','Дата открытия (новые)']].map(s=>`<option value="${s[0]}" ${designSort===s[0]?'selected':''}>${s[1]}</option>`).join('');
       // K-92: продуктовые группы (grp) — папки-вкладки СВЕРХУ; порядок ОК·СП·ПВО·РТИ·БМ·ЦХ
       const byG={}; projs.forEach(p=>{const g=p.grp||'—';(byG[g]||(byG[g]=[])).push(p);});
       const gOrder=D_GROUP_ORDER.filter(g=>byG[g]).concat(Object.keys(byG).filter(g=>!D_GROUP_ORDER.includes(g)).sort((a,b)=>String(a).localeCompare(String(b),'ru')));
@@ -3988,31 +4002,40 @@
       // папки-вкладки: «Все» + группы (пустые скрыты — их нет в gOrder)
       const folds=`<div class="dfold ${dProjGrp==='all'?'on':''}" data-g="all"><span class="dfold-code">Все</span><span class="dfold-cnt">${projs.length}</span></div>`
         +gOrder.map(g=>`<div class="dfold ${dProjGrp===g?'on':''}" data-g="${esc(g)}"><span class="dfold-code">${esc(g)}</span>${D_GROUP_NAMES[g]?`<span class="dfold-nm">${esc(D_GROUP_NAMES[g])}</span>`:''}<span class="dfold-cnt">${byG[g].length}</span></div>`).join('');
-      // проекты текущей папки → выпадающий список (вместо бокового рельса); карточка — на всю ширину
+      // K-279: реестр проектов слева (как в заказах), карточка справа
       const inGrp=dProjGrp==='all'?projs:(byG[dProjGrp]||[]);
-      const o=inGrp.find(p=>p.decNo===designSel)||null; // выбранный проект в пределах текущей папки
-      const projOpts=`<option value="">— выберите проект —</option>`+inGrp.map(p=>`<option value="${esc(p.decNo)}" ${o&&o.decNo===p.decNo?'selected':''}>${esc(p.name)} · ПБС.${esc(p.decNo)}</option>`).join('');
-      const grpNote=dProjGrp==='all'?(projs.length+' проект(ов)'):('Группа '+dProjGrp+(D_GROUP_NAMES[dProjGrp]?' · '+D_GROUP_NAMES[dProjGrp]:'')+' · '+inGrp.length);
-      const emptyCard=(msg)=>`<div class="card pad dempty"><div style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:6px">Выберите проект</div><div style="font-size:13px;color:var(--sub)">${msg}</div></div>`;
-      const detailHtml = projs.length===0
-        ? `<div class="card pad" style="color:var(--sub)">${(DESIGN&&DESIGN.warning)?esc(DESIGN.warning)+' — ':''}Проекты ОКР не загружены.</div>`
-        : (o?dProjDetail(o):emptyCard(`Выберите продуктовую группу выше и проект в выпадающем списке «Проект».${inGrp.length?'':' В этой группе проектов нет.'}`));
-      host.innerHTML=`<div class="filters" style="margin-bottom:10px">
-          <label style="font-size:13px;color:var(--sub)">Сортировка</label>
-          <select id="dsort" style="font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--bd);border-radius:var(--r-m)">${sortOpts}</select>
-          <span class="spacer" style="margin-left:auto"></span>
-          <button class="pbtn" id="dnew" title="Завести проект ОКР без ЗП (продуктовая инициатива)">＋ Новый проект ОКР</button>
-          <a class="pbtn" href="/api/design/projects.xlsx">⤓ Выгрузить реестр (xlsx · Ф.3–П.1)</a></div>
-        <div class="dfold-row" title="Продуктовые группы — папки: выберите группу, затем проект в списке">${folds}</div>
-        <div class="dpick"><label class="dpick-l" for="dproj-sel">Проект</label><select id="dproj-sel" class="dpick-sel">${projOpts}</select><span class="dpick-note">${esc(grpNote)}</span></div>
-        <div class="detail" id="dproj-detail">${detailHtml}</div>`;
-      const ss=document.getElementById('dsort'); if(ss)ss.onchange=()=>{designSort=ss.value;dProj(host);};
-      const nb=document.getElementById('dnew'); if(nb)nb.onclick=()=>openNewProject();
+      if(designSel&&!inGrp.some(p=>p.decNo===designSel)&&dProjGrp!=='all'){ /* выбранный проект вне папки — показываем папку без выбора */ }
+      const o=inGrp.find(p=>p.decNo===designSel)||null;
+      const allKd=(DESIGN&&DESIGN.kd)||[], orders=(typeof DATA!=='undefined'&&DATA&&DATA.orders)||[];
+      const rows=inGrp.map(p=>{ const np=decNorm(p.decNo); const kdN=allKd.filter(k=>kdProj(k.docNo)===p.decNo||(k.projectNo&&kdProj(k.projectNo)===p.decNo)).length;
+        const mkN=BOARD_RT===null?null:BOARD_RT.filter(r=>{const nd=decNorm(r.designation);return np&&((nd&&nd.indexOf(np)===0)||kdProj(r.designation)===p.decNo);}).length;
+        const pzN=orders.filter(x=>(x.positions||[]).some(q=>np&&decNorm(q.drawing).indexOf(np)>-1)).length;
+        return {p,kdN,mkN,pzN,dosN:p.dossierCount||0}; });
+      const num=(v)=>v==null?'<span class="c-gray">…</span>':(v?`<b>${v}</b>`:'<span class="c-gray">—</span>');
+      const cols=[
+        {key:'dec',label:'Децим. №',w:96,cls:'code',cell:r=>esc(r.p.decNo),sortVal:r=>r.p.decNo},
+        {key:'name',label:'Проект',cls:'ell',cell:r=>`<span title="${esc(r.p.name||'')}">${esc(r.p.name||'')}</span>`,sortVal:r=>r.p.name},
+        {key:'grp',label:'Гр.',w:56,cls:'nw c-gray',cell:r=>esc(r.p.grp||''),sortVal:r=>r.p.grp},
+        {key:'kd',label:'Черт.',w:62,cls:'nw',cell:r=>num(r.kdN),sortVal:r=>r.kdN},
+        {key:'mk',label:'МК',w:54,cls:'nw',cell:r=>num(r.mkN),sortVal:r=>r.mkN||0},
+        {key:'pz',label:'ПЗ',w:54,cls:'nw',cell:r=>num(r.pzN),sortVal:r=>r.pzN},
+        {key:'dos',label:'Досье',w:66,cls:'nw',cell:r=>num(r.dosN),sortVal:r=>r.dosN},
+        {key:'chat',label:'Чат',w:50,cls:'nw',cell:r=>r.p.chat?'<i class=ic-chat title="Чат проекта создан"></i>':'<span class="c-gray">—</span>',sortVal:r=>r.p.chat?1:0},
+      ];
+      host.innerHTML=`<div class="dfold-row" title="Продуктовые группы">${folds}</div>
+        <div class="dp-split"><div id="dpgrid"></div><div class="detail" id="dproj-detail"></div></div>`;
+      const det=document.getElementById('dproj-detail');
+      det.innerHTML=projs.length===0?`<div class="card pad" style="color:var(--sub)">${(DESIGN&&DESIGN.warning)?esc(DESIGN.warning)+' — ':''}Проекты ОКР не загружены.</div>`
+        :(o?dProjDetail(o):`<div class="card pad dempty"><div style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:6px">Выберите проект</div><div style="font-size:13px;color:var(--sub)">Нажмите на строку в реестре слева.${inGrp.length?'':' В этой группе проектов нет.'}</div></div>`);
+      erpGrid(document.getElementById('dpgrid'),{key:'dprojects',cols,rows,rowKey:r=>r.p.decNo,selKey:o?o.decNo:null,
+        onRow:r=>{ designSel=r.p.decNo; try{localStorage.setItem('pbs-dproj-sel',designSel);}catch{} dProj(host); },
+        info:`<span>Проектов: <b style="color:var(--ink)">${rows.length}</b></span>`,
+        empty:{text:'Проектов в этой группе нет',sub:'Выберите другую группу или заведите новый проект.'},
+        toolbar:[{label:'＋ Новый проект',cls:'primary',onClick:()=>openNewProject()},{label:'Реестр (xlsx · Ф.3–П.1)',onClick:()=>{ location.href='/api/design/projects.xlsx'; }}]});
       host.querySelectorAll('.dfold[data-g]').forEach(el=>el.onclick=()=>{dProjGrp=el.dataset.g;try{localStorage.setItem('pbs-dproj-grp',dProjGrp);}catch{} dProj(host);});
-      const psel=document.getElementById('dproj-sel'); if(psel)psel.onchange=()=>{designSel=psel.value;try{localStorage.setItem('pbs-dproj-sel',designSel);}catch{} dProj(host);};
-      wireCopyLink(host); // <i class=ic-link></i> в шапке карточки проекта
-      bindGoKd();
-      if(o){ loadDesignFiles(o.decNo); loadProjRoutes(o.decNo); }
+      if(BOARD_RT===null)ensureRoutesList().then(()=>{ if(host.isConnected&&document.getElementById('dpgrid'))dProj(host); }); // счётчики МК — после загрузки маршрутов
+      wireCopyLink(host); bindGoKd(); dpWireTabs(host);
+      if(o){ loadDesignFiles(o.decNo); loadProjRoutes(o.decNo); loadProjHistory(o.decNo); }
     }
     // --- файлы КД проекта (records 6.7-РТД): список + загрузка чертежей ----------
     const dfileUrl=(proj,rel,dl)=>`/api/design/file?proj=${encodeURIComponent(proj)}&rel=${encodeURIComponent(rel)}${dl?'&dl=1':''}`;
@@ -4151,55 +4174,79 @@
       </div>`;
       return statsHtml+prodTilesHtml+tdBlockHtml;
     }
+    // K-279: карточка проекта — шапка + вкладки (Обзор / Чертежи и МК / Досье / Производство / Файлы / История); стадия ОКР в интерфейсе не показывается
+    let dpTab='main', dpTabProj='';
     function dProjDetail(o){
-      const cur=stepNo(o.stage), total=D_STEPS.length, kdOf=((DESIGN&&DESIGN.kd)||[]).filter(k=>kdProj(k.docNo)===o.decNo||(k.projectNo&&kdProj(k.projectNo)===o.decNo));
+      if(dpTabProj!==o.decNo){ dpTab='main'; dpTabProj=o.decNo; }
+      const kdOf=((DESIGN&&DESIGN.kd)||[]).filter(k=>kdProj(k.docNo)===o.decNo||(k.projectNo&&kdProj(k.projectNo)===o.decNo));
       const kv=(k,v)=>v?`<div class="kv">${esc(k)}: <b>${esc(v)}</b></div>`:'';
       const osn=kdOf.filter(k=>k.elemType==='Оснастка').length;
       const teamN=(o.members||[]).length;
       const teamBtn=`<button class="pbtn" onclick="openTeamPanel('${esc(o.decNo)}')" title="Участники проекта из чата Bitrix24">${aico('chat',13)} Команда${teamN?' ('+teamN+')':''}</button>`;
       const btns=`${teamBtn}${o.chat?`<a class="pbtn" href="${esc(o.chat)}" target="_blank" rel="noopener" style="border-color:var(--blue);background:var(--blue);color:#fff">${aico('chat',13)} Чат Bitrix24</a>`:`<button class="pbtn" style="border-style:dashed;color:var(--sub);cursor:pointer" title="Создать групповой чат проекта в Bitrix24 (нужен входящий вебхук в «Настройках»)" onclick="createChat('${esc(o.decNo)}')">${aico('chat',13)} Создать чат</button>`}${o.nas?`<a class="pbtn" href="${nasHref(o.nas)}" title="Открыть папку проекта на NAS в Проводнике (нужен обработчик pbsnas://, ставится 1 раз — /tools/pbs-nas-handler.ps1): ${esc(o.nas)}">${aico('folder',13)} NAS</a>`:''}`;
       const grpLabel=(D_GROUP_NAMES[o.grp]?D_GROUP_NAMES[o.grp]+' ('+o.grp+')':o.grp)+' · '+o.subgroup;
-      // K-100: карточка-хаб — порядок сверху вниз = жизненный цикл изделия:
-      // Шапка → Карточка проекта → ТЗ → Состав КД → Состав ТД → Изменения (если есть) → Производство → Файлы (полоска, низ)
-      return `<div class="card pad"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span style="font-size:16px;font-weight:700;color:var(--navy);line-height:1.2;min-width:0">${esc(o.name)}</span>
+      const np=decNorm(o.decNo), pzN=((typeof DATA!=='undefined'&&DATA&&DATA.orders)||[]).filter(x=>(x.positions||[]).some(p=>np&&decNorm(p.drawing).indexOf(np)>-1)).length;
+      const prodHtml=dProdOrdersBlock(o);
+      const tabs=[['main','Обзор'],['kd','Чертежи и МК'+(kdOf.length?' · '+kdOf.length:'')],['dos','Досье'+(o.dossierCount?' · '+o.dossierCount:'')],['prod','Производство'+(pzN?' · '+pzN:'')],['files','Файлы'],['hist','История']];
+      const pane=(k,html)=>`<div data-dptab="${k}"${dpTab===k?'':' style="display:none"'}>${html}</div>`;
+      return `<div class="card pad dp-head"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span class="dp-title">${esc(o.name)}</span>
           <span class="dnochip" title="Децимальный № проекта">ПБС.${esc(o.decNo)}</span>
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${btns}${linkBtn('#design/'+encodeURIComponent(o.decNo))}</span></div></div>
-        ${dProjCoverHtml(o,kdOf)}
-        <div class="card pad"><div class="sec-h" style="margin-bottom:8px">Карточка проекта</div>
-          <div class="dgrid2">${kv('Группа / подгруппа',grpLabel)}${kv('Тип продукции',o.productType)}${kv('Семейство / программа',o.family)}${kv('Инициатор',o.initiator)}${kv('Связь с ПЗ / заказом',o.orderLink)}${kv('Дата открытия',fmt(o.opened))}${o.nas?kv('NAS-папка',o.nas):''}</div></div>
-        ${dTzCard(o)}
-        <div class="card pad"><div class="row" style="margin-bottom:8px;flex-wrap:wrap"><span class="sec-h">Состав КД</span><span class="spacer"></span><span style="font-size:13px;color:var(--sub)">${kdOf.length} док.${osn?' · оснастки '+osn:''}</span>${kdOf.length?` <button class="pbtn" style="border-color:var(--blue);background:var(--blue);color:#fff" onclick="dProdToggle('${esc(o.decNo)}')">${aico('orders',13)} В производство</button>`:''} <button class="pbtn" onclick="dKdUplToggle('${esc(o.decNo)}')">${aico('doc',13)} Загрузить чертёж</button> <a class="pbtn" data-gokd="${esc(o.decNo)}">Реестр КД →</a></div>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${btns}${linkBtn('#design/'+encodeURIComponent(o.decNo))}</span></div>
+          <div class="dp-sum"><span><b>${kdOf.length}</b> черт.${osn?' · оснастки '+osn:''}</span><span><b id="dp-mkn">…</b> МК</span><span><b>${pzN}</b> ПЗ</span><span><b id="dp-dosn">${o.dossierCount||0}</b> в досье</span></div></div>
+        <div class="card eq-tabbar" id="dp-tabs"><div class="eq-tabs">${tabs.map(([k,t])=>`<button class="${dpTab===k?'on':''}" data-dptabbtn="${k}">${esc(t)}</button>`).join('')}</div></div>
+        ${pane('main',`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">Реквизиты</div>
+            <div class="dgrid2">${kv('Группа / подгруппа',grpLabel)}${kv('Тип продукции',o.productType)}${kv('Семейство / программа',o.family)}${kv('Инициатор',o.initiator)}${kv('Связь с ПЗ / заказом',o.orderLink)}${kv('Дата открытия',fmt(o.opened))}${o.nas?kv('NAS-папка',o.nas):''}</div></div>
+          ${dTzCard(o)}
+          <div class="card pad"><div class="sec-h" style="margin-bottom:8px">Последние события</div><div id="dp-lastev" class="dos-empty">Загрузка…</div></div>`)}
+        ${pane('kd',`        <div class="card pad"><div class="row" style="margin-bottom:8px;flex-wrap:wrap"><span class="sec-h">Чертежи и маршрутные карты</span><span class="spacer"></span><span style="font-size:13px;color:var(--sub)">${kdOf.length} док.${osn?' · оснастки '+osn:''}</span>${kdOf.length?` <button class="pbtn" style="border-color:var(--blue);background:var(--blue);color:#fff" onclick="dProdToggle('${esc(o.decNo)}')">${aico('orders',13)} В производство</button>`:''} <button class="pbtn" onclick="dKdUplToggle('${esc(o.decNo)}')">${aico('doc',13)} Загрузить чертёж</button> <a class="pbtn" data-gokd="${esc(o.decNo)}">Реестр КД →</a></div>
           <div id="dkd-upl-panel"></div>
-          ${kdOf.length?KD_LEGEND2+dKdComposition(kdOf):'<div style="color:var(--sub);font-size:13px">Документы КД не заведены</div>'}</div>
-        <div id="dprod-panel"></div>
-        <div class="card pad" id="dtd-block" data-proj="${esc(o.decNo)}"><div class="row" style="margin-bottom:8px"><span class="sec-h"><i class=ic-wrench></i> Состав ТД</span><span class="spacer"></span><span id="dtd-cnt" style="font-size:13px;color:var(--sub)"></span></div>
-          <div id="dtd-body" style="font-size:13px;color:var(--sub)">Загрузка маршрутов…</div></div>
-        <div class="card pad" id="ddos-block" data-proj="${esc(o.decNo)}"><div class="dos-head"><span class="sec-h"><i class=ic-folder></i> Досье проекта</span><span class="c-gray" id="ddos-cnt"></span><span class="spacer"></span><span id="ddos-add"></span></div>
-          <div id="ddos-body" class="dos-empty">Загрузка досье…</div></div>
-        ${dNoticesBlock(o)}
-        ${dProdOrdersBlock(o)}
-        <div class="extkd-wrap empty" id="dfiles-wrap" style="margin-top:var(--gap)">
-          <div class="extkd-strip" id="dfiles-strip" role="button" tabindex="0" aria-expanded="false" title="Развернуть/свернуть файлы проекта (записи 6.7-РТД) — любые файлы, не только чертежи">
-            <span class="extkd-chev">▸</span>
-            <span class="extkd-lbl"><i class=ic-folder></i> Файлы проекта</span>
-            <span class="extkd-cnt" id="dfiles-cnt"></span>
-          </div>
-          <div class="extkd-body pad" id="dfiles-body" hidden>
-            <div id="dfiles" data-proj="${esc(o.decNo)}"><div style="font-size:13px;color:var(--sub)">Загрузка файлов…</div></div>
-          </div>
-        </div>`;
+          ${kdOf.length?dProjKdMk(o,kdOf):'<div class="dos-empty">Чертежи по проекту ещё не заведены. Загрузите чертёж — запись в реестре КД появится автоматически по децимальному номеру в имени файла.</div>'}</div>
+          <div id="dprod-panel"></div>
+          <div class="card pad" id="dtd-block" data-proj="${esc(o.decNo)}"><div class="row" style="margin-bottom:8px"><span class="sec-h"><i class=ic-wrench></i> МК без привязки к чертежу проекта</span><span class="spacer"></span><span id="dtd-cnt" class="c-gray"></span></div>
+            <div id="dtd-body" class="dos-empty">Загрузка маршрутов…</div></div>
+          ${dNoticesBlock(o)}`)}
+        ${pane('dos',`<div class="card pad" id="ddos-block" data-proj="${esc(o.decNo)}"><div class="dos-head"><span class="sec-h"><i class=ic-folder></i> Досье проекта</span><span class="c-gray" id="ddos-cnt"></span><span class="spacer"></span><span id="ddos-add"></span></div>
+          <div id="ddos-body" class="dos-empty">Загрузка досье…</div></div>`)}
+        ${pane('prod',prodHtml||'<div class="card pad dos-empty">Заказов на производство по чертежам этого проекта пока нет. Заказ попадает сюда, когда в его позиции указан чертёж с децимальным номером проекта.</div>')}
+        ${pane('files',`<div class="card pad"><div class="row" style="margin-bottom:8px"><span class="sec-h"><i class=ic-folder></i> Файлы проекта на NAS</span><span class="c-gray" id="dfiles-cnt"></span></div>
+          <div id="dfiles" data-proj="${esc(o.decNo)}"><div class="dos-empty">Загрузка файлов…</div></div></div>`)}
+        ${pane('hist',`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">История проекта</div><div id="dp-hist" class="dos-empty">Загрузка…</div>
+          <div class="hint" style="margin-top:var(--sp-3);font-size:var(--fs-xs);color:var(--sub)">В историю попадают загрузка и удаление файлов, новые версии чертежей, записи досье, создание чата. Ведётся с 21.09.2026.</div></div>`)}`;
+    }
+    function dpWireTabs(root){ (root||document).querySelectorAll('[data-dptabbtn]').forEach(b=>b.onclick=()=>{ dpTab=b.dataset.dptabbtn; document.querySelectorAll('[data-dptab]').forEach(el=>{ el.style.display=el.dataset.dptab===dpTab?'':'none'; }); document.querySelectorAll('[data-dptabbtn]').forEach(x=>x.classList.toggle('on',x.dataset.dptabbtn===dpTab)); }); }
+    // чертежи проекта деревом, справа у каждого — его маршрутные карты (№, статус, способ) и «＋ МК»
+    function dProjKdMk(o,kdOf){
+      const roots=buildKdTree(kdOf||[]); const canMk=rbacAccess('routes')==='write'; let rows='';
+      const mkChip=(m)=>`<a href="#routes/${m.id}" class="dp-mk" title="Открыть маршрутную карту"><b>${esc(String(m.mk).replace('МК-',''))}</b><span class="dp-mkst dp-mkst--${m.statusMk==='Утверждена'?'ok':m.statusMk==='В производстве'?'run':m.statusMk==='На согласовании'?'wait':'draft'}">${esc(m.statusMk||'Черновик')}</span>${m.variant?`<span class="c-gray">${esc(m.variant)}</span>`:''}</a>`;
+      const walk=(n,depth)=>{ const mks=n.mks||[]; const needMk=n.docNo&&!['Материал','Стандартное','Покупное'].includes(n.elemType);
+        rows+=`<tr><td class="dp-kdn"><div style="padding-left:${depth*18}px"><div class="dp-kdname" title="${esc(n.name||'')}">${esc(n.name||'—')}${n._borrowed?' <span class="badge b-gray" title="Заимствовано из другого проекта">заимств.</span>':''}</div><div class="dp-kdno">${esc(n.docNo||'')}${n.rev!=null&&n.rev!==''?` · ред. ${esc(String(n.rev))}`:''}</div></div></td>
+          <td class="nw">${elemChip(n.elemType)}</td><td class="nw">${kdFileLinks(n)||'<span class="c-gray">нет файла</span>'}</td>
+          <td><div class="dp-mks">${mks.map(mkChip).join('')}${!mks.length&&needMk?'<span class="c-gray">МК нет</span>':''}${needMk&&canMk?`<a href="#routes/new-kd:${encodeURIComponent(n.docNo)}" class="dp-mkadd" title="Создать маршрутную карту по этому чертежу">＋ МК</a>`:''}</div></td></tr>`;
+        (n._children||[]).forEach(c=>walk(c,depth+1)); };
+      roots.forEach(r=>walk(r,0));
+      return `<div class="tbl-wrap"><table class="dt dp-kdt" style="--tbl-min:640px"><colgroup><col><col style="width:110px"><col style="width:120px"><col style="width:42%"></colgroup><thead><tr><th>Чертёж</th><th>Тип</th><th>Файл</th><th>Маршрутные карты</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+    // K-279: история проекта (события «Проект / <децим.№>»)
+    async function loadProjHistory(proj){
+      const host=document.getElementById('dp-hist'), last=document.getElementById('dp-lastev'); if(!host&&!last)return;
+      let d; try{ d=await (await fetch('/api/design/history?proj='+encodeURIComponent(proj))).json(); }catch(e){ d={events:[]}; }
+      if(dpTabProj!==proj)return; const ev=d.events||[];
+      const row=(e)=>`<div class="dp-ev"><span class="dp-evd">${esc(fmt(String(e.when||'').slice(0,10)))} ${esc(String(e.when||'').slice(11,16))}</span><span class="dp-evt">${esc(e.details||e.type||'')}</span><span class="dp-evw">${esc(e.who||'')}</span></div>`;
+      if(host){ host.className=ev.length?'':'dos-empty'; host.innerHTML=ev.length?ev.map(row).join(''):'Событий пока нет.'; }
+      if(last){ last.className=ev.length?'':'dos-empty'; last.innerHTML=ev.length?ev.slice(0,5).map(row).join('')+(ev.length>5?`<div style="margin-top:var(--sp-2)"><a href="#" class="c-blue" onclick="document.querySelector('[data-dptabbtn=hist]').click();return false" style="font-size:var(--fs-xs)">Вся история · ${ev.length}</a></div>`:''):'Событий пока нет — история ведётся с 21.09.2026.'; }
     }
     // ── K-277: досье проекта — расчёты, испытания, фото, методики; единый классификатор, файлы на NAS по папкам ИСМ, уведомление в чат Bitrix
     let dosFilter='';
     const dosIsImg=(n)=>/\.(png|jpe?g|webp|gif)$/i.test(n), dosFileUrl=(proj,f)=>`/api/design/file?proj=${encodeURIComponent(proj)}&rel=${encodeURIComponent(f.rel)}`;
     const dosSize=(b)=>b>=1048576?(b/1048576).toFixed(1).replace('.',',')+' МБ':Math.max(1,Math.round(b/1024))+' КБ';
     async function loadDossier(proj){
+      if(document.getElementById('dp-hist'))loadProjHistory(proj);
       const block=document.getElementById('ddos-block'); if(!block||block.dataset.proj!==proj)return;
       let d; try{ d=await (await fetch('/api/design/dossier?proj='+encodeURIComponent(proj))).json(); }catch(e){ d={error:String(e.message||e)}; }
       if(!block.isConnected||block.dataset.proj!==proj)return;
       const body=document.getElementById('ddos-body'), cnt=document.getElementById('ddos-cnt'), add=document.getElementById('ddos-add');
       if(d.error){ body.textContent='Досье недоступно: '+d.error; return; }
-      const recs=d.records||[]; cnt.textContent=recs.length?`· записей: ${recs.length}`:'';
+      const recs=d.records||[]; cnt.textContent=recs.length?`· записей: ${recs.length}`:''; { const dn=document.getElementById('dp-dosn'); if(dn)dn.textContent=String(recs.length); }
       add.innerHTML=d.canAdd?`<button class="btn btn--primary btn--sm" id="ddos-addbtn">＋ Добавить запись</button>`:'';
       const ab=document.getElementById('ddos-addbtn'); if(ab)ab.onclick=()=>dossierAddDialog(proj,d);
       if(!recs.length){ body.className='dos-empty'; body.innerHTML=d.canAdd?'Записей пока нет. Сюда складываются расчёты, результаты испытаний, фото, методики и протоколы по проекту — файлы ложатся в папку проекта на NAS, запись уходит в чат проекта.':'Записей пока нет.'; return; }
@@ -4277,14 +4324,16 @@
       if(!block.isConnected||block.dataset.proj!==proj)return; // карточка сменилась за время await
       const np=decNorm(proj);
       const list=np?all.filter(r=>{const nd=decNorm(r.designation);return (nd&&nd.indexOf(np)===0)||kdProj(r.designation)===proj;}):[];
-      const cnt=document.getElementById('dtd-cnt'); if(cnt)cnt.textContent=list.length?`${list.length} МК`:'';
+      const mkn=document.getElementById('dp-mkn'); if(mkn)mkn.textContent=String(list.length);
+      const shownIds=new Set(kdOfProj(proj).flatMap(k=>(k.mks||[]).map(m=>String(m.id)))); const allCnt=list.length; list.splice(0,list.length,...list.filter(r=>!shownIds.has(String(r.id))));
+      const cnt=document.getElementById('dtd-cnt'); if(cnt)cnt.textContent=list.length?`${list.length} МК`:''; if(!list.length&&allCnt){ block.style.display='none'; return; } block.style.display='';
       // K-? этап C: карточка-цифра «ТД» в обложке — сразу синхронизируем счётчик МК (тот же список, что и здесь),
       // затем довесок (МК+карты наладки) досчитает loadProjTdCover() своим кэшем (loadRtSetup, отдельный запрос)
       dCoverTdUpdate(proj,list.length,false);
       loadProjTdCover(proj);
       const body=document.getElementById('dtd-body'); if(!body)return;
       if(!list.length){
-        body.innerHTML=`Маршрутов пока нет. <a href="#routes" style="color:var(--blue)">Маршруты →</a>`;
+        body.innerHTML=`Маршрутных карт по проекту пока нет. <a href="#routes" style="color:var(--blue)">Маршруты →</a>`;
         return;
       }
       const rows=list.map(r=>`<tr><td class="code"><a href="#routes/${encodeURIComponent(r.mk)}" style="color:var(--blue);font-weight:600;text-decoration:none">${esc(r.mk)}</a></td><td class="nowrap">${rtTypeChip(r.type)}</td><td class="name" title="${esc(r.name||'')}">${esc(r.name||'—')}</td><td class="nowrap" style="text-align:center">${r.type==='СБР'?'<span class="c-gray">сборка</span>':String(r.opCount||0)}</td><td class="nowrap">${rtStatus(r.statusMk||r.status)}</td></tr>`).join('');
@@ -4299,7 +4348,7 @@
           ? `<div style="margin-top:8px;font-size:13px;color:var(--sub)">Без ТД: ${uncovered.map(k=>esc(k.name)).join(', ')}</div>`
           : `<div style="margin-top:8px;font-size:13px;color:var(--green);font-weight:600">ТД покрывает все детали</div>`;
       }
-      body.innerHTML=table+gap;
+      body.innerHTML=table; // K-279: «без ТД» теперь видно по строкам чертежей («МК нет»)
     }
     // K-? этап C: обновление карточки-цифры «ТД» в обложке (id dcov-row гейтит устаревшие ответы — карточка
     // могла смениться, пока грузился кэш). final=true — учтены и МК, и карты наладки (после loadProjTdCover).
@@ -4363,7 +4412,7 @@
         const n=(j.saved||[]).length, sk=(j.skipped||[]).length;
         try{ const nd=await (await fetch('/api/design')).json(); if(nd&&nd.projects)DESIGN=nd; }catch{}
         const det=document.getElementById('dproj-detail'); // перерисовать карточку целиком — обновится состав КД + свернётся этот виджет
-        if(det&&DESIGN){ const o2=(DESIGN.projects||[]).find(p=>p.decNo===proj); if(o2){ det.innerHTML=dProjDetail(o2); bindGoKd(); loadDesignFiles(proj); loadProjRoutes(proj); } }
+        if(det&&DESIGN){ const o2=(DESIGN.projects||[]).find(p=>p.decNo===proj); if(o2){ det.innerHTML=dProjDetail(o2); bindGoKd(); dpWireTabs(det); loadDesignFiles(proj); loadProjRoutes(proj); loadProjHistory(proj); } }
         toast(`Загружено чертежей: ${n}${sk?`, пропущено (тип не поддержан): ${sk}`:''}`,n?'ok':'err');
         dRegWarnUnlinked(j.saved); // K-? улучшение 1: не привязался по децим.№ — заметное предупреждение
       }catch(e){ if(st)st.textContent='Ошибка: '+(e.message||e); if(btn){btn.disabled=false;btn.textContent=old;} }

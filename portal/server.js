@@ -1248,6 +1248,8 @@ function designProjectFolder(decNo, opts) {
   const projDir = path.join(base, name ? `${dec} ${name}` : dec);
   try { fs.mkdirSync(projDir, { recursive: true }); return projDir; } catch { return null; }
 }
+// K-279: история проекта — события «Проект / <децим.№>» в общей ленте событий (файлы, чертежи, досье, чат)
+function projLog(decNo, type, details, session) { const dn = String(decNo || '').trim(); if (!dn) return; try { logEvent({ type, obj: 'Проект', objNum: dn, who: (session && session.fio) || '', details }); } catch { /* журнал не критичен */ } }
 // ── K-277: досье проекта разработки ─────────────────────────────────────────────
 // Единый классификатор записей (одинаков для всех проектов) → папка этапа ИСМ (ДП–Д.1.2 §8), куда ложатся файлы.
 // «15-Фото и медиа» — единственная папка вне перечня ИСМ: для фото/видео этапа в раскладке нет.
@@ -1332,6 +1334,7 @@ async function dossierAdd(fields, files, session) {
     let chat = { sent: false, reason: 'отправка отключена' };
     if (String(fields.notify || '1') !== '0') { chat = await dossierNotify(rec, projRow, folder); if (chat.sent) { const mark = `${new Date().toISOString().slice(0, 16).replace('T', ' ')}${chat.attached ? ' · вложений ' + chat.attached : ''}`; try { await ncUpdate('design_dossier', rec.id, { 'Чат': mark }); rec.chat = mark; } catch {} } }
     logEvent({ type: 'создан', obj: 'Досье', objNum: no, who: (session && session.fio) || '', details: `${kind.label}: ${title}; файлов: ${saved.length}` });
+    projLog(proj, 'файл приложен', `Досье ${no} · ${kind.label}: «${title}»${saved.length ? ' — ' + saved.map((f) => f.name).join(', ') : ''}${chat.sent ? ' · отправлено в чат' : ''}`, session);
     return { ok: true, record: rec, chat };
   });
 }
@@ -1343,6 +1346,7 @@ async function dossierDelete(body, session) {
   if (folder && relDir) { const src = path.normalize(path.join(folder, relDir)); if (src.startsWith(folder + path.sep) && fs.existsSync(src)) { const bin = path.join(folder, '_deleted'); try { fs.mkdirSync(bin, { recursive: true }); fs.renameSync(src, path.join(bin, `${Date.now()}__${path.basename(src)}`)); } catch (e) { console.warn('K-277: перенос в _deleted:', e.message); } } }
   await ncUpdate('design_dossier', id, { 'Удалена': `${new Date().toISOString().slice(0, 10)} · ${(session && session.fio) || ''}` });
   logEvent({ type: 'удалён', obj: 'Досье', objNum: r['№ записи'] || '', who: (session && session.fio) || '', details: r['Название'] || '' });
+  projLog(proj, 'комментарий', `Запись досье ${r['№ записи'] || ''} «${r['Название'] || ''}» удалена (файлы перенесены в _deleted)`, session);
   return { ok: true };
 }
 async function dossierResend(body, session) {
@@ -12845,7 +12849,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/design') {
       if (!isLive()) return sendJson(res, 200, designMock());
-      try { const d = await buildDesignLive(); d.canReplaceKd = kdCanReplace(sessionFromReq(req)); return sendJson(res, 200, d.projects.length ? d : { ...designMock(), warning: 'таблицы пусты — показаны демо-данные' }); }
+      try { const d = await buildDesignLive(); d.canReplaceKd = kdCanReplace(sessionFromReq(req));
+        try { const dc = {}; (await ncListSoft('design_dossier')).forEach((r) => { if (String(r['Удалена'] || '').trim()) return; const k = String(r['Проект (децим. №)'] || '').trim(); dc[k] = (dc[k] || 0) + 1; }); d.projects.forEach((pr) => { pr.dossierCount = dc[pr.decNo] || 0; }); } catch { /* счётчик досье не критичен */ } return sendJson(res, 200, d.projects.length ? d : { ...designMock(), warning: 'таблицы пусты — показаны демо-данные' }); }
       catch (e) { return sendJson(res, 200, { ...designMock(), warning: String(e.message || e) }); }
     }
     // просмотр чертежа КД (выпущенный PDF из релиз-контура записей, ДП–Д.1.2 §8)
@@ -12960,6 +12965,10 @@ const server = http.createServer(async (req, res) => {
     }
     // --- файлы КД проекта (records 6.7-РТД): список / загрузка / отдача / office→PDF ---
     // K-277: досье проекта. Чтение — право «КД» (view), запись — раздел dossier (/api/dossier/*).
+    if (p === '/api/design/history' && req.method === 'GET') { // K-279: лента событий проекта
+      const proj = String(url.searchParams.get('proj') || '').trim();
+      try { const ev = await buildEvents({ obj: 'Проект', num: proj, limit: 300 }); return sendJson(res, 200, { ok: true, events: ev.events || [] }); } catch (e) { return sendJson(res, 200, { ok: true, events: [], warning: String(e.message || e) }); }
+    }
     if (p === '/api/design/dossier' && req.method === 'GET') {
       const proj = String(url.searchParams.get('proj') || '').trim(); const sD = sessionFromReq(req);
       try { const projRow = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === proj);
@@ -13046,6 +13055,7 @@ const server = http.createServer(async (req, res) => {
           await ncUpdate('design_projects', projRow.Id ?? projRow.id, { 'NAS-папка проекта': relNas });
         }
       } catch {}
+      if (saved.length) projLog(proj, 'файл приложен', docForVersion ? `Чертёж ${docForVersion}: ${archived.length ? 'новая версия' : 'загружен'}${version && version.rev != null ? ' (ред. ' + version.rev + ')' : ''} — ${saved.map((f) => f.name).join(', ')}${verMeta && verMeta.what ? '. ' + verMeta.what : ''}` : `Загружено в «${stage}»: ${saved.map((f) => f.name).join(', ')}`, verSess);
       return sendJson(res, 200, { ok: true, saved, skipped, archived, version, files: walkDesignFiles(folder), folder: path.basename(folder) });
     }
     // Удаление файла КД — ТОЛЬКО Администратор (деструктивно). Путь строго внутри папки проекта.
@@ -13068,6 +13078,7 @@ const server = http.createServer(async (req, res) => {
       try { fs.unlinkSync(target); } catch (e) { return sendJson(res, 500, { error: 'Не удалось удалить файл: ' + e.message }); }
       invalidateDesignIndex(); // выпущенные PDF могли измениться → пересканировать ссылки в реестре КД
       try { const who = (req.session && req.session.fio) || ('id' + ((req.session && req.session.userId) || '?')); console.log(`[design] файл КД удалён администратором (${who}): ${proj} / ${rel}`); } catch {}
+      projLog(proj, 'комментарий', `Файл удалён: ${rel}`, sessionFromReq(req));
       return sendJson(res, 200, { ok: true, deleted: rel, files: walkDesignFiles(folder), folder: path.basename(folder) });
     }
     if (p === '/api/design/file') {
@@ -13856,6 +13867,7 @@ const server = http.createServer(async (req, res) => {
         const url = `${bitrixPortal()}/online/?IM_DIALOG=chat${chatId}`;
         // K-278: ссылка на чат сразу пишется в проект — раньше её просили скопировать в NocoDB вручную, и портал о чате не знал
         let saved = false; const decNo = String(body.decNo || '').trim();
+        if (decNo) projLog(decNo, 'создан', `Создан чат проекта в Bitrix24 (chat${chatId})`, sessionFromReq(req));
         if (decNo) { try { const pr = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === decNo); if (pr) { await ncUpdate('design_projects', pr.Id ?? pr.id, { 'Ссылка на чат (Bitrix)': url }); saved = true; } } catch (e) { console.warn('K-278: ссылка на чат не сохранена:', e.message); } }
         return sendJson(res, 200, { ok: true, chatId, url, saved });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }

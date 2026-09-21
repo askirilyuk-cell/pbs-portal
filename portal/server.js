@@ -1362,6 +1362,7 @@ async function buildSalesLive() {
       // Остаётся Г3 заказ (ЗКЗ) по «Результат КП» — это гейт по согласованию, не по ЛОВ.
       gates: { kp: true, lovOk: lovPositive(z), order: kpOrderGateOpen(kpRes, z['Сумма выигранной части']) }, // DEF-29: для «Выиграли частично» гейт ЗКЗ открыт только когда сумма выигранной части задана
       note: z['Примечание'] || '', orderNo: '', chat: z['Чат Bitrix'] || '',
+      sumKpNum: Number(kpSum) > 0 ? Number(kpSum) : null, wonSum: Number(z['Сумма выигранной части']) > 0 ? Number(z['Сумма выигранной части']) : null, wonNote: z['Объём/примечание выигранной части'] || '', // K-275: числа для печатной сводки
       prodOrders: prodOrders.filter((o) => String(o['№ ЗП'] || '').split(/[,;\s]+/).includes(String(z['№ запроса'] || '').trim()) && String(z['№ запроса'] || '').trim()).map((o) => ({ numPz: o['№ ПЗ'] || '', status: o['Статус'] || '', plan: o['Плановый срок'] || '', customer: o['Заказчик / Инициатор'] || '' })), // K-270
     };
   });
@@ -5969,7 +5970,7 @@ async function propagateLovToRequest(sheetId, rejected) {
   const patch = { 'Дата оценки': new Date().toISOString().slice(0, 10), 'Результат оценки': rejected ? 'Невыполнимо' : 'Выполнимо' };
   const cur = String(reqRow['Статус'] || '');
   if (rejected) patch['Статус'] = 'Отклонён';
-  else if (cur === 'Новый' || cur === 'На оценке (ЛОВ)') patch['Статус'] = 'На оценке (ЛОВ)';
+  // K-276: статус «На оценке (ЛОВ)» выведен из оборота (решение ДпП 21.09.2026) — оценка статус запроса не двигает
   try { await ncUpdate('sales_requests', idOfRow(reqRow), patch); } catch (e) { console.warn('ЛОВ→ЗП проброс не удался:', e.message); }
 }
 async function buildLovList() {
@@ -6059,7 +6060,6 @@ async function createLovFromRequestUnlocked(zp, body) {
   // № ЛОВ пробрасываем в ЗП; статус двигаем только с «Новый» (не откатываем более поздние).
   // «На оценке (ЛОВ)» — валидное значение SingleSelect (миграция K-04); прежнее «Оценка» роняло весь PATCH.
   const reqPatch = { '№ ЛОВ': numLov };
-  if (String(reqRow['Статус'] || '') === 'Новый') reqPatch['Статус'] = 'На оценке (ЛОВ)';
   try { await ncUpdate('sales_requests', idOfRow(reqRow), reqPatch); } catch (e) { console.warn('ЛОВ: № ЛОВ/статус в ЗП не записаны:', e.message); }
   return { ok: true, numLov, id: sheetId };
 }

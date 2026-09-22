@@ -6869,6 +6869,13 @@ async function buildBoardLive() {
     const routeOpsAll = (opsByRouteId.get(String(route.Id ?? route.id ?? '')) || []).slice().sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
     const opIdx = routeOpsAll.findIndex((x) => idOf(x) === idOf(operation));
     const nextOpRow = opIdx >= 0 ? routeOpsAll[opIdx + 1] : null;
+    // K-281: единицы с предыдущей операции по этой же позиции — годные по журналу, с отметками «передал / принял».
+    //  prevOp=null (первая операция) → incoming=null: все единицы доступны сразу.
+    const prevOpRow = opIdx > 0 ? routeOpsAll[opIdx - 1] : null;
+    const prevTask = prevOpRow ? (tasks || []).find((x) => Number(x.positions_id) === Number(t.positions_id) && Number(x.operations_id) === Number(prevOpRow.Id ?? prevOpRow.id)) : null;
+    const prevSec = (() => { if (!prevOpRow) return ''; const pt = otById.get(prevOpRow.op_types_id) || {}; const sId = _linkIds(pt['Участки'])[0] ?? pt.sections_id; return (secById.get(sId) || {})['Код'] || ''; })();
+    const incoming = prevOpRow ? (journalByTask.get(String((prevTask && prevTask['№ задачи']) || '')) || []).filter((j) => Number(j['№ единицы']) > 0 && unitGood(j))
+      .map((j) => ({ unit: Number(j['№ единицы']), handedBy: j['Передал'] || '', handedAt: j['Передано'] || '', takenBy: j['Принял'] || '', takenAt: j['Принято'] || '' })).sort((a, b) => a.unit - b.unit) : null;
     const nextOp = (() => { if (!nextOpRow) return null; const nt = otById.get(nextOpRow.op_types_id) || {}; const nsId = _linkIds(nt['Участки'])[0] ?? nt.sections_id; const ns = secById.get(nsId) || {};
       return { num: nextOpRow['№ операции'] ?? '', name: nextOpRow['Операция'] || nt['Наименование'] || '', section: ns['Код'] || '' }; })();
     const orderRow = orderByIdB.get(position.orders_id) || orderByIdB.get(t.orders_id) || {};
@@ -6882,7 +6889,8 @@ async function buildBoardLive() {
       .map((j) => ({ id: idOf(j), unit: j['№ единицы'] ?? '', executor: j['Исполнитель'] || '',
         blankNo: j['№ заготовки / приёмки'] || '', self: j['Самоконтроль'] || '', otk: j['Контроль ОТК'] || '',
         date: j['Дата'] || '', note: j['Примечание'] || '',
-        measured: j['Измерено'] ?? '', matCode: j['Карточка металла'] || '', si: j['СИ'] || '' })) // K-187 / K-207
+        measured: j['Измерено'] ?? '', matCode: j['Карточка металла'] || '', si: j['СИ'] || '',
+        handedBy: j['Передал'] || '', handedAt: j['Передано'] || '', takenBy: j['Принял'] || '', takenAt: j['Принято'] || '' })) // K-187 / K-207 / K-281
       .sort((a, b) => (Number(a.unit) || 0) - (Number(b.unit) || 0));
     // параметры: значения задачи (если есть), иначе набор из типа операции (без значения)
     //  норматив/допуск — план (read-only для рабочего), факт — то, что забил рабочий.
@@ -6925,6 +6933,7 @@ async function buildBoardLive() {
       selfControl: !!t['Самоконтроль (С)'], otk: !!t['Контроль ОТК'], note: t['Примечание'] || '',
       // K-187: экран оператора
       opTotal: routeOpsAll.length, opIndex: opIdx >= 0 ? opIdx + 1 : null, nextOp,
+      prevOp: prevOpRow ? { num: prevOpRow['№ операции'] ?? '', name: prevOpRow['Операция'] || '', section: prevSec, taskId: prevTask ? (prevTask.Id ?? prevTask.id) : null, taskNum: prevTask ? (prevTask['№ задачи'] || '') : '', status: prevTask ? (prevTask['Статус'] || '') : '' } : null, incoming, // K-281
       numPz: String(t['№ задачи'] || '').split('/')[0] || '', posNo: position['№ позиции'] ?? '',
       customer: orderRow['Заказчик / Инициатор'] || '', orderDue: position['Срок готовности'] || orderRow['Плановый срок'] || '',
       startedAt: t['Начато (факт)'] || '', finishedAt: t['Завершено (факт)'] || '', pauseReason: t['Причина приостановки'] || '',
@@ -7959,6 +7968,45 @@ async function retroDelete(body, session) {
   if (lines.length) await ncDeleteMany('retro_lines', lines);
   await ncDeleteMany('retro_outputs', [a.Id ?? a.id]);
   return { ok: true, id: a.Id ?? a.id, no: a['№ акта'] || '', lines: lines.length };
+}
+// ── K-281: поединичная передача заготовок между участками ───────────────────────────────────────
+//  Отметки живут в строке журнала той операции, которая единицу ИЗГОТОВИЛА: «Передал / Передано» (оператор текущего
+//  участка) и «Принял / Принято» (оператор следующего). Следующая задача открывается по первой годной единице.
+async function _handEnsureCols() { for (const [c, t] of [['Передал', 'SingleLineText'], ['Передано', 'SingleLineText'], ['Принял', 'SingleLineText'], ['Принято', 'SingleLineText']]) await ncEnsureColumn('journal', c, t); }
+const _handNow = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
+// предыдущая по маршруту задача той же позиции
+async function _prevTaskOf(taskRow) {
+  const [ops, tasks] = await Promise.all([ncListSoft('operations'), ncListSoft('tasks')]);
+  const op = ops.find((o) => Number(o.Id ?? o.id) === Number(taskRow.operations_id)); if (!op) return null;
+  const chain = ops.filter((o) => Number(o.routes_id) === Number(op.routes_id)).sort((a, b) => (Number(a['№ операции']) || 0) - (Number(b['№ операции']) || 0));
+  const i = chain.findIndex((o) => Number(o.Id ?? o.id) === Number(op.Id ?? op.id)); if (i <= 0) return null;
+  const prev = chain[i - 1]; return tasks.find((x) => Number(x.positions_id) === Number(taskRow.positions_id) && Number(x.operations_id) === Number(prev.Id ?? prev.id)) || null;
+}
+async function taskHandover(body, session) {
+  const action = String(body.action || ''); const units = [...new Set((Array.isArray(body.units) ? body.units : []).map(Number).filter((u) => u > 0))];
+  if (!['hand', 'take'].includes(action)) throw new Error('action: hand | take'); if (!units.length) throw new Error('Не выбраны единицы.');
+  const who = String(body.who || (session && session.fio) || '').trim() || 'портал';
+  const tasks = await ncListSoft('tasks'); const task = tasks.find((x) => String(x.Id ?? x.id) === String(body.taskId)); if (!task) { const e = new Error('Задача не найдена.'); e.status = 404; throw e; }
+  const target = action === 'hand' ? task : await _prevTaskOf(task); if (!target) throw new Error('Предыдущей операции нет — это первая операция маршрута.');
+  await _handEnsureCols();
+  const jr = (await ncListSoft('journal')).filter((j) => String(j['№ задачи'] || '') === String(target['№ задачи'] || ''));
+  const upd = [], skipped = [];
+  for (const u of units) { const row = jr.find((j) => Number(j['№ единицы']) === u); if (!row || !unitGood(row)) { skipped.push(u); continue; }
+    if (action === 'hand') { if (row['Передал']) continue; upd.push({ Id: row.Id ?? row.id, 'Передал': who, 'Передано': _handNow() }); }
+    else { if (row['Принял']) continue; upd.push({ Id: row.Id ?? row.id, 'Принял': who, 'Принято': _handNow() }); } }
+  if (upd.length) await ncUpdateMany('journal', upd);
+  const numTask = String(task['№ задачи'] || '');
+  if (upd.length) logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numTask.split('/')[0], who, details: action === 'hand' ? `Задача ${numTask}: передано на следующую операцию ед. № ${upd.map((x) => jr.find((j) => (j.Id ?? j.id) === x.Id)['№ единицы']).join(', ')}` : `Задача ${numTask}: принято с предыдущей операции ед. № ${upd.map((x) => jr.find((j) => (j.Id ?? j.id) === x.Id)['№ единицы']).join(', ')}` });
+  return { ok: true, marked: upd.length, skipped };
+}
+// автоприём: единицы, по которым начали работу на следующей операции, помечаются принятыми (если «Забрал» не нажали)
+async function unitsAutoTake(taskNum, units, who) {
+  const tasks = await ncListSoft('tasks'); const task = tasks.find((x) => String(x['№ задачи'] || '') === String(taskNum)); if (!task) return 0;
+  const prev = await _prevTaskOf(task); if (!prev) return 0;
+  await _handEnsureCols();
+  const jr = (await ncListSoft('journal')).filter((j) => String(j['№ задачи'] || '') === String(prev['№ задачи'] || ''));
+  const upd = jr.filter((j) => units.includes(Number(j['№ единицы'])) && !j['Принял']).map((j) => ({ Id: j.Id ?? j.id, 'Принял': (who || 'оператор') + ' (без подтверждения передачи)', 'Принято': _handNow() }));
+  if (upd.length) await ncUpdateMany('journal', upd); return upd.length;
 }
 // ============================================================================
 //  K-168/K-169: НЗП — незавершённое производство по позициям ПЗ и производственные акты выпуска
@@ -14044,6 +14092,12 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html);
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
+    // K-281: передача единиц между участками. action 'hand' — оператор текущей операции отдал (строки своей задачи),
+    //  'take' — оператор следующей операции забрал (строки задачи предыдущей операции). Нажать может любая сторона.
+    if (p === '/api/task/handover' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' });
+      try { return sendJson(res, 200, await taskHandover(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/task/journal' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме.' });
       const body = await readBody(req);
@@ -14068,6 +14122,8 @@ const server = http.createServer(async (req, res) => {
       try {
         await ncUpdateMany('journal', updates);
         await ncCreateMany('journal', creates);
+        // K-281: начал работу по единице — она считается принятой с предыдущей операции, даже если «Забрал» не нажимали
+        try { const touched = rows.filter((r) => r.executor || r.self || r.otk || r.measured).map((r) => Number(r.unit)).filter((u) => u > 0); if (touched.length) await unitsAutoTake(taskNum, touched, rows.map((r) => r.executor).find(Boolean) || (sessionFromReq(req) || {}).fio || ''); } catch (e) { console.warn('K-281: автоприём:', e.message); }
         return sendJson(res, 200, { ok: true, updated: updates.length, created: creates.length });
       } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }

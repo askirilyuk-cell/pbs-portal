@@ -14122,6 +14122,17 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // standalone-создание проекта разработки (продуктовая инициатива, без ЗП)
+    // K-280: переименование проекта — только администратор; событие в историю проекта. Папка на NAS не переименовывается (ссылки в vault и Drive не ломаем).
+    if (p === '/api/design/project-rename' && req.method === 'POST') {
+      const sR = sessionFromReq(req); if (!(sR && sR.isAdmin && !sR.effectiveRole)) return sendJson(res, 403, { error: 'Переименовать проект может только администратор.' });
+      try { const b = await readBody(req); const decNo = String(b.decNo || '').trim(), name = String(b.name || '').replace(/\s+/g, ' ').trim();
+        if (name.length < 3) return sendJson(res, 400, { error: 'Название слишком короткое.' });
+        const pr = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === decNo); if (!pr) return sendJson(res, 404, { error: 'Проект не найден.' });
+        const old = String(pr['Наименование изделия'] || '').trim(); if (old === name) return sendJson(res, 200, { ok: true, unchanged: true });
+        await ncUpdate('design_projects', pr.Id ?? pr.id, { 'Наименование изделия': name });
+        projLog(decNo, 'комментарий', `Проект переименован: «${old}» → «${name}»`, sR);
+        return sendJson(res, 200, { ok: true, name, old }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/design/project-create' && req.method === 'POST') {
       try { return sendJson(res, 200, await createDesignProject(await readBody(req))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }

@@ -4193,7 +4193,7 @@
       const tabs=[['main','Обзор'],['kd','Чертежи и МК'+(kdOf.length?' · '+kdOf.length:'')],['dos','Досье'+(o.dossierCount?' · '+o.dossierCount:'')],['prod','Производство'+(pzN?' · '+pzN:'')],['files','Файлы'],['hist','История']];
       const pane=(k,html)=>`<div data-dptab="${k}"${dpTab===k?'':' style="display:none"'}>${html}</div>`;
       return `<div class="card pad dp-head"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span class="dp-title">${esc(o.name)}</span>
-          <span class="dnochip" title="Децимальный № проекта">ПБС.${esc(o.decNo)}</span>
+          <span class="dnochip" title="Децимальный № проекта">ПБС.${esc(o.decNo)}</span>${isAdminUser()?`<button class="btn btn--ghost btn--sm" data-dprename="${esc(o.decNo)}" title="Переименовать проект"><i class=ic-pencil></i></button>`:''}
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${btns}${linkBtn('#design/'+encodeURIComponent(o.decNo))}</span></div>
           <div class="dp-sum"><span><b>${kdOf.length}</b> черт.${osn?' · оснастки '+osn:''}</span><span><b id="dp-mkn">…</b> МК</span><span><b>${pzN}</b> ПЗ</span><span><b id="dp-dosn">${o.dossierCount||0}</b> в досье</span></div></div>
         <div class="card eq-tabbar" id="dp-tabs"><div class="eq-tabs">${tabs.map(([k,t])=>`<button class="${dpTab===k?'on':''}" data-dptabbtn="${k}">${esc(t)}</button>`).join('')}</div></div>
@@ -4216,7 +4216,10 @@
         ${pane('hist',`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">История проекта</div><div id="dp-hist" class="dos-empty">Загрузка…</div>
           <div class="hint" style="margin-top:var(--sp-3);font-size:var(--fs-xs);color:var(--sub)">В историю попадают загрузка и удаление файлов, новые версии чертежей, записи досье, создание чата. Ведётся с 21.09.2026.</div></div>`)}`;
     }
-    function dpWireTabs(root){ (root||document).querySelectorAll('[data-dptabbtn]').forEach(b=>b.onclick=()=>{ dpTab=b.dataset.dptabbtn; document.querySelectorAll('[data-dptab]').forEach(el=>{ el.style.display=el.dataset.dptab===dpTab?'':'none'; }); document.querySelectorAll('[data-dptabbtn]').forEach(x=>x.classList.toggle('on',x.dataset.dptabbtn===dpTab)); }); }
+    async function dpRename(decNo){ const p=((DESIGN&&DESIGN.projects)||[]).find(x=>x.decNo===decNo); if(!p)return;
+      const name=await uiPrompt(`Новое название проекта ПБС.${decNo}`,p.name||''); if(name==null||!String(name).trim()||String(name).trim()===p.name)return;
+      try{ const j=await postJson('/api/design/project-rename',{decNo,name:String(name).trim()}); toast(`Проект переименован: «${j.name}».`,'ok'); DESIGN=null; renderDesign(document.getElementById('view'),decNo); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } }
+    function dpWireTabs(root){ (root||document).querySelectorAll('[data-dprename]').forEach(b=>b.onclick=()=>dpRename(b.dataset.dprename)); (root||document).querySelectorAll('[data-dptabbtn]').forEach(b=>b.onclick=()=>{ dpTab=b.dataset.dptabbtn; document.querySelectorAll('[data-dptab]').forEach(el=>{ el.style.display=el.dataset.dptab===dpTab?'':'none'; }); document.querySelectorAll('[data-dptabbtn]').forEach(x=>x.classList.toggle('on',x.dataset.dptabbtn===dpTab)); }); }
     // чертежи проекта деревом, справа у каждого — его маршрутные карты (№, статус, способ) и «＋ МК»
     function dProjKdMk(o,kdOf){
       const roots=buildKdTree(kdOf||[]); const canMk=rbacAccess('routes')==='write'; let rows='';

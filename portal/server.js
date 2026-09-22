@@ -1249,6 +1249,7 @@ function designProjectFolder(decNo, opts) {
   try { fs.mkdirSync(projDir, { recursive: true }); return projDir; } catch { return null; }
 }
 // K-279: история проекта — события «Проект / <децим.№>» в общей ленте событий (файлы, чертежи, досье, чат)
+const mkProjOf = (row) => { const m = /[А-ЯЁ]{2}\d{4}/.exec(String((row && row['Изделие / обозначение']) || '') + ' ' + String((row && row['Чертежи КД']) || '')); return m ? m[0] : ''; };
 function projLog(decNo, type, details, session) { const dn = String(decNo || '').trim(); if (!dn) return; try { logEvent({ type, obj: 'Проект', objNum: dn, who: (session && session.fio) || '', details }); } catch { /* журнал не критичен */ } }
 // ── K-277: досье проекта разработки ─────────────────────────────────────────────
 // Единый классификатор записей (одинаков для всех проектов) → папка этапа ИСМ (ДП–Д.1.2 §8), куда ложатся файлы.
@@ -1845,7 +1846,7 @@ function mkOpDir(mk, opNum, kind, create) {
   return dir;
 }
 function mkOpFiles(mk, opNum, kind) {
-  try { const dir = mkOpDir(mk, opNum, kind); if (!dir) return []; return fs.readdirSync(dir).filter((f) => { try { return fs.statSync(path.join(dir, f)).isFile(); } catch { return false; } }).sort(); }
+  try { const dir = mkOpDir(mk, opNum, kind); if (!dir) return []; return fs.readdirSync(dir).filter((f) => { if (/^(@eaDir|SYNOFILE_)/i.test(f) || f.startsWith('.')) return false; try { return fs.statSync(path.join(dir, f)).isFile(); } catch { return false; } }).sort(); }
   catch { return []; }
 }
 
@@ -1989,6 +1990,7 @@ async function mkSetStatus(body, session) {
       if (res.to === 'На согласовании' && Array.isArray(body.approvers) && body.approvers.length) what += ' (согласующие: ' + body.approvers.map((a) => a && a.name).filter(Boolean).join(' → ') + ')';
       if (res.to === 'Черновик' && String(body.comment || '').trim()) what += '. Комментарий: ' + String(body.comment).trim(); }
     if (what) await mkHistAdd(res.id, [what], session);
+    if (res && res.from !== res.to && !res.partial) { const row = (await ncListSoft('routes')).find((x) => String(x.Id ?? x.id) === String(res.id)); const dn = mkProjOf(row); if (dn) projLog(dn, 'статус изменён', `МК ${res.mk || ''}: «${res.from}» → «${res.to}»`, session); }
   } catch { /* история — не критично */ }
   return res;
 }
@@ -2129,6 +2131,7 @@ async function saveRoute(body, session) {
     routeRow['Статус'] = 'Действует';
     const cr = await ncCreateMany('routes', [routeRow]);
     const c = Array.isArray(cr) ? cr[0] : cr; routeId = c.Id ?? c.id;
+    { const dn = mkProjOf(routeRow); if (dn) projLog(dn, 'создан', `Создана МК ${mk}${routeRow['Изделие / обозначение'] ? ' по ' + routeRow['Изделие / обозначение'] : ''}: ${routeRow['Наименование'] || ''}`, session); }
   } else {
     // читаем ТЕКУЩУЮ строку МК ДО патча — источник oldStatusMk (после ncUpdate это будет уже новый статус)
     const routesBefore = await ncListSoft('routes');
@@ -2471,6 +2474,7 @@ async function createRouteForPosition({ type, name, designation, copyFromRouteId
   const cr = await ncCreateMany('routes', [routeRow]);
   const c = Array.isArray(cr) ? cr[0] : cr;
   const routeId = c.Id ?? c.id;
+  { const dn = mkProjOf(routeRow); if (dn) projLog(dn, 'создан', `Создана МК ${mk} из позиции заказа${designation ? ' по ' + String(designation).trim() : ''}: ${routeRow['Наименование']}`, null); }
   let copiedOps = 0, copiedComps = 0;
   if (copyFromRouteId != null) {
     const srcId = Number(copyFromRouteId);
@@ -5032,10 +5036,10 @@ function walkSalesFiles(folder) {
   const walk = (dir) => {
     let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
-      if (e.name.startsWith('.')) continue;
+      if (e.name.startsWith('.') || /^(@eaDir|#recycle|#snapshot)$/i.test(e.name)) continue; // @eaDir — служебные миниатюры Synology (SYNOFILE_THUMB_*.jpg), не документы
       const full = path.join(dir, e.name);
       if (e.isDirectory()) { walk(full); continue; }
-      if (/^(desktop\.ini|thumbs\.db)$/i.test(e.name) || /\.tmp$/i.test(e.name)) continue;
+      if (/^(desktop\.ini|thumbs\.db)$/i.test(e.name) || /\.tmp$/i.test(e.name) || /^SYNOFILE_/i.test(e.name)) continue;
       const rel = path.relative(folder, full).split(path.sep).join('/');
       let size = 0; try { size = fs.statSync(full).size; } catch {}
       out.push({ rel, name: e.name, ext: (e.name.split('.').pop() || '').toLowerCase(), stage: rel.includes('/') ? rel.split('/')[0] : '', size });

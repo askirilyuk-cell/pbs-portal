@@ -1313,6 +1313,25 @@
     .ic-arrdown{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M10 4v12M5 11l5 5 5-5'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M10 4v12M5 11l5 5 5-5'/></svg>");}
     .ic-totop{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M4 3.5h12M10 17V7M5.5 11.5L10 7l4.5 4.5'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M4 3.5h12M10 17V7M5.5 11.5L10 7l4.5 4.5'/></svg>");}
     .ic-play{-webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6 4l10 6-10 6z'/></svg>");mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6 4l10 6-10 6z'/></svg>");}
+    /* K-283: киоск — экран отрезки без прокрутки (1920×1080 при масштабе 1.4 ≈ 1371×771 css px) */
+    body.kiosk .ui-scr,body.kiosk .cut-nav,body.kiosk .cut-fig{display:none!important}
+    body.kiosk .content{padding:8px 12px}
+    body.kiosk .cut-wrap{gap:8px;max-width:none}
+    body.kiosk .cut-top{padding:6px 12px;gap:12px;border-radius:9px} body.kiosk .cut-top .k{font-size:10px} body.kiosk .cut-top b{font-size:14px} body.kiosk .cut-top .sm{font-size:11px}
+    body.kiosk .cut-back-k{padding:4px 9px;font-size:12px;margin-bottom:4px;background:#1c3654;color:#fff;border-color:#2c4a6d}
+    body.kiosk .cut-body{gap:8px;grid-template-columns:1.6fr 1fr}
+    body.kiosk .cut-card{border-radius:9px} body.kiosk .cut-card .h{padding:6px 12px;font-size:11px} body.kiosk .cut-card .c{padding:8px 12px}
+    body.kiosk .cut-task{font-size:17px} body.kiosk .cut-task small{font-size:12px;margin-top:2px}
+    body.kiosk .cut-yellow{padding:5px 9px;font-size:12px;margin-top:6px} body.kiosk .cut-note{font-size:11px} body.kiosk .cut-kv{font-size:12px;gap:4px 10px}
+    body.kiosk .cut-t th,body.kiosk .cut-t td{padding:4px 6px;font-size:13px} body.kiosk .cut-t .cut-inp{padding:5px 8px;font-size:14px;width:90px}
+    body.kiosk .cut-units b{width:30px;height:30px;font-size:13px}
+    body.kiosk .cut-btn{padding:7px 12px;font-size:13px} body.kiosk .cut-btn.big{padding:9px 14px;font-size:14px} body.kiosk .cut-btn.sm{padding:5px 9px;font-size:12px}
+    body.kiosk .hand-units{margin:2px 0 6px} body.kiosk .hand-u{padding:3px 7px}
+    body.kiosk .cut-t td{padding:2px 6px} body.kiosk .cut-t th{padding:3px 6px;font-size:11px} body.kiosk .cut-t .cut-inp{padding:3px 8px;font-size:14px;width:84px} body.kiosk .cut-t .cut-btn.sm{padding:4px 9px}
+    body.kiosk .cut-yellow{padding:4px 9px;margin-top:4px;line-height:1.3} body.kiosk .cut-task{margin:0} body.kiosk .cut-mat b{font-size:15px}
+    body.kiosk .cut-card .c>.cut-note:last-child{display:none}
+    body.kiosk .cut-units{display:none} /* плитки дублируют таблицу */ body.kiosk .cut-t .cut-btn.sm{padding:3px 8px;font-size:12px;min-height:0} body.kiosk .cut-t .cut-inp{padding:2px 8px} body.kiosk .cut-t td .cut-pill{padding:2px 8px;font-size:11px}
+    body.kiosk .cut-card .h{padding:5px 12px} /* поясняющие абзацы внизу карточек — в киоске лишние */
     /* K-281: передача единиц между участками */
     .hand-units{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px}
     .hand-u{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--sl-300);border-radius:var(--r-s);padding:5px 9px;font-size:var(--fs-s);background:#fff;cursor:pointer} .hand-u b{font-family:var(--mono)} .hand-u span{font-size:var(--fs-xs);color:var(--sub)}
@@ -12956,9 +12975,9 @@
         const bi=st.blankInfo||{};
         const matOpts=st.matList.map(x=>`<option value="${x.kind}:${x.id}" ${m&&m.kind===x.kind&&String(m.id)===String(x.id)?'selected':''}>${esc(matLabel(x))}${x.kind==='stock'?' · доступно '+mtNum(x.available)+' кг':' · '+mtNum(x.weight)+' кг'}</option>`).join('');
         host.innerHTML=`<div class="cut-wrap">
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="st-back" id="cut-back">← К задачам участка</button><span class="cut-note">Экран оператора · <a href="#" id="cut-classic" style="color:var(--navy)">классическая карта Ф.14</a></span></div>
+          <div class="cut-nav" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="st-back" id="cut-back">← К задачам участка</button><span class="cut-note">Экран оператора · <a href="#" id="cut-classic" style="color:var(--navy)">классическая карта Ф.14</a></span></div>
           <div class="cut-top">
-            <div><div class="k">Заказ · позиция</div><b class="cut-mono">${esc(t.numPz||'')}${t.posNo!==''&&t.posNo!=null?' / '+esc(String(t.posNo)):''}</b><div class="sm">${t.orderDue?'срок '+esc(fmt(t.orderDue)):''}${t.customer?' · '+esc(t.customer):''}</div></div>
+            <div>${kiosk?`<button class="st-back cut-back-k" id="cut-back2">← Задачи</button>`:``}<div class="k">Заказ · позиция</div><b class="cut-mono">${esc(t.numPz||'')}${t.posNo!==''&&t.posNo!=null?' / '+esc(String(t.posNo)):''}</b><div class="sm">${t.orderDue?'срок '+esc(fmt(t.orderDue)):''}${t.customer?' · '+esc(t.customer):''}</div></div>
             <div class="mid"><div><div class="k">Изделие</div><b>${esc(t.partName||'—')}</b>${t.drawing?`<div class="sm">чертёж ${(t.kdDrawings||[]).length?`<a href="/api/design/kd/file?doc=${encodeURIComponent(t.kdDrawings[0].doc||'')}" target="_blank" rel="noopener" style="color:#9cc4ff;text-decoration:underline">${esc(t.drawing)} — открыть</a>`:esc(t.drawing)}</div>`:''}${(t.drawingFiles||[]).map(f=>`<div class="sm"><a href="/api/route/opfile?mk=${encodeURIComponent(t.mk||'')}&op=0&kind=drawing&rel=${encodeURIComponent(f)}" target="_blank" rel="noopener" style="color:#9cc4ff;text-decoration:underline">${esc(f)}</a></div>`).join('')}${t.kdChanged?`<div class="sm" style="color:#ffd37a;font-weight:700">⚠ чертёж изменён (ред. ${esc(String(t.kdChanged.rev??''))}): ${esc(t.kdChanged.what||'')}</div>`:''}</div>
               <div><div class="k">Маршрут</div><b class="cut-mono">${esc(t.mk||'')}${t.opIndex?' · оп. '+t.opIndex+' из '+t.opTotal:''}</b><div class="sm">${t.nextOp?'далее: оп. '+esc(String(t.nextOp.num))+' '+esc(t.nextOp.name)+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'последняя операция'}</div></div>
               <div><div class="k">Станок</div><b>${esc(eqTxt)}</b><div class="sm">${esc(t.section||'')}</div></div></div>
@@ -12969,7 +12988,7 @@
               <div class="cut-card"><div class="h">Задание<span class="n">${t.normTime!==''&&t.normTime!=null?'норма '+esc(String(t.normTime))+' ч':''}${t.ri?' · '+esc(t.ri):''}</span></div><div class="c">
                 <div class="cut-task">Отрезать <span class="cut-mono">${qty} шт</span>${blankName?' · '+esc(blankName):''}${L!=null?` · <span class="cut-mono">L = ${esc(String(L))}${tol&&tol.text?' '+esc(tol.text):''} мм</span>`:' · <span class="cut-pill warn">размер реза не задан в МК</span>'}
                   <small>${lo!=null&&hi!=null?`годная длина ${esc(String(lo))}–${esc(String(hi))} мм`:(L!=null?'допуск не задан — режем в размер':'')}${perItem>1?` · ${perItem} заготовки на одно изделие`:''}</small></div>
-                ${rtCutFigureSvg({id:'c'+t.id,L:L!=null?L:'',tol:pSize.tol||'',qty:qty,blank:blankName||''})}
+                <div class="cut-fig">${rtCutFigureSvg({id:'c'+t.id,L:L!=null?L:'',tol:pSize.tol||'',qty:qty,blank:blankName||''})}</div>
                 ${(()=>{ const modes=(t.params||[]).filter(p=>!CUT_RE_LEN.test(p.name||'')&&!CUT_RE_PER.test(p.name||'')&&!/^(припуск|количество)/i.test(p.name||'')&&String(p.norm||'').trim()); // K-215 (З-006)
                   return modes.length?`<div class="cut-kv" style="margin-top:8px"><span class="k">Режимы реза</span><span>${modes.map(p=>`${esc(p.name)}: <b class="cut-mono">${esc(String(p.norm))}${p.unit?' '+esc(p.unit):''}</b>${p.tol?' <span class="cut-note">'+esc(p.tol)+'</span>':''}`).join(' · ')}</span></div>`:''; })()}
                 ${t.instructions?`<div class="cut-yellow"><b>Указания технолога:</b> ${esc(t.instructions)}</div>`:''}
@@ -12995,13 +13014,6 @@
                   ${m&&m.kind==='stock'?`<span class="k">На карточке</span><span class="cut-mono">доступно ${mtNum(m.available)} кг · остаток ${mtNum(m.balance)} кг</span>`:''}</div>
                 <div class="cut-note">Скан подтверждает, из чего режем; если пруток другой — выберите его, списание пойдёт с правильной карточки.${m&&bi.blank&&bi.blank.grade&&m.grade&&String(m.grade).toLowerCase()!==String(bi.blank.grade).toLowerCase()?' <b style="color:#b91c1c">Марка отличается от МК ('+esc(bi.blank.grade)+')!</b>':''}</div>
               </div></div>
-              <div class="cut-card"><div class="h">Остаток после резки</div><div class="c">
-                <div class="cut-kv"><span class="k">Отрезано (по замерам)</span><span class="cut-mono">${Math.round(consumedMm()*10)/10} мм, ${units.filter(u=>u.measured!=='').length} шт с пропилами</span><span class="k">Расчётный остаток</span><span class="cut-mono">${rem!=null?(rem>=0?'<b>'+rem+' мм</b>':'<b style="color:#b91c1c">'+rem+' мм — длина прутка меньше отрезанного</b>'):'укажите длину прутка'}</span></div>
-                <div class="cut-btns"><label class="cut-btn sm ${st.remMode==='do'?'pri':''}"><input type="radio" name="cut-rem" value="do" ${st.remMode==='do'?'checked':''} hidden>Деловой остаток → бирка</label><label class="cut-btn sm ${st.remMode==='scrap'?'pri':''}"><input type="radio" name="cut-rem" value="scrap" ${st.remMode==='scrap'?'checked':''} hidden>В обрезь</label><label class="cut-btn sm ${st.remMode==='none'?'pri':'ghost'}"><input type="radio" name="cut-rem" value="none" ${st.remMode==='none'?'checked':''} hidden>Пруток остаётся</label></div>
-                ${(()=>{ const R=(st.blankInfo&&st.blankInfo.remRules)||{doMinMm:30,keepMinMm:500}; const sug=rem==null||rem<=0?'':(rem>=R.keepMinMm?'none':(rem>=R.doMinMm?'do':'scrap')); const nm={none:'Пруток остаётся',do:'Деловой остаток → бирка',scrap:'В обрезь'};
-                  return `<div class="cut-note" style="margin-top:6px"><b>Как решить:</b> остаток от ${R.keepMinMm} мм — <b>пруток остаётся</b> на карточке (металла просто стало меньше); от ${R.doMinMm} до ${R.keepMinMm} мм — <b>деловой остаток</b>: кусок уходит с карточки на стеллаж ДО с биркой; меньше ${R.doMinMm} мм — <b>в обрезь</b> (списывается).${sug?` По расчёту ${rem} мм → <b>${nm[sug]}</b>${sug!==st.remMode?' <span style="color:#b45309">(выбрано другое — так и надо?)</span>':''}.`:''}</div>`; })()}
-                
-              </div></div>
               <div class="cut-card"><div class="h">Ход операции</div><div class="c">
                 <div class="cut-kv"><span class="k">Начата</span><span>${st.startedAt?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+cutElapsed(st.startedAt):'—'}</span><span class="k">Норма / факт</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'} / ${st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10+' ч':'—'}</span></div>
                 <div class="cut-btns">
@@ -13010,6 +13022,13 @@
                 </div>
                 <div class="cut-btns"><button class="cut-btn ghost sm" id="cut-labels" ${acc?'':'disabled'}>🖨 Бирки на заготовки</button><button class="cut-btn ghost sm" id="cut-save">Сохранить</button><span class="cut-note" id="cut-msg"></span></div>
                 <div class="cut-note">Завершение списывает отрезанный металл с карточки по замерам, оформляет остаток, закрывает задачу и ставит следующую операцию в очередь участка.</div>
+              </div></div>
+              <div class="cut-card"><div class="h">Остаток после резки</div><div class="c">
+                <div class="cut-kv"><span class="k">Отрезано (по замерам)</span><span class="cut-mono">${Math.round(consumedMm()*10)/10} мм, ${units.filter(u=>u.measured!=='').length} шт с пропилами</span><span class="k">Расчётный остаток</span><span class="cut-mono">${rem!=null?(rem>=0?'<b>'+rem+' мм</b>':'<b style="color:#b91c1c">'+rem+' мм — длина прутка меньше отрезанного</b>'):'укажите длину прутка'}</span></div>
+                <div class="cut-btns"><label class="cut-btn sm ${st.remMode==='do'?'pri':''}"><input type="radio" name="cut-rem" value="do" ${st.remMode==='do'?'checked':''} hidden>Деловой остаток → бирка</label><label class="cut-btn sm ${st.remMode==='scrap'?'pri':''}"><input type="radio" name="cut-rem" value="scrap" ${st.remMode==='scrap'?'checked':''} hidden>В обрезь</label><label class="cut-btn sm ${st.remMode==='none'?'pri':'ghost'}"><input type="radio" name="cut-rem" value="none" ${st.remMode==='none'?'checked':''} hidden>Пруток остаётся</label></div>
+                ${(()=>{ const R=(st.blankInfo&&st.blankInfo.remRules)||{doMinMm:30,keepMinMm:500}; const sug=rem==null||rem<=0?'':(rem>=R.keepMinMm?'none':(rem>=R.doMinMm?'do':'scrap')); const nm={none:'Пруток остаётся',do:'Деловой остаток → бирка',scrap:'В обрезь'};
+                  return `<div class="cut-note" style="margin-top:6px"><b>Как решить:</b> остаток от ${R.keepMinMm} мм — <b>пруток остаётся</b> на карточке (металла просто стало меньше); от ${R.doMinMm} до ${R.keepMinMm} мм — <b>деловой остаток</b>: кусок уходит с карточки на стеллаж ДО с биркой; меньше ${R.doMinMm} мм — <b>в обрезь</b> (списывается).${sug?` По расчёту ${rem} мм → <b>${nm[sug]}</b>${sug!==st.remMode?' <span style="color:#b45309">(выбрано другое — так и надо?)</span>':''}.`:''}</div>`; })()}
+                
               </div></div>
             </div>
           </div></div>`;
@@ -13024,6 +13043,7 @@
       const pickMat=(m,confirmed)=>{ st.mat=m; st.matConfirmed=!!confirmed; if(m&&m.kind==='remnant'&&st.barLen==null){ const mm=/(\d{3,5})\s*мм/i.exec(String(m.sizes||'')); if(mm)st.barLen=Number(mm[1]); } };
       const wire=()=>{
         host.querySelector('#cut-back').onclick=()=>renderStation(host);
+        const back2=host.querySelector('#cut-back2'); if(back2)back2.onclick=()=>renderStation(host);
         host.querySelector('#cut-classic').onclick=(e)=>{ e.preventDefault(); cutClassic=true; renderStationTask(host,t.id); cutClassic=false; };
         const ob=host.querySelector('#cut-op'); if(ob)ob.onclick=()=>stationOperatorDialog(()=>renderStationTask(host,t.id));
         const scan=host.querySelector('#cut-scan'); if(scan){ scan.onkeydown=async(e)=>{ if(e.key!=='Enter')return; e.preventDefault(); const code=scan.value.trim().toUpperCase(); if(!code)return; if(/^(СОТР|SOTR)-/.test(code)){ /* K-282: сканер шлёт латиницу (Code128 от asciiBar) */ try{ await stationSetOperator({badge:code}); renderStationTask(host,t.id); }catch(err){ toast(err.message,'err'); scan.select(); } return; } // K-206: бейдж сотрудника — смена оператора

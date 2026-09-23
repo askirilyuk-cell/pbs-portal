@@ -3922,6 +3922,8 @@
       if(!PGROUPS){ try{PGROUPS=await (await fetch('/api/product-groups')).json();}catch(e){PGROUPS={mode:'mock',groups:[],warning:String(e.message||e)};} }
       const D=PGROUPS, gs=D.groups||[];
       if(pgSub){ const g=gs.find(x=>(x.subgroups||[]).some(sg=>sg.code===pgSub)); if(g){ pgOpen=g.code; } else pgSub=null; }
+      if(!(DOCS_STATE&&DOCS_STATE.list&&DOCS_STATE.list.length)){ try{ const j=await (await fetch('/api/docs')).json(); DOCS_STATE={list:j.docs||[],live:j.mode==='live'}; }catch{} }
+      if(typeof SALES!=='undefined'&&!SALES){ try{ SALES=await (await fetch('/api/sales')).json(); }catch{} }
       const tag=srcChip(D.mode==='live', D.mode==='live'?(gs.length+' групп'):(D.warning||'примеры'));
       const cards=gs.map(g=>`<div class="pg-card${g.code===pgOpen?' pg-act':''}" data-g="${esc(g.code)}">
           <span class="pg-code">${esc(g.code)}</span>
@@ -3946,9 +3948,16 @@
           <td>${p.hasKd?`<span class="pg-dn" data-open="${esc(p.decNo)}">чертёж · КД</span>`:'<span style="color:var(--gray4,#9aa7b5)">—</span>'}</td></tr>`;}).join('')
         ||`<tr><td colspan="4" style="color:var(--sub);padding:10px 8px">Проектов в группе пока нет (появятся из «Проекты разработки» по коду ${esc(g.code)})</td></tr>`;
       const subChips=(g.subgroups||[]).map(s=>`<a class="pg-chip pg-subchip ${pgSub===s.code?'on':''}" href="#prodgroups/${encodeURIComponent(s.code)}" title="Карточка подгруппы: чат, досье, документы ИСМ">${esc(s.code)} · ${esc(s.name)}${s.chat?' <i class=ic-chat></i>':''}</a>`).join('')||'<span style="color:var(--sub)">—</span>';
-      const linkHtml=(l,ic)=>`<a class="pg-link" ${l.href&&l.href.startsWith('#')?`data-nav="${esc(l.href)}"`:`href="${esc(l.href||'#')}" target="_blank" rel="noopener"`}><span class="ic">${ic}</span> ${esc(l.label)}</a>`;
-      const refl=(g.refLinks||[]).map(l=>linkHtml(l,'▤')).join('');
-      const sl=(g.salesLinks||[]).map(l=>linkHtml(l,'₽')).join('');
+      const linkHtml=(l,ic)=>`<a class="pg-link" ${l.href&&l.href.startsWith('#')?`data-nav="${esc(l.href)}"${l.grp?` data-grp="${esc(l.grp)}"`:''}`:`href="${esc(l.href||'#')}" target="_blank" rel="noopener"`}><span class="ic">${ic}</span> ${esc(l.label)}</a>`;
+      // K-287: ссылки считаются из данных, а не из product-groups-meta.json (там были заглушки «уточняется» на #docs)
+      const subsAll=(g.subgroups||[]); const subs=pgSub?subsAll.filter(x=>x.code===pgSub):subsAll; const docsAll=(DOCS_STATE&&DOCS_STATE.list)||[]; const scope=pgSub?`${pgSub} · ${(subsAll.find(x=>x.code===pgSub)||{}).name||''}`:g.code+' (все подгруппы)';
+      const ismLinks=subs.flatMap(sg=>(sg.ismDocs||[]).map(code=>{ const dd=docsAll.filter(x=>x.code===code); const d=dd.find(x=>/действ/i.test(x.status||''))||dd[0]; return {label:`${code}${d?' · '+String(d.name).replace(/^.*?—\s*/,'')+' · ред. '+(d.ver||''):''}`,href:'#docs/'+encodeURIComponent(code)}; }));
+      const refl=(ismLinks.length?ismLinks:[{label:'Документы ИСМ к подгруппам не привязаны — откройте карточку подгруппы и нажмите «Привязать из реестра»',href:'#prodgroups'}]).map(l=>linkHtml(l,'▤')).join('')
+        +subs.map(sg=>linkHtml({label:`Досье группы ${sg.code} · ${sg.name}${sg.chat?' · чат':''}`,href:'#prodgroups/'+encodeURIComponent(sg.code)},'▤')).join('');
+      const zps=((typeof SALES!=='undefined'&&SALES&&SALES.requests)||[]); const grpZp=zps.filter(z=>(z.products||[]).some(pr=>pr.groupCode===g.code&&(!pgSub||pr.subCode===pgSub)));
+      const pzAll=((typeof DATA!=='undefined'&&DATA&&DATA.orders)||[]); const grpPz=pzAll.filter(o=>(o.positions||[]).some(q=>new RegExp('^(ПБС\\.)?'+(pgSub||subsAll.map(x=>x.code).join('|')||g.code)+'\\d{4}').test(String(q.drawing||'').replace(/^ПБС\./,'')))||String(o.productType||'').includes(pgSub?'· '+pgSub+' ':g.code+' ·'));
+      const grpKey=pgSub?g.code+':'+pgSub:g.code;
+      const sl=[linkHtml({label:`Запросы продаж по ${pgSub||g.code}${grpZp.length?' · '+grpZp.length:' · пока нет'}`,href:'#sales',grp:grpKey},'₽'),linkHtml({label:`Заказы на производство по ${pgSub||g.code}${grpPz.length?' · '+grpPz.length:' · пока нет'}`,href:'#orders',grp:grpKey},'₽'),linkHtml({label:'Каталог номенклатуры',href:'#catalog'},'₽')].join('');
       h.innerHTML=`<div class="pg-panel">
         <div class="pg-head"><span class="c">${esc(g.code)}</span><div style="font-weight:700;font-size:14px;color:var(--navy)">${esc(g.name)} <small style="font-weight:400;color:var(--sub);font-size:13px">— ${g.projectCount} проект(ов) · ${(g.subgroups||[]).length} подгрупп</small></div></div>
         <div class="pg-cols">
@@ -3960,13 +3969,13 @@
               <div style="margin-top:6px"><b>Подгруппы (Прил. А):</b><br>${subChips}</div></div>
           </div>
           <div class="pg-r">
-            <div class="pg-sech">Справка · ссылки на ИСМ</div>${refl||'<div style="color:var(--sub);font-size:13px">—</div>'}
-            <div class="pg-sech" style="margin-top:16px">Продажи</div>${sl||'<div style="color:var(--sub);font-size:13px">—</div>'}
+            <div class="pg-sech">Документы ИСМ и досье · ${esc(scope)}</div>${refl||'<div style="color:var(--sub);font-size:13px">—</div>'}
+            <div class="pg-sech" style="margin-top:16px">Продажи и производство · ${esc(scope)}</div>${sl||'<div style="color:var(--sub);font-size:13px">—</div>'}
           </div>
         </div></div>${pgSub?`<div id="pg-sub" style="margin-top:var(--gap)"></div>`:''}`;
       if(pgSub){ pgSubCard(g,(g.subgroups||[]).find(x=>x.code===pgSub)); setTimeout(()=>{ const el=document.getElementById('pg-sub'); if(el&&location.hash.includes('/'))el.scrollIntoView({block:'start',behavior:'smooth'}); },150); }
       h.querySelectorAll('[data-open]').forEach(e=>e.onclick=()=>{ designSel=e.dataset.open; location.hash='#design/'+encodeURIComponent(e.dataset.open); });
-      h.querySelectorAll('[data-nav]').forEach(e=>e.onclick=()=>{ location.hash=e.dataset.nav; });
+      h.querySelectorAll('[data-nav]').forEach(e=>e.onclick=()=>{ const t=e.dataset.nav; if(e.dataset.grp){ if(t==='#sales'){ salesGrp=e.dataset.grp; salesFilter=null; } if(t==='#orders'){ ordGrp=e.dataset.grp; } } if(t===location.hash){ route(); } else location.hash=t; });
     }
 
     // ── K-285: карточка подгруппы продукции (ПЧ, ЦТ, …): чат группы, досье группы, документы ИСМ, история ────────────
@@ -5310,7 +5319,7 @@
     //  таблицы продаж в NocoDB ещё не заведены → бейдж «демо». ERP-движок переиспользуется.
     // ════════════════════════════════════════════════════════════════════════
     let SALES=null, salesTab='req', kpState=null;
-    let salesFilter=null, salesSelZp=null, salesSearch='', salesOpenZp=null;   // K-05: воронка (фильтр по состоянию K-06) + выбранный ЗП в реестре; salesOpenZp — открытый на всё окно запрос («Работа по запросу»)
+    let salesFilter=null, salesSelZp=null, salesSearch='', salesOpenZp=null, salesGrp=null; // K-287: salesGrp — фильтр по группе/подгруппе продукции ('СП' | 'СП:ПЧ')   // K-05: воронка (фильтр по состоянию K-06) + выбранный ЗП в реестре; salesOpenZp — открытый на всё окно запрос («Работа по запросу»)
     let salesKpZp=null, salesKpMode='build';   // полноэкранная страница «Конструктор КП»: открытый ЗП + режим-таб (build=Составление · blank=Предпросмотр бланка)
     let CPS=null, cpRole='all', cpCardTab='overview', cpNoInn=false;
     // ── K-98 · ИНН как ключ связи ──────────────────────────────────────────────
@@ -5523,10 +5532,11 @@
           ${m('Активных запросов',cnt.new+cnt.lov+cnt.prep+cnt.sent,'var(--navy)')}
         </div>
         <div class="funnel" style="margin-top:var(--gap)">${funnel}</div>
-        <div class="fterm">Терминалы (вне воронки): ${terms}<span style="margin-left:auto;color:var(--sl-500)">клик по сегменту → фильтр реестра${salesFilter?` · <a href="#" data-f="" style="color:var(--blue)">сбросить</a>`:''}</span></div>
+        <div class="fterm">Терминалы (вне воронки): ${terms}<span style="margin-left:auto;color:var(--sl-500)">${salesGrp?`<span class="badge b-navy">группа ${esc(salesGrp.replace(':',' · '))}</span> <a href="#" data-grpclear="1" style="color:var(--blue)">снять</a> · `:''}клик по сегменту → фильтр реестра${salesFilter?` · <a href="#" data-f="" style="color:var(--blue)">сбросить</a>`:''}</span></div>
         <div id="sgrid" style="margin-top:var(--gap)"></div>`;
       // воронка/терминалы → фильтр реестра (повторный клик по активному сегменту снимает фильтр)
       host.querySelectorAll('[data-f]').forEach(el=>el.onclick=(e)=>{ e.preventDefault(); const k=el.dataset.f||null; salesFilter=(k&&salesFilter===k)?null:k; salesReq(host); });
+      const gcl=host.querySelector('[data-grpclear]'); if(gcl)gcl.onclick=(e)=>{ e.preventDefault(); salesGrp=null; salesReq(host); };
       salesGrid();
     }
     // K-42: «Ответ до» (SLA §5.3.8) — дата КП + 10 дней; просрочка = kpStale (считает server).
@@ -5541,6 +5551,7 @@
       const all=(SALES&&SALES.requests)||[];
       let rows=all.slice();
       if(salesFilter) rows=rows.filter(r=>zpBucket(r)===salesFilter);
+      if(salesGrp){ const [gc,sc]=salesGrp.split(':'); rows=rows.filter(r=>(r.products||[]).some(pr=>pr.groupCode===gc&&(!sc||pr.subCode===sc))); }
       rows.sort((a,b)=>String(b.numZp).localeCompare(String(a.numZp),'ru'));   // по умолчанию № ЗП ↓
       if(!rows.length){ gh.innerHTML=emptyCard('Запросов по текущему фильтру нет',{sub:'Снимите фильтр или создайте новый запрос.'}); return; }
       if(!salesSelZp||!rows.some(r=>r.numZp===salesSelZp)) salesSelZp=rows[0].numZp;
@@ -14394,10 +14405,12 @@
 
     // Заказы (ПЗ) — ERP-реестр (erpGrid) + master-detail: таблица слева, панель с вкладками справа (K-42 Задача C)
     let ordSel=null, ordTab='pos', ordApi=null;
+    let ordGrp=null; // K-287: фильтр реестра ПЗ по группе/подгруппе продукции ('СП' | 'СП:ПЧ') — ставится ссылкой из карточки группы
     function renderOrdersView(host,arg){
       if(arg)ordSel=arg;
       const today=new Date().toISOString().slice(0,10);
-      const rows=DATA.orders.map(o=>{const tot=(o.tasks||[]).length,dn=doneCount(o);const late=o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status);return {o,tot,dn,pct:tot?Math.round(dn/tot*100):0,late};});
+      const ordInGrp=(o)=>{ if(!ordGrp)return true; const [gc,sc]=ordGrp.split(':'); const pt=String(o.productType||''); if(sc?pt.includes('· '+sc+' '):pt.startsWith(gc+' ·'))return true; const re=new RegExp('^(ПБС\\.)?'+(sc||'[А-ЯЁ]{2}')+'\\d{4}'); return (o.positions||[]).some(q=>re.test(String(q.drawing||'').replace(/^ПБС\./,''))); };
+      const rows=DATA.orders.filter(ordInGrp).map(o=>{const tot=(o.tasks||[]).length,dn=doneCount(o);const late=o.plan&&String(o.plan).slice(0,10)<today&&!orderFinished(o.status);return {o,tot,dn,pct:tot?Math.round(dn/tot*100):0,late};});
       const lateN=rows.filter(r=>r.late).length;
       const otkN=countWaitsOtk(DATA.orders);
       const cols=[
@@ -14418,10 +14431,11 @@
         onEnter:r=>{ordSel=r.o.numPz;try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}odShowDetail(ordSel);}, // K-116: Enter — тот же дровер с вкладками                       // Enter — карточка целиком (модалка; полноэкранный роут — TODO)
         onEsc:()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);},
         del:DATA.mode==='live'?{key:'orders',idOf:r=>r.o.id,reload:()=>load()}:undefined,
-        info:`${srcChip(DATA.mode==='live')}<span>Всего: <b style="color:var(--ink)">${rows.length}</b></span>${lateN?`<span class="c-red">Просрочено: <b>${lateN}</b></span>`:''}${otkN?`<span class="c-amber">Ждут ОТК: <b>${otkN}</b></span>`:''}`,
+        info:`${srcChip(DATA.mode==='live')}${ordGrp?`<span class="badge b-navy">группа ${esc(ordGrp.replace(':',' · '))}</span> <a href="#" id="ord-grpclear" style="color:var(--blue)">снять</a>`:''}<span>Всего: <b style="color:var(--ink)">${rows.length}</b></span>${lateN?`<span class="c-red">Просрочено: <b>${lateN}</b></span>`:''}${otkN?`<span class="c-amber">Ждут ОТК: <b>${otkN}</b></span>`:''}`,
         empty:{text:'Производственных заданий пока нет',sub:'Первое ПЗ создаётся кнопкой «+ Создать ПЗ» или размещением заказа из продаж.'},
         toolbar:[{label:'+ Создать ПЗ',cls:'primary',onClick:()=>openCreateOrder()},...((typeof ME!=='undefined'&&ME&&ME.isAdmin&&!ME.viewAs)?[{label:'Печать сводки',onClick:()=>ordersPrintDialog()}]:[])],
       });
+      const ogc=document.getElementById('ord-grpclear'); if(ogc)ogc.onclick=(e)=>{ e.preventDefault(); ordGrp=null; renderOrdersView(host); };
       odShowDetail(ordSel);
     }
     // ── K-274: печатная сводка по заказам для обсуждения с руководством — суммы по заказчикам + подробный перечень. Только администратор (коммерческие суммы).

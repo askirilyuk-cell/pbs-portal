@@ -6801,7 +6801,13 @@ async function deleteOrder(body, who) {
   const posIds = mine.map((r) => r.Id ?? r.id).filter((x) => x != null);
   if (posIds.length) await ncDeleteMany('positions', posIds);
   await ncDeleteMany('orders', [o.Id ?? o.id]);
-  logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who, details: `заказ удалён (позиций: ${posIds.length})` });
+  // K-289: снять привязку чата — иначе следующий ПЗ с тем же номером «прилипнет» к старому чату; сам чат в Bitrix
+  // удалить через REST нельзя — переименовываем с пометкой, чтобы не путать с новым.
+  let chatNote = '';
+  try { const map = readOrderChats(); const chat = String(map[numPz] || ''); if (chat) { delete map[numPz]; writeOrderChats(map); chatNote = `, чат chat${chat} отвязан`;
+    try { const info = await bitrixCall('im.dialog.get', { DIALOG_ID: 'chat' + chat }); const t = String((info && (info.title || info.TITLE)) || ''); await bitrixCall('im.chat.updateTitle', { CHAT_ID: Number(chat), TITLE: (t || numPz) + ' — ПЗ удалён ' + new Date().toLocaleDateString('ru-RU') }); } catch (e) { console.warn('K-289: переименование чата удалённого ПЗ:', e.message); } } }
+  catch (e) { console.warn('K-289: отвязка чата удалённого ПЗ:', e.message); }
+  logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who, details: `заказ удалён (позиций: ${posIds.length}${chatNote})` });
   return { ok: true, numPz, positionsDeleted: posIds.length };
 }
 async function updateOrderStatus(body, who, whoShort) {
@@ -10656,7 +10662,7 @@ function settingsView() {
   return {
     ncUrl: c.NC_URL, gotenbergUrl: c.GOTENBERG, tokenSet: !!c.NC_TOKEN,
     recordsRoot: c.RECORDS, docsRoot: c.DOCS_ROOT,
-    bitrixSet: !!c.BITRIX, bitrixUsers: c.BITRIX_USERS, salesDept: c.SALES_DEPT, hubChat: c.HUB_CHAT, portalBase: c.PORTAL_BASE,
+    bitrixSet: !!c.BITRIX, bitrixUsers: c.BITRIX_USERS, orderChatUsers: c.ORDER_CHAT_USERS, salesDept: c.SALES_DEPT, hubChat: c.HUB_CHAT, portalBase: c.PORTAL_BASE,
     bitrixAuthSet: !!(c.BX_CLIENT_ID && c.BX_CLIENT_SECRET), bitrixClientId: c.BX_CLIENT_ID, bitrixDomain: c.BX_DOMAIN,
     deptRole: c.DEPT_ROLE || DEFAULT_DEPT_ROLE, roleOverrides: c.ROLE_OVERRIDES || DEFAULT_OVERRIDES,
     // параметры продаж/КП (K-05 §5.3) — редактируются в «Настройках раздела», без деплоя кода
@@ -10697,6 +10703,7 @@ function saveSettings(body) {
   if (body.bitrixWebhook === '__clear__') delete next.BITRIX_WEBHOOK;
   else if (typeof body.bitrixWebhook === 'string' && body.bitrixWebhook.trim()) next.BITRIX_WEBHOOK = body.bitrixWebhook.trim();
   if (typeof body.bitrixUsers === 'string') next.BITRIX_USERS = body.bitrixUsers.trim();
+  if (typeof body.orderChatUsers === 'string') next.ORDER_CHAT_USERS = body.orderChatUsers.trim(); // K-289: участники чата ПЗ по умолчанию
   if (typeof body.salesDept === 'string' && body.salesDept.trim()) next.SALES_DEPT_ID = body.salesDept.trim();
   if (typeof body.hubChat === 'string') next.BITRIX_HUB_CHAT = body.hubChat.trim();
   // K-159: 1С и бухгалтерия (пароль 1С через настройки не меняется — только runtime/env)
@@ -12580,6 +12587,18 @@ const server = http.createServer(async (req, res) => {
       try { saveSettings(await readBody(req)); }
       catch (e) { console.warn('[settings] сохранение отклонено:', e.message); return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
       return sendJson(res, 200, settingsView());
+    }
+    // K-289: участники чата заказа — по умолчанию (ORDER_CHAT_USERS) + все активные сотрудники для поиска; кэш 10 мин
+    if (p === '/api/orders/chat-users' && req.method === 'GET') {
+      if (!cfg().BITRIX) return sendJson(res, 200, { ok: true, defaults: [], users: [], warning: 'Вебхук Bitrix не задан' });
+      try {
+        if (!global._bxUsersCache || Date.now() - global._bxUsersCache.at > 600000) {
+          const out = []; let start = 0;
+          for (let i = 0; i < 10; i++) { const r = await bitrixCall('user.get', { FILTER: { ACTIVE: true }, start }); const batch = Array.isArray(r) ? r : (r.items || []); out.push(...batch); if (batch.length < 50) break; start += 50; }
+          global._bxUsersCache = { at: Date.now(), users: out.map((u) => ({ id: Number(u.ID), name: `${u.LAST_NAME || ''} ${u.NAME || ''}`.trim() || ('id' + u.ID), position: u.WORK_POSITION || '' })).filter((u) => u.id).sort((a, b) => a.name.localeCompare(b.name, 'ru')) };
+        }
+        return sendJson(res, 200, { ok: true, defaults: orderChatDefaultUsers(), users: global._bxUsersCache.users });
+      } catch (e) { return sendJson(res, 200, { ok: true, defaults: orderChatDefaultUsers(), users: [], warning: String(e.message || e) }); }
     }
     if (p === '/api/dict/pch-sizes' && req.method === 'GET') return sendJson(res, 200, { ok: true, ...readPchSizes() }); // K-288
     if (p === '/api/dict/product-types' && req.method === 'GET') { try { return sendJson(res, 200, { ok: true, groups: await prodTypeOptions() }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } } // K-241

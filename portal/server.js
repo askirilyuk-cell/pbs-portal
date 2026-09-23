@@ -12842,6 +12842,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/docs/changelog' && req.method === 'POST') {
       try {
         const body = await readBody(req);
+        try { logEvent({ type: 'комментарий', obj: 'Документ', objNum: String(body.code || ''), who: (sessionFromReq(req) || {}).fio || '', details: `Ф.3–Л.1: ${body.verFrom || ''} → ${body.verTo || ''}: ${String(body.desc || '').slice(0, 300)}` }); } catch { /* журнал не критичен */ }
         const code = String(body.code || '').trim();
         if (!code) throw new Error('Не задан код документа.');
         if (!String(body.desc || '').trim()) throw new Error('Описание изменения обязательно.');
@@ -12898,8 +12899,20 @@ const server = http.createServer(async (req, res) => {
             patch['UNC мастера'] = folder + '/' + fname;
           }
         }
+        // K-286: архив → опубликованный файл прежней редакции уезжает в 07-Архив-ПБС с датой; в ленту событий — запись
+        let archived = '';
+        if (/архив/i.test(String(body['Статус'])) && cfg().DOCS_ROOT) {
+          const tid = await ismDocsTid(); const recRes = await fetch(`${cfg().NC_URL}/api/v2/tables/${tid}/records/${id}`, { headers: { 'xc-token': cfg().NC_TOKEN } }); const rec = recRes.ok ? await recRes.json() : {};
+          const unc = String(rec['UNC мастера'] || '');
+          if (unc && !unc.startsWith('draft:')) { const src = path.normalize(path.join(cfg().DOCS_ROOT, unc)); if (src.startsWith(path.resolve(cfg().DOCS_ROOT)) && fs.existsSync(src)) {
+            const ext = path.extname(src); const stem = path.basename(src, ext); const dest = path.join(cfg().DOCS_ROOT, '07-Архив-ПБС', `${stem} (архив ${new Date().toISOString().slice(0, 10).split('-').reverse().join('.')})${ext}`);
+            try { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(src, dest); fs.unlinkSync(src); archived = '07-Архив-ПБС/' + path.basename(dest); patch['UNC мастера'] = archived; } catch (e) { console.warn('K-286: архив файла:', e.message); } } } // папки ИСМ — разные маунты, rename между ними не работает (EXDEV)
+          logEvent({ type: 'статус изменён', obj: 'Документ', objNum: String(rec['Код'] || id), from: rec['Статус'] || '', to: 'архив', who: (sessionFromReq(req) || {}).fio || '', details: archived ? 'файл перенесён в ' + archived : '' });
+        }
+        if (/действ/i.test(String(body['Статус']))) { try { const tid = await ismDocsTid(); const recRes = await fetch(`${cfg().NC_URL}/api/v2/tables/${tid}/records/${id}`, { headers: { 'xc-token': cfg().NC_TOKEN } }); const rec = recRes.ok ? await recRes.json() : {};
+          logEvent({ type: 'статус изменён', obj: 'Документ', objNum: String(rec['Код'] || id), from: rec['Статус'] || '', to: 'действует', who: (sessionFromReq(req) || {}).fio || '', details: (patch['UNC мастера'] ? 'опубликован ' + patch['UNC мастера'] : '') + (patch['Версия'] ? ' · версия ' + patch['Версия'] : '') }); } catch { /* журнал не критичен */ } }
         await ncDocsWrite('PATCH', [{ Id: id, ...patch }]);
-        return sendJson(res, 200, { ok: true, published: patch['UNC мастера'] || '' });
+        return sendJson(res, 200, { ok: true, published: patch['UNC мастера'] || '', archived });
       } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // загрузка файла документа (черновик): сохраняем в DRAFTS_DIR с каноничным именем, привязываем к записи

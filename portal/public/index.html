@@ -3131,7 +3131,7 @@
     const TYPE_WRITE={'ДП':'ДП','РК':'РК','РИ':'РИ','Ф':'Форма'}; // значения SingleSelect «Тип» в реестре («Ф»→«Форма»)
     const typeFull=(d)=>TYPE_FULL[d.type]||d.type||docParse(d.code).type;
     const docPref=(d)=>{const t=String(d.type||'').toUpperCase();return ['ДП','РИ','Ф','РК'].includes(t)?t:docParse(d.code).pref;};
-    const docFind=(code)=>DOCS_STATE.list.find(d=>dcNorm(d.code)===dcNorm(code));
+    const docFind=(code)=>{ const all=DOCS_STATE.list.filter(d=>dcNorm(d.code)===dcNorm(code)); return all.find(d=>/действ/i.test(d.status||''))||all.find(d=>!/архив/i.test(d.status||''))||all[0]; }; // K-286: при нескольких редакциях — действующая
     const fmtShort=(d)=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||''));return m?`${m[3]}.${m[2]}`:'';};
     const shortAppr=(s)=>{const m=/(ГД|ДпП|ПРК)/.exec(String(s||''));return m?m[1]:(s||'');};
     // шифр → тип / префикс / номер раздела / родитель / раздел
@@ -3305,13 +3305,16 @@
       window.open('/api/docs/file?code='+encodeURIComponent(code),'_blank','noopener');
     }
     const docCardRow=(k,v)=>`<div style="display:flex;gap:8px;font-size:13px;padding:4px 0"><span style="color:var(--sl-500)">${esc(k)}</span><span style="margin-left:auto;color:var(--sl-700);text-align:right">${v}</span></div>`;
+    // K-286: история версий — все записи реестра с этим кодом (каждая редакция своей строкой) + лист регистрации изменений Ф.3–Л.1 (грузится отдельно в #doc-chg)
     function docHistory(d){
-      const cur=`<div style="display:flex;align-items:center;gap:9px;font-size:13px;padding:3px 0"><span style="width:7px;height:7px;border-radius:50%;background:#15803d;flex:0 0 auto"></span><span class="code" style="color:var(--navy)">v${esc(d.ver||'1.0')}</span><span style="color:var(--sl-500)">${(d.approvedDate||d.date)?fmt(d.approvedDate||d.date):'—'}</span>${DOCS_STATE.live?`<a class="dlink" href="/api/docs/file?code=${encodeURIComponent(d.code)}" target="_blank" rel="noopener" style="margin-left:auto;text-decoration:none">файл ↗</a>`:''}</div>`;
-      let prev=''; const m=/^(\d+)\.(\d+)/.exec(String(d.ver||''));
-      if(m&&!(m[1]==='1'&&m[2]==='0')){const pv=+m[2]>0?`${m[1]}.${+m[2]-1}`:`${+m[1]-1}.0`;
-        prev=`<div style="display:flex;align-items:center;gap:9px;font-size:13px;padding:3px 0"><span style="width:7px;height:7px;border-radius:50%;background:#9ca3af;flex:0 0 auto"></span><span class="code" style="color:var(--sl-500)">v${pv}</span><span style="color:var(--sl-500)">заменена вер. ${esc(d.ver)}</span></div>`;}
-      return cur+prev;
+      const same=DOCS_STATE.list.filter(x=>dcNorm(x.code)===dcNorm(d.code)).sort((a,b)=>String(b.ver||'').localeCompare(String(a.ver||''),undefined,{numeric:true}));
+      const rows=same.map(x=>{ const act=/действ/i.test(x.status||''); const relQ=x.draft?('draft='+encodeURIComponent(x.draft)):(x.fileRel?('rel='+encodeURIComponent(x.fileRel)):'');
+        return `<div style="display:flex;align-items:center;gap:9px;font-size:13px;padding:4px 0;flex-wrap:wrap"><span style="width:7px;height:7px;border-radius:50%;background:${act?'#15803d':'#9ca3af'};flex:0 0 auto"></span><span class="code" style="color:${act?'var(--navy)':'var(--sl-500)'}">v${esc(x.ver||'1.0')}</span><span style="color:var(--sl-500)">${esc(x.status||'')}${x.approvedDate?' · '+esc(fmt(x.approvedDate)):''}</span>${relQ?`<a href="/api/docs/file?${relQ}" target="_blank" rel="noopener" class="c-blue" style="font-size:12px;text-decoration:none">${x.draft?'черновик':(/Архив/.test(x.fileRel||'')?'архивный файл':'файл')} →</a>`:''}</div>`; }).join('');
+      return rows+`<div id="doc-chg" data-code="${esc(d.code)}" style="margin-top:8px;font-size:12px;color:var(--sub)">Ф.3–Л.1: загрузка…</div>`;
     }
+    async function docChgLoad(code){ const h=document.getElementById('doc-chg'); if(!h||h.dataset.code!==code)return; let rows=[]; try{ rows=((await (await fetch('/api/docs/changelog?code='+encodeURIComponent(code))).json()).rows)||[]; }catch{}
+      if(!h.isConnected)return; if(!rows.length){ h.textContent='Ф.3–Л.1: записей об изменениях нет.'; return; }
+      h.innerHTML=`<div style="font-weight:600;color:var(--sl-700);margin-bottom:3px">Лист регистрации изменений (Ф.3–Л.1) <a href="/api/docs/changesheet?code=${encodeURIComponent(code)}" target="_blank" class="c-blue" style="font-weight:400;text-decoration:none">бланк →</a></div>`+rows.slice().reverse().map(r=>`<div style="padding:3px 0;border-top:1px solid var(--line2);color:var(--sl-800)"><b>№${r.no}</b> · ${esc(fmt(r.date))} · ${esc(r.verFrom||'—')} → <b>${esc(r.verTo||'')}</b>${r.approver?' · '+esc(r.approver):''}<div style="color:var(--sub)">${esc(r.desc||'')}</div></div>`).join(''); }
     function docCardActions(d,lc){
       const btn=(act,label,cls='')=>`<button class="tbtn ${cls}" data-act="${act}" style="padding:7px 13px">${label}</button>`;
       let flow='';
@@ -3323,7 +3326,7 @@
     }
     // ── Карточка документа: просмотрщик NAS + метаданные + история + связи + ЖЦ ──
     function openDocCard(code){
-      const d=docFind(code); if(!d)return;
+      const d=docFind(code); if(!d)return; setTimeout(()=>docChgLoad(d.code),0);
       const p=docParse(d.code), lvl=docLevel(d), lc=lcInfo(d), ri=reviewInfo(d), live=DOCS_STATE.live;
       const relQ=d.draft?('draft='+encodeURIComponent(d.draft)):(d.fileRel?('rel='+encodeURIComponent(d.fileRel)):('code='+encodeURIComponent(d.code)));
       const appr=docApprover(lvl), fileUrlV='/api/docs/file?'+relQ, convUrlV='/api/docs/convert?'+relQ;
@@ -3974,7 +3977,7 @@
       const prj=(g.projects||[]).filter(p=>String(p.decNo||'').startsWith(sg.code));
       const tabs=[['main','Обзор'],['dos','Досье'],['hist','История']]; const pane=(k,html)=>`<div data-pgtab="${k}"${pgSubTab===k?'':' style="display:none"'}>${html}</div>`;
       const docsAll=(DOCS_STATE&&DOCS_STATE.list)||[];
-      const docRow=(code)=>{ const d=docsAll.find(x=>x.code===code); const par=/^(.+?)\s+—\s+Приложение/.exec(code); const nm=d?(par?String(d.name).replace(/^.*?—\s*/,'')+` <span class="c-gray">· к <a href="#docs/${encodeURIComponent(par[1])}" class="c-blue" style="text-decoration:none">${esc(par[1])}</a></span>`:esc(d.name)):''; return `<div class="pg-ismdoc"><a href="#docs/${encodeURIComponent(code)}" class="code c-blue" style="text-decoration:none" title="Открыть карточку документа">${esc(code)}</a><span style="flex:1;min-width:0">${d?nm:'<span class="c-gray">нет в реестре — откройте «Документы ИСМ»</span>'}</span>${d?`<span class="c-gray">ред. ${esc(d.ver||'—')} · ${esc(d.status||'')}</span>`:''}${canW?`<b data-ismdel="${esc(code)}" class="c-gray" style="cursor:pointer" title="Отвязать">✕</b>`:''}</div>`; };
+      const docRow=(code)=>{ const dd=docsAll.filter(x=>x.code===code); const d=dd.find(x=>/действ/i.test(x.status||''))||dd[0]; const par=/^(.+?)\s+—\s+Приложение/.exec(code); const nm=d?(par?String(d.name).replace(/^.*?—\s*/,'')+` <span class="c-gray">· к <a href="#docs/${encodeURIComponent(par[1])}" class="c-blue" style="text-decoration:none">${esc(par[1])}</a></span>`:esc(d.name)):''; return `<div class="pg-ismdoc"><a href="#docs/${encodeURIComponent(code)}" class="code c-blue" style="text-decoration:none" title="Открыть карточку документа">${esc(code)}</a><span style="flex:1;min-width:0">${d?nm:'<span class="c-gray">нет в реестре — откройте «Документы ИСМ»</span>'}</span>${d?`<span class="c-gray">ред. ${esc(d.ver||'—')} · ${esc(d.status||'')}</span>`:''}${canW?`<b data-ismdel="${esc(code)}" class="c-gray" style="cursor:pointer" title="Отвязать">✕</b>`:''}</div>`; };
       h.innerHTML=`<div class="card pad dp-head"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span class="dp-title">${esc(sg.name)}</span><span class="dnochip" title="Код подгруппы">${esc(sg.code)}</span><span class="c-gray">группа продукции · ${esc(g.code)} ${esc(g.name)}</span>
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${sg.chat?`<a class="pbtn" href="${esc(sg.chat)}" target="_blank" rel="noopener" style="border-color:var(--blue);background:var(--blue);color:#fff">${aico('chat',13)} Чат группы</a>${canW?`<button class="pbtn" id="pgs-chatedit" title="Сменить или отвязать чат">…</button>`:''}`:(canW?`<button class="pbtn" id="pgs-chatnew" style="border-style:dashed">${aico('chat',13)} Создать чат группы</button><button class="pbtn" id="pgs-chatedit" title="Привязать существующий чат">Привязать чат…</button>`:'')}${linkBtn('#prodgroups/'+encodeURIComponent(sg.code))}</span></div>
           <div class="dp-sum"><span><b>${prj.length}</b> проектов</span><span><b id="dp-dosn">…</b> в досье</span><span><b>${(sg.ismDocs||[]).length}</b> док. ИСМ</span></div></div>

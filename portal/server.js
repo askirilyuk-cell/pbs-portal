@@ -8338,7 +8338,7 @@ async function buildCabinet(session) {
     if (isAdmin || roles.includes('ОТК')) { const opById = new Map(opsRaw.map((o) => [o.Id ?? o.id, o])); let ops = 0, units = 0;
       for (const t of tasksRaw) { const op = opById.get(t.operations_id); if (!op || String(op['Точка контроля'] || '') !== 'ОТК') continue; const n = jrRaw.filter((j) => String(j['№ задачи'] || '') === String(t['№ задачи'] || '') && j['Самоконтроль'] === 'годен' && !j['Контроль ОТК']).length; if (n) { ops++; units += n; } }
       if (ops) out.todo.push({ tone: 'amber', title: `Очередь ОТК: операций ${ops}, единиц ${units}`, sub: 'Предъявлено на контроль — примите или забракуйте по единицам.', url: '#control', action: 'К очереди ОТК' }); }
-    if (isAdmin || roles.includes('Технолог')) for (const t of tasksRaw) { if (String(t['Статус'] || '') !== 'Приостановлено') continue;
+    if (isAdmin || roles.includes('Технолог') || roles.includes('Начальник производства')) for (const t of tasksRaw) { if (String(t['Статус'] || '') !== 'Приостановлено') continue;
       out.todo.push({ tone: 'red', title: `Задача приостановлена: ${t['№ задачи'] || ''}`, sub: String(t['Причина приостановки'] || 'причина не указана') + (t['Примечание'] ? ' · ' + String(t['Примечание']).slice(0, 120) : ''), url: '#station', action: 'На участок' }); }
   } catch (e) { console.warn('K-255: лента кабинета:', e.message); }
   // K-166/K-171: черновики МК автора (с пометкой возврата) и МК на согласовании у меня
@@ -11685,7 +11685,7 @@ function persistRoleOverrides() {
   catch (e) { console.error('[auth] не удалось записать role-overrides:', e.message); return false; }
 }
 // Известные портальные роли (для валидации переключателя «просмотр как» и назначений).
-const PORTAL_ROLES = ['Продажи', 'Конструктор', 'Технолог', 'Цех', 'Снабжение', 'Руководство', 'Кладовщик', 'Инструментальщик', 'ОТК', 'Наблюдатель', 'Сотрудник', 'Администратор', 'guest'];
+const PORTAL_ROLES = ['Продажи', 'Конструктор', 'Технолог', 'Цех', 'Снабжение', 'Руководство', 'Начальник производства', 'Кладовщик', 'Инструментальщик', 'ОТК', 'Наблюдатель', 'Сотрудник', 'Администратор', 'guest'];
 // Назначаемые вручную роли (без guest) — для UI/валидации POST /api/admin/roles.
 const ASSIGNABLE_ROLES = PORTAL_ROLES.filter((r) => r !== 'guest');
 // ── K-49 Шаг 2: дерево отделов Bitrix (обход вверх по PARENT) ────────────────
@@ -11765,6 +11765,9 @@ const RBAC_MATRIX = {
   'Администратор': '*',
   // Руководство — всё 👁; аппрувы ЛОВ/подпись КП = запись в Продажах/ЛОВ; Настройки — нет.
   'Руководство': { _all: 'view', sales: 'write', lov: 'write', retro: 'write', settings: null },
+  // Начальник производства — всё производственное ✏ (как администратор, но без Продаж/ЛОВ, Настроек и коммерческих сумм —
+  // суммы заказов видит только настоящий администратор). Герасимов 23.09: «видны заказы и цены — для меня лишнее», но тестировать нужно всё.
+  'Начальник производства': { _all: 'write', sales: null, lov: null, settings: null, counterparties: 'view' },
   // Продажи — Продажи(sales/lov/kp) ✏, Контрагенты ✏; Заказы/Склад/КД/Документы 👁; Каталог 👁.
   'Продажи': { sales: 'write', lov: 'write', counterparties: 'write', orders: 'view', warehouse: 'view', catalog: 'view', onec: 'view', design: 'view', prodgroups: 'view', logistics: 'write', docs: 'view' },
   // Конструктор — КД/Проектирование/Оборудование ✏; Заказы/Маршруты/Склад/Инструмент/Каталог/Документы 👁.
@@ -12295,6 +12298,7 @@ async function bitrixUserName(id) {
 const ROLE_ABOUT = {
   'Администратор': 'Всё без ограничений: настройки, роли, справочники, исправление статусов и удаление записей. Может смотреть портал «как другая роль».',
   'Руководство': 'Видит все разделы. Ведёт продажи, оценки выполнимости и бухгалтерский ретро-учёт. Настройки недоступны.',
+  'Начальник производства': 'Все производственные разделы на запись: заказы, доска, маршруты, ОТК, склад, инструмент, КД, бухгалтерия. Продажи, оценки выполнимости, настройки и суммы заказов — недоступны.',
   'Продажи': 'Запросы и заказы клиентов, контрагенты, оценки выполнимости, заявки на перевозку. Производственные заказы, склад и чертежи — для справки.',
   'Конструктор': 'Реестр чертежей: заводит записи КД, загружает и заменяет чертежи (только эта роль и администратор), ведёт спецификации сборок, участки и оборудование. Маршрутные карты и заказы — только просмотр.',
   'Технолог': 'Маршрутные карты (создание, правка, отправка на согласование), карты наладки, заказы и запуск позиций в производство, доска и порядок очереди участков, рабочее место. Чертежи, инструмент, СИ и склад — просмотр.',
@@ -12627,7 +12631,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/station/operator' && req.method === 'POST') { const raw = stationSessionRaw(req); if (!raw) return sendJson(res, 401, { error: 'Нет сессии.' }); try { const op = await stationSetOperator(raw, await readBody(req)); return sendJson(res, 200, { ok: true, operator: { id: op.id, fio: op.fio, role: op.role, since: op.since } }); } catch (e) { return sendJson(res, e.status || 500, { error: String(e.message || e) }); } }
     if (p === '/api/station/operator/clear' && req.method === 'POST') { const raw = stationSessionRaw(req); if (raw) { raw.operator = null; persistSessions(); } return sendJson(res, 200, { ok: true }); }
     if (p === '/api/station/touch' && req.method === 'POST') { const raw = stationSessionRaw(req); if (raw && raw.operator) { if (stationTouch(raw)) { persistSessions(); return sendJson(res, 200, { ok: true, operator: null, expired: true }); } raw.operator.at = Date.now(); } return sendJson(res, 200, { ok: true, operator: raw && raw.operator ? { id: raw.operator.id, fio: raw.operator.fio } : null }); }
-    if (p === '/api/station/badges' && req.method === 'GET') { const s = req.session; if (!s || !(s.isAdmin || (s.roles || []).some((r) => ['admin', 'Технолог', 'Руководство'].includes(r)))) return sendJson(res, 403, { error: 'Печать бейджей — администратор, технолог или руководство.' }); try { const html = await stationBadgesHtml(url.searchParams.get('section') || '', String(url.searchParams.get('ids') || '').split(',').filter(Boolean)); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
+    if (p === '/api/station/badges' && req.method === 'GET') { const s = req.session; if (!s || !(s.isAdmin || (s.roles || []).some((r) => ['admin', 'Технолог', 'Руководство', 'Начальник производства'].includes(r)))) return sendJson(res, 403, { error: 'Печать бейджей — администратор, технолог или руководство.' }); try { const html = await stationBadgesHtml(url.searchParams.get('section') || '', String(url.searchParams.get('ids') || '').split(',').filter(Boolean)); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } }
     // K-49 Шаг 2: серверный enforcement (активен ТОЛЬКО при RBAC_ENFORCE ON; иначе no-op).
     if (await rbacEnforce(req, res, p)) return;
     if (p === '/api/health') return sendJson(res, 200, { ok: true, ...settingsView() });

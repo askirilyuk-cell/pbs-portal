@@ -2046,7 +2046,7 @@
     //    индикатор роли + переключатель «смотреть как» (только Админ). Всё —
     //    ТОЛЬКО при ME.enforce (RBAC_ENFORCE ON). При OFF модуль ничего не делает.
     let ME=null, RBAC_ON=false;
-    const RBAC_ROLE_LABEL={ 'Администратор':'Администратор','Руководство':'Руководство','Продажи':'Продажи','Конструктор':'Конструктор','Технолог':'Технолог','Цех':'Цех','Снабжение':'Снабжение','Кладовщик':'Кладовщик','ОТК':'ОТК','Наблюдатель':'Наблюдатель','Сотрудник':'Сотрудник' };
+    const RBAC_ROLE_LABEL={ 'Администратор':'Администратор','Руководство':'Руководство','Начальник производства':'Начальник производства','Продажи':'Продажи','Конструктор':'Конструктор','Технолог':'Технолог','Цех':'Цех','Снабжение':'Снабжение','Кладовщик':'Кладовщик','ОТК':'ОТК','Наблюдатель':'Наблюдатель','Сотрудник':'Сотрудник' };
     // Клиентская копия маппинга эндпоинтов → разделы (зеркало RBAC_API_PREFIX на сервере).
     const RBAC_API_PREFIX=[['/api/board','board'],['/api/station','station'],['/api/orders','orders'],['/api/control','control'],['/api/routes','routes'],['/api/route','routes'],['/api/task','board'],['/api/equipment','equipment'],['/api/tools','tools'],['/api/metal','metal'],['/api/warehouse','warehouse'],['/api/sales','sales'],['/api/lov','lov'],['/api/counterpart','counterparties'],['/api/procurement','purchase'],['/api/catalog','catalog'],['/api/design','design'],['/api/docs','docs'],['/api/logistics','logistics'],['/api/drawing-mass','logistics'],['/api/settings','settings']];
     function rbacApiSection(u){ try{ const p=new URL(u,location.origin).pathname; for(const[pre,sec]of RBAC_API_PREFIX)if(p===pre||p.startsWith(pre+'/')||p.startsWith(pre+'.'))return sec; }catch{} return null; }

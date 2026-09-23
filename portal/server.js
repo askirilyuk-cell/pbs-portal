@@ -6805,7 +6805,7 @@ async function deleteOrder(body, who) {
   // удалить через REST нельзя — переименовываем с пометкой, чтобы не путать с новым.
   let chatNote = '';
   try { const map = readOrderChats(); const chat = String(map[numPz] || ''); if (chat) { delete map[numPz]; writeOrderChats(map); chatNote = `, чат chat${chat} отвязан`;
-    try { const info = await bitrixCall('im.dialog.get', { DIALOG_ID: 'chat' + chat }); const t = String((info && (info.title || info.TITLE)) || ''); await bitrixCall('im.chat.updateTitle', { CHAT_ID: Number(chat), TITLE: (t || numPz) + ' — ПЗ удалён ' + new Date().toLocaleDateString('ru-RU') }); } catch (e) { console.warn('K-289: переименование чата удалённого ПЗ:', e.message); } } }
+    try { const info = await bitrixCall('im.dialog.get', { DIALOG_ID: 'chat' + chat }); const t = String((info && (info.name || info.title)) || ''); await bitrixCall('im.chat.updateTitle', { CHAT_ID: Number(chat), TITLE: (t || numPz) + ' — ПЗ удалён ' + new Date().toLocaleDateString('ru-RU') }); } catch (e) { console.warn('K-289: переименование чата удалённого ПЗ:', e.message); } } }
   catch (e) { console.warn('K-289: отвязка чата удалённого ПЗ:', e.message); }
   logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who, details: `заказ удалён (позиций: ${posIds.length}${chatNote})` });
   return { ok: true, numPz, positionsDeleted: posIds.length };

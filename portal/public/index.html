@@ -5235,7 +5235,7 @@
       const p=(DESIGN.projects||[]).find(x=>x.decNo===decNo); if(!p)return;
       if(!(await uiConfirm(`Создать в Bitrix24 групповой чат проекта ПБС.${decNo} «${p.name}»?\nУчастники по умолчанию (из «Настроек») добавятся автоматически.`)))return;
       try{
-        const r=await fetch('/api/design/chat/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decNo,title:`ПБС.${decNo} · ${p.name}`,description:`Чат проекта ОКР ПБС.${decNo}`})});
+        const r=await fetch('/api/design/chat/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decNo,title:`${decNo} - ${p.name}` /* формат как у остальных чатов проектов: «ПЧ0001 - Пакер…» (Александр 23.09) */,description:`Чат проекта ОКР ПБС.${decNo}`})});
         const j=await r.json().catch(()=>({}));
         if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         if(j.saved){ toast('Чат проекта создан и привязан к проекту.','ok'); p.chat=j.url; DESIGN=null; renderDesign(document.getElementById('view'),decNo); }

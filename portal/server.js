@@ -981,7 +981,7 @@ async function buildProductGroups() {
   }
   for (const r of subs) {
     const g = String(r['Группа'] || '').trim(); if (!g) continue;
-    (subByGrp[g] = subByGrp[g] || []).push({ code: r['Код'] || '', name: r['Значение'] || '', order: r['Порядок'] ?? null });
+    (subByGrp[g] = subByGrp[g] || []).push({ code: r['Код'] || '', name: r['Значение'] || '', order: r['Порядок'] ?? null, chat: r['Чат Bitrix'] || '', ismDocs: String(r['Документы ИСМ'] || '').split(/\s*;\s*/).map((x) => x.trim()).filter(Boolean), about: r['Описание'] || '' }); // K-285
   }
   const list = groups.slice()
     .sort((a, b) => (Number(a['Порядок'] || 0) - Number(b['Порядок'] || 0)))
@@ -1250,7 +1250,7 @@ function designProjectFolder(decNo, opts) {
 }
 // K-279: история проекта — события «Проект / <децим.№>» в общей ленте событий (файлы, чертежи, досье, чат)
 const mkProjOf = (row) => { const m = /[А-ЯЁ]{2}\d{4}/.exec(String((row && row['Изделие / обозначение']) || '') + ' ' + String((row && row['Чертежи КД']) || '')); return m ? m[0] : ''; };
-function projLog(decNo, type, details, session) { const dn = String(decNo || '').trim(); if (!dn) return; try { logEvent({ type, obj: 'Проект', objNum: dn, who: (session && session.fio) || '', details }); } catch { /* журнал не критичен */ } }
+function projLog(decNo, type, details, session) { const dn = String(decNo || '').trim(); if (!dn) return; try { logEvent({ type, obj: dossierIsSub(dn) ? 'Подгруппа' : 'Проект', objNum: dossierIsSub(dn) ? dn.slice(4) : dn, who: (session && session.fio) || '', details }); } catch { /* журнал не критичен */ } }
 // ── K-277: досье проекта разработки ─────────────────────────────────────────────
 // Единый классификатор записей (одинаков для всех проектов) → папка этапа ИСМ (ДП–Д.1.2 §8), куда ложатся файлы.
 // «15-Фото и медиа» — единственная папка вне перечня ИСМ: для фото/видео этапа в раскладке нет.
@@ -1265,11 +1265,40 @@ const DOSSIER_KINDS = [
   { code: 'АН', label: 'Аналоги и кросс-референс', dir: '12-Кросс-референс' },
   { code: 'ДР', label: 'Прочее', dir: '13-Переписка' },
 ];
+// K-285: досье ПОДГРУППЫ продукции (ПЧ, ЦТ, …) — общее для всех проектов подгруппы. Ключ записи «SUB:<код>», папка «<подгруппа>/_Общее».
+const DOSSIER_KINDS_SUB = [
+  { code: 'ПН', label: 'Перечень наименований и артикулов', dir: '03-КД' },
+  { code: 'ТП', label: 'Типовые требования и ТУ', dir: '01-ТЗ' },
+  { code: 'МТ', label: 'Методика испытаний (общая для группы)', dir: '07-Верификация и валидация' },
+  { code: 'СТ', label: 'Стандарты и нормативка (внешние)', dir: '14-Стандарты' },
+  { code: 'КТ', label: 'Каталог, брошюра, презентация', dir: '10-Паспорт и этикетка' },
+  { code: 'ПЭ', label: 'Паспорт и этикетка — типовые формы', dir: '10-Паспорт и этикетка' },
+  { code: 'АН', label: 'Аналоги и конкуренты', dir: '12-Кросс-референс' },
+  { code: 'ОП', label: 'Опыт эксплуатации, рекламации', dir: '07-Верификация и валидация' },
+  { code: 'РН', label: 'Решения и протоколы', dir: '08-Утверждение' },
+  { code: 'ДР', label: 'Прочее', dir: '13-Переписка' },
+];
+const dossierIsSub = (key) => /^SUB:/.test(String(key || ''));
+const dossierKinds = (key) => dossierIsSub(key) ? DOSSIER_KINDS_SUB : DOSSIER_KINDS;
+const dossierNoPrefix = (key) => dossierIsSub(key) ? String(key).slice(4) : String(key); // ПЧ-Д-001 / ПЧ0007-Д-001
+// папка подгруппы на NAS: <DESIGN_ROOT>/<группа dir>/<подгруппа dir>/_Общее (создаётся при первой записи)
+function designSubgroupFolder(subCode, opts) {
+  opts = opts || {}; const root = cfg().DESIGN_ROOT; if (!root) return null; const code = String(subCode || '').trim(); if (!/^[А-ЯЁ]{2}$/.test(code)) return null;
+  const SKIP = /^(@eaDir|#recycle|#snapshot|\.)/i; const re = new RegExp('^' + code + '($|[\\s\\-_])', 'i'); let found = null;
+  const walk = (dir, depth) => { if (found || depth > 2) return; let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) { if (found) return; if (!e.isDirectory() || SKIP.test(e.name)) continue; const full = path.join(dir, e.name); if (depth >= 1 && re.test(e.name)) { found = full; return; } walk(full, depth + 1); } };
+  walk(root, 0);
+  if (!found && opts.create && opts.grp) { let base = root; let ents = []; try { ents = fs.readdirSync(root, { withFileTypes: true }); } catch {}
+    const g = ents.find((e) => e.isDirectory() && new RegExp('^' + opts.grp + '($|[\\s\\-_])', 'i').test(e.name)); base = g ? path.join(root, g.name) : path.join(root, opts.grp);
+    found = path.join(base, opts.name ? `${code} - ${String(opts.name).replace(/[\\/:*?"<>|]/g, '_')}` : code); }
+  if (!found) return null; const common = path.join(found, '_Общее'); if (opts.create) { try { fs.mkdirSync(common, { recursive: true }); } catch { return null; } }
+  return fs.existsSync(common) || opts.create ? common : null;
+}
 const DOSSIER_EXT = /\.(pdf|docx?|xlsx?|xlsm|pptx?|txt|csv|png|jpe?g|heic|webp|gif|tiff?|bmp|mp4|mov|avi|mkv|cdw|m3d|a3d|dwg|dxf|step|stp|igs|iges|stl|zip|7z|rar|html?)$/i;
 const DOSSIER_CHAT_ATTACH = /\.(pdf|png|jpe?g|webp|gif|heic)$/i; // в чат прикладываем фото и PDF ≤ 20 МБ, остальное — ссылкой
 const DOSSIER_CHAT_MAX = 20 * 1024 * 1024;
 const dossierJson = (v) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
-const dossierShape = (r) => { const k = DOSSIER_KINDS.find((x) => x.code === r['Тип']) || { code: r['Тип'] || '', label: r['Тип'] || '' };
+const dossierShape = (r) => { const k = dossierKinds(r['Проект (децим. №)']).find((x) => x.code === r['Тип']) || { code: r['Тип'] || '', label: r['Тип'] || '' };
   return { id: r.Id ?? r.id, no: r['№ записи'] || '', proj: r['Проект (децим. №)'] || '', kind: k.code, kindLabel: k.label, title: r['Название'] || '', summary: r['Вывод'] || '', date: r['Дата'] || '',
     author: r['Автор'] || '', authorId: r['Автор (id)'] || '', link: r['Связь'] || '', folder: r['Папка'] || '', files: dossierJson(r['Файлы']), chat: r['Чат'] || '', created: r.CreatedAt || '',
     version: Number(r['Версия']) || 1, versions: dossierJson(r['Версии']) }; }; // K-284
@@ -1286,9 +1315,9 @@ async function dossierNotify(rec, projRow, folder) {
   const fileUrl = (f) => `${portal}/api/design/file?proj=${encodeURIComponent(rec.proj)}&rel=${encodeURIComponent(f.rel)}`;
   const attach = [], linked = [];
   for (const f of rec.files) { (DOSSIER_CHAT_ATTACH.test(f.name) && f.size <= DOSSIER_CHAT_MAX ? attach : linked).push(f); }
-  const L = [`[B]Зарегистрировано в досье проекта ПБС.${rec.proj}[/B]`, `${rec.no} · ${rec.kindLabel}`, `«${rec.title}»`,
+  const L = [dossierIsSub(rec.proj) ? `[B]Зарегистрировано в досье группы продукции ${rec.proj.slice(4)}[/B]` : `[B]Зарегистрировано в досье проекта ПБС.${rec.proj}[/B]`, `${rec.no} · ${rec.kindLabel}`, `«${rec.title}»`,
     rec.summary ? `Вывод: ${rec.summary}` : '', rec.link ? `Связь: ${rec.link}` : '', `${rec.author || 'портал'} · ${ruDate(rec.date)}`,
-    `Карточка проекта: ${portal}/#design/${encodeURIComponent(rec.proj)}`,
+    dossierIsSub(rec.proj) ? `Карточка группы продукции: ${portal}/#prodgroups/${encodeURIComponent(rec.proj.slice(4))}` : `Карточка проекта: ${portal}/#design/${encodeURIComponent(rec.proj)}`,
     linked.length ? 'Файлы (ссылкой, открываются из сети офиса / VPN):\n' + linked.map((f) => ` • ${f.name} — ${fileUrl(f)}`).join('\n') : ''].filter(Boolean);
   const text = L.join('\n');
   let attached = 0, warn = '';
@@ -1308,21 +1337,26 @@ async function dossierNotify(rec, projRow, folder) {
 }
 async function dossierAdd(fields, files, session) {
   if (!dossierCanWrite(session)) { const e = new Error('Добавлять записи в досье могут конструктор, технолог, ОТК и администратор.'); e.status = 403; throw e; }
-  const proj = String(fields.proj || '').trim(); const kind = DOSSIER_KINDS.find((k) => k.code === String(fields.kind || '').trim());
+  const proj = String(fields.proj || '').trim(); const isSub = dossierIsSub(proj); const kind = dossierKinds(proj).find((k) => k.code === String(fields.kind || '').trim());
   const title = String(fields.title || '').trim().slice(0, 200);
-  if (!/^[A-Za-zА-Яа-я]{2,4}\d{4}$/.test(proj)) throw new Error('Не указан проект (децим. №).');
+  if (!isSub && !/^[A-Za-zА-Яа-я]{2,4}\d{4}$/.test(proj)) throw new Error('Не указан проект (децим. №).');
+  if (!isSub && /^(РИ|ДП|Ф|ИСМ)[.\-–]/i.test(title)) throw new Error('Это документ ИСМ — привяжите его из реестра «Документы ИСМ», а не загружайте копию.');
+  if (isSub && /^(РИ|ДП|Ф|ИСМ)[.\-–]/i.test(title)) throw new Error('Это документ ИСМ — привяжите его из реестра в блоке «Документы ИСМ по группе», а не загружайте копию.');
   if (!kind) throw new Error('Выберите тип записи.');
   if (title.length < 3) throw new Error('Дайте записи название.');
   const good = files.filter((f) => f && f.filename && f.data && f.data.length), bad = good.filter((f) => !DOSSIER_EXT.test(String(f.filename)));
   if (bad.length) throw new Error('Недопустимый тип файла: ' + bad.map((f) => f.filename).join(', '));
   if (!good.length && String(fields.summary || '').trim().length < 5) throw new Error('Приложите файл или напишите вывод / результат.');
-  const projRow = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === proj); if (!projRow) throw new Error(`Проект ${proj} не найден.`);
-  const folder = designProjectFolder(proj, { create: true, grp: String(projRow['Группа'] || '').trim(), subCode: (proj.match(/^[A-Za-zА-Яа-я]{2}/) || [''])[0], name: String(projRow['Наименование изделия'] || '').trim() });
-  if (!folder) throw new Error(`Не удалось определить / создать папку проекта ${proj}.`);
+  let projRow = null, folder = null;
+  if (isSub) { const sc = proj.slice(4); const sub = (await ncListSoft('dict_product_subgroups')).find((r) => String(r['Код'] || '').trim() === sc); if (!sub) throw new Error(`Подгруппа ${sc} не найдена.`);
+    projRow = { 'Ссылка на чат (Bitrix)': sub['Чат Bitrix'] || '' }; folder = designSubgroupFolder(sc, { create: true, grp: String(sub['Группа'] || '').trim(), name: sub['Значение'] || '' }); if (!folder) throw new Error(`Не удалось создать папку подгруппы ${sc}.`); }
+  else { projRow = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === proj); if (!projRow) throw new Error(`Проект ${proj} не найден.`);
+    folder = designProjectFolder(proj, { create: true, grp: String(projRow['Группа'] || '').trim(), subCode: (proj.match(/^[A-Za-zА-Яа-я]{2}/) || [''])[0], name: String(projRow['Наименование изделия'] || '').trim() });
+    if (!folder) throw new Error(`Не удалось определить / создать папку проекта ${proj}.`); }
   return withKeyLock('dossier:' + proj, async () => {
     const all = (await ncListSoft('design_dossier')).filter((r) => String(r['Проект (децим. №)'] || '').trim() === proj);
     const n = all.reduce((m, r) => Math.max(m, Number((String(r['№ записи'] || '').match(/-Д-(\d+)$/) || [])[1]) || 0), 0) + 1;
-    const no = `${proj}-Д-${String(n).padStart(3, '0')}`;
+    const no = `${dossierNoPrefix(proj)}-Д-${String(n).padStart(3, '0')}`;
     const safe = title.normalize('NFC').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60);
     const recDir = path.join(folder, kind.dir, `${no} ${safe}`);
     const saved = [];
@@ -1341,6 +1375,8 @@ async function dossierAdd(fields, files, session) {
   });
 }
 // K-284: новая версия записи досье — прежние файлы уходят в подпапку «_v<N>» записи, версия +1, в историю проекта и чат
+// владелец досье: строка проекта или суррогат из подгруппы (для ссылки на чат)
+async function dossierOwnerRow(key) { if (dossierIsSub(key)) { const sub = (await ncListSoft('dict_product_subgroups')).find((r) => String(r['Код'] || '').trim() === key.slice(4)); return sub ? { 'Ссылка на чат (Bitrix)': sub['Чат Bitrix'] || '' } : null; } return (await ncListSoft('design_projects')).find((x) => String(x['Децимальный номер'] || '').trim() === key) || null; }
 async function dossierUpdate(fields, files, session) {
   if (!dossierCanWrite(session)) { const e = new Error('Обновлять записи досье могут конструктор, технолог, ОТК и администратор.'); e.status = 403; throw e; }
   const id = Number(fields.id); const r = (await ncListSoft('design_dossier')).find((x) => (x.Id ?? x.id) === id); if (!r || String(r['Удалена'] || '').trim()) { const e = new Error('Запись не найдена.'); e.status = 404; throw e; }
@@ -1350,7 +1386,7 @@ async function dossierUpdate(fields, files, session) {
   const good = files.filter((f) => f && f.filename && f.data && f.data.length), bad = good.filter((f) => !DOSSIER_EXT.test(String(f.filename)));
   if (bad.length) throw new Error('Недопустимый тип файла: ' + bad.map((f) => f.filename).join(', '));
   if (!good.length) throw new Error('Приложите новые файлы.');
-  const proj = String(r['Проект (децим. №)'] || '').trim(); const folder = designProjectFolder(proj); if (!folder) throw new Error('Папка проекта не найдена.');
+  const proj = String(r['Проект (децим. №)'] || '').trim(); const folder = dossierIsSub(proj) ? designSubgroupFolder(proj.slice(4)) : designProjectFolder(proj); if (!folder) throw new Error('Папка проекта не найдена.');
   await ncEnsureColumn('design_dossier', 'Версия', 'Number'); await ncEnsureColumn('design_dossier', 'Версии', 'LongText');
   return withKeyLock('dossier:' + proj, async () => {
     const recDir = path.normalize(path.join(folder, String(r['Папка'] || ''))); if (!recDir.startsWith(folder + path.sep)) throw new Error('Недопустимая папка записи.');
@@ -1367,7 +1403,7 @@ async function dossierUpdate(fields, files, session) {
     projLog(proj, 'файл приложен', `Досье ${rec.no} · новая версия ${ver + 1}: ${what} — ${saved.map((f) => f.name).join(', ')}`, session);
     logEvent({ type: 'комментарий', obj: 'Досье', objNum: rec.no, who: (session && session.fio) || '', details: `версия ${ver + 1}: ${what}` });
     let chat = { sent: false, reason: 'отправка отключена' };
-    if (String(fields.notify || '1') !== '0') { const projRow = (await ncListSoft('design_projects')).find((x) => String(x['Децимальный номер'] || '').trim() === proj); chat = await dossierNotify({ ...rec, title: `${rec.title} — версия ${ver + 1}`, summary: `Что изменилось: ${what}${rec.summary ? '\n' + rec.summary : ''}` }, projRow, folder); }
+    if (String(fields.notify || '1') !== '0') { const projRow = await dossierOwnerRow(proj); chat = await dossierNotify({ ...rec, title: `${rec.title} — версия ${ver + 1}`, summary: `Что изменилось: ${what}${rec.summary ? '\n' + rec.summary : ''}` }, projRow, folder); }
     return { ok: true, record: rec, version: ver + 1, chat };
   });
 }
@@ -1375,7 +1411,7 @@ async function dossierDelete(body, session) {
   const id = Number(body.id); const r = (await ncListSoft('design_dossier')).find((x) => (x.Id ?? x.id) === id); if (!r) { const e = new Error('Запись не найдена.'); e.status = 404; throw e; }
   const isAdmin = session && session.isAdmin && !session.effectiveRole; const own = session && session.userId != null && String(session.userId) === String(r['Автор (id)'] || '');
   if (!isAdmin && !(own && dossierCanWrite(session))) { const e = new Error('Удалить запись может её автор или администратор.'); e.status = 403; throw e; }
-  const proj = String(r['Проект (децим. №)'] || '').trim(); const folder = designProjectFolder(proj); const relDir = String(r['Папка'] || '');
+  const proj = String(r['Проект (децим. №)'] || '').trim(); const folder = dossierIsSub(proj) ? designSubgroupFolder(proj.slice(4)) : designProjectFolder(proj); const relDir = String(r['Папка'] || '');
   if (folder && relDir) { const src = path.normalize(path.join(folder, relDir)); if (src.startsWith(folder + path.sep) && fs.existsSync(src)) { const bin = path.join(folder, '_deleted'); try { fs.mkdirSync(bin, { recursive: true }); fs.renameSync(src, path.join(bin, `${Date.now()}__${path.basename(src)}`)); } catch (e) { console.warn('K-277: перенос в _deleted:', e.message); } } }
   await ncUpdate('design_dossier', id, { 'Удалена': `${new Date().toISOString().slice(0, 10)} · ${(session && session.fio) || ''}` });
   logEvent({ type: 'удалён', obj: 'Досье', objNum: r['№ записи'] || '', who: (session && session.fio) || '', details: r['Название'] || '' });
@@ -1385,7 +1421,7 @@ async function dossierDelete(body, session) {
 async function dossierResend(body, session) {
   if (!dossierCanWrite(session)) { const e = new Error('Нет права на досье.'); e.status = 403; throw e; }
   const id = Number(body.id); const r = (await ncListSoft('design_dossier')).find((x) => (x.Id ?? x.id) === id); if (!r) { const e = new Error('Запись не найдена.'); e.status = 404; throw e; }
-  const rec = dossierShape(r); const projRow = (await ncListSoft('design_projects')).find((x) => String(x['Децимальный номер'] || '').trim() === rec.proj); const folder = designProjectFolder(rec.proj);
+  const rec = dossierShape(r); const projRow = await dossierOwnerRow(rec.proj); const folder = dossierIsSub(rec.proj) ? designSubgroupFolder(rec.proj.slice(4)) : designProjectFolder(rec.proj);
   const chat = await dossierNotify(rec, projRow, folder); if (!chat.sent) throw new Error('В чат не отправлено: ' + (chat.reason || ''));
   const mark = `${new Date().toISOString().slice(0, 16).replace('T', ' ')}${chat.attached ? ' · вложений ' + chat.attached : ''}`; await ncUpdate('design_dossier', id, { 'Чат': mark });
   return { ok: true, chat, mark };
@@ -11736,7 +11772,7 @@ function sessionPortalRoles(session) {
 // владеющему разделу из body.key), '@print' печать (view по разделу документа).
 // Не сопоставленный эндпоинт → null (общий бакет: /api/me|health|test|admin).
 const RBAC_API_PREFIX = [
-  ['/api/dossier', 'dossier'], // K-277: запись в досье проекта (чтение идёт через /api/design/dossier — право «КД»)
+  ['/api/dossier', 'dossier'], ['/api/prodgroups/sub', 'dossier'], // K-277: запись в досье проекта (чтение идёт через /api/design/dossier — право «КД»)
   ['/api/board', 'board'], ['/api/station', 'station'], ['/api/orders', 'orders'],
   ['/api/position', 'orders'], ['/api/control', 'control'], // control → раздел ОТК (DEF-19: вердикт пишет только control-write роль)
   ['/api/routes', 'routes'], ['/api/route', 'routes'], ['/api/task/reorder', 'board'], ['/api/task', 'station'], ['/api/metal/blank', 'station'], ['/api/metal/find-blank', 'station'], // K-252: работа по задаче — право «Рабочее место»; порядок очереди — «Доска»
@@ -13049,14 +13085,35 @@ const server = http.createServer(async (req, res) => {
     }
     // --- файлы КД проекта (records 6.7-РТД): список / загрузка / отдача / office→PDF ---
     // K-277: досье проекта. Чтение — право «КД» (view), запись — раздел dossier (/api/dossier/*).
+    // K-285: подгруппа продукции — чат, привязки к реестру ИСМ, описание (только Конструктор/Технолог/Администратор — право dossier)
+    if (p === '/api/prodgroups/sub/update' && req.method === 'POST') {
+      const sS = sessionFromReq(req); if (!dossierCanWrite(sS)) return sendJson(res, 403, { error: 'Карточку подгруппы правят конструктор, технолог и администратор.' });
+      try { const b = await readBody(req); const code = String(b.code || '').trim(); const sub = (await ncListSoft('dict_product_subgroups')).find((r) => String(r['Код'] || '').trim() === code); if (!sub) return sendJson(res, 404, { error: 'Подгруппа не найдена.' });
+        for (const [c, t] of [['Чат Bitrix', 'SingleLineText'], ['Документы ИСМ', 'SingleLineText'], ['Описание', 'LongText']]) await ncEnsureColumn('dict_product_subgroups', c, t);
+        const patch = {}; const ev = [];
+        if ('chat' in b) { const v = String(b.chat || '').trim(); if (v && !/IM_DIALOG=chat\d+/.test(v)) return sendJson(res, 400, { error: 'Ссылка на чат должна быть вида …/online/?IM_DIALOG=chatNNNN' }); patch['Чат Bitrix'] = v; ev.push(v ? 'привязан чат ' + (v.match(/chat\d+/) || [''])[0] : 'чат отвязан'); }
+        if ('ismDocs' in b) { const docs = (await buildDocs()).map((d) => d.code); const list = [...new Set((Array.isArray(b.ismDocs) ? b.ismDocs : String(b.ismDocs || '').split(/\s*;\s*/)).map((x) => String(x).trim()).filter(Boolean))]; const bad = list.filter((x) => !docs.includes(x)); if (bad.length) return sendJson(res, 400, { error: 'Нет в реестре ИСМ: ' + bad.join(', ') }); patch['Документы ИСМ'] = list.join('; '); ev.push('документы ИСМ: ' + (list.join(', ') || '—')); }
+        if ('about' in b) { patch['Описание'] = String(b.about || '').trim().slice(0, 4000); ev.push('описание обновлено'); }
+        if (!Object.keys(patch).length) return sendJson(res, 400, { error: 'Нечего менять.' });
+        await ncUpdate('dict_product_subgroups', sub.Id ?? sub.id, patch); projLog('SUB:' + code, 'комментарий', ev.join('; '), sS);
+        return sendJson(res, 200, { ok: true }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/prodgroups/sub/chat-create' && req.method === 'POST') {
+      const sS = sessionFromReq(req); if (!dossierCanWrite(sS)) return sendJson(res, 403, { error: 'Нет права.' }); if (!cfg().BITRIX) return sendJson(res, 501, { error: 'Задайте вебхук Bitrix24 в «Настройках».' });
+      try { const b = await readBody(req); const code = String(b.code || '').trim(); const sub = (await ncListSoft('dict_product_subgroups')).find((r) => String(r['Код'] || '').trim() === code); if (!sub) return sendJson(res, 404, { error: 'Подгруппа не найдена.' });
+        const title = `${code} · ${sub['Значение'] || ''} · группа продуктов`; const users = String(cfg().BITRIX_USERS || '').split(/[,\s]+/).map((x) => Number(x)).filter(Boolean);
+        const chatId = await bitrixCall('im.chat.add', { TYPE: 'CHAT', TITLE: title, DESCRIPTION: `Обсуждение группы продукции ${code} в целом (не отдельного проекта)`, USERS: users }); const url = `${bitrixPortal()}/online/?IM_DIALOG=chat${chatId}`;
+        await ncEnsureColumn('dict_product_subgroups', 'Чат Bitrix', 'SingleLineText'); await ncUpdate('dict_product_subgroups', sub.Id ?? sub.id, { 'Чат Bitrix': url }); projLog('SUB:' + code, 'создан', `Создан чат группы в Bitrix24 (chat${chatId})`, sS);
+        return sendJson(res, 200, { ok: true, url }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+    }
     if (p === '/api/design/history' && req.method === 'GET') { // K-279: лента событий проекта
       const proj = String(url.searchParams.get('proj') || '').trim();
-      try { const ev = await buildEvents({ obj: 'Проект', num: proj, limit: 300 }); return sendJson(res, 200, { ok: true, events: ev.events || [] }); } catch (e) { return sendJson(res, 200, { ok: true, events: [], warning: String(e.message || e) }); }
+      try { const ev = await buildEvents({ obj: dossierIsSub(proj) ? 'Подгруппа' : 'Проект', num: dossierIsSub(proj) ? proj.slice(4) : proj, limit: 300 }); return sendJson(res, 200, { ok: true, events: ev.events || [] }); } catch (e) { return sendJson(res, 200, { ok: true, events: [], warning: String(e.message || e) }); }
     }
     if (p === '/api/design/dossier' && req.method === 'GET') {
       const proj = String(url.searchParams.get('proj') || '').trim(); const sD = sessionFromReq(req);
-      try { const projRow = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === proj);
-        return sendJson(res, 200, { ok: true, kinds: DOSSIER_KINDS.map((k) => ({ code: k.code, label: k.label, dir: k.dir })), records: await dossierList(proj), canAdd: dossierCanWrite(sD), isAdmin: !!(sD && sD.isAdmin && !sD.effectiveRole), me: sD && sD.userId != null ? String(sD.userId) : '', hasChat: !!dossierChatId(projRow) }); }
+      try { const projRow = await dossierOwnerRow(proj);
+        return sendJson(res, 200, { ok: true, kinds: dossierKinds(proj).map((k) => ({ code: k.code, label: k.label, dir: k.dir })), records: await dossierList(proj), canAdd: dossierCanWrite(sD), isAdmin: !!(sD && sD.isAdmin && !sD.effectiveRole), me: sD && sD.userId != null ? String(sD.userId) : '', hasChat: !!dossierChatId(projRow) }); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/dossier/add' && req.method === 'POST') {

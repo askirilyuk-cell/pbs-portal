@@ -1332,6 +1332,9 @@
     body.kiosk .cut-card .c>.cut-note:last-child{display:none}
     body.kiosk .cut-units{display:none} /* плитки дублируют таблицу */ body.kiosk .cut-t .cut-btn.sm{padding:3px 8px;font-size:12px;min-height:0} body.kiosk .cut-t .cut-inp{padding:2px 8px} body.kiosk .cut-t td .cut-pill{padding:2px 8px;font-size:11px}
     body.kiosk .cut-card .h{padding:5px 12px} /* поясняющие абзацы внизу карточек — в киоске лишние */
+    /* K-285: подгруппа продукции */
+    .pg-subchip{text-decoration:none;cursor:pointer} .pg-subchip.on{background:var(--c-brand);color:#fff;border-color:var(--c-brand)}
+    .pg-ismdoc{display:flex;gap:var(--sp-2);align-items:baseline;padding:5px 0;border-top:1px solid var(--line2);font-size:var(--fs-s)} .pg-ismdoc:first-of-type{border-top:0}
     /* K-281: передача единиц между участками */
     .hand-units{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px}
     .hand-u{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--sl-300);border-radius:var(--r-s);padding:5px 9px;font-size:var(--fs-s);background:#fff;cursor:pointer} .hand-u b{font-family:var(--mono)} .hand-u span{font-size:var(--fs-xs);color:var(--sub)}
@@ -2335,7 +2338,7 @@
       const host=document.getElementById('view');
       if(STUBS[v])renderStub(host,v);
       else if(v==='design')renderDesign(host,arg);
-      else if(v==='prodgroups')renderProdGroups(host);
+      else if(v==='prodgroups')renderProdGroups(host,arg);
       else if(v==='logistics')renderLogistics(host,arg);
       else if(v==='sales'){ if(!arg){salesOpenZp=null;salesKpZp=null;} renderSales(host,arg); }
       else if(v==='lov')renderLov(host,arg);
@@ -3907,11 +3910,14 @@
         @media(max-width:900px){.pg-cards{grid-template-columns:1fr}.pg-cols{grid-template-columns:1fr}.pg-l{border-right:none;border-bottom:1px solid var(--sl-200)}}`;
       document.head.appendChild(s);
     }
-    async function renderProdGroups(host){
+    let pgSub=null; // K-285: открытая подгруппа
+    async function renderProdGroups(host,arg){
       pgStyles();
+      if(arg){ pgSub=arg; }
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка раздела «Продуктовые группы»…</div>';
       if(!PGROUPS){ try{PGROUPS=await (await fetch('/api/product-groups')).json();}catch(e){PGROUPS={mode:'mock',groups:[],warning:String(e.message||e)};} }
       const D=PGROUPS, gs=D.groups||[];
+      if(pgSub){ const g=gs.find(x=>(x.subgroups||[]).some(sg=>sg.code===pgSub)); if(g){ pgOpen=g.code; } else pgSub=null; }
       const tag=srcChip(D.mode==='live', D.mode==='live'?(gs.length+' групп'):(D.warning||'примеры'));
       const cards=gs.map(g=>`<div class="pg-card${g.code===pgOpen?' pg-act':''}" data-g="${esc(g.code)}">
           <span class="pg-code">${esc(g.code)}</span>
@@ -3923,19 +3929,19 @@
           <span class="spacer" style="margin-left:auto"></span>${tag}</div>
         <div class="pg-cards">${cards}</div>
         <div id="pg-panel" style="margin-top:16px"></div>`;
-      host.querySelectorAll('.pg-card[data-g]').forEach(el=>el.onclick=()=>{ pgOpen=(pgOpen===el.dataset.g)?null:el.dataset.g; renderProdGroups(host); });
+      host.querySelectorAll('.pg-card[data-g]').forEach(el=>el.onclick=()=>{ pgOpen=(pgOpen===el.dataset.g)?null:el.dataset.g; pgSub=null; try{history.replaceState(null,'','#prodgroups');}catch{} renderProdGroups(host); });
       pgPanel();
     }
     function pgPanel(){ const h=document.getElementById('pg-panel'); if(!h)return;
       const g=(PGROUPS.groups||[]).find(x=>x.code===pgOpen); if(!g){h.innerHTML='';return;}
       const prj=g.projects||[];
-      const rows=prj.map(p=>{const st=stepNo(p.stage);const tone=st>=9?'b-green':(st>=6?'b-amber':'b-blue');
+      const rows=prj.map(p=>{
         return `<tr><td><span class="pg-dn" data-open="${esc(p.decNo)}" title="Открыть в разделе «Проектирование»">ПБС.${esc(p.decNo)}</span></td>
           <td style="color:var(--sl-700)">${esc(p.name)}</td>
-          <td><span class="badge ${tone}">${esc(p.stage||'—')}</span></td>
+          <td>${p.chat?'<i class=ic-chat title="есть чат проекта"></i>':'<span style="color:var(--gray4,#9aa7b5)">—</span>'}</td>
           <td>${p.hasKd?`<span class="pg-dn" data-open="${esc(p.decNo)}">чертёж · КД</span>`:'<span style="color:var(--gray4,#9aa7b5)">—</span>'}</td></tr>`;}).join('')
         ||`<tr><td colspan="4" style="color:var(--sub);padding:10px 8px">Проектов в группе пока нет (появятся из «Проекты разработки» по коду ${esc(g.code)})</td></tr>`;
-      const subChips=(g.subgroups||[]).map(s=>`<span class="pg-chip" title="${esc(s.name)}">${esc(s.code)} · ${esc(s.name)}</span>`).join('')||'<span style="color:var(--sub)">—</span>';
+      const subChips=(g.subgroups||[]).map(s=>`<a class="pg-chip pg-subchip ${pgSub===s.code?'on':''}" href="#prodgroups/${encodeURIComponent(s.code)}" title="Карточка подгруппы: чат, досье, документы ИСМ">${esc(s.code)} · ${esc(s.name)}${s.chat?' <i class=ic-chat></i>':''}</a>`).join('')||'<span style="color:var(--sub)">—</span>';
       const linkHtml=(l,ic)=>`<a class="pg-link" ${l.href&&l.href.startsWith('#')?`data-nav="${esc(l.href)}"`:`href="${esc(l.href||'#')}" target="_blank" rel="noopener"`}><span class="ic">${ic}</span> ${esc(l.label)}</a>`;
       const refl=(g.refLinks||[]).map(l=>linkHtml(l,'▤')).join('');
       const sl=(g.salesLinks||[]).map(l=>linkHtml(l,'₽')).join('');
@@ -3944,7 +3950,7 @@
         <div class="pg-cols">
           <div class="pg-l">
             <div class="pg-sech">Реестр проектов группы · авто из «Проекты разработки»</div>
-            <table class="pg-tbl"><tr><th>Децим. №</th><th>Наименование</th><th>Этап ОКР</th><th>КД</th></tr>${rows}</table>
+            <table class="pg-tbl"><tr><th>Децим. №</th><th>Наименование</th><th>Чат</th><th>КД</th></tr>${rows}</table>
             <div class="pg-sech" style="margin-top:16px">Общая информация группы</div>
             <div class="pg-info">${g.info?esc(g.info):'<span style="color:var(--sub)">Описание группы пока не заполнено (правится в product-groups-meta.json).</span>'}
               <div style="margin-top:6px"><b>Подгруппы (Прил. А):</b><br>${subChips}</div></div>
@@ -3953,11 +3959,45 @@
             <div class="pg-sech">Справка · ссылки на ИСМ</div>${refl||'<div style="color:var(--sub);font-size:13px">—</div>'}
             <div class="pg-sech" style="margin-top:16px">Продажи</div>${sl||'<div style="color:var(--sub);font-size:13px">—</div>'}
           </div>
-        </div></div>`;
+        </div></div>${pgSub?`<div id="pg-sub" style="margin-top:var(--gap)"></div>`:''}`;
+      if(pgSub){ pgSubCard(g,(g.subgroups||[]).find(x=>x.code===pgSub)); setTimeout(()=>{ const el=document.getElementById('pg-sub'); if(el&&location.hash.includes('/'))el.scrollIntoView({block:'start',behavior:'smooth'}); },150); }
       h.querySelectorAll('[data-open]').forEach(e=>e.onclick=()=>{ designSel=e.dataset.open; location.hash='#design/'+encodeURIComponent(e.dataset.open); });
       h.querySelectorAll('[data-nav]').forEach(e=>e.onclick=()=>{ location.hash=e.dataset.nav; });
     }
 
+    // ── K-285: карточка подгруппы продукции (ПЧ, ЦТ, …): чат группы, досье группы, документы ИСМ, история ────────────
+    let pgSubTab='main';
+    async function pgSubCard(g,sg){
+      const h=document.getElementById('pg-sub'); if(!h||!sg)return;
+      if(!(DOCS_STATE&&DOCS_STATE.list&&DOCS_STATE.list.length)){ try{ const j=await (await fetch('/api/docs')).json(); DOCS_STATE={list:j.docs||[],live:j.mode==='live'}; }catch{} if(!h.isConnected)return; } const key='SUB:'+sg.code; const canW=rbacAccess('dossier')==='write'||isAdminUser();
+      const prj=(g.projects||[]).filter(p=>String(p.decNo||'').startsWith(sg.code));
+      const tabs=[['main','Обзор'],['dos','Досье'],['hist','История']]; const pane=(k,html)=>`<div data-pgtab="${k}"${pgSubTab===k?'':' style="display:none"'}>${html}</div>`;
+      const docsAll=(DOCS_STATE&&DOCS_STATE.list)||[];
+      const docRow=(code)=>{ const d=docsAll.find(x=>x.code===code); return `<div class="pg-ismdoc"><a href="#docs" class="code c-blue" style="text-decoration:none">${esc(code)}</a><span style="flex:1;min-width:0">${d?esc(d.name):'<span class="c-gray">нет в реестре — откройте «Документы ИСМ»</span>'}</span>${d?`<span class="c-gray">ред. ${esc(d.ver||'—')} · ${esc(d.status||'')}</span>`:''}${canW?`<b data-ismdel="${esc(code)}" class="c-gray" style="cursor:pointer" title="Отвязать">✕</b>`:''}</div>`; };
+      h.innerHTML=`<div class="card pad dp-head"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span class="dp-title">${esc(sg.name)}</span><span class="dnochip" title="Код подгруппы">${esc(sg.code)}</span><span class="c-gray">группа продукции · ${esc(g.code)} ${esc(g.name)}</span>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${sg.chat?`<a class="pbtn" href="${esc(sg.chat)}" target="_blank" rel="noopener" style="border-color:var(--blue);background:var(--blue);color:#fff">${aico('chat',13)} Чат группы</a>${canW?`<button class="pbtn" id="pgs-chatedit" title="Сменить или отвязать чат">…</button>`:''}`:(canW?`<button class="pbtn" id="pgs-chatnew" style="border-style:dashed">${aico('chat',13)} Создать чат группы</button><button class="pbtn" id="pgs-chatedit" title="Привязать существующий чат">Привязать чат…</button>`:'')}${linkBtn('#prodgroups/'+encodeURIComponent(sg.code))}</span></div>
+          <div class="dp-sum"><span><b>${prj.length}</b> проектов</span><span><b id="dp-dosn">…</b> в досье</span><span><b>${(sg.ismDocs||[]).length}</b> док. ИСМ</span></div></div>
+        <div class="card eq-tabbar" id="pgs-tabs"><div class="eq-tabs">${tabs.map(([k,t])=>`<button class="${pgSubTab===k?'on':''}" data-pgtabbtn="${k}">${esc(t)}</button>`).join('')}</div></div>
+        ${pane('main',`<div class="card pad"><div class="row" style="margin-bottom:8px"><span class="sec-h">Документы ИСМ по группе</span><span class="spacer"></span>${canW?`<button class="btn btn--sm" id="pgs-ismadd">＋ Привязать из реестра</button>`:''}</div>
+            ${(sg.ismDocs||[]).length?sg.ismDocs.map(docRow).join(''):'<div class="dos-empty">Инструкции, процедуры и формы ИСМ, действующие для всей группы (например РИ по обозначению и наименованию изделий). Привязываются ссылкой на реестр — копия не нужна, редакция подтянется сама.</div>'}</div>
+          <div class="card pad"><div class="row" style="margin-bottom:8px"><span class="sec-h">О группе</span><span class="spacer"></span>${canW?`<button class="btn btn--ghost btn--sm" id="pgs-about">${aico('pencil',12)}</button>`:''}</div><div class="dos-sum" id="pgs-abouttxt">${sg.about?esc(sg.about):'<span class="c-gray">Описание не заполнено.</span>'}</div></div>
+          <div class="card pad"><div class="sec-h" style="margin-bottom:8px">Проекты подгруппы</div>${prj.length?`<div class="tbl-wrap"><table class="dt"><thead><tr><th>Децим. №</th><th>Наименование</th><th>Чат</th></tr></thead><tbody>${prj.map(p=>`<tr><td class="code"><a href="#design/${encodeURIComponent(p.decNo)}" class="c-blue" style="text-decoration:none">ПБС.${esc(p.decNo)}</a></td><td>${esc(p.name)}</td><td>${p.chat?'<i class=ic-chat></i>':'<span class="c-gray">—</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="dos-empty">Проектов нет.</div>'}</div>
+          <div class="card pad"><div class="sec-h" style="margin-bottom:8px">Последние события</div><div id="dp-lastev" class="dos-empty">Загрузка…</div></div>`)}
+        ${pane('dos',`<div class="card pad" id="ddos-block" data-proj="${esc(key)}"><div class="dos-head"><span class="sec-h"><i class=ic-folder></i> Досье группы</span><span class="c-gray" id="ddos-cnt"></span><span class="spacer"></span><span id="ddos-add"></span></div><div id="ddos-body" class="dos-empty">Загрузка досье…</div></div>`)}
+        ${pane('hist',`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">История группы</div><div id="dp-hist" class="dos-empty">Загрузка…</div></div>`)}`;
+      h.querySelectorAll('[data-pgtabbtn]').forEach(b=>b.onclick=()=>{ pgSubTab=b.dataset.pgtabbtn; h.querySelectorAll('[data-pgtab]').forEach(el=>{ el.style.display=el.dataset.pgtab===pgSubTab?'':'none'; }); h.querySelectorAll('[data-pgtabbtn]').forEach(x=>x.classList.toggle('on',x.dataset.pgtabbtn===pgSubTab)); });
+      dpTabProj=key; loadDossier(key); loadProjHistory(key);
+      const reload=()=>{ PGROUPS=null; renderProdGroups(document.getElementById('view'),sg.code); };
+      const upd=async(body)=>{ try{ await postJson('/api/prodgroups/sub/update',Object.assign({code:sg.code},body)); toast('Сохранено.','ok'); reload(); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } };
+      const cn=h.querySelector('#pgs-chatnew'); if(cn)cn.onclick=async()=>{ if(!(await uiConfirm(`Создать в Bitrix24 чат «${sg.code} · ${sg.name} · группа продуктов»? Участники по умолчанию — из «Настроек».`,{ok:'Создать'})))return; try{ await postJson('/api/prodgroups/sub/chat-create',{code:sg.code}); toast('Чат создан и привязан.','ok'); reload(); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } };
+      const ce=h.querySelector('#pgs-chatedit'); if(ce)ce.onclick=async()=>{ const v=await uiPrompt('Ссылка на чат Bitrix24 (…/online/?IM_DIALOG=chatNNNN). Пусто — отвязать.',sg.chat||''); if(v==null)return; upd({chat:String(v).trim()}); };
+      const ab=h.querySelector('#pgs-about'); if(ab)ab.onclick=async()=>{ const v=await uiPrompt('Описание группы',sg.about||''); if(v==null)return; upd({about:String(v)}); };
+      const ia=h.querySelector('#pgs-ismadd'); if(ia)ia.onclick=async()=>{ if(!docsAll.length){ try{ const j=await (await fetch('/api/docs')).json(); DOCS_STATE={list:j.docs||[],live:true}; }catch{} } const list=((DOCS_STATE&&DOCS_STATE.list)||[]).filter(d=>!(sg.ismDocs||[]).includes(d.code));
+        const w=document.createElement('div'); w.className='ui-dlg'; w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Привязать документ ИСМ к группе ${esc(sg.code)}</div><div class="field" style="margin-top:var(--sp-3)"><label>Документ из реестра</label><input id="ism-q" class="inp" placeholder="поиск по коду или названию"><select id="ism-sel" size="9" style="height:auto;margin-top:6px">${list.map(d=>`<option value="${esc(d.code)}">${esc(d.code)} · ${esc(d.name)}${d.status?' · '+esc(d.status):''}</option>`).join('')}</select></div><div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Привязать</button></div></div>`;
+        document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>w.remove(); const sel=w.querySelector('#ism-sel'); w.querySelector('#ism-q').oninput=(e)=>{ const q=e.target.value.toLowerCase(); [...sel.options].forEach(o=>{ o.hidden=q&&!o.textContent.toLowerCase().includes(q); }); };
+        w.querySelector('[data-d="ok"]').onclick=()=>{ if(!sel.value){ toast('Выберите документ.','warn'); return; } w.remove(); upd({ismDocs:[...(sg.ismDocs||[]),sel.value]}); }; };
+      h.querySelectorAll('[data-ismdel]').forEach(b=>b.onclick=()=>upd({ismDocs:(sg.ismDocs||[]).filter(c=>c!==b.dataset.ismdel)}));
+    }
     async function renderDesign(host,arg){
       dStyles();
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка раздела «Проектирование»…</div>';
@@ -4224,7 +4264,7 @@
           <div class="dp-sum"><span><b>${kdOf.length}</b> черт.${osn?' · оснастки '+osn:''}</span><span><b id="dp-mkn">…</b> МК</span><span><b>${pzN}</b> ПЗ</span><span><b id="dp-dosn">${o.dossierCount||0}</b> в досье</span></div></div>
         <div class="card eq-tabbar" id="dp-tabs"><div class="eq-tabs">${tabs.map(([k,t])=>`<button class="${dpTab===k?'on':''}" data-dptabbtn="${k}">${esc(t)}</button>`).join('')}</div></div>
         ${pane('main',`<div class="card pad"><div class="sec-h" style="margin-bottom:8px">Реквизиты</div>
-            <div class="dgrid2">${kv('Группа / подгруппа',grpLabel)}${kv('Тип продукции',o.productType)}${kv('Семейство / программа',o.family)}${kv('Инициатор',o.initiator)}${kv('Связь с ПЗ / заказом',o.orderLink)}${kv('Дата открытия',fmt(o.opened))}${o.nas?kv('NAS-папка',o.nas):''}</div></div>
+            <div class="dgrid2"><div class="kv">Группа / подгруппа: <b>${esc(grpLabel)}</b> · <a href="#prodgroups/${encodeURIComponent((o.decNo.match(/^[А-ЯЁ]{2}/)||[''])[0])}" class="c-blue" style="text-decoration:none" title="Карточка группы продукции: чат группы, общее досье, документы ИСМ">карточка группы ${esc((o.decNo.match(/^[А-ЯЁ]{2}/)||[''])[0])} →</a></div>${kv('Тип продукции',o.productType)}${kv('Семейство / программа',o.family)}${kv('Инициатор',o.initiator)}${kv('Связь с ПЗ / заказом',o.orderLink)}${kv('Дата открытия',fmt(o.opened))}${o.nas?kv('NAS-папка',o.nas):''}</div></div>
           ${dTzCard(o)}
           <div class="card pad"><div class="sec-h" style="margin-bottom:8px">Последние события</div><div id="dp-lastev" class="dos-empty">Загрузка…</div></div>`)}
         ${pane('kd',`        <div class="card pad"><div class="row" style="margin-bottom:8px;flex-wrap:wrap"><span class="sec-h">Чертежи и маршрутные карты</span><span class="spacer"></span><span style="font-size:13px;color:var(--sub)">${kdOf.length} док.${osn?' · оснастки '+osn:''}</span>${kdOf.length?` <button class="pbtn" style="border-color:var(--blue);background:var(--blue);color:#fff" onclick="dProdToggle('${esc(o.decNo)}')">${aico('orders',13)} В производство</button>`:''} <button class="pbtn" onclick="dKdUplToggle('${esc(o.decNo)}')">${aico('doc',13)} Загрузить чертёж</button> <a class="pbtn" data-gokd="${esc(o.decNo)}">Реестр КД →</a></div>
@@ -4281,7 +4321,7 @@
       const recs=d.records||[]; cnt.textContent=recs.length?`· записей: ${recs.length}`:''; { const dn=document.getElementById('dp-dosn'); if(dn)dn.textContent=String(recs.length); }
       add.innerHTML=d.canAdd?`<button class="btn btn--primary btn--sm" id="ddos-addbtn">＋ Добавить запись</button>`:'';
       const ab=document.getElementById('ddos-addbtn'); if(ab)ab.onclick=()=>dossierAddDialog(proj,d);
-      if(!recs.length){ body.className='dos-empty'; body.innerHTML=d.canAdd?'Записей пока нет. Сюда складываются расчёты, результаты испытаний, фото, методики и протоколы по проекту — файлы ложатся в папку проекта на NAS, запись уходит в чат проекта.':'Записей пока нет.'; return; }
+      if(!recs.length){ body.className='dos-empty'; body.innerHTML=d.canAdd?(/^SUB:/.test(proj)?'Записей пока нет. Сюда складываются перечни наименований, ТУ, общие методики, каталоги и решения по группе — файлы ложатся в папку группы «_Общее» на NAS, запись уходит в чат группы.':'Записей пока нет. Сюда складываются расчёты, результаты испытаний, фото, методики и протоколы по проекту — файлы ложатся в папку проекта на NAS, запись уходит в чат проекта.'):'Записей пока нет.'; return; }
       const used=(d.kinds||[]).filter(k=>recs.some(r=>r.kind===k.code)); if(dosFilter&&!used.some(k=>k.code===dosFilter))dosFilter='';
       const shown=dosFilter?recs.filter(r=>r.kind===dosFilter):recs;
       body.className=''; body.innerHTML=`<div class="dos-filters"><button class="dos-chip ${dosFilter?'':'on'}" data-dosf="">Все · ${recs.length}</button>${used.map(k=>`<button class="dos-chip ${dosFilter===k.code?'on':''}" data-dosf="${esc(k.code)}">${esc(k.label)} · ${recs.filter(r=>r.kind===k.code).length}</button>`).join('')}</div>
@@ -4314,7 +4354,7 @@
     }
     function dossierAddDialog(proj,d){
       const w=document.createElement('div'); w.className='ui-dlg'; const today=new Date().toISOString().slice(0,10);
-      w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Новая запись в досье · ПБС.${esc(proj)}</div>
+      const isSub=/^SUB:/.test(proj); w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Новая запись в досье · ${isSub?'группа '+esc(proj.slice(4)):'ПБС.'+esc(proj)}</div>${isSub?'<div class="ui-dlg-t">Документы, общие для всей группы изделий. Расчёты и испытания конкретного изделия — в досье его проекта; инструкции и процедуры ИСМ — привязкой из реестра, не копией.</div>':''}
         <div class="dlg-form">
           <div class="field"><label>Тип записи</label><select id="dos-kind"><option value="">— выберите —</option>${(d.kinds||[]).map(k=>`<option value="${esc(k.code)}">${esc(k.label)}</option>`).join('')}</select><span class="hint" id="dos-dir"></span></div>
           <div class="field"><label>Дата</label><input type="date" id="dos-date" value="${today}"></div>
@@ -4327,7 +4367,7 @@
         <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Зарегистрировать</button></div></div>`;
       document.body.appendChild(w); const $$=(q)=>w.querySelector(q);
       $$('[data-d="cancel"]').onclick=()=>w.remove();
-      $$('#dos-kind').onchange=()=>{ const k=(d.kinds||[]).find(x=>x.code===$$('#dos-kind').value); $$('#dos-dir').textContent=k?'Файлы лягут в папку проекта: '+k.dir:''; };
+      $$('#dos-kind').onchange=()=>{ const k=(d.kinds||[]).find(x=>x.code===$$('#dos-kind').value); $$('#dos-dir').textContent=k?'Файлы лягут в папку '+(isSub?'группы (_Общее)':'проекта')+': '+k.dir:''; };
       $$('#dos-files').onchange=()=>{ const fs=[...$$('#dos-files').files]; $$('#dos-picked').textContent=fs.length?fs.map(f=>f.name+' ('+dosSize(f.size)+')').join(', '):'Файлы не выбраны'; };
       $$('[data-d="ok"]').onclick=async()=>{ const kind=$$('#dos-kind').value, title=$$('#dos-title').value.trim(), files=[...$$('#dos-files').files];
         if(!kind){ toast('Выберите тип записи.','warn'); return; } if(title.length<3){ toast('Дайте записи название.','warn'); return; }

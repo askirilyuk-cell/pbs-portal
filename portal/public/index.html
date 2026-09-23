@@ -3957,7 +3957,7 @@
       const zps=((typeof SALES!=='undefined'&&SALES&&SALES.requests)||[]); const grpZp=zps.filter(z=>(z.products||[]).some(pr=>pr.groupCode===g.code&&(!pgSub||pr.subCode===pgSub)));
       const pzAll=((typeof DATA!=='undefined'&&DATA&&DATA.orders)||[]); const grpPz=pzAll.filter(o=>(o.positions||[]).some(q=>new RegExp('^(ПБС\\.)?'+(pgSub||subsAll.map(x=>x.code).join('|')||g.code)+'\\d{4}').test(String(q.drawing||'').replace(/^ПБС\./,'')))||String(o.productType||'').includes(pgSub?'· '+pgSub+' ':g.code+' ·'));
       const grpKey=pgSub?g.code+':'+pgSub:g.code;
-      const sl=[linkHtml({label:`Запросы продаж по ${pgSub||g.code}${grpZp.length?' · '+grpZp.length:' · пока нет'}`,href:'#sales',grp:grpKey},'₽'),linkHtml({label:`Заказы на производство по ${pgSub||g.code}${grpPz.length?' · '+grpPz.length:' · пока нет'}`,href:'#orders',grp:grpKey},'₽'),linkHtml({label:'Каталог номенклатуры',href:'#catalog'},'₽')].join('');
+      const sl=[linkHtml({label:`Запросы продаж по ${pgSub||g.code}${grpZp.length?' · '+grpZp.length:' · пока нет'}`,href:'#sales',grp:grpKey},'₽'),linkHtml({label:`Заказы на производство по ${pgSub||g.code}${grpPz.length?' · '+grpPz.length:' · пока нет'}`,href:'#orders',grp:grpKey},'₽')].join('');
       h.innerHTML=`<div class="pg-panel">
         <div class="pg-head"><span class="c">${esc(g.code)}</span><div style="font-weight:700;font-size:14px;color:var(--navy)">${esc(g.name)} <small style="font-weight:400;color:var(--sub);font-size:13px">— ${g.projectCount} проект(ов) · ${(g.subgroups||[]).length} подгрупп</small></div></div>
         <div class="pg-cols">

@@ -1272,7 +1272,7 @@ const DOSSIER_KINDS = [
   { code: 'ФТ', label: 'Фото и видео продукции', dir: '15-Фото и медиа' },
   { code: 'БР', label: 'Брошюра / презентация', dir: '10-Паспорт и этикетка' },
   { code: 'ПР', label: 'Протокол / акт / решение', dir: '08-Утверждение' },
-  { code: 'АН', label: 'Аналоги и кросс-референс', dir: '12-Кросс-референс' },
+  { code: 'АН', label: 'Продукция конкурентов, аналоги и кросс-референс', dir: '12-Кросс-референс' },
   { code: 'ДР', label: 'Прочее', dir: '13-Переписка' },
 ];
 // K-285: досье ПОДГРУППЫ продукции (ПЧ, ЦТ, …) — общее для всех проектов подгруппы. Ключ записи «SUB:<код>», папка «<подгруппа>/_Общее».
@@ -1415,6 +1415,54 @@ async function dossierUpdate(fields, files, session) {
     let chat = { sent: false, reason: 'отправка отключена' };
     if (String(fields.notify || '1') !== '0') { const projRow = await dossierOwnerRow(proj); chat = await dossierNotify({ ...rec, title: `${rec.title} — версия ${ver + 1}`, summary: `Что изменилось: ${what}${rec.summary ? '\n' + rec.summary : ''}` }, projRow, folder); }
     return { ok: true, record: rec, version: ver + 1, chat };
+  });
+}
+// K-290: правка записи досье без новой версии — тип (с переносом папки записи в папку нового этапа), название,
+// вывод, связь, дата; дополнение файлами (в ту же папку, версия не меняется). Автор или администратор.
+async function dossierEdit(fields, files, session) {
+  if (!dossierCanWrite(session)) { const e = new Error('Править записи досье могут конструктор, технолог, ОТК и администратор.'); e.status = 403; throw e; }
+  const id = Number(fields.id); const r = (await ncListSoft('design_dossier')).find((x) => (x.Id ?? x.id) === id); if (!r || String(r['Удалена'] || '').trim()) { const e = new Error('Запись не найдена.'); e.status = 404; throw e; }
+  const isAdmin = session && session.isAdmin && !session.effectiveRole; const own = session && session.userId != null && String(session.userId) === String(r['Автор (id)'] || '');
+  if (!isAdmin && !own) { const e = new Error('Изменить запись может её автор или администратор.'); e.status = 403; throw e; }
+  const proj = String(r['Проект (децим. №)'] || '').trim(); const kinds = dossierKinds(proj);
+  const kind = fields.kind != null && String(fields.kind).trim() ? kinds.find((k) => k.code === String(fields.kind).trim()) : null;
+  if (fields.kind != null && String(fields.kind).trim() && !kind) throw new Error('Неизвестный тип записи.');
+  const title = fields.title != null ? String(fields.title).trim().slice(0, 200) : String(r['Название'] || '');
+  if (title.length < 3) throw new Error('Дайте записи название.');
+  if (/^(РИ|ДП|Ф|ИСМ)[.\-–]/i.test(title)) throw new Error('Это документ ИСМ — привяжите его из реестра, а не загружайте копию.');
+  const good = files.filter((f) => f && f.filename && f.data && f.data.length), bad = good.filter((f) => !DOSSIER_EXT.test(String(f.filename)));
+  if (bad.length) throw new Error('Недопустимый тип файла: ' + bad.map((f) => f.filename).join(', '));
+  const folder = dossierIsSub(proj) ? designSubgroupFolder(proj.slice(4)) : designProjectFolder(proj); if (!folder) throw new Error('Папка проекта не найдена.');
+  return withKeyLock('dossier:' + proj, async () => {
+    let recDir = path.normalize(path.join(folder, String(r['Папка'] || ''))); if (!recDir.startsWith(folder + path.sep)) throw new Error('Недопустимая папка записи.');
+    let fileList = dossierJson(r['Файлы']); const patch = {}; const changes = [];
+    const oldKind = kinds.find((k) => k.code === r['Тип']);
+    // 1. смена типа → папка записи переезжает в папку нового этапа; rel всех файлов (включая _v<N>) пересчитываются
+    if (kind && kind.code !== r['Тип']) {
+      const newDir = path.join(folder, kind.dir, path.basename(recDir));
+      if (fs.existsSync(recDir)) { if (fs.existsSync(newDir)) throw new Error('В папке нового типа уже есть папка с таким именем: ' + path.basename(recDir)); try { fs.mkdirSync(path.dirname(newDir), { recursive: true }); fs.renameSync(recDir, newDir); } catch (e) { throw new Error('Не удалось перенести папку записи: ' + e.message); } }
+      const oldRel = path.relative(folder, recDir).split(path.sep).join('/'), newRel = path.relative(folder, newDir).split(path.sep).join('/');
+      const remap = (f) => ({ ...f, rel: String(f.rel || '').startsWith(oldRel + '/') ? newRel + String(f.rel).slice(oldRel.length) : f.rel });
+      fileList = fileList.map(remap); const hist = dossierJson(r['Версии']).map((v) => ({ ...v, files: (v.files || []).map(remap) }));
+      patch['Тип'] = kind.code; patch['Папка'] = newRel; patch['Версии'] = JSON.stringify(hist); recDir = newDir;
+      changes.push(`тип: ${(oldKind && oldKind.label) || r['Тип']} → ${kind.label}`);
+    }
+    if (title !== String(r['Название'] || '')) { patch['Название'] = title; changes.push(`название: «${title}»`); }
+    if (fields.summary != null && String(fields.summary).trim() !== String(r['Вывод'] || '').trim()) { patch['Вывод'] = String(fields.summary).trim().slice(0, 4000); changes.push('вывод'); }
+    if (fields.link != null && String(fields.link).trim() !== String(r['Связь'] || '').trim()) { patch['Связь'] = String(fields.link).trim().slice(0, 300); changes.push('связь'); }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(fields.date || '')) && String(fields.date) !== String(r['Дата'] || '').slice(0, 10)) { patch['Дата'] = String(fields.date); changes.push('дата'); }
+    // 2. дополнение файлами — в ту же папку, без версии
+    const saved = []; for (const f of good) { const rel = await saveFileUnique(folder, recDir, path.basename(String(f.filename)), f.data); if (rel) saved.push({ name: path.basename(rel), rel, size: f.data.length }); }
+    if (saved.length) { fileList = fileList.concat(saved); changes.push('добавлены файлы: ' + saved.map((f) => f.name).join(', ')); }
+    if (saved.length || patch['Папка']) patch['Файлы'] = JSON.stringify(fileList);
+    if (!changes.length) return { ok: true, record: dossierShape(r), unchanged: true };
+    await ncUpdate('design_dossier', id, patch);
+    const rec = dossierShape({ ...r, ...patch });
+    projLog(proj, saved.length ? 'файл приложен' : 'комментарий', `Досье ${rec.no} изменено: ${changes.join('; ')}`, session);
+    logEvent({ type: 'комментарий', obj: 'Досье', objNum: rec.no, who: (session && session.fio) || '', details: changes.join('; ') });
+    let chat = { sent: false, reason: 'отправка отключена' };
+    if (saved.length && String(fields.notify || '0') === '1') { const projRow = await dossierOwnerRow(proj); chat = await dossierNotify({ ...rec, files: saved, title: `${rec.title} — дополнение`, summary: rec.summary }, projRow, folder); }
+    return { ok: true, record: rec, changes, chat };
   });
 }
 async function dossierDelete(body, session) {
@@ -13165,6 +13213,13 @@ const server = http.createServer(async (req, res) => {
       if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
       let raw; try { raw = await readRawBody(req, 256 * 1024 * 1024); } catch (e) { return sendJson(res, 413, { error: 'Файлы слишком большие (предел 256 МБ на запись). ' + String(e.message || e) }); }
       try { const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim()); return sendJson(res, 200, await dossierAdd(fields, files, sessionFromReq(req))); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/dossier/edit' && req.method === 'POST') { // K-290: правка записи / дополнение файлами
+      const ct = String(req.headers['content-type'] || ''); const bm = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ct);
+      if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
+      let raw; try { raw = await readRawBody(req, 256 * 1024 * 1024); } catch (e) { return sendJson(res, 413, { error: String(e.message || e) }); }
+      try { const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim()); return sendJson(res, 200, await dossierEdit(fields, files, sessionFromReq(req))); }
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/dossier/delete' && req.method === 'POST') { try { return sendJson(res, 200, await dossierDelete(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }

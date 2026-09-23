@@ -1375,6 +1375,7 @@
     .dos-thumb img{width:100%;height:100%;object-fit:cover;display:block}
     .dos-acts{display:flex;gap:var(--sp-1);align-items:flex-start}
     .dos-empty{font-size:var(--fs-s);color:var(--sub)}
+    .dos-vers{grid-column:1/-1;font-size:var(--fs-xs);color:var(--sub);border-left:2px solid var(--sl-200);padding-left:var(--sp-2)} .dos-vers a{color:var(--c-brand)}
     .dos-drop{border:1px dashed var(--sl-300);border-radius:var(--r-s);padding:var(--sp-3);font-size:var(--fs-s);color:var(--sub);text-align:center}
     .dos-picked{font-size:var(--fs-xs);color:var(--sl-700);margin-top:var(--sp-1);overflow-wrap:anywhere}
     @media(max-width:560px){.dos-rec{grid-template-columns:minmax(0,1fr)}.dos-thumb{width:96px;height:72px}}
@@ -4285,13 +4286,31 @@
       const shown=dosFilter?recs.filter(r=>r.kind===dosFilter):recs;
       body.className=''; body.innerHTML=`<div class="dos-filters"><button class="dos-chip ${dosFilter?'':'on'}" data-dosf="">Все · ${recs.length}</button>${used.map(k=>`<button class="dos-chip ${dosFilter===k.code?'on':''}" data-dosf="${esc(k.code)}">${esc(k.label)} · ${recs.filter(r=>r.kind===k.code).length}</button>`).join('')}</div>
         ${shown.map(r=>{ const imgs=(r.files||[]).filter(f=>dosIsImg(f.name)), rest=(r.files||[]).filter(f=>!dosIsImg(f.name)); const canDel=d.isAdmin||(d.canAdd&&d.me&&d.me===String(r.authorId||''));
-          return `<div class="dos-rec"><div><div class="dos-title">${esc(r.title)}</div><div class="dos-meta"><span class="dos-no">${esc(r.no)}</span><span class="dos-kind">${esc(r.kindLabel)}</span><span>${esc(fmt(r.date))}</span><span>${esc(r.author||'')}</span>${r.link?`<span>связь: ${esc(r.link)}</span>`:''}${r.chat?`<span title="Отправлено в чат проекта ${esc(r.chat)}"><i class=ic-chat></i> в чате</span>`:''}</div></div>
-            <div class="dos-acts">${d.canAdd&&d.hasChat?`<button class="btn btn--ghost btn--sm" data-dosre="${r.id}" title="${r.chat?'Отправить в чат проекта ещё раз':'Отправить в чат проекта'}"><i class=ic-chat></i></button>`:''}${canDel?`<button class="btn btn--ghost btn--sm" data-dosdel="${r.id}" title="Удалить запись (файлы уйдут в _deleted)"><i class=ic-trash></i></button>`:''}</div>
+          return `<div class="dos-rec"><div><div class="dos-title">${esc(r.title)}</div><div class="dos-meta"><span class="dos-no">${esc(r.no)}</span><span class="dos-kind">${esc(r.kindLabel)}</span>${r.version>1?`<span class="badge b-navy" title="${esc((r.versions||[]).map(v=>'v'+v.ver+' → '+v.replacedAt+' '+v.by+': '+v.what).join('\n'))}">версия ${r.version}</span>`:''}<span>${esc(fmt(r.date))}</span><span>${esc(r.author||'')}</span>${r.link?`<span>связь: ${esc(r.link)}</span>`:''}${r.chat?`<span title="Отправлено в чат проекта ${esc(r.chat)}"><i class=ic-chat></i> в чате</span>`:''}</div></div>
+            <div class="dos-acts">${(d.isAdmin||(d.canAdd&&d.me&&d.me===String(r.authorId||'')))&&(r.files||[]).length?`<button class="btn btn--sm" data-dosupd="${r.id}" title="Заменить файлы новой версией; прежние останутся в папке записи">Новая версия</button>`:''}${d.canAdd&&d.hasChat?`<button class="btn btn--ghost btn--sm" data-dosre="${r.id}" title="${r.chat?'Отправить в чат проекта ещё раз':'Отправить в чат проекта'}"><i class=ic-chat></i></button>`:''}${canDel?`<button class="btn btn--ghost btn--sm" data-dosdel="${r.id}" title="Удалить запись (файлы уйдут в _deleted)"><i class=ic-trash></i></button>`:''}</div>
             ${r.summary?`<div class="dos-sum">${esc(r.summary)}</div>`:''}
+            ${(r.versions||[]).length?`<div class="dos-vers">${r.versions.slice().reverse().map(v=>`<div><b>v${v.ver}</b> · заменена ${esc(v.replacedAt)} ${esc(v.by)} — ${esc(v.what)}${(v.files||[]).length?' · '+v.files.map(f=>`<a href="${dosFileUrl(proj,f)}" target="_blank" rel="noopener">${esc(f.name)}</a>`).join(', '):''}</div>`).join('')}</div>`:''}
             ${(r.files||[]).length?`<div class="dos-files">${imgs.map(f=>`<a class="dos-thumb" href="${dosFileUrl(proj,f)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img loading="lazy" src="${dosFileUrl(proj,f)}" alt="${esc(f.name)}"></a>`).join('')}${rest.map(f=>`<a class="dos-file" href="${dosFileUrl(proj,f)}" target="_blank" rel="noopener"><i class=ic-doc></i>${esc(f.name)} <span class="c-gray">${dosSize(f.size||0)}</span></a>`).join('')}</div>`:''}</div>`; }).join('')}`;
       body.querySelectorAll('[data-dosf]').forEach(b=>b.onclick=()=>{ dosFilter=b.dataset.dosf; loadDossier(proj); });
       body.querySelectorAll('[data-dosdel]').forEach(b=>b.onclick=async()=>{ const r=recs.find(x=>String(x.id)===b.dataset.dosdel); if(!(await uiConfirm(`Удалить запись ${r.no} «${r.title}»? Файлы будут перенесены в папку _deleted проекта.`,{ok:'Удалить',danger:true})))return; try{ await postJson('/api/dossier/delete',{id:r.id}); toast('Запись удалена.','ok'); loadDossier(proj); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } });
+      body.querySelectorAll('[data-dosupd]').forEach(b=>b.onclick=()=>dossierUpdateDialog(proj,d,recs.find(x=>String(x.id)===b.dataset.dosupd)));
       body.querySelectorAll('[data-dosre]').forEach(b=>b.onclick=async()=>{ const r=recs.find(x=>String(x.id)===b.dataset.dosre); if(r.chat&&!(await uiConfirm(`Запись ${r.no} уже отправлялась в чат (${r.chat}). Отправить ещё раз?`,{ok:'Отправить'})))return; b.disabled=true; try{ await postJson('/api/dossier/resend',{id:r.id}); toast('Отправлено в чат проекта.','ok'); loadDossier(proj); }catch(e){ toast(String(e.message||e),'err'); b.disabled=false; } });
+    }
+    function dossierUpdateDialog(proj,d,r){
+      const w=document.createElement('div'); w.className='ui-dlg';
+      w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Новая версия · ${esc(r.no)}</div><div class="ui-dlg-t">${esc(r.title)} · сейчас версия ${r.version||1}. Прежние файлы (${(r.files||[]).map(f=>esc(f.name)).join(', ')}) останутся в папке записи в подпапке _v${r.version||1}.</div>
+        <div class="dlg-form"><div class="field full"><label>Что изменилось</label><input id="dosu-what" maxlength="500" placeholder="Например: пересчитано под давление 70 МПа, добавлен вариант с пружинами"></div>
+          <div class="field full"><label>Вывод / результат (если поменялся)</label><textarea id="dosu-sum" rows="2">${esc(r.summary||'')}</textarea></div>
+          <div class="field full"><label>Новые файлы</label><div class="dos-drop"><input type="file" id="dosu-files" multiple><div class="dos-picked" id="dosu-picked">Файлы не выбраны</div></div></div>
+          <label class="full"><input type="checkbox" id="dosu-notify" ${d.hasChat?'checked':'disabled'}> Сообщить в чат проекта</label></div>
+        <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Заменить</button></div></div>`;
+      document.body.appendChild(w); const $$=(q)=>w.querySelector(q); $$('[data-d="cancel"]').onclick=()=>w.remove();
+      $$('#dosu-files').onchange=()=>{ const fs=[...$$('#dosu-files').files]; $$('#dosu-picked').textContent=fs.length?fs.map(f=>f.name+' ('+dosSize(f.size)+')').join(', '):'Файлы не выбраны'; };
+      $$('[data-d="ok"]').onclick=async()=>{ const what=$$('#dosu-what').value.trim(), files=[...$$('#dosu-files').files]; if(what.length<3){ toast('Напишите, что изменилось.','warn'); return; } if(!files.length){ toast('Приложите новые файлы.','warn'); return; }
+        const fd=new FormData(); fd.append('id',r.id); fd.append('what',what); fd.append('summary',$$('#dosu-sum').value); fd.append('notify',$$('#dosu-notify').checked?'1':'0'); files.forEach(f=>fd.append('files',f,f.name));
+        const ok=$$('[data-d="ok"]'); ok.disabled=true; ok.textContent='Загрузка…';
+        try{ const rs=await fetch('/api/dossier/update',{method:'POST',body:fd}); const j=await rs.json().catch(()=>({})); if(!rs.ok||j.error)throw new Error(j.error||('HTTP '+rs.status)); w.remove(); toast(`${r.no}: версия ${j.version}`+(j.chat&&j.chat.sent?' · отправлено в чат':''),'ok'); loadDossier(proj); }
+        catch(e){ toast('Не удалось: '+(e.message||e),'err'); ok.disabled=false; ok.textContent='Заменить'; } };
     }
     function dossierAddDialog(proj,d){
       const w=document.createElement('div'); w.className='ui-dlg'; const today=new Date().toISOString().slice(0,10);

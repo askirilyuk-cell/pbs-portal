@@ -1271,7 +1271,8 @@ const DOSSIER_CHAT_MAX = 20 * 1024 * 1024;
 const dossierJson = (v) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 const dossierShape = (r) => { const k = DOSSIER_KINDS.find((x) => x.code === r['Тип']) || { code: r['Тип'] || '', label: r['Тип'] || '' };
   return { id: r.Id ?? r.id, no: r['№ записи'] || '', proj: r['Проект (децим. №)'] || '', kind: k.code, kindLabel: k.label, title: r['Название'] || '', summary: r['Вывод'] || '', date: r['Дата'] || '',
-    author: r['Автор'] || '', authorId: r['Автор (id)'] || '', link: r['Связь'] || '', folder: r['Папка'] || '', files: dossierJson(r['Файлы']), chat: r['Чат'] || '', created: r.CreatedAt || '' }; };
+    author: r['Автор'] || '', authorId: r['Автор (id)'] || '', link: r['Связь'] || '', folder: r['Папка'] || '', files: dossierJson(r['Файлы']), chat: r['Чат'] || '', created: r.CreatedAt || '',
+    version: Number(r['Версия']) || 1, versions: dossierJson(r['Версии']) }; }; // K-284
 async function dossierList(proj) {
   return (await ncListSoft('design_dossier')).filter((r) => String(r['Проект (децим. №)'] || '').trim() === proj && !String(r['Удалена'] || '').trim()).map(dossierShape)
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.no).localeCompare(String(a.no), 'ru'));
@@ -1337,6 +1338,37 @@ async function dossierAdd(fields, files, session) {
     logEvent({ type: 'создан', obj: 'Досье', objNum: no, who: (session && session.fio) || '', details: `${kind.label}: ${title}; файлов: ${saved.length}` });
     projLog(proj, 'файл приложен', `Досье ${no} · ${kind.label}: «${title}»${saved.length ? ' — ' + saved.map((f) => f.name).join(', ') : ''}${chat.sent ? ' · отправлено в чат' : ''}`, session);
     return { ok: true, record: rec, chat };
+  });
+}
+// K-284: новая версия записи досье — прежние файлы уходят в подпапку «_v<N>» записи, версия +1, в историю проекта и чат
+async function dossierUpdate(fields, files, session) {
+  if (!dossierCanWrite(session)) { const e = new Error('Обновлять записи досье могут конструктор, технолог, ОТК и администратор.'); e.status = 403; throw e; }
+  const id = Number(fields.id); const r = (await ncListSoft('design_dossier')).find((x) => (x.Id ?? x.id) === id); if (!r || String(r['Удалена'] || '').trim()) { const e = new Error('Запись не найдена.'); e.status = 404; throw e; }
+  const isAdmin = session && session.isAdmin && !session.effectiveRole; const own = session && session.userId != null && String(session.userId) === String(r['Автор (id)'] || '');
+  if (!isAdmin && !own) { const e = new Error('Обновить запись может её автор или администратор.'); e.status = 403; throw e; }
+  const what = String(fields.what || '').trim().slice(0, 500); if (what.length < 3) throw new Error('Напишите, что изменилось.');
+  const good = files.filter((f) => f && f.filename && f.data && f.data.length), bad = good.filter((f) => !DOSSIER_EXT.test(String(f.filename)));
+  if (bad.length) throw new Error('Недопустимый тип файла: ' + bad.map((f) => f.filename).join(', '));
+  if (!good.length) throw new Error('Приложите новые файлы.');
+  const proj = String(r['Проект (децим. №)'] || '').trim(); const folder = designProjectFolder(proj); if (!folder) throw new Error('Папка проекта не найдена.');
+  await ncEnsureColumn('design_dossier', 'Версия', 'Number'); await ncEnsureColumn('design_dossier', 'Версии', 'LongText');
+  return withKeyLock('dossier:' + proj, async () => {
+    const recDir = path.normalize(path.join(folder, String(r['Папка'] || ''))); if (!recDir.startsWith(folder + path.sep)) throw new Error('Недопустимая папка записи.');
+    const ver = Number(r['Версия']) || 1; const oldFiles = dossierJson(r['Файлы']);
+    const vdir = path.join(recDir, `_v${ver}`); try { fs.mkdirSync(vdir, { recursive: true }); } catch {}
+    const moved = [];
+    for (const f of oldFiles) { const src = path.join(folder, f.rel); if (!fs.existsSync(src)) continue; const dst = path.join(vdir, f.name); try { fs.renameSync(src, dst); moved.push({ name: f.name, rel: path.relative(folder, dst).split(path.sep).join('/'), size: f.size }); } catch (e) { console.warn('K-284: перенос в _v:', e.message); } }
+    const saved = []; for (const f of good) { const rel = await saveFileUnique(folder, recDir, path.basename(String(f.filename)), f.data); if (rel) saved.push({ name: path.basename(rel), rel, size: f.data.length }); }
+    const hist = dossierJson(r['Версии']); hist.push({ ver, files: moved, replacedAt: new Date().toISOString().slice(0, 16).replace('T', ' '), by: (session && session.fio) || '', what });
+    const patch = { 'Файлы': JSON.stringify(saved), 'Версия': ver + 1, 'Версии': JSON.stringify(hist), 'Дата': new Date().toISOString().slice(0, 10) };
+    if (String(fields.summary || '').trim()) patch['Вывод'] = String(fields.summary).trim().slice(0, 4000);
+    await ncUpdate('design_dossier', id, patch);
+    const rec = dossierShape({ ...r, ...patch });
+    projLog(proj, 'файл приложен', `Досье ${rec.no} · новая версия ${ver + 1}: ${what} — ${saved.map((f) => f.name).join(', ')}`, session);
+    logEvent({ type: 'комментарий', obj: 'Досье', objNum: rec.no, who: (session && session.fio) || '', details: `версия ${ver + 1}: ${what}` });
+    let chat = { sent: false, reason: 'отправка отключена' };
+    if (String(fields.notify || '1') !== '0') { const projRow = (await ncListSoft('design_projects')).find((x) => String(x['Децимальный номер'] || '').trim() === proj); chat = await dossierNotify({ ...rec, title: `${rec.title} — версия ${ver + 1}`, summary: `Что изменилось: ${what}${rec.summary ? '\n' + rec.summary : ''}` }, projRow, folder); }
+    return { ok: true, record: rec, version: ver + 1, chat };
   });
 }
 async function dossierDelete(body, session) {
@@ -13035,6 +13067,13 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/dossier/delete' && req.method === 'POST') { try { return sendJson(res, 200, await dossierDelete(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
+    if (p === '/api/dossier/update' && req.method === 'POST') { // K-284: новая версия файлов записи
+      const ct = String(req.headers['content-type'] || ''); const bm = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ct);
+      if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
+      let raw; try { raw = await readRawBody(req, 256 * 1024 * 1024); } catch (e) { return sendJson(res, 413, { error: String(e.message || e) }); }
+      try { const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim()); return sendJson(res, 200, await dossierUpdate(fields, files, sessionFromReq(req))); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/dossier/resend' && req.method === 'POST') { try { return sendJson(res, 200, await dossierResend(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); } }
     if (p === '/api/design/files') {
       if (!cfg().DESIGN_ROOT) return sendJson(res, 200, { files: [], warning: 'Путь к записям РКД не задан (DESIGN_ROOT / RECORDS_ROOT).' });

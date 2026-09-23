@@ -65,6 +65,7 @@ function cfg() {
     // K-108: участники рабочего чата заказа по умолчанию (id Bitrix через запятую).
     // Пусто = чат создаётся только с автором вебхука; состав правится в самом чате.
     ORDER_CHAT_USERS: String(runtime.ORDER_CHAT_USERS || process.env.ORDER_CHAT_USERS || ''),
+    TENDER_TASK_AUDITORS: String(runtime.TENDER_TASK_AUDITORS || process.env.TENDER_TASK_AUDITORS || '41, 61'), // наблюдатели задачи «Подача тендера»: Антонова 41, Копанев 61 (просьба Смирновой 23.09.2026 — чтобы она могла править ссылку и срок подачи)
     FS_URL: (runtime.FS_URL || process.env.FS_URL || 'http://192.168.1.10:5000').replace(/\/+$/, ''),
     FS_USER: runtime.FS_USER || process.env.FS_USER || '',
     FS_PASS: runtime.FS_PASS || process.env.FS_PASS || '',
@@ -10662,7 +10663,7 @@ function settingsView() {
   return {
     ncUrl: c.NC_URL, gotenbergUrl: c.GOTENBERG, tokenSet: !!c.NC_TOKEN,
     recordsRoot: c.RECORDS, docsRoot: c.DOCS_ROOT,
-    bitrixSet: !!c.BITRIX, bitrixUsers: c.BITRIX_USERS, orderChatUsers: c.ORDER_CHAT_USERS, salesDept: c.SALES_DEPT, hubChat: c.HUB_CHAT, portalBase: c.PORTAL_BASE,
+    bitrixSet: !!c.BITRIX, bitrixUsers: c.BITRIX_USERS, orderChatUsers: c.ORDER_CHAT_USERS, tenderAuditors: c.TENDER_TASK_AUDITORS, salesDept: c.SALES_DEPT, hubChat: c.HUB_CHAT, portalBase: c.PORTAL_BASE,
     bitrixAuthSet: !!(c.BX_CLIENT_ID && c.BX_CLIENT_SECRET), bitrixClientId: c.BX_CLIENT_ID, bitrixDomain: c.BX_DOMAIN,
     deptRole: c.DEPT_ROLE || DEFAULT_DEPT_ROLE, roleOverrides: c.ROLE_OVERRIDES || DEFAULT_OVERRIDES,
     // параметры продаж/КП (K-05 §5.3) — редактируются в «Настройках раздела», без деплоя кода
@@ -10704,6 +10705,7 @@ function saveSettings(body) {
   else if (typeof body.bitrixWebhook === 'string' && body.bitrixWebhook.trim()) next.BITRIX_WEBHOOK = body.bitrixWebhook.trim();
   if (typeof body.bitrixUsers === 'string') next.BITRIX_USERS = body.bitrixUsers.trim();
   if (typeof body.orderChatUsers === 'string') next.ORDER_CHAT_USERS = body.orderChatUsers.trim(); // K-289: участники чата ПЗ по умолчанию
+  if (typeof body.tenderAuditors === 'string') next.TENDER_TASK_AUDITORS = body.tenderAuditors.trim();
   if (typeof body.salesDept === 'string' && body.salesDept.trim()) next.SALES_DEPT_ID = body.salesDept.trim();
   if (typeof body.hubChat === 'string') next.BITRIX_HUB_CHAT = body.hubChat.trim();
   // K-159: 1С и бухгалтерия (пароль 1С через настройки не меняется — только runtime/env)
@@ -14136,6 +14138,7 @@ const server = http.createServer(async (req, res) => {
           try {
             const fields = {
               TITLE: `Подача тендера ${zp} — ${customer}`.slice(0, 250), RESPONSIBLE_ID: submitResp, CREATED_BY: 11,
+              AUDITORS: String(cfg().TENDER_TASK_AUDITORS || '').split(/[,\s;]+/).map((x) => Number(x)).filter((x) => x && x !== submitResp),
               DESCRIPTION: `Подготовить и подать тендерное предложение по запросу ${zp} (${customer}).\nЧат запроса: ${url}\nЗапрос в портале: ${portal}/#sales/${zp}\nСсылка на тендер: ${row['Ссылка на тендер'] || '—'}`,
             };
             // DEADLINE c временем (Bitrix трактует в TZ портала = МСК): «2026-07-15T10:00:00»

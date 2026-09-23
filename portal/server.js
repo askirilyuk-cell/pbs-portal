@@ -947,6 +947,15 @@ function pgDefaultSalesLinks() {
     { label: 'Прошлые КП/ЗП группы', href: '#sales' },
   ];
 }
+// K-288: справочник типоразмеров ПЧ для конструктора позиций ПЗ — pch-sizes.json (генерируется
+// tools/pch_sizes_gen.py из перечня ПЧ-Д-002; расширяется без правки кода). Кэш по mtime файла.
+const PCH_SIZES_FILE = path.join(__dirname, 'pch-sizes.json');
+let _pchCache = null;
+function readPchSizes() {
+  try { const st = fs.statSync(PCH_SIZES_FILE); if (_pchCache && _pchCache.mtime === st.mtimeMs) return _pchCache.data;
+    const data = JSON.parse(fs.readFileSync(PCH_SIZES_FILE, 'utf8')); _pchCache = { mtime: st.mtimeMs, data }; return data; }
+  catch (e) { return { group: 'ПЧ', types: [], materials: [], sizes: [], error: String(e.message || e) }; }
+}
 function readPgMeta() {
   try { return JSON.parse(fs.readFileSync(PG_META_FILE, 'utf8')) || {}; } catch { return {}; }
 }
@@ -12572,6 +12581,7 @@ const server = http.createServer(async (req, res) => {
       catch (e) { console.warn('[settings] сохранение отклонено:', e.message); return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
       return sendJson(res, 200, settingsView());
     }
+    if (p === '/api/dict/pch-sizes' && req.method === 'GET') return sendJson(res, 200, { ok: true, ...readPchSizes() }); // K-288
     if (p === '/api/dict/product-types' && req.method === 'GET') { try { return sendJson(res, 200, { ok: true, groups: await prodTypeOptions() }); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); } } // K-241
     if (p === '/api/dict' && req.method === 'GET') {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', dicts: [] });

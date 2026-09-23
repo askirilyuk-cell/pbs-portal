@@ -14957,6 +14957,7 @@
     })();
     // K-241: «Тип продукции» — группа · подгруппа из классификатора ДП–Д.1.2; прежнее значение, которого нет в классификаторе, остаётся отдельной строкой
     let PROD_GROUPS=null; async function prodGroupsLoad(){ if(PROD_GROUPS)return PROD_GROUPS; try{ const j=await (await fetch('/api/dict/product-types')).json(); if((j.groups||[]).length)PROD_GROUPS=j.groups; return j.groups||[]; }catch(e){ return []; } }
+    let PCH_SIZES=null; async function pchSizesLoad(){ if(PCH_SIZES)return PCH_SIZES; try{ const j=await (await fetch('/api/dict/pch-sizes')).json(); if((j.sizes||[]).length)PCH_SIZES=j; return j; }catch(e){ return null; } } // K-288
     function prodOptionsHtml(groups,cur){ cur=String(cur||''); let seen=false; const o=(l,t)=>{ const on=l===cur; if(on)seen=true; return `<option value="${esc(l)}"${on?' selected':''}>${esc(t)}</option>`; };
       const body=(groups||[]).map(g=>`<optgroup label="${esc(g.label)}">${o(g.label,g.subs.length?g.code+' · вся группа':g.label)}${g.subs.map(x=>o(x.label,x.code+' · '+x.name)).join('')}</optgroup>`).join('');
       return `<option value=""${cur?'':' selected'}>— не указан —</option>${cur&&!seen?`<option value="${esc(cur)}" selected>${esc(cur)} (прежнее значение)</option>`:''}${body}`; }
@@ -15026,6 +15027,7 @@
           <div style="margin-top:var(--gap)">
             <div class="row" style="margin-bottom:10px"><span class="sec-h">Позиции (компоненты задания)</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">маршрут и задачи привяжешь после создания</span></div>
             <div id="ockd-wrap" style="margin-bottom:10px"></div>
+            <div id="opch-wrap" style="margin-bottom:10px"></div>
             <div class="tbl-wrap"><table class="dt" style="--tbl-min:660px"><colgroup><col style="width:66px"><col><col style="width:150px"><col style="width:60px"><col style="width:84px"><col style="width:150px"><col style="width:38px"></colgroup>
               <thead><tr><th>№ поз.</th><th>Наименование / обозначение</th><th>Чертёж / ТУ</th><th>Ед.</th><th>Кол-во</th><th>Срок готовности</th><th></th></tr></thead>
               <tbody id="o-pos">${E&&(E.positions||[]).length?(E.positions||[]).map((p,i)=>posRow(i+1,p)).join(''):posRow(1)}</tbody></table></div>
@@ -15116,6 +15118,77 @@
             renumber();
             toast(`Добавлено позиций: ${items.length}`,'ok');
             ockOpen=false; render();
+          };
+        };
+        render();
+      })();
+      // K-288: вход №3 — «Конструктор ПЧ»: типоразмер (Ø → стенка) → тип → материал → кол-во.
+      // Наименование, артикул и обозначение КД собираются по Приложению Б к РИ.1–Д.1.2 ред. 1.1 из справочника
+      // /api/dict/pch-sizes (portal/pch-sizes.json ← перечень ПЧ-Д-002). Чертёж может отсутствовать в реестре КД —
+      // это не блокирует: позиция создаётся с обозначением, чертёж подтянется, когда появится.
+      (async function ocPchInit(){
+        const wrap=document.getElementById('opch-wrap'); if(!wrap)return;
+        const D=await pchSizesLoad(); if(!D||!(D.sizes||[]).length)return; // справочника нет — блок скрыт
+        if(!posBody.isConnected)return;
+        let open=false, sel={dia:'',wall:'',type:'ПЧ00',mat:'00',qty:'1'};
+        const dias=[]; D.sizes.forEach(z=>{ if(!dias.some(d=>d.dia===z.dia))dias.push({dia:z.dia,proj:z.proj}); });
+        const wallsOf=(dia)=>D.sizes.filter(z=>z.dia===dia);
+        const sizeOf=()=>D.sizes.find(z=>z.dia===sel.dia&&(z.wallMin+'–'+z.wallMax)===sel.wall)||null;
+        const variantOf=()=>{ const z=sizeOf(); return z?(z.variants.find(v=>v.type===sel.type&&v.mat===sel.mat)||null):null; };
+        const ru=(x)=>String(x??'').replace('.',',');
+        const kdHas=(drawing)=>{ const kd=(DESIGN&&DESIGN.kd)||[]; return !!mkWizFindKd(drawing,kd); };
+        const render=()=>{
+          const z=sizeOf(), v=variantOf(); const walls=sel.dia?wallsOf(sel.dia):[];
+          wrap.innerHTML=`<div class="extkd-wrap${open?'':' empty'}">
+              <div class="extkd-strip" id="opch-strip" role="button" tabindex="0" aria-expanded="${open?'true':'false'}" title="Собрать позицию по типоразмеру пакера чашечного типа (группа ПЧ)">
+                <span class="extkd-chev">${open?'▾':'▸'}</span>
+                <span class="extkd-lbl">🧩 Конструктор ПЧ — пакер чашечного типа</span>
+                <span style="font-size:12px;color:var(--sl-500);margin-left:auto">${esc(D.sizes.length)} типоразмеров · перечень ПЧ-Д-002</span>
+              </div>
+              ${open?`<div class="extkd-body pad">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 12px;align-items:end">
+                  <div>${lbl('Ø колонны, мм',true)}<select id="opch-dia" style="${ist}"><option value="">— выберите —</option>${dias.map(d=>`<option value="${esc(d.dia)}"${d.dia===sel.dia?' selected':''}>Ø${esc(ru(d.dia))} · ${esc(d.proj)}</option>`).join('')}</select></div>
+                  <div>${lbl('Стенка колонны, мм',true)}<select id="opch-wall" style="${ist}"${sel.dia?'':' disabled'}>${walls.length?walls.map(w=>{ const k=w.wallMin+'–'+w.wallMax; return `<option value="${esc(k)}"${k===sel.wall?' selected':''}>${esc(ru(w.wallMin))} – ${esc(ru(w.wallMax))}</option>`; }).join(''):'<option value="">— сначала Ø —</option>'}</select></div>
+                  <div style="grid-column:span 2">${lbl('Тип')}<select id="opch-type" style="${ist}">${(D.types||[]).map(t=>`<option value="${esc(t.code)}"${t.code===sel.type?' selected':''}>${esc(t.label)}</option>`).join('')}</select></div>
+                  <div>${lbl('Материал')}<select id="opch-mat" style="${ist}">${(D.materials||[]).map(m=>`<option value="${esc(m.code)}"${m.code===sel.mat?' selected':''}>${esc(m.label)}</option>`).join('')}</select></div>
+                  <div>${lbl('Кол-во, шт')}<input id="opch-qty" type="number" min="1" step="1" value="${esc(sel.qty)}" style="${ist};text-align:right"></div>
+                </div>
+                <div id="opch-prev" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--sl-300);border-radius:var(--r-m);background:#fff;font-size:13px;line-height:1.5">${v?`
+                  <div><b>${esc(v.name)}</b></div>
+                  <div style="display:flex;gap:14px;flex-wrap:wrap;color:var(--sl-600);margin-top:4px">
+                    <span>Артикул: <b style="font-family:ui-monospace,monospace">${esc(v.art)}</b></span>
+                    <span>Чертёж: <b style="font-family:ui-monospace,monospace">${esc(v.drawing)}</b> ${kdHas(v.drawing)?'<span style="color:var(--green,#15803d)">· есть в реестре КД</span>':'<span style="color:var(--sl-500)">· в реестре КД пока нет — позиция всё равно создастся</span>'}</span>
+                    ${v.mass!=null?`<span>Масса: <b>${esc(ru(v.mass))} кг</b>${Number(sel.qty)>1?` · итого ${esc(ru(Math.round(v.mass*Number(sel.qty)*100)/100))} кг`:''}</span>`:''}
+                    ${z&&z.dims&&Object.keys(z.dims).length?`<span>Размеры: ${Object.entries(z.dims).map(([k,x])=>`${esc(k)}=${esc(ru(x))}`).join(' · ')} мм</span>`:''}
+                  </div>`:'<span style="color:var(--sl-500)">Выберите диаметр и стенку колонны — наименование, артикул и обозначение чертежа соберутся автоматически.</span>'}</div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+                  <span style="font-size:12px;color:var(--sl-500);margin-right:auto;align-self:center">Правила: Приложение Б к РИ.1–Д.1.2 ред. 1.1</span>
+                  <button type="button" class="tbtn primary" id="opch-add"${v?'':' disabled'} style="padding:7px 14px;font-size:13px">Добавить в позиции</button>
+                </div>
+              </div>`:''}
+            </div>`;
+          const strip=wrap.querySelector('#opch-strip'); if(strip)strip.onclick=()=>{ open=!open; render(); };
+          if(!open)return;
+          const on=(id,f)=>{ const el=wrap.querySelector('#'+id); if(el)el.onchange=()=>f(el.value); };
+          on('opch-dia',(x)=>{ sel.dia=x; const w=wallsOf(x); sel.wall=w.length?(w[0].wallMin+'–'+w[0].wallMax):''; render(); });
+          on('opch-wall',(x)=>{ sel.wall=x; render(); });
+          on('opch-type',(x)=>{ sel.type=x; render(); });
+          on('opch-mat',(x)=>{ sel.mat=x; render(); });
+          const q=wrap.querySelector('#opch-qty'); if(q){ q.oninput=()=>{ sel.qty=q.value; }; q.onchange=()=>{ sel.qty=q.value; render(); }; }
+          const add=wrap.querySelector('#opch-add'); if(add)add.onclick=()=>{
+            const v=variantOf(); if(!v)return; const z=sizeOf();
+            const qty=Math.max(1,Math.round(Number(wrap.querySelector('#opch-qty').value)||1));
+            const existing=[...posBody.querySelectorAll('[data-prow]')];
+            const isEmptyRow=(tr)=>{ const g=(f)=>{const el=tr.querySelector(`[data-pf="${f}"]`);return el?el.value.trim():'';}; return !g('name')&&!g('drawing')&&!g('qty'); };
+            let tr=existing.find(isEmptyRow);
+            if(!tr){ const nn=existing.length+1; const tmp=document.createElement('tbody'); tmp.innerHTML=posRow(nn); tr=tmp.firstElementChild; posBody.appendChild(tr); wireRow(tr); }
+            const set=(f,x)=>{ const el=tr.querySelector(`[data-pf="${f}"]`); if(el)el.value=x; };
+            set('name',`${v.name} (${v.art})`); set('drawing',v.drawing); set('unit','шт'); set('qty',String(qty));
+            renumber();
+            // тип продукции ПЗ — подгруппа ПЧ из классификатора, если ещё не выбран
+            (async()=>{ const prodEl=document.getElementById('o-prod'); if(!prodEl||prodEl.value)return; const g=await prodGroupsLoad(); let label=''; for(const gr of g){ const x=(gr.subs||[]).find(z=>z.code===(D.group||'ПЧ')); if(x){label=x.label;break;} } if(!label)return; if(![...prodEl.options].some(o=>o.value===label)){ prodEl.innerHTML=prodOptionsHtml(g,label); prodEl.dataset.pg='1'; } prodEl.value=label; })();
+            toast(`Добавлено: ${v.art} × ${qty}${z?' · '+z.proj:''}`,'ok');
+            sel.qty='1'; render();
           };
         };
         render();

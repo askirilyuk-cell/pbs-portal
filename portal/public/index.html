@@ -2354,7 +2354,7 @@
       else if(v==='metal')renderMetal(host,arg);
       else if(v==='counterparties')renderCounterparties(host,arg);
       else if(v==='settings')renderSettings(host);
-      else if(v==='docs')renderDocs(host);
+      else if(v==='docs')renderDocs(host,arg);
       else if(!DATA){host.innerHTML='';}
       else if(v==='station')renderStation(host);
       else if(v==='orders')renderOrdersView(host,arg);
@@ -3247,13 +3247,14 @@
           <b style="color:#1f3a52">Как читается шифр:</b> хвост <span class="code" style="color:var(--navy)">–Х.Y</span> = владелец-процедура (<span class="code">Ф.13–Д.1</span> → <span class="code">ДП–Д.1</span>); подраздел <span class="code">.N</span> = вложенность (<span class="code">ДП–Л.1.2</span> → <span class="code">ДП–Л.1</span>); префикс = тип. Дерево строится из шифра без ручного ввода (бейдж «выведено»); ручные кросс-ссылки — «задано вручную» (приоритет).</div>`;
     }
     // ── главный рендер раздела ──
-    async function renderDocs(host){
+    async function renderDocs(host,arg){
       host.innerHTML=`<div class="card pad" style="color:var(--sub)">Загрузка реестра документов…</div>`;
       let docs=[], live=false, warn='';
       try{ const j=await (await fetch('/api/docs')).json(); docs=j.docs||[]; live=j.mode==='live'&&docs.length>0; warn=j.warning||''; }
       catch(e){ warn=String(e.message||e); }
       if(!docs.length){ docs=DOCS; live=false; }
       DOCS_STATE={list:docs,live};
+      if(arg){ setTimeout(()=>{ if(docFind(arg))openDocCard(arg); else toast('Документ «'+arg+'» не найден в реестре.','warn'); },50); }
       const tag=srcChip(live, live?('база «ИСМ ПБС» · '+docs.length):(warn?('демо · '+warn):'демо-данные'));
       const seg=(v,l)=>`<button data-v="${v}" class="${docsView===v?'on':''}">${l}</button>`;
       const types=['ДП','РИ','Ф'], stats=['Действует','На регистрации','Проект','Архив'];
@@ -3973,7 +3974,7 @@
       const prj=(g.projects||[]).filter(p=>String(p.decNo||'').startsWith(sg.code));
       const tabs=[['main','Обзор'],['dos','Досье'],['hist','История']]; const pane=(k,html)=>`<div data-pgtab="${k}"${pgSubTab===k?'':' style="display:none"'}>${html}</div>`;
       const docsAll=(DOCS_STATE&&DOCS_STATE.list)||[];
-      const docRow=(code)=>{ const d=docsAll.find(x=>x.code===code); return `<div class="pg-ismdoc"><a href="#docs" class="code c-blue" style="text-decoration:none">${esc(code)}</a><span style="flex:1;min-width:0">${d?esc(d.name):'<span class="c-gray">нет в реестре — откройте «Документы ИСМ»</span>'}</span>${d?`<span class="c-gray">ред. ${esc(d.ver||'—')} · ${esc(d.status||'')}</span>`:''}${canW?`<b data-ismdel="${esc(code)}" class="c-gray" style="cursor:pointer" title="Отвязать">✕</b>`:''}</div>`; };
+      const docRow=(code)=>{ const d=docsAll.find(x=>x.code===code); const nm=d?String(d.name).replace(/^Обозначение и наименование изделий продукции\s*—\s*/,''):''; return `<div class="pg-ismdoc"><a href="#docs/${encodeURIComponent(code)}" class="code c-blue" style="text-decoration:none" title="Открыть карточку документа">${esc(code)}</a><span style="flex:1;min-width:0">${d?esc(nm):'<span class="c-gray">нет в реестре — откройте «Документы ИСМ»</span>'}</span>${d?`<span class="c-gray">ред. ${esc(d.ver||'—')} · ${esc(d.status||'')}</span>`:''}${canW?`<b data-ismdel="${esc(code)}" class="c-gray" style="cursor:pointer" title="Отвязать">✕</b>`:''}</div>`; };
       h.innerHTML=`<div class="card pad dp-head"><div class="row" style="flex-wrap:wrap;gap:8px;align-items:baseline"><span class="dp-title">${esc(sg.name)}</span><span class="dnochip" title="Код подгруппы">${esc(sg.code)}</span><span class="c-gray">группа продукции · ${esc(g.code)} ${esc(g.name)}</span>
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-self:center">${sg.chat?`<a class="pbtn" href="${esc(sg.chat)}" target="_blank" rel="noopener" style="border-color:var(--blue);background:var(--blue);color:#fff">${aico('chat',13)} Чат группы</a>${canW?`<button class="pbtn" id="pgs-chatedit" title="Сменить или отвязать чат">…</button>`:''}`:(canW?`<button class="pbtn" id="pgs-chatnew" style="border-style:dashed">${aico('chat',13)} Создать чат группы</button><button class="pbtn" id="pgs-chatedit" title="Привязать существующий чат">Привязать чат…</button>`:'')}${linkBtn('#prodgroups/'+encodeURIComponent(sg.code))}</span></div>
           <div class="dp-sum"><span><b>${prj.length}</b> проектов</span><span><b id="dp-dosn">…</b> в досье</span><span><b>${(sg.ismDocs||[]).length}</b> док. ИСМ</span></div></div>

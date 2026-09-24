@@ -6805,7 +6805,7 @@ async function updateOrder(body, who) {
         const exNum = String(ex['№ позиции'] || '').trim();
         if (locked.has(exNum)) { posOut.locked.push(exNum); continue; } // есть задачи Ф.14 — не трогаем
         upd.push({ Id: ex.Id ?? ex.id, ...row });
-      } else { create.push(row); }
+      } else { create.push({ ...row, 'Статус': 'В очереди' }); } // статус как у позиций при создании ПЗ
     }
     for (const r of mine) { // удаление: чего нет в присланном списке
       const id = String(r.Id ?? r.id); const pn = String(r['№ позиции'] || '').trim();

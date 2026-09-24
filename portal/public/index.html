@@ -15254,7 +15254,7 @@
         const url=E?'/api/orders/update':'/api/orders/create';
         try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
           const msg=document.getElementById('o-msg'); if(msg){ msg.style.color='var(--green)';
-            msg.innerHTML=E?`<i class=ic-okc></i> Сохранено: ${esc(j.note||'изменений нет')}`
+            msg.innerHTML=E?`<i class=ic-okc></i> Сохранено: ${esc(j.note||'изменений нет')}${j.chat&&j.chat.sent?' · обновлённая карточка отправлена в чат заказа':''}`
                            :`<i class=ic-okc></i> Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||positions.length}`; }
           btn.textContent=E?'Сохранено ✓':'Создано ✓';
           ordSel=E?E.numPz:j.numPz; try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}

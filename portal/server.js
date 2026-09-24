@@ -5546,10 +5546,10 @@ function buildOrderChatTitle(row, positions) {
   return parts.join('').replace(/\s+/g, ' ').slice(0, 100);
 }
 
-function buildOrderChatMessage(row, positions) {
+function buildOrderChatMessage(row, positions, head) {
   const num = String(row['№ ПЗ'] || '').trim();
   const portal = cfg().PORTAL_BASE;
-  const L = [`[B]${num} размещён[/B]`, ''];
+  const L = [head || `[B]${num} размещён[/B]`, ''];
   for (const p of positions) {
     const name = String(p['Наименование / обозначение'] || '').trim();
     const dwg = String(p['Чертёж / ТУ'] || '').trim();
@@ -6831,7 +6831,15 @@ async function updateOrder(body, who) {
   if (posOut.removed) bits.push(`удалено: ${posOut.removed}`);
   if (posOut.locked.length) bits.push(`защищены задачами Ф.14: ${[...new Set(posOut.locked)].join(', ')}`);
   if (bits.length) logEvent({ type: 'реквизиты изменены', obj: 'ПЗ', objNum: numPz, who, details: bits.join('; ') });
-  return { ok: true, numPz, changed, positions: posOut, note: bits.join('; ') || 'изменений нет' };
+  // K-291: в чат заказа — обновлённая карточка (что изменилось + актуальный состав позиций), Александр 24.09
+  let chat = { sent: false };
+  if (bits.length && cfg().BITRIX) { const oc = orderChatFor(numPz); if (oc) { try {
+    const [o2, allPos2] = await Promise.all([ncList('orders'), ncList('positions')]); const row2 = o2.find((r) => String(r['№ ПЗ'] || '').trim() === numPz) || o;
+    const pos2 = allPos2.filter((x) => String(x['Позиция'] || '').startsWith(numPz + ' ')).sort((a, b) => String(a['№ позиции'] || '').localeCompare(String(b['№ позиции'] || ''), 'ru', { numeric: true }));
+    const head = `[B]${numPz} обновлён[/B]${who ? ' · ' + who : ''}\nИзменения: ${bits.join('; ')}\n\n[B]Состав заказа теперь:[/B]`;
+    await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: buildOrderChatMessage(row2, pos2, head) }); chat = { sent: true, chat: oc.chat };
+  } catch (e) { chat = { sent: false, reason: String(e.message || e) }; console.warn('K-291: чат заказа при правке:', e.message); } } }
+  return { ok: true, numPz, changed, positions: posOut, note: bits.join('; ') || 'изменений нет', chat };
 }
 // удаление ПЗ — только «Размещён» и только пока не привязаны МК и задачи Ф.14
 async function deleteOrder(body, who) {

@@ -14590,6 +14590,7 @@
         <div class="card pad" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:20px;font-weight:700;color:var(--navy)">${esc(o.numPz)}</span>${stCell(o.status)}${linkBtn('#orders/'+encodeURIComponent(o.numPz))}
           <span id="od-flow" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap"></span>
+          ${odCanEdit(o)?`<button class="btn btn--sm" data-od-edit title="Правка реквизитов и позиций (добавить / изменить / удалить позиции)"><i class=ic-pencil></i> Изменить</button>`:''}
           <span style="font-size:13px;color:var(--sub)">${esc(o.customer||'')}${o.orderType?' · '+esc(o.orderType):''}</span>
           <button class="x" id="od-x" aria-label="Закрыть" title="Закрыть (Esc)" style="margin-left:auto;background:var(--sl-100);border:0;width:26px;height:26px;border-radius:var(--radius);cursor:pointer;color:var(--sub);font-size:14px">✕</button>
         </div>
@@ -14600,7 +14601,7 @@
         <div id="od-znz-panel"></div>
         <div class="card pad" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
           <span id="od-chat" style="margin-right:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--sub)"></span>
-          ${odCanEdit(o)?`<button class="ui-btn" id="od-edit-btn" title="Правка реквизитов и позиций Ф.1–П.2"><i class=ic-pencil></i> Изменить</button>`:''}
+          ${odCanEdit(o)?`<button class="ui-btn" id="od-edit-btn" title="Правка реквизитов и позиций Ф.1–П.2 (добавить / изменить / удалить позиции)"><i class=ic-pencil></i> Реквизиты и позиции</button>`:''}
           <button class="ui-btn" id="od-znz-btn" title="Разместить заявку на закупку под этот заказ (ЗнЗ с источником ${esc(o.numPz)})"><i class=ic-box></i> Заявка на закупку</button>
           ${routeBtns}
           <a class="pbtn" href="/api/print/pz/${encodeURIComponent(o.numPz)}" target="_blank" rel="noopener">${aico('print',14)} Печать ПЗ (Ф.1–П.2)</a>
@@ -14618,7 +14619,8 @@
       odWireFlow(host,o);
       odWireChat(o);   // K-102: «Чат заказа: chatNNN [задать]» (оверлей order-chats.json)
       const zb=host.querySelector('#od-znz-btn'); if(zb)zb.onclick=()=>odToggleZnzPanel(o);
-      const eb=host.querySelector('#od-edit-btn'); if(eb)eb.onclick=()=>{ openCreateOrder(o); const pn=document.getElementById('ocreate-panel'); if(pn)pn.scrollIntoView({behavior:'smooth',block:'start'}); };
+      const odEdit=()=>{ openCreateOrder(o); const pn=document.getElementById('ocreate-panel'); if(pn)pn.scrollIntoView({behavior:'smooth',block:'start'}); };
+      host.querySelectorAll('#od-edit-btn,[data-od-edit]').forEach(b=>b.onclick=odEdit); host._odEdit=odEdit;
       host.querySelectorAll('[data-odreq]').forEach(el=>el.onclick=()=>{ odReqOpen=!odReqOpen; odShowDetail(o.numPz); });
       // K-273: блок «Продажи» в карточке ПЗ (только администратор): сумма этого заказа, привязка / отвязка запроса
       { const sb=host.querySelector('#od-sales'); if(sb){ const again=async()=>{ await load(); odShowDetail(o.numPz); };
@@ -14803,11 +14805,12 @@
         const nomen=(o.positions||[]).map(p=>`<div class="nrow"><b>${esc(p.numPos)}</b><span class="sp">${esc(p.name||'')}</span>${p.drawing?`<span style="color:var(--sub)">чертёж ${esc(p.drawing)}</span>`:''}<span style="color:var(--sub)">${esc(p.qty??'')} ${esc(p.unit||'')}</span>${badge(p.status)}${DATA.mode==='live'?`<span style="margin-left:auto">${posRouteSelect(p)}</span>`:''}</div>`).join('')||'<div class="nrow" style="color:var(--sub)">Позиции не заведены</div>';
         const genBtn=DATA.mode==='live'?`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;justify-content:flex-end"><span style="font-size:12px;color:var(--sub)">Привяжите МК к позициям, затем</span><button class="tbtn primary" id="pos-gen">⚙ Сгенерировать задачи Ф.14</button></div>`:'';
         // МК-мост п.1: кнопка «Сформировать МК» — инлайн-мастер раскладки позиций по МК (см. openMkWizard)
-        const mkRow=DATA.mode==='live'?`<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="tbtn primary" id="mk-wiz-btn">⚙ Сформировать МК</button></div>`:'';
+        const mkRow=DATA.mode==='live'?`<div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">${odCanEdit(o)?`<button class="tbtn" id="od-pos-add" title="Открыть правку заказа: добавить, изменить или удалить позиции">＋ Добавить позиции</button>`:''}<button class="tbtn primary" id="mk-wiz-btn">⚙ Сформировать МК</button></div>`:'';
         h.innerHTML=`<div id="mkwiz-panel"></div><div class="card pad nomen">${nomen}</div>${mkRow}${genBtn}`;
         wirePosRoutes(h); // после load() вся вкладка перерисуется через route()
         const gb=h.querySelector('#pos-gen'); if(gb)gb.onclick=()=>genOrderTasks(o.numPz);
         const mb=h.querySelector('#mk-wiz-btn'); if(mb)mb.onclick=()=>{ mkWizNumPz=o.numPz; openMkWizard(); };
+        const pa=h.querySelector('#od-pos-add'); if(pa)pa.onclick=()=>{ const host=document.getElementById('odetail'); if(host&&host._odEdit)host._odEdit(); };
       } else if(ordTab==='tasks'){
         const tk=(o.tasks||[]).slice().sort((a,b)=>(Number(a.opNum)||0)-(Number(b.opNum)||0));
         const tasks=tk.map(t=>{const cls=t.status==='Выполнено'?'done':(t.status==='В работе'?'work':'');return `<div class="tcard ${cls}"><div class="st">${esc(t.sectionCode||t.section||'')}${(t.opNum!==''&&t.opNum!=null)?' · оп.'+esc(t.opNum):''}</div><div class="nm">${esc(t.title||t.op||'')}</div>${badge(t.status)}</div>`;}).join('')||'<div style="color:var(--sub)">Задач нет</div>';

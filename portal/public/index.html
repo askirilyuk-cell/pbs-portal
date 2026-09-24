@@ -3642,7 +3642,7 @@
       const members=(p.members||[]);
       const list=members.length
         ? members.map(m=>`<div class="team-row"><span class="team-av">${esc(ini(m.name))}</span><div style="min-width:0"><div class="team-nm">${esc(m.name)}</div>${m.pos?`<div class="team-pos">${esc(m.pos)}</div>`:''}</div></div>`).join('')
-        : `<div class="team-empty">${p.chat?'Участники подтянутся из чата Bitrix24 после подключения вебхука (live).':'Чат проекта не создан. При создании чата в него добавятся участники проекта.'}</div>`;
+        : `<div class="team-empty">${p.chat?'Загружаю участников чата…':'Чат проекта не создан. При создании чата в него добавятся участники проекта.'}</div>`;
       sc.innerHTML=`<div class="team-drawer" role="dialog" aria-label="Команда проекта">
           <div class="team-head"><div style="min-width:0"><div class="team-title">Команда проекта</div><div class="team-sub">ПБС.${esc(decNo)} · участники чата Bitrix24</div></div><button class="team-x" aria-label="Закрыть">✕</button></div>
           <div class="team-body">${list}</div>
@@ -3652,6 +3652,11 @@
       sc.onclick=(e)=>{ if(e.target===sc)close(); };
       const xb=sc.querySelector('.team-x'); if(xb)xb.onclick=close;
       document.addEventListener('keydown',function onEsc(e){ if(e.key==='Escape'){ close(); document.removeEventListener('keydown',onEsc); } });
+      // K-292: участники — из чата Bitrix24 через сервер (im.chat.user.list), кэшируются в объекте проекта
+      if(!members.length&&p.chat){ fetch('/api/design/team?proj='+encodeURIComponent(decNo)).then(r=>r.json()).then(j=>{ const body=sc.querySelector('.team-body'); if(!body||!sc.classList.contains('open'))return;
+        const ms=(j&&j.members)||[]; p.members=ms;
+        body.innerHTML=ms.length?ms.map(m=>`<div class="team-row"><span class="team-av">${esc(ini(m.name))}</span><div style="min-width:0"><div class="team-nm">${esc(m.name)}</div>${m.pos?`<div class="team-pos">${esc(m.pos)}</div>`:''}</div></div>`).join('')
+          :`<div class="team-empty">${esc((j&&j.warning)?'Не удалось получить участников: '+j.warning:'В чате пока нет участников.')}</div>`; }).catch(()=>{}); }
     }
     // продуктовые группы: порядок и имена (сверено с product-groups-meta.json)
     const D_GROUP_ORDER=['ОК','СП','ПВО','РТИ','БМ','ЦХ'];

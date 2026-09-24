@@ -14397,6 +14397,25 @@ const server = http.createServer(async (req, res) => {
         projLog(decNo, 'комментарий', `Проект переименован: «${old}» → «${name}»`, sR);
         return sendJson(res, 200, { ok: true, name, old }); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
+    // K-292: команда проекта = участники его чата Bitrix24 (панель «Команда»). Раньше клиент показывал заглушку
+    // «подтянутся после подключения вебхука», а сервер участников не отдавал вовсе. Имена — из кэша активных сотрудников (K-289).
+    if (p === '/api/design/team' && req.method === 'GET') {
+      const proj = String(url.searchParams.get('proj') || '').trim();
+      if (!cfg().BITRIX) return sendJson(res, 200, { ok: true, members: [], warning: 'Вебхук Bitrix не задан' });
+      try {
+        const row = (await ncListSoft('design_projects')).find((r) => String(r['Децимальный номер'] || '').trim() === proj);
+        const chat = dossierChatId(row); if (!chat) return sendJson(res, 200, { ok: true, members: [], chat: '' });
+        const ids = (await bitrixCall('im.chat.user.list', { CHAT_ID: Number(chat) }) || []).map(Number).filter(Boolean);
+        if (!global._bxUsersCache || Date.now() - global._bxUsersCache.at > 600000) {
+          const out = []; let start = 0;
+          for (let i = 0; i < 10; i++) { const r = await bitrixCall('user.get', { FILTER: { ACTIVE: true }, start }); const batch = Array.isArray(r) ? r : (r.items || []); out.push(...batch); if (batch.length < 50) break; start += 50; }
+          global._bxUsersCache = { at: Date.now(), users: out.map((u) => ({ id: Number(u.ID), name: `${u.LAST_NAME || ''} ${u.NAME || ''}`.trim() || ('id' + u.ID), position: u.WORK_POSITION || '' })).filter((u) => u.id).sort((a, b) => a.name.localeCompare(b.name, 'ru')) };
+        }
+        const byId = new Map(global._bxUsersCache.users.map((u) => [u.id, u]));
+        const members = ids.map((id) => { const u = byId.get(id); return { id, name: u ? u.name : 'id' + id, pos: u ? u.position : '' }; }).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        return sendJson(res, 200, { ok: true, chat, members });
+      } catch (e) { return sendJson(res, 200, { ok: true, members: [], warning: String(e.message || e) }); }
+    }
     if (p === '/api/design/project-create' && req.method === 'POST') {
       try { return sendJson(res, 200, await createDesignProject(await readBody(req))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }

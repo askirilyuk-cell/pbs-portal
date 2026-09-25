@@ -11020,6 +11020,15 @@ const OPERATION_KINDS = ['Токарная', 'Фрезерная', 'Наплав
 const OPERATION_KIND_DEFAULT = 'Токарная';
 // migrate-041: блок «Зажим и кулачки» карты наладки — колонка ↔ ключ тела (все Text/LongText).
 //   Патрон подтягивается из паспорта станка (eqShape), но «Патрон (тип)» карты — editable override/снапшот.
+// K-305: оснащение задней бабки (Александр 25.09)
+const SETUP_TAIL_FIELDS = [
+  ['ЗБ — оснащение', 'tailKind', 'SingleLineText'],
+  ['ЗБ — конус / посадка', 'tailTaper', 'SingleLineText'],
+  ['ЗБ — центр / патрон (инв. №)', 'tailTool', 'SingleLineText'],
+  ['ЗБ — вылет пиноли, мм', 'tailQuill', 'SingleLineText'],
+  ['ЗБ — усилие поджима', 'tailForce', 'SingleLineText'],
+  ['ЗБ — примечание', 'tailNote', 'SingleLineText'],
+];
 const SETUP_JAW_FIELDS = [
   ['Патрон (тип)', 'chuckType', 'SingleLineText'],
   ['Тип кулачков (карта)', 'jawTypeCard', 'SingleLineText'],
@@ -11035,6 +11044,13 @@ const SETUP_JAW_FIELDS = [
 // пусто/некорректно → «Токарная» (fallback: существующие карты трактуем токарными)
 const effOperationKind = (v) => { const t = String(v || '').trim(); return OPERATION_KINDS.includes(t) ? t : OPERATION_KIND_DEFAULT; };
 const nextSetupNumber = (year) => nextNumber('setup_cards', '№', 'КН', year);
+// K-305: номер карты по станку — КН-<инв. № без площадки и дефисов>-NNN, счётчик в рамках станка
+async function nextSetupNumberFor(invNo) {
+  const short = String(invNo || '').trim().replace(/^(ПБС|ЕНД)-/i, '').replace(/-/g, '') || 'X'; const prefix = `КН-${short}-`;
+  const rows = await ncListSoft('setup_cards'); let max = 0;
+  for (const r of rows) { const v = String(r['№'] || '').trim(); if (v.startsWith(prefix)) { const n = Number(v.slice(prefix.length)); if (Number.isFinite(n)) max = Math.max(max, n); } }
+  return prefix + String(max + 1).padStart(3, '0');
+}
 
 // строки карты карты → фильтр по родителю: FK setup_cards_id (hm-образец saveRoute:
 // operations.routes_id) ИЛИ reciprocal-link «Карты наладки» (устойчиво к формату).
@@ -11134,6 +11150,7 @@ async function buildSetupCard(id) {
   // блок «Зажим и кулачки» (migrate-041): фактические параметры карты + привязанный комплект + патрон станка
   const jaw = {};
   for (const [col, key] of SETUP_JAW_FIELDS) jaw[key] = c[col] || '';
+  const tail = {}; for (const [col, key] of SETUP_TAIL_FIELDS) tail[key] = c[col] || ''; item.tail = tail; item.purpose = c['Назначение'] || ''; // K-305
   const jawSetId = tcLinkIds(c['Комплект кулачков'])[0];
   const setRow = jawSetId != null ? jawById[String(jawSetId)] : null;
   jaw.chuckSetId = jawSetId ?? null;
@@ -11308,8 +11325,7 @@ function buildSetupCardHtml(d) {
 // POST создать/обновить карту наладки + пересоздать строки (образец saveRoute)
 async function saveSetupCard(body, who) {
   const isNew = !(body.id != null && body.id !== '');
-  const name = String(body.name || '').trim();
-  if (!name) throw new Error('Не задано наименование карты наладки.');
+  const name = String(body.name || '').trim(); // K-305: необязательно — иначе автоподпись по станку/кулачкам/позициям
   const machineId = (body.machineId != null && body.machineId !== '') ? Number(body.machineId) : null;
   if (!machineId || !Number.isFinite(machineId)) throw new Error('Не выбран станок (обязательное поле).');
   const status = SETUP_STATUSES.includes(String(body.status || '').trim()) ? String(body.status).trim() : 'Черновик';
@@ -11325,7 +11341,11 @@ async function saveSetupCard(body, who) {
   // N позиций: явно из тела (снапшот с UI) → иначе от типа головки + «Позиций револьвера» станка (плоская → 4)
   const revolverSlots = (body.revolverSlots != null && body.revolverSlots !== '') ? effRevolver(body.revolverSlots) : effSlots(headTypeEff, e.revolverSlots);
 
-  const cardRow = { 'Наименование': name, 'Статус': status };
+  const autoName = `Наладка ${String(e.model || e.name || '').trim()}${body.jaw && body.jaw.jawSetNo ? ' · кулачки ' + String(body.jaw.jawSetNo).trim() : ''} · ${(Array.isArray(body.lines) ? body.lines.filter((l) => l && (l.holderId || l.insertId)).length : 0)} поз.`;
+  const cardRow = { 'Наименование': name || autoName, 'Статус': status };
+  if ('purpose' in body) { try { await ncEnsureColumn('setup_cards', 'Назначение', 'LongText'); cardRow['Назначение'] = String(body.purpose || '').trim(); } catch (e2) { console.warn('K-305 Назначение:', e2.message); } }
+  const tailIn = (body.tail && typeof body.tail === 'object') ? body.tail : {};
+  for (const [col, key, uidt] of SETUP_TAIL_FIELDS) { if (!(key in tailIn)) continue; try { await ncEnsureColumn('setup_cards', col, uidt); cardRow[col] = String(tailIn[key] || '').trim(); } catch (e2) { console.warn('K-305 ЗБ:', e2.message); } }
   cardRow['Модель-снапшот'] = [e.name, e.model].filter(Boolean).join(' · ') || e.invNo || '';
   // снапшот N (migrate-038); defensive ensure — карта помнит N даже если у станка потом изменят
   try { await ncEnsureColumn('setup_cards', 'Позиций револьвера (снапшот)', 'Decimal'); cardRow['Позиций револьвера (снапшот)'] = revolverSlots; }
@@ -11351,8 +11371,7 @@ async function saveSetupCard(body, who) {
   let cardId = (body.id != null && body.id !== '') ? Number(body.id) : null;
   let no = '';
   if (cardId == null) {
-    const year = new Date().getFullYear();
-    no = await nextSetupNumber(year);
+    no = await nextSetupNumberFor(e.invNo); // K-305: шифр по станку КН-ОБ022-NNN (вариант 1, 25.09)
     cardRow['№'] = no;
     cardRow['Дата'] = new Date().toISOString().slice(0, 10);
     const cr = await ncCreateMany('setup_cards', [cardRow]);

@@ -16828,7 +16828,7 @@
         </div>
         <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:var(--gap)">
           <div style="grid-column:1/3"><div style="font-size:12px;color:var(--sl-500)">Наименование</div><div style="color:var(--ink);font-weight:600">${esc(it.name||'—')}</div></div>
-          <div><div style="font-size:12px;color:var(--sl-500)">Деталь</div><div>${esc(it.part||'—')}</div></div>
+          <div><div style="font-size:12px;color:var(--sl-500)">Назначение</div><div>${esc(it.purpose||it.part||'—')}</div></div>
           <div><div style="font-size:12px;color:var(--sl-500)">Дата</div><div>${esc(it.date||'—')}</div></div>
           <div style="grid-column:1/3"><div style="font-size:12px;color:var(--sl-500)">Станок</div><div style="color:var(--ink);font-weight:600">${esc(it.machine||'—')}${it.machineInvNo?` <span class="c-gray" style="font-weight:400">· инв. ${esc(it.machineInvNo)}</span>`:''}</div></div>
           <div><div style="font-size:12px;color:var(--sl-500)">Тип головки</div><div style="color:var(--ink);font-weight:600">${esc(it.headType||(shape==='flat'?'Плоская':'Револьверная круглая'))}</div></div>
@@ -16841,6 +16841,7 @@
         <div class="card pad"><div class="row" style="margin-bottom:10px"><span class="sec-h">${esc(headLabel)} · позиции T1…T${N}</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">занято ${filledN} из ${N}</span></div>${grid}${det}
           <div style="margin-top:9px;font-size:12px;color:var(--sl-500)">Позиция = гнездо головки. Пустая позиция — «свободно». Вылет показан выступом (радиальным на диске / вертикальным на гребёнке). Державка и пластина — из ISO-каталога инструмента (Этап 2a). Тип и число позиций — свойство станка (снапшот).</div></div>
         ${setupJawView(it)}
+        ${(()=>{ const t=(it.tail||{}); const has=Object.values(t).some(v=>v&&v!=='не используется'); if(!has)return ''; const P=(l,v)=>`<div><div style="font-size:11px;color:var(--sl-500)">${l}</div><div style="font-weight:600;color:var(--ink)">${v||'<span style=\"color:var(--sl-500);font-weight:400\">—</span>'}</div></div>`; return `<div class="card pad" style="margin-top:var(--gap)"><div class="sec-h" style="margin-bottom:10px">Задняя бабка — оснащение</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px 18px;font-size:13px">${P('Оснащение',esc(t.tailKind))}${P('Конус / посадка',esc(t.tailTaper))}${P('Центр / патрон',esc(t.tailTool))}${P('Вылет пиноли, мм',esc(t.tailQuill))}${P('Усилие поджима',esc(t.tailForce))}${P('Примечание',esc(t.tailNote))}</div></div>`; })()}
         <div class="card pad" style="margin-top:var(--gap)"><div class="sec-h" style="margin-bottom:10px">История изменений</div>${(it.history||[]).length?`<div style="display:flex;flex-direction:column;gap:8px;font-size:var(--fs-s)">${it.history.map(h=>`<div style="display:flex;gap:10px"><span class="c-gray nw">${esc(h.when)}</span><span><b>${esc(h.who||'—')}</b> · ${esc(h.type)}${h.details?' — '+esc(h.details):''}</span></div>`).join('')}</div>`:'<span class="c-gray" style="font-size:var(--fs-s)">Записей нет</span>'}</div>
 `;
       const back=host.querySelector('[href="#setup"]'); if(back)back.onclick=(e)=>{e.preventDefault(); renderSetupView(host);};
@@ -16910,10 +16911,10 @@
           <div class="card pad">
             <div class="sec-h" style="margin-bottom:10px">Реквизиты карты</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px 18px">
-              <div style="grid-column:1/3">${lbl('Наименование',true)}<input id="sb-name" style="${ist}" value="${esc(init.item.name||'')}" placeholder="напр. Наладка на втулку 2ДТ.180"></div>
+              <div style="grid-column:1/3">${lbl('Наименование')}<input id="sb-name" style="${ist}" value="${esc(init.item.name||'')}" placeholder="необязательно — соберётся из станка, кулачков и позиций"></div>
               <div>${lbl('Дата')}<div style="padding:7px 0;font-size:var(--fs-s);color:var(--sl-700)">${esc(init.item.date||new Date().toLocaleDateString('ru-RU'))}</div></div>
               <div style="grid-column:1/3">${lbl('Станок',true)}<select id="sb-machine" style="${ist}">${eqOpt(init.item.machineId)}</select></div>
-              <div>${lbl('Деталь')}<input id="sb-part" style="${ist}" value="${esc(init.item.part||'')}" placeholder="обозначение / наим. детали"></div>
+              <div style="grid-column:1/3">${lbl('Назначение')}<input id="sb-purpose" style="${ist}" value="${esc(init.item.purpose||'')}" placeholder="для чего наладка — напр. корпуса пакеров Ø168–219, наружная обточка"><div style="font-size:11px;color:#8a97a6;margin-top:3px">Деталь и чертёж определяются операциями МК, к которым привязана карта</div></div>
               <div>${lbl('Позиций головки',true)}<input id="sb-nslots" type="number" min="1" max="60" step="1" style="${ist}" value="${initN}"><div id="sb-headinfo" style="font-size:11px;color:#8a97a6;margin-top:3px"></div></div>
             </div>
           </div>
@@ -16950,6 +16951,17 @@
               <div>${lbl('Поджим / люнет')}<input id="sb-jaw-support" style="${ist}" placeholder="центр / люнет / нет"></div>
               <div>${lbl('Биение после зажима')}<input id="sb-jaw-runout" style="${ist}" placeholder="≤ мм"></div>
               <div style="grid-column:1/4">${lbl('Примечание / эскиз кулачков')}<input id="sb-jaw-note" style="${ist}" placeholder="расточка сырых под Ø…, прилегание по краске"></div>
+            </div>
+          </div>
+          <div class="card pad" style="margin-top:var(--gap)">
+            <div class="row" style="margin-bottom:10px"><span class="sec-h">Задняя бабка — оснащение</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">поджим заготовки</span></div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px 18px">
+              <div>${lbl('Оснащение')}<select id="sb-tail-kind" style="${ist}">${['не используется','центр вращающийся','центр неподвижный','центр поводковый','сверлильный патрон','люнет задний'].map(o=>`<option${(init.item.tail&&init.item.tail.tailKind)===o?' selected':''}>${o}</option>`).join('')}</select></div>
+              <div>${lbl('Конус / посадка')}<input id="sb-tail-taper" style="${ist}" value="${esc((init.item.tail||{}).tailTaper||'')}" placeholder="напр. Морзе 4"></div>
+              <div>${lbl('Центр / патрон (инв. №)')}<input id="sb-tail-tool" style="${ist}" value="${esc((init.item.tail||{}).tailTool||'')}" placeholder="из справочника оснастки"></div>
+              <div>${lbl('Вылет пиноли, мм')}<input id="sb-tail-quill" style="${ist}" value="${esc((init.item.tail||{}).tailQuill||'')}"></div>
+              <div>${lbl('Усилие поджима')}<input id="sb-tail-force" style="${ist}" value="${esc((init.item.tail||{}).tailForce||'')}" placeholder="кН / деление"></div>
+              <div>${lbl('Примечание')}<input id="sb-tail-note" style="${ist}" value="${esc((init.item.tail||{}).tailNote||'')}"></div>
             </div>
           </div>
           <div id="sb-err" style="margin-top:10px;color:var(--red);font-size:13px"></div>
@@ -17054,7 +17066,6 @@
         const errEl=document.getElementById('sb-err'); errEl.textContent='';
         const name=document.getElementById('sb-name').value.trim();
         const machineId=machineSel.value;
-        if(!name){errEl.textContent='Укажите наименование карты наладки.';return;}
         if(!machineId){errEl.textContent='Выберите станок (обязательное поле).';return;}
         const N=curN();
         const lines=Object.keys(slots).map(Number).filter(n=>n>=1&&n<=N).sort((a,b)=>a-b)
@@ -17065,7 +17076,7 @@
         const jaw={chuckType:jawChuck.value.trim(),chuckSetId:jawSet.value||'',jawSetNo:(jawSetById[String(jawSet.value)]||{}).setNo||'',
           jawTypeCard:jawType.value.trim(),jawClampDia:jawClamp.value.trim(),jawLen:jawLen.value.trim(),jawForce:jawForce.value.trim(),
           workpieceOverhang:jawOver.value.trim(),jawSupport:jawSup.value.trim(),jawRunout:jawRun.value.trim(),jawNote:jawNote.value.trim()};
-        const body={id:cardId,name,machineId,revolverSlots:N,headType:curHeadType,operationKind,part:document.getElementById('sb-part').value.trim(),lines,jaw};
+        const body={id:cardId,name,machineId,revolverSlots:N,headType:curHeadType,operationKind,purpose:document.getElementById('sb-purpose').value.trim(),lines,jaw,tail:{tailKind:document.getElementById('sb-tail-kind').value,tailTaper:document.getElementById('sb-tail-taper').value.trim(),tailTool:document.getElementById('sb-tail-tool').value.trim(),tailQuill:document.getElementById('sb-tail-quill').value.trim(),tailForce:document.getElementById('sb-tail-force').value.trim(),tailNote:document.getElementById('sb-tail-note').value.trim()}};
         const btn=document.getElementById('sb-save'); btn.disabled=true; const ot=btn.textContent; btn.textContent='Сохранение…';
         try{ const r=await fetch('/api/setup-card/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
           SETUP=null; toast(`Карта наладки ${esc(j.no||'')} сохранена · занято слотов: ${j.lines}`,'ok'); openSetupCard(host,j.id);

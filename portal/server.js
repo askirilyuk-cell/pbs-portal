@@ -11067,8 +11067,8 @@ function setupLineShape(l, holderById, insertById) {
   return {
     id: l.Id ?? l.id, pos: Number(l['№ п/п']) || 0,
     toolPos: l['Позиция инструмента'] || '',
-    holderId: hId ?? null, holderIso: h ? String(h['ISO-код'] || '') : '', holderMaker: h ? String(h['Производитель'] || '') : '',
-    insertId: iId ?? null, insertIso: ins ? String(ins['ISO-код'] || '') : '', insertGrade: ins ? String(ins['Сплав / марка'] || '') : '',
+    holderId: hId ?? null, holderIso: h ? String(h['ISO-код'] || '') : String(l['Державка (ISO, текст)'] || ''), holderMaker: h ? String(h['Производитель'] || '') : '', holderInCatalog: !!h,
+    insertId: iId ?? null, insertIso: ins ? String(ins['ISO-код'] || '') : String(l['Пластина (ISO, текст)'] || ''), insertGrade: ins ? String(ins['Сплав / марка'] || '') : '', insertInCatalog: !!ins,
     overhang: l['Вылет'] || '', params: l['Параметры'] || '', note: l['Примечание'] || '',
   };
 }
@@ -11341,7 +11341,7 @@ async function saveSetupCard(body, who) {
   // N позиций: явно из тела (снапшот с UI) → иначе от типа головки + «Позиций револьвера» станка (плоская → 4)
   const revolverSlots = (body.revolverSlots != null && body.revolverSlots !== '') ? effRevolver(body.revolverSlots) : effSlots(headTypeEff, e.revolverSlots);
 
-  const autoName = `Наладка ${String(e.model || e.name || '').trim()}${body.jaw && body.jaw.jawSetNo ? ' · кулачки ' + String(body.jaw.jawSetNo).trim() : ''} · ${(Array.isArray(body.lines) ? body.lines.filter((l) => l && (l.holderId || l.insertId)).length : 0)} поз.`;
+  const autoName = `Наладка ${String(e.model || e.name || '').trim()}${body.jaw && body.jaw.jawSetNo ? ' · кулачки ' + String(body.jaw.jawSetNo).trim() : ''} · ${(Array.isArray(body.lines) ? body.lines.filter((l) => l && (l.holderId || l.insertId || String(l.holderIso || '').trim() || String(l.insertIso || '').trim())).length : 0)} поз.`;
   const cardRow = { 'Наименование': name || autoName, 'Статус': status };
   if ('purpose' in body) { try { await ncEnsureColumn('setup_cards', 'Назначение', 'LongText'); cardRow['Назначение'] = String(body.purpose || '').trim(); } catch (e2) { console.warn('K-305 Назначение:', e2.message); } }
   const tailIn = (body.tail && typeof body.tail === 'object') ? body.tail : {};
@@ -11421,8 +11421,11 @@ async function saveSetupCard(body, who) {
     const overhang = String(ln.overhang || '').trim();
     const params = String(ln.params || '').trim();
     const note = String(ln.note || '').trim();
-    if (holderId == null && insertId == null && !overhang && !params && !note) continue; // пустой слот — не храним
+    const holderIso = holderId == null ? String(ln.holderIso || '').trim().slice(0, 60) : '', insertIso = insertId == null ? String(ln.insertIso || '').trim().slice(0, 60) : ''; // K-307: инструмент вне каталога — ISO-код текстом
+    if (holderId == null && insertId == null && !holderIso && !insertIso && !overhang && !params && !note) continue; // пустой слот — не храним
     const lineRow = { '№ п/п': slot };
+    if (holderIso) { try { await ncEnsureColumn('setup_card_lines', 'Державка (ISO, текст)', 'SingleLineText'); lineRow['Державка (ISO, текст)'] = holderIso; } catch {} }
+    if (insertIso) { try { await ncEnsureColumn('setup_card_lines', 'Пластина (ISO, текст)', 'SingleLineText'); lineRow['Пластина (ISO, текст)'] = insertIso; } catch {} }
     if (toolPos) lineRow['Позиция инструмента'] = toolPos;
     if (overhang) lineRow['Вылет'] = overhang;
     if (params) lineRow['Параметры'] = params;

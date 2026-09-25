@@ -16797,9 +16797,14 @@
           ${(set&&set.files&&set.files.length)?`<div style="margin-top:10px;font-size:13px;color:var(--sl-500)">Эскиз/фото комплекта: ${cjFileLinks(set.setNo,set.files)}</div>`:''}
         </div>`;
     }
+    // K-307: наличие инструмента на складе по ISO-коду — из реестра «Инструмент и оснастка» (остаток). Карта наладки может
+    //        ссылаться на инструмент, которого ещё нет ни в каталоге, ни на складе — тогда показываем «нет на складе».
+    let TOOLS_STOCK=null; async function toolsStockLoad(){ if(TOOLS_STOCK)return TOOLS_STOCK; try{ const j=await (await fetch('/api/tools')).json(); TOOLS_STOCK=(j.items||[]).map(i=>({key:String((i.name||'')+' '+(i.gost||'')+' '+(i.code||'')).toUpperCase(),bal:Number(i.balance)||0})); }catch(e){ TOOLS_STOCK=[]; } return TOOLS_STOCK; }
+    function toolStock(iso){ const k=String(iso||'').trim().toUpperCase(); if(!k||!TOOLS_STOCK)return null; const hit=TOOLS_STOCK.filter(t=>t.key.includes(k)); if(!hit.length)return {found:false,bal:0}; return {found:true,bal:hit.reduce((a,t)=>a+t.bal,0)}; }
+    function stockBadge(iso){ const st=toolStock(iso); if(!st)return ''; if(!st.found||st.bal<=0)return `<span class="badge" style="color:#b45309;background:#fffbeb;border:1px solid #fde68a;margin-left:6px" title="В реестре инструмента нет остатка по этому ISO-коду">нет на складе</span>`; return `<span class="badge" style="color:#15803d;background:#f0fdf4;border:1px solid #bbf7d0;margin-left:6px">на складе ${st.bal}</span>`; }
     async function openSetupCard(host,id){
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка карты наладки…</div>';
-      let d; try{ d=await (await fetch('/api/setup-card?id='+encodeURIComponent(id))).json(); }catch(e){ host.innerHTML='<div class="card pad c-red">Ошибка: '+esc(e.message)+'</div>'; return; }
+      let d; try{ [d]=await Promise.all([(await fetch('/api/setup-card?id='+encodeURIComponent(id))).json(),toolsStockLoad()]); }catch(e){ host.innerHTML='<div class="card pad c-red">Ошибка: '+esc(e.message)+'</div>'; return; }
       if(!d||!d.item){ host.innerHTML='<div class="card pad">Карта недоступна. <a href="#setup">← назад</a></div>'; if(host.querySelector('[href="#setup"]'))host.querySelector('[href="#setup"]').onclick=(e)=>{e.preventDefault();renderSetupView(host);}; return; }
       const it=d.item, lines=d.lines||[], live=d.mode==='live';
       const shape=it.headShape||'round';
@@ -16816,8 +16821,8 @@
       // таблица деталей только по заполненным слотам (вылет/параметры/примечание)
       const det=filledN?`<table class="dt" style="font-size:13px;width:100%;margin-top:12px"><thead><tr><th style="width:56px">Слот</th><th>Державка (ISO)</th><th>Пластина (ISO)</th><th style="width:90px">Вылет</th><th>Параметры</th><th>Примечание</th></tr></thead><tbody>${lines.slice().sort((a,b)=>(a.pos||0)-(b.pos||0)).map(l=>`<tr>
           <td class="nw"><b style="color:var(--ink)">${esc(l.toolPos||('T'+l.pos))}</b></td>
-          <td class="nw">${l.holderIso?`<span class="code" style="font-family:var(--mono)">${esc(l.holderIso)}</span>${l.holderMaker?` <span class="c-gray" style="font-size:12px">${esc(l.holderMaker)}</span>`:''}`:'<span class="c-gray">—</span>'}</td>
-          <td class="nw">${l.insertIso?`<span class="code" style="font-family:var(--mono)">${esc(l.insertIso)}</span>${l.insertGrade?` <span class="c-gray" style="font-size:12px">${esc(l.insertGrade)}</span>`:''}`:'<span class="c-gray">—</span>'}</td>
+          <td>${l.holderIso?`<span class="code" style="font-family:var(--mono)">${esc(l.holderIso)}</span>${l.holderMaker?` <span class="c-gray" style="font-size:12px">${esc(l.holderMaker)}</span>`:''}${l.holderInCatalog===false?' <span class="c-gray" style="font-size:11px">· вне каталога</span>':''}${stockBadge(l.holderIso)}`:'<span class="c-gray">—</span>'}</td>
+          <td>${l.insertIso?`<span class="code" style="font-family:var(--mono)">${esc(l.insertIso)}</span>${l.insertGrade?` <span class="c-gray" style="font-size:12px">${esc(l.insertGrade)}</span>`:''}${l.insertInCatalog===false?' <span class="c-gray" style="font-size:11px">· вне каталога</span>':''}${stockBadge(l.insertIso)}`:'<span class="c-gray">—</span>'}</td>
           <td class="nw c-gray">${esc(l.overhang||'—')}</td>
           <td class="ell c-gray">${esc(l.params||'—')}</td>
           <td class="ell c-gray">${esc(l.note||'—')}</td></tr>`).join('')}</tbody></table>`:'';
@@ -16882,7 +16887,8 @@
       let init={item:{id:null,no:'',name:'',part:'',status:'Черновик',machineId:null,revolverSlots:null},lines:[]};
       if(cardId!=null){ try{ const d=await (await fetch('/api/setup-card?id='+encodeURIComponent(cardId))).json(); if(d&&d.item)init={item:d.item,lines:d.lines||[]}; }catch(e){} }
       // состояние слотов револьвера: номер слота (1..N) → {holderId,insertId,overhang,params,note}
-      const slots={}; (init.lines||[]).forEach(l=>{const n=Number(l.pos)||0; if(n>=1)slots[n]={holderId:(l.holderId!=null?String(l.holderId):''),insertId:(l.insertId!=null?String(l.insertId):''),overhang:l.overhang||'',params:l.params||'',note:l.note||''};});
+      const slots={}; (init.lines||[]).forEach(l=>{const n=Number(l.pos)||0; if(n>=1)slots[n]={holderId:(l.holderId!=null?String(l.holderId):''),insertId:(l.insertId!=null?String(l.insertId):''),holderIso:(l.holderId==null?(l.holderIso||''):''),insertIso:(l.insertId==null?(l.insertIso||''):''),overhang:l.overhang||'',params:l.params||'',note:l.note||''};});
+      toolsStockLoad();
       const machineN=(id)=>{ const e=eqById[String(id)]; return e&&e.revolverSlots>0?e.revolverSlots:12; };
       const machineShape=(id)=>{ const e=eqById[String(id)]; return (e&&e.headShape)||'round'; };
       const machineHeadType=(id)=>{ const e=eqById[String(id)]; return (e&&e.headType)||''; };
@@ -16925,8 +16931,8 @@
             <div id="sb-slotedit" style="display:none;margin-top:14px;border:1px solid #cdd8e5;border-radius:9px;background:#f8fbff;padding:12px 14px">
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b id="sb-se-title" style="color:var(--ink)">Слот</b><span class="spacer" style="flex:1"></span><button class="tbtn" id="sb-se-clear" style="color:var(--red)">Очистить слот</button></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
-                <div>${lbl('Державка')}<select id="sb-se-holder" style="${ist}"></select></div>
-                <div>${lbl('Пластина')}<select id="sb-se-insert" style="${ist}"></select></div>
+                <div>${lbl('Державка')}<select id="sb-se-holder" style="${ist}"></select><input id="sb-se-holder-txt" style="${ist};margin-top:6px" placeholder="или ISO-код вручную — если державки ещё нет в каталоге"><div id="sb-se-holder-st" style="font-size:11px;margin-top:3px"></div></div>
+                <div>${lbl('Пластина')}<select id="sb-se-insert" style="${ist}"></select><input id="sb-se-insert-txt" style="${ist};margin-top:6px" placeholder="или ISO-код вручную — если пластины ещё нет в каталоге"><div id="sb-se-insert-st" style="font-size:11px;margin-top:3px"></div></div>
                 <div>${lbl('Вылет')}<input id="sb-se-overhang" style="${ist}" placeholder="мм"></div>
                 <div>${lbl('Параметры')}<input id="sb-se-params" style="${ist}" placeholder="S/n, f, ap…"></div>
                 <div style="grid-column:1/3">${lbl('Примечание')}<input id="sb-se-note" style="${ist}"></div>
@@ -16980,7 +16986,7 @@
       const seOver=document.getElementById('sb-se-overhang'), seParams=document.getElementById('sb-se-params'), seNote=document.getElementById('sb-se-note'), seTitle=document.getElementById('sb-se-title');
       const headTitle=document.getElementById('sb-headtitle'), headInfo=document.getElementById('sb-headinfo');
       const curN=()=>{ let n=parseInt(nInput.value,10); if(!(n>=1))n=(curShape==='flat'?4:12); if(n>60)n=60; return n; };
-      const slotFilled=(s)=>!!(s&&(s.holderId||s.insertId||s.overhang||s.params||s.note));
+      const slotFilled=(s)=>!!(s&&(s.holderId||s.insertId||s.holderIso||s.insertIso||s.overhang||s.params||s.note));
       let curSlot=null;
       const updateHeadInfo=()=>{
         const isFlat=curShape==='flat';
@@ -16989,7 +16995,7 @@
       };
       const buildSvgData=(N)=>{ const d={}; for(let n=1;n<=N;n++){ const s=slots[n];
         if(slotFilled(s)){ const h=s.holderId?holderById[String(s.holderId)]:null, i=s.insertId?insertById[String(s.insertId)]:null;
-          d[n]={filled:true,holderIso:h?h.iso:'',insertIso:i?i.iso:'',insertGrade:i?i.grade:'',overhang:s.overhang||''}; } else d[n]={filled:false}; } return d; };
+          d[n]={filled:true,holderIso:h?h.iso:(s.holderIso||''),insertIso:i?i.iso:(s.insertIso||''),insertGrade:i?i.grade:'',overhang:s.overhang||''}; } else d[n]={filled:false}; } return d; };
       const renderGrid=()=>{
         const N=curN(); let filled=0; for(let n=1;n<=N;n++)if(slotFilled(slots[n]))filled++;
         const rotBar=curShape==='round'?`<div style="display:flex;gap:6px;justify-content:center;align-items:center;margin-top:4px"><button type="button" class="tbtn" id="sb-rot-ccw" title="Повернуть против часовой стрелки — крутит оба вида">↺</button><button type="button" class="tbtn" id="sb-rot-cw" title="Повернуть по часовой стрелке — крутит оба вида">↻</button><span style="font-size:11px;color:#8a97a6">повернуть головку (визуально, не сохраняется)</span></div>`:'';
@@ -17005,15 +17011,20 @@
         seTitle.textContent=`Позиция T${n}`;
         seHolder.innerHTML=holderOpt(s.holderId||''); refreshInsertOpts(s.insertId||'');
         seOver.value=s.overhang||''; seParams.value=s.params||''; seNote.value=s.note||'';
+        const hTxt=document.getElementById('sb-se-holder-txt'), iTxt=document.getElementById('sb-se-insert-txt'); hTxt.value=s.holderIso||''; iTxt.value=s.insertIso||'';
+        const stHint=(inp,box)=>{ const v=inp.value.trim(); const st=toolStock(v); box.innerHTML=!v?'':(st&&st.found&&st.bal>0?`<span style="color:#15803d">на складе ${st.bal}</span>`:`<span style="color:#b45309">нет на складе — карта сохранится, инструмент надо закупить/завести</span>`); };
+        hTxt.oninput=()=>{ if(hTxt.value.trim())seHolder.value=''; stHint(hTxt,document.getElementById('sb-se-holder-st')); }; iTxt.oninput=()=>{ if(iTxt.value.trim())seInsert.value=''; stHint(iTxt,document.getElementById('sb-se-insert-st')); };
+        stHint(hTxt,document.getElementById('sb-se-holder-st')); stHint(iTxt,document.getElementById('sb-se-insert-st'));
         renderGrid(); // подсветить выбранную позицию на схеме
         editor.style.display='block'; editor.scrollIntoView({behavior:'smooth',block:'center'});
         // K-306: пустой ISO-каталог — подсказать, где заводить державки/пластины (иначе списки в редакторе позиции пустые)
         if(!holders.length&&!inserts.length){ let hh=document.getElementById('sb-se-emptyhint'); if(!hh){ hh=document.createElement('div'); hh.id='sb-se-emptyhint'; hh.style.cssText='margin-top:8px;font-size:var(--fs-s);color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-s);padding:8px 11px'; hh.innerHTML='Справочник державок и пластин пуст — списки ниже нечем заполнить. Заведите их в <a href="#tools" style="color:var(--blue)">Инструмент и оснастка → Каталог → Державки (ISO 5608) / Пластины (ISO 1832)</a>, затем вернитесь в карту.'; editor.prepend(hh); } }
       };
-      seHolder.onchange=()=>{ const cur=seInsert.value; seInsert.innerHTML=insertOpt(seHolder.value,cur); if(seInsert.value!==cur)seInsert.value=''; };
+      seHolder.onchange=()=>{ const cur=seInsert.value; seInsert.innerHTML=insertOpt(seHolder.value,cur); if(seInsert.value!==cur)seInsert.value=''; if(seHolder.value){ const t=document.getElementById('sb-se-holder-txt'); t.value=''; document.getElementById('sb-se-holder-st').innerHTML=''; } };
+      seInsert.addEventListener('change',()=>{ if(seInsert.value){ const t=document.getElementById('sb-se-insert-txt'); t.value=''; document.getElementById('sb-se-insert-st').innerHTML=''; } });
       document.getElementById('sb-se-apply').onclick=()=>{
         if(curSlot==null)return;
-        const s={holderId:seHolder.value||'',insertId:seInsert.value||'',overhang:seOver.value.trim(),params:seParams.value.trim(),note:seNote.value.trim()};
+        const s={holderId:seHolder.value||'',insertId:seInsert.value||'',holderIso:seHolder.value?'':document.getElementById('sb-se-holder-txt').value.trim(),insertIso:seInsert.value?'':document.getElementById('sb-se-insert-txt').value.trim(),overhang:seOver.value.trim(),params:seParams.value.trim(),note:seNote.value.trim()};
         if(slotFilled(s))slots[curSlot]=s; else delete slots[curSlot];
         editor.style.display='none'; curSlot=null; renderGrid();
       };
@@ -17071,8 +17082,8 @@
         if(!machineId){errEl.textContent='Выберите станок (обязательное поле).';return;}
         const N=curN();
         const lines=Object.keys(slots).map(Number).filter(n=>n>=1&&n<=N).sort((a,b)=>a-b)
-          .map(n=>({slot:n,toolPos:'T'+n,holderId:slots[n].holderId,insertId:slots[n].insertId,overhang:slots[n].overhang,params:slots[n].params,note:slots[n].note}))
-          .filter(l=>l.holderId||l.insertId||l.overhang||l.params||l.note);
+          .map(n=>({slot:n,toolPos:'T'+n,holderId:slots[n].holderId,insertId:slots[n].insertId,holderIso:slots[n].holderIso||'',insertIso:slots[n].insertIso||'',overhang:slots[n].overhang,params:slots[n].params,note:slots[n].note}))
+          .filter(l=>l.holderId||l.insertId||l.holderIso||l.insertIso||l.overhang||l.params||l.note);
         // вид операции: у существующей карты — её вид; у новой — активный подраздел (Токарная)
         const operationKind=(cardId!=null?(init.item.operationKind||'Токарная'):(SETUP_KIND||'Токарная'));
         const jaw={chuckType:jawChuck.value.trim(),chuckSetId:jawSet.value||'',jawSetNo:(jawSetById[String(jawSet.value)]||{}).setNo||'',

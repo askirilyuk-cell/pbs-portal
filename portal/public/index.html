@@ -16662,27 +16662,46 @@
     //    Чистый SVG (пригоден к печати на 2c). data:{[pos]:{filled,holderIso,insertIso,overhang}}.
     //    interactive=true → добавляет прозрачные data-pos хит-зоны (клик по позиции).
     const headOverhangPx=(ov)=>{ const v=parseFloat(String(ov||'').replace(',','.').replace(/[^\d.]/g,'')); return (Number.isFinite(v)&&v>0)?Math.max(7,Math.min(v,60)*0.85):0; };
+    // K-299 (редизайн, Александр 25.09): револьверная головка — многогранник с гнёздами на гранях, резцы наружу,
+    //    рабочая позиция внизу у заготовки; занятые гнёзда — зелёные с кодом ISO, свободные — пунктир. Один вид, без «профиля».
     function headSVGRound(N,data,rot,interactive,selected){
-      const C=220,Rdisk=112,Rmark=17,W=440,H=452; const step=360/N, rotDeg=(rot||0)*step;
-      let studs='',marks='',labels='';
-      for(let i=0;i<N;i++){ const n=i+1, s=data[n]||{}, filled=!!s.filled;
-        const a=(-90+i*step+rotDeg)*Math.PI/180, ca=Math.cos(a), sa=Math.sin(a);
-        const mx=C+Rdisk*ca, my=C+Rdisk*sa, ov=headOverhangPx(s.overhang);
-        if(filled&&ov>0){ const x1=C+(Rdisk+Rmark)*ca,y1=C+(Rdisk+Rmark)*sa,x2=C+(Rdisk+Rmark+ov)*ca,y2=C+(Rdisk+Rmark+ov)*sa;
-          studs+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#0f8a4a" stroke-width="4" stroke-linecap="round"/>`;
-          const lx=C+(Rdisk+Rmark+ov+11)*ca, ly=C+(Rdisk+Rmark+ov+11)*sa;
-          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#3f9b63" text-anchor="middle" dominant-baseline="central">${esc(String(s.overhang||''))}</text>`; }
-        const stroke=filled?'#15803d':'#c2ccd8', fill=filled?'#15803d':'#f2f5f9';
-        marks+=`<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="${Rmark}" fill="${fill}" stroke="${stroke}" stroke-width="2"${filled?'':' stroke-dasharray="3 3"'}/>`;
-        marks+=`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" font-size="11" font-weight="700" fill="${filled?'#fff':'#7c8a99'}" text-anchor="middle" dominant-baseline="central">T${n}</text>`;
-        if(filled&&(s.holderIso||s.insertIso)){ const lr=Rdisk-Rmark-15,hx=C+lr*ca,hy=C+lr*sa;
-          labels+=`<text x="${hx.toFixed(1)}" y="${hy.toFixed(1)}" font-size="8.5" fill="#31506a" text-anchor="middle" dominant-baseline="central" font-family="monospace">${esc(String(s.holderIso||s.insertIso||'').slice(0,12))}</text>`; }
-        if(selected===n)marks+=`<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="${Rmark+4}" fill="none" stroke="#2563eb" stroke-width="2.5"/>`;
-        if(interactive)marks+=`<circle data-pos="${n}" cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="${Rmark+6}" fill="transparent" style="cursor:pointer"/>`;
+      const W=560,H=520,C=280,CY=240,R=132,Rin=44; const step=360/N, rotDeg=(rot||0)*step;
+      const ang=(i)=>(90+i*step+rotDeg)*Math.PI/180; // i=0 (T1) — внизу при rot=0 → рабочая
+      const rWork=(((0-(rot||0))%N)+N)%N; // индекс позиции в рабочей точке (низ)
+      const pt=(r,a)=>[C+r*Math.cos(a),CY+r*Math.sin(a)];
+      // многогранник: вершины между гнёздами
+      let poly='';
+      for(let i=0;i<N;i++){ const [x,y]=pt(R/Math.cos(Math.PI/N),ang(i)+Math.PI/N); poly+=(i?' L ':'M ')+x.toFixed(1)+' '+y.toFixed(1); }
+      const body=`<path d="${poly} Z" fill="#f6f9fc" stroke="#7f95ab" stroke-width="2.5" stroke-linejoin="round"/>
+        <circle cx="${C}" cy="${CY}" r="${R-26}" fill="none" stroke="#dbe4ee" stroke-width="1" stroke-dasharray="3 5"/>
+        <circle cx="${C}" cy="${CY}" r="${Rin}" fill="#e9eff6" stroke="#b9c7d6" stroke-width="1.5"/>
+        <circle cx="${C}" cy="${CY}" r="7" fill="#b9c7d6"/>
+        <text x="${C}" y="${CY-14}" font-size="10" fill="#7c8a99" text-anchor="middle">головка</text>
+        <text x="${C}" y="${CY+2}" font-size="13" font-weight="700" fill="#31506a" text-anchor="middle">${N} поз.</text>`;
+      // рабочая зона: заготовка под головкой
+      const wy=CY+R+70; const work=`<rect x="${C-150}" y="${wy-9}" width="300" height="18" rx="3" fill="#e6edf5" stroke="#b9c7d6" stroke-width="1.5"/>
+        <line x1="${C-150}" y1="${wy}" x2="${C+150}" y2="${wy}" stroke="#9aa7b4" stroke-width="1" stroke-dasharray="6 4"/>
+        <text x="${C+156}" y="${wy+1}" font-size="9.5" fill="#7c8a99" dominant-baseline="central">ось заготовки</text>`;
+      let seats='',tools='',labels='',hits='';
+      for(let i=0;i<N;i++){ const n=i+1, s=data[n]||{}, filled=!!s.filled, a=ang(i), deg=a*180/Math.PI, isWork=(i===rWork);
+        const [sx,sy]=pt(R,a); const ov=headOverhangPx(s.overhang);
+        const g=(inner)=>`<g transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)}) rotate(${(deg-90).toFixed(1)})">${inner}</g>`; // ось Y группы = наружу
+        if(isWork) seats+=`<path d="M ${C} ${CY} L ${pt(R+8,a-Math.PI/N).map(v=>v.toFixed(1)).join(' ')} A ${R+8} ${R+8} 0 0 1 ${pt(R+8,a+Math.PI/N).map(v=>v.toFixed(1)).join(' ')} Z" fill="#eaf2ff"/>`;
+        // гнездо (паз) на грани
+        seats+=g(`<rect x="-17" y="-12" width="34" height="14" rx="2" fill="${filled?'#d9efe2':'#eef2f6'}" stroke="${filled?'#15803d':'#b9c7d6'}" stroke-width="1.5"${filled?'':' stroke-dasharray="3 3"'}/>`);
+        if(filled){ const L=22+ov; // державка + резец наружу
+          tools+=g(`<rect x="-8" y="0" width="16" height="${L.toFixed(1)}" rx="2" fill="#15803d" stroke="#0f6b3c" stroke-width="1"/><path d="M -8 ${L.toFixed(1)} L 8 ${L.toFixed(1)} L 0 ${(L+9).toFixed(1)} Z" fill="#0f8a4a"/>`);
+          const iso=String(s.holderIso||s.insertIso||''); const [lx,ly]=pt(R+L+22,a); const right=Math.cos(a)>0.15, left=Math.cos(a)<-0.15;
+          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#31506a" font-family="monospace" text-anchor="${right?'start':(left?'end':'middle')}" dominant-baseline="central">${esc(iso.slice(0,16))}${s.overhang?`${iso?' · ':''}вылет ${esc(String(s.overhang))}`:''}</text>`;
+        }
+        // номер позиции — внутри у грани
+        const [bx,by]=pt(R-26,a);
+        seats+=`<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="13" fill="${filled?'#15803d':'#fff'}" stroke="${filled?'#15803d':'#c2ccd8'}" stroke-width="1.5"/><text x="${bx.toFixed(1)}" y="${by.toFixed(1)}" font-size="10.5" font-weight="700" fill="${filled?'#fff':'#7c8a99'}" text-anchor="middle" dominant-baseline="central">T${n}</text>`;
+        if(selected===n){ const [cx,cy]=pt(R+4,a); seats+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="26" fill="none" stroke="#2563eb" stroke-width="2.5"/>`; }
+        if(interactive){ const [cx,cy]=pt(R-6,a); hits+=`<circle data-pos="${n}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="34" fill="transparent" style="cursor:pointer"/>`; }
       }
-      const disk=`<circle cx="${C}" cy="${C}" r="${Rdisk}" fill="#fbfdff" stroke="#9fb4c8" stroke-width="2"/><circle cx="${C}" cy="${C}" r="34" fill="#eef3f8" stroke="#c2ccd8" stroke-width="1.5"/><text x="${C}" y="${C-5}" font-size="10" fill="var(--sl-500)" text-anchor="middle">головка</text><text x="${C}" y="${C+10}" font-size="11" font-weight="700" fill="#31506a" text-anchor="middle">${N} поз.</text>`;
-      const wp=`<path d="M ${C-9} ${C+Rdisk+34} L ${C+9} ${C+Rdisk+34} L ${C} ${C+Rdisk+18} Z" fill="#2563eb"/><text x="${C}" y="${C+Rdisk+48}" font-size="9.5" fill="#2563eb" text-anchor="middle">рабочая точка</text>`;
-      return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:440px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${disk}${studs}${marks}${labels}${wp}</svg>`;
+      const wk=`<path d="M ${C-8} ${CY+R+50} L ${C+8} ${CY+R+50} L ${C} ${CY+R+38} Z" fill="#2563eb"/><text x="${C}" y="${CY+R+62}" font-size="9.5" fill="#2563eb" text-anchor="middle">рабочая позиция · T${rWork+1}</text>`;
+      return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:560px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${work}${body}${seats}${tools}${labels}${wk}${hits}</svg>`;
     }
     function headSVGFlat(N,data,interactive,selected){
       const cols=Math.max(1,N),cw=100,pad=26,barY=58,barH=26,W=pad*2+cols*cw,H=barY+barH+112;
@@ -16747,7 +16766,7 @@
       return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${cap}${axis}${body}${out}${hits}</svg>`;
     }
     const headSide=(shape,N,data,rot,interactive,selected)=>shape==='flat'?headSideFlat(N,data,interactive,selected):headSideRound(N,data,rot,interactive,selected);
-    const headViews=(shape,N,data,rot,interactive,selected,extraTop)=>`<div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:flex-start"><div style="flex:1 1 280px;min-width:250px;max-width:460px"><div style="font-size:12px;color:var(--sl-500);text-align:center;font-weight:600;margin-bottom:2px">Вид сверху</div>${headSVG(shape,N,data,rot,interactive,selected)}${extraTop||''}</div><div style="flex:1 1 280px;min-width:250px;max-width:380px"><div style="font-size:12px;color:var(--sl-500);text-align:center;font-weight:600;margin-bottom:2px">Вид сбоку (профиль)</div>${headSide(shape,N,data,rot,interactive,selected)}</div></div>`;
+    const headViews=(shape,N,data,rot,interactive,selected,extraTop)=>`<div style="max-width:620px;margin:0 auto">${headSVG(shape,N,data,rot,interactive,selected)}${extraTop||''}<div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--sl-500);margin-top:6px"><span><span style="display:inline-block;width:10px;height:10px;background:#15803d;border-radius:2px;vertical-align:middle;margin-right:4px"></span>позиция занята · код державки/пластины и вылет</span><span><span style="display:inline-block;width:10px;height:10px;border:1.5px dashed #b9c7d6;border-radius:2px;vertical-align:middle;margin-right:4px"></span>свободно</span><span><span style="display:inline-block;width:10px;height:10px;background:#eaf2ff;border:1px solid #2563eb;border-radius:2px;vertical-align:middle;margin-right:4px"></span>рабочая позиция у заготовки</span></div></div>`;
     // блок «Зажим и кулачки» для просмотра карты (Этап 2c) — по it.jaw
     function setupJawView(it){
       const j=(it&&it.jaw)||{};
@@ -16952,7 +16971,7 @@
           d[n]={filled:true,holderIso:h?h.iso:'',insertIso:i?i.iso:'',insertGrade:i?i.grade:'',overhang:s.overhang||''}; } else d[n]={filled:false}; } return d; };
       const renderGrid=()=>{
         const N=curN(); let filled=0; for(let n=1;n<=N;n++)if(slotFilled(slots[n]))filled++;
-        const rotBar=curShape==='round'?`<div style="display:flex;gap:6px;justify-content:center;align-items:center;margin-top:4px"><button type="button" class="tbtn" id="sb-rot-ccw" title="Повернуть против часовой стрелки — крутит оба вида">↺</button><button type="button" class="tbtn" id="sb-rot-cw" title="Повернуть по часовой стрелке — крутит оба вида">↻</button><span style="font-size:11px;color:#8a97a6">повернуть головку — синхронно оба вида (визуально, не сохраняется)</span></div>`:'';
+        const rotBar=curShape==='round'?`<div style="display:flex;gap:6px;justify-content:center;align-items:center;margin-top:4px"><button type="button" class="tbtn" id="sb-rot-ccw" title="Повернуть против часовой стрелки — крутит оба вида">↺</button><button type="button" class="tbtn" id="sb-rot-cw" title="Повернуть по часовой стрелке — крутит оба вида">↻</button><span style="font-size:11px;color:#8a97a6">повернуть головку (визуально, не сохраняется)</span></div>`:'';
         grid.innerHTML=headViews(curShape,N,buildSvgData(N),rot,true,curSlot,rotBar);
         slotInfo.textContent=`занято ${filled} из ${N}`;
         [...grid.querySelectorAll('[data-pos]')].forEach(el=>el.onclick=()=>openSlot(Number(el.dataset.pos)));

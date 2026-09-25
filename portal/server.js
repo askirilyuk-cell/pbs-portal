@@ -11034,6 +11034,12 @@ const SETUP_TAIL_FIELDS = [
   ['ЗБ — усилие поджима', 'tailForce', 'SingleLineText'],
   ['ЗБ — примечание', 'tailNote', 'SingleLineText'],
 ];
+// K-309 (Александр 25.09, по Sinumerik 808D): вид инструмента (наружный/осевой), положение режущей кромки 1–8, измеренные корректоры X/Z/r/ширина
+const SETUP_LINE_EXTRA = [['Вид инструмента', 'toolKind'], ['Положение реж. кромки', 'edgePos'], ['Длина X', 'lenX'], ['Длина Z', 'lenZ'], ['Радиус', 'radius'], ['Ширина пластины', 'width']];
+const SETUP_AXIAL_KINDS = ['расточной резец', 'сверло', 'центровочное сверло', 'резьбовой внутренний', 'развёртка', 'метчик']; // осевой инструмент — в отверстии головки, вылет по Z
+const setupIsAxial = (kind) => SETUP_AXIAL_KINDS.includes(String(kind || '').trim());
+// K-309: привязка детали (нуль) — сначала деталь, потом инструмент
+const SETUP_ZERO_FIELDS = [['Нуль детали — смещение', 'zeroOffset', 'SingleLineText'], ['Нуль Z — метод', 'zeroZMethod', 'SingleLineText'], ['Нуль Z — Z0, мм', 'zeroZ', 'SingleLineText'], ['Нуль X — метод', 'zeroXMethod', 'SingleLineText'], ['Нуль X — Ø, мм', 'zeroX', 'SingleLineText'], ['Нуль — базовое смещение', 'zeroBase', 'SingleLineText'], ['Нуль — примечание', 'zeroNote', 'SingleLineText']];
 const SETUP_JAW_FIELDS = [
   ['Патрон (тип)', 'chuckType', 'SingleLineText'],
   ['Тип кулачков (карта)', 'jawTypeCard', 'SingleLineText'],
@@ -11075,6 +11081,7 @@ function setupLineShape(l, holderById, insertById) {
     holderId: hId ?? null, holderIso: h ? String(h['ISO-код'] || '') : String(l['Державка (ISO, текст)'] || ''), holderMaker: h ? String(h['Производитель'] || '') : '', holderInCatalog: !!h,
     insertId: iId ?? null, insertIso: ins ? String(ins['ISO-код'] || '') : String(l['Пластина (ISO, текст)'] || ''), insertGrade: ins ? String(ins['Сплав / марка'] || '') : '', insertInCatalog: !!ins,
     overhang: l['Вылет'] || '', params: l['Параметры'] || '', note: l['Примечание'] || '',
+    toolKind: l['Вид инструмента'] || '', edgePos: l['Положение реж. кромки'] || '', lenX: l['Длина X'] || '', lenZ: l['Длина Z'] || '', radius: l['Радиус'] || '', width: l['Ширина пластины'] || '', axial: setupIsAxial(l['Вид инструмента']), // K-309
   };
 }
 function setupCardListShape(c, eqById) {
@@ -11156,6 +11163,7 @@ async function buildSetupCard(id) {
   const jaw = {};
   for (const [col, key] of SETUP_JAW_FIELDS) jaw[key] = c[col] || '';
   const tail = {}; for (const [col, key] of SETUP_TAIL_FIELDS) tail[key] = c[col] || ''; item.tail = tail; item.purpose = c['Назначение'] || ''; // K-305
+  const zero = {}; for (const [col, key] of SETUP_ZERO_FIELDS) zero[key] = c[col] || ''; item.zero = zero; // K-309
   const jawSetId = tcLinkIds(c['Комплект кулачков'])[0];
   const setRow = jawSetId != null ? jawById[String(jawSetId)] : null;
   jaw.chuckSetId = jawSetId ?? null;
@@ -11177,37 +11185,49 @@ async function buildSetupCard(id) {
 //    revolverSlots,date,author,jaw{...}} + lines[{pos,toolPos,holderIso,insertIso,insertGrade,
 //    overhang,params,note}]. Схема головки — SVG (вид сверху + сбоку с вылетом). ──
 function setupHeadSvgTop(shape, N, byPos) {
-  const filled = (n) => { const l = byPos[n]; return !!(l && (l.holderIso || l.insertIso || l.overhang || l.params || l.note)); };
+  const filled = (n) => { const l = byPos[n]; return !!(l && (l.holderIso || l.insertIso || l.overhang || l.params || l.note || l.toolKind)); };
   if (shape === 'flat') {
     const cols = Math.max(1, N), W = Math.min(360, 44 * cols + 16), cw = (W - 16) / cols;
     let s = `<svg viewBox="0 0 ${W} 150" width="${W}" height="150" xmlns="http://www.w3.org/2000/svg">`;
     s += `<rect x="6" y="70" width="${W - 12}" height="26" rx="3" fill="#DCE6F2" stroke="#1F4E79"/>`;
     for (let i = 0; i < cols; i++) { const n = i + 1, cx = 8 + cw * i + cw / 2, f = filled(n);
       s += `<rect x="${cx - 9}" y="40" width="18" height="30" fill="${f ? '#1F4E79' : '#F2F6FB'}" stroke="#1F4E79"/>`;
-      if (f) s += `<rect x="${cx - 3}" y="18" width="6" height="22" fill="#1F4E79"/>`; // вылет вверх
+      if (f) s += `<rect x="${cx - 3}" y="18" width="6" height="22" fill="#1F4E79"/>`;
       s += `<text x="${cx}" y="88" font-size="10" fill="${f ? '#fff' : '#1F4E79'}" text-anchor="middle" font-family="Arial">T${n}</text>`; }
     return s + `</svg>`;
   }
-  const cx = 118, cy = 112, R = 74, r = 15;
-  let s = `<svg viewBox="0 0 236 224" width="236" height="224" xmlns="http://www.w3.org/2000/svg">`;
-  s += `<circle cx="${cx}" cy="${cy}" r="${R + 22}" fill="#F2F6FB" stroke="#1F4E79"/><circle cx="${cx}" cy="${cy}" r="20" fill="#DCE6F2" stroke="#1F4E79"/>`;
-  for (let n = 1; n <= N; n++) { const a = (-90 + (n - 1) * 360 / N) * Math.PI / 180;
-    const px = cx + R * Math.cos(a), py = cy + R * Math.sin(a), f = filled(n);
-    if (f) { const ox = cx + (R + 20) * Math.cos(a), oy = cy + (R + 20) * Math.sin(a); s += `<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${ox.toFixed(1)}" y2="${oy.toFixed(1)}" stroke="#1F4E79" stroke-width="3"/>`; }
-    s += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${r}" fill="${f ? '#1F4E79' : '#fff'}" stroke="#1F4E79"/>`;
-    s += `<text x="${px.toFixed(1)}" y="${(py + 3.5).toFixed(1)}" font-size="10.5" fill="${f ? '#fff' : '#1F4E79'}" text-anchor="middle" font-family="Arial">T${n}</text>`; }
+  // K-309: многогранник, наружный инструмент — наружу, осевой (расточной/сверло) — кружок ⊙ в гнезде, рабочая позиция T1 внизу
+  const W = 300, H = 300, cx = 150, cy = 140, R = 78, step = 360 / N;
+  const ang = (i) => (90 + i * step) * Math.PI / 180; const pt = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  let poly = ''; for (let i = 0; i < N; i++) { const [x, y] = pt(R / Math.cos(Math.PI / N), ang(i) + Math.PI / N); poly += (i ? ' L ' : 'M ') + x.toFixed(1) + ' ' + y.toFixed(1); }
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" font-family="Arial">`;
+  s += `<path d="${poly} Z" fill="#F2F6FB" stroke="#1F4E79" stroke-width="1.5"/><circle cx="${cx}" cy="${cy}" r="24" fill="#DCE6F2" stroke="#1F4E79"/><text x="${cx}" y="${cy + 4}" font-size="10" fill="#1F4E79" text-anchor="middle">${N} поз.</text>`;
+  s += `<line x1="${cx - 90}" y1="${cy + R + 42}" x2="${cx + 90}" y2="${cy + R + 42}" stroke="#94a3b8" stroke-dasharray="5 3"/><text x="${cx}" y="${cy + R + 54}" font-size="8" fill="#64748b" text-anchor="middle">ось заготовки · рабочая позиция T1</text>`;
+  for (let i = 0; i < N; i++) { const n = i + 1, l = byPos[n] || {}, f = filled(n), a = ang(i), deg = a * 180 / Math.PI, [sx, sy] = pt(R, a);
+    const g = (inner) => `<g transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)}) rotate(${(deg - 90).toFixed(1)})">${inner}</g>`;
+    s += g(`<rect x="-11" y="-8" width="22" height="9" rx="1.5" fill="${f ? '#DCE6F2' : '#fff'}" stroke="#1F4E79" stroke-width="1"${f ? '' : ' stroke-dasharray="2 2"'}/>`);
+    if (f && l.axial) { s += g(`<circle cx="0" cy="8" r="7" fill="#fff" stroke="#1F4E79" stroke-width="1.5"/><circle cx="0" cy="8" r="2.2" fill="#1F4E79"/>`); }
+    else if (f) { const ov = Math.max(6, Math.min(40, (parseFloat(String(l.overhang || '').replace(',', '.')) || 0) * 0.6 || 14)); s += g(`<rect x="-5" y="0" width="10" height="${ov.toFixed(1)}" fill="#1F4E79"/><path d="M -5 ${ov.toFixed(1)} L 5 ${ov.toFixed(1)} L 0 ${(ov + 6).toFixed(1)} Z" fill="#1F4E79"/>`); }
+    const [bx, by] = pt(R - 18, a);
+    s += `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="9" fill="${f ? '#1F4E79' : '#fff'}" stroke="#1F4E79" stroke-width="1"/><text x="${bx.toFixed(1)}" y="${(by + 3.2).toFixed(1)}" font-size="8" font-weight="bold" fill="${f ? '#fff' : '#1F4E79'}" text-anchor="middle">T${n}</text>`;
+    if (f) { const [lx, ly] = pt(R + 46, a); const iso = String(l.holderIso || l.insertIso || '').slice(0, 14); const right = Math.cos(a) > 0.15, left = Math.cos(a) < -0.15; s += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="7" fill="#1F4E79" text-anchor="${right ? 'start' : (left ? 'end' : 'middle')}" dominant-baseline="central">${hesc(iso)}${l.axial ? ' ⊙' : ''}</text>`; }
+  }
+  s += `<text x="8" y="${H - 6}" font-size="7.5" fill="#64748b">■ наружный (резец наружу)   ⊙ осевой — расточной / сверло (вылет по Z, см. вид сбоку)</text>`;
   return s + `</svg>`;
 }
 function setupHeadSvgSide(shape, N, byPos) {
-  const filled = (n) => { const l = byPos[n]; return !!(l && (l.holderIso || l.insertIso || l.overhang || l.params || l.note)); };
+  const filled = (n) => { const l = byPos[n]; return !!(l && (l.holderIso || l.insertIso || l.overhang || l.params || l.note || l.toolKind)); };
   const cnt = Math.max(1, Math.min(N, 12));
-  let s = `<svg viewBox="0 0 236 150" width="236" height="150" xmlns="http://www.w3.org/2000/svg">`;
-  s += `<rect x="150" y="20" width="34" height="112" rx="4" fill="#DCE6F2" stroke="#1F4E79"/>`; // корпус револьвера
-  s += `<line x1="167" y1="20" x2="167" y2="132" stroke="#1F4E79" stroke-dasharray="3 3"/>`;    // ось
-  for (let i = 0; i < cnt; i++) { const n = i + 1, y = 30 + i * (100 / Math.max(1, cnt - 1 || 1)), f = filled(n);
-    s += `<rect x="${f ? 96 : 120}" y="${(y - 4).toFixed(1)}" width="${f ? 54 : 30}" height="8" fill="${f ? '#1F4E79' : '#F2F6FB'}" stroke="#1F4E79"/>`;
-    s += `<text x="90" y="${(y + 3).toFixed(1)}" font-size="9.5" fill="#1F4E79" text-anchor="end" font-family="Arial">T${n}</text>`; }
-  s += `<text x="167" y="146" font-size="9" fill="#64748b" text-anchor="middle" font-family="Arial">вылет →</text>`;
+  let s = `<svg viewBox="0 0 236 ${20 + cnt * 13 + 20}" width="236" height="${20 + cnt * 13 + 20}" xmlns="http://www.w3.org/2000/svg" font-family="Arial">`;
+  s += `<rect x="150" y="8" width="34" height="${cnt * 13 + 8}" rx="4" fill="#DCE6F2" stroke="#1F4E79"/>`;
+  for (let i = 0; i < cnt; i++) { const n = i + 1, l = byPos[n] || {}, y = 14 + i * 13 + 6, f = filled(n);
+    const ov = f ? Math.max(10, Math.min(120, (parseFloat(String(l.overhang || '').replace(',', '.')) || 0) * 0.5 || 24)) : 0;
+    if (f && l.axial) { s += `<rect x="${(150 - ov).toFixed(1)}" y="${(y - 2.5).toFixed(1)}" width="${ov.toFixed(1)}" height="5" fill="#1F4E79"/><circle cx="${(150 - ov).toFixed(1)}" cy="${y}" r="3" fill="#1F4E79"/>`; }
+    else if (f) { s += `<rect x="${(150 - 22).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="22" height="8" fill="#1F4E79"/><rect x="${(150 - 22 - Math.min(ov, 40)).toFixed(1)}" y="${(y - 1.5).toFixed(1)}" width="${Math.min(ov, 40).toFixed(1)}" height="3" fill="#1F4E79"/>`; }
+    else s += `<line x1="136" y1="${y}" x2="150" y2="${y}" stroke="#94a3b8" stroke-dasharray="2 2"/>`;
+    s += `<text x="${(150 - (f ? (l.axial ? ov : 22 + Math.min(ov, 40)) : 14) - 4).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="8" fill="#1F4E79" text-anchor="end">T${n}${f && l.overhang ? ' · ' + hesc(String(l.overhang)) : ''}</text>`;
+    s += `<text x="167" y="${(y + 3).toFixed(1)}" font-size="7.5" fill="#1F4E79" text-anchor="middle">${f && l.axial ? 'Z' : (f ? 'X' : '')}</text>`; }
+  s += `<text x="118" y="${20 + cnt * 13 + 14}" font-size="7.5" fill="#64748b" text-anchor="middle">← вылет: осевой — по Z из головки, наружный — от державки</text>`;
   return s + `</svg>`;
 }
 function buildSetupCardHtml(d) {
@@ -11221,12 +11241,12 @@ function buildSetupCardHtml(d) {
   const infoCell = (lbl, val) => `<td class="k">${hesc(lbl)}</td><td class="v">${dash(val)}</td>`;
   const rowsTr = lines.length ? lines.map((l) => `<tr>
       <td class="c"><b>${hesc(l.toolPos || ('T' + l.pos))}</b></td>
-      <td>${dash('')}</td>
+      <td>${l.toolKind ? hesc(l.toolKind) : '<span class="g">—</span>'}${l.edgePos ? ` · кромка <b>${hesc(l.edgePos)}</b>` : ''}</td>
       <td>${l.holderIso ? `<span class="mono">${hesc(l.holderIso)}</span>${l.holderMaker ? ` <span class="g">${hesc(l.holderMaker)}</span>` : ''}` : '<span class="g">—</span>'}</td>
       <td>${l.insertIso ? `<span class="mono">${hesc(l.insertIso)}</span>${l.insertGrade ? ` <span class="g">${hesc(l.insertGrade)}</span>` : ''}` : '<span class="g">—</span>'}</td>
-      <td class="c">${dash(l.overhang)}</td>
-      <td>${dash(l.params)}</td>
-      <td>${dash(l.note)}</td></tr>`).join('')
+      <td class="c">${dash(l.overhang)}${l.axial ? ' <span class="g">Z</span>' : ''}</td>
+      <td>${[l.lenX ? 'X ' + hesc(l.lenX) : '', l.lenZ ? 'Z ' + hesc(l.lenZ) : '', l.radius ? 'r ' + hesc(l.radius) : '', l.width ? 'шир. ' + hesc(l.width) : ''].filter(Boolean).join(' · ') || '<span class="g">—</span>'}</td>
+      <td>${[l.params, l.note].filter(Boolean).map(hesc).join(' · ') || '<span class="g">—</span>'}</td></tr>`).join('')
     : `<tr><td colspan="7" style="text-align:center;color:#888;padding:14px">Позиции инструмента не заданы.</td></tr>`;
   const jawRow = (lbl, val) => `<tr><td class="jk">${hesc(lbl)}</td><td class="jv">${dash(val)}</td></tr>`;
   const foot = `<div class="ft">
@@ -11262,6 +11282,8 @@ function buildSetupCardHtml(d) {
     .schrow{display:flex;gap:8px}
     .esk{border:1px dashed #9aa7b5;border-radius:3px;min-height:120px;display:flex;align-items:center;justify-content:center;color:#9aa7b5;font-size:10px;margin-top:8px}
     table.jaw{width:100%;border-collapse:collapse;font-size:9.5px}
+    table.kv{width:100%;border-collapse:collapse;font-size:9.5px;page-break-inside:avoid} table.kv td{border:1px solid #C4D2E2;padding:3px 6px} table.kv td:nth-child(odd){width:22%;background:#F2F6FB;color:#41546a;font-size:9px} table.kv td:nth-child(even){font-weight:600;color:#1c2b3a}
+    .sec{page-break-after:avoid} table.pos tr{page-break-inside:avoid}
     table.jaw td{border:1px solid #C4D2E2;padding:3px 6px} table.jaw td.jk{width:46%;background:#F2F6FB;color:#41546a;font-size:9px} table.jaw td.jv{font-weight:600;color:#1c2b3a}
     .sign{display:flex;gap:24px;margin-top:14px;font-size:10px}
     .sign .box{flex:1;border-top:1px solid #333;padding-top:3px;color:#555;text-align:center}
@@ -11309,10 +11331,15 @@ function buildSetupCardHtml(d) {
       </div>
     </div>
 
+    <div class="sec">Привязка детали (нуль) — до привязки инструмента</div>
+    <table class="kv"><tr><td>Смещение нулевой точки</td><td><b>${dash((it.zero || {}).zeroOffset)}</b></td><td>Базовое смещение</td><td>${dash((it.zero || {}).zeroBase)}</td></tr>
+      <tr><td>Нуль Z — метод</td><td>${dash((it.zero || {}).zeroZMethod)}</td><td>Z0, мм</td><td>${dash((it.zero || {}).zeroZ)}</td></tr>
+      <tr><td>Нуль X — метод</td><td>${dash((it.zero || {}).zeroXMethod)}</td><td>Ø детали, мм</td><td>${dash((it.zero || {}).zeroX)}</td></tr>
+      ${(it.zero || {}).zeroNote ? `<tr><td>Примечание</td><td colspan="3">${hesc((it.zero || {}).zeroNote)}</td></tr>` : ''}</table>
     <div class="sec">Позиции инструмента</div>
     <table class="pos">
-      <colgroup><col style="width:6%"><col style="width:15%"><col style="width:16%"><col style="width:16%"><col style="width:8%"><col style="width:23%"><col style="width:16%"></colgroup>
-      <thead><tr><th>Поз.</th><th>Назначение</th><th>Державка (ISO)</th><th>Пластина (ISO · марка)</th><th>Вылет</th><th>Режимы / корректоры (n · f · aₚ · X/Z)</th><th>Примечание</th></tr></thead>
+      <colgroup><col style="width:6%"><col style="width:14%"><col style="width:15%"><col style="width:15%"><col style="width:7%"><col style="width:20%"><col style="width:23%"></colgroup>
+      <thead><tr><th>Поз.</th><th>Вид · кромка</th><th>Державка (ISO)</th><th>Пластина (ISO · марка)</th><th>Вылет</th><th>Корректоры: X · Z · r · шир.</th><th>Режимы · примечание</th></tr></thead>
       <tbody>${rowsTr}</tbody>
     </table>
 
@@ -11349,6 +11376,8 @@ async function saveSetupCard(body, who) {
   const autoName = `Наладка ${String(e.model || e.name || '').trim()}${body.jaw && body.jaw.jawSetNo ? ' · кулачки ' + String(body.jaw.jawSetNo).trim() : ''} · ${(Array.isArray(body.lines) ? body.lines.filter((l) => l && (l.holderId || l.insertId || String(l.holderIso || '').trim() || String(l.insertIso || '').trim())).length : 0)} поз.`;
   const cardRow = { 'Наименование': name || autoName, 'Статус': status };
   if ('purpose' in body) { try { await ncEnsureColumn('setup_cards', 'Назначение', 'LongText'); cardRow['Назначение'] = String(body.purpose || '').trim(); } catch (e2) { console.warn('K-305 Назначение:', e2.message); } }
+  const zeroIn = (body.zero && typeof body.zero === 'object') ? body.zero : {};
+  for (const [col, key, uidt] of SETUP_ZERO_FIELDS) { if (!(key in zeroIn)) continue; try { await ncEnsureColumn('setup_cards', col, uidt); cardRow[col] = String(zeroIn[key] || '').trim(); } catch (e2) { console.warn('K-309 нуль:', e2.message); } }
   const tailIn = (body.tail && typeof body.tail === 'object') ? body.tail : {};
   for (const [col, key, uidt] of SETUP_TAIL_FIELDS) { if (!(key in tailIn)) continue; try { await ncEnsureColumn('setup_cards', col, uidt); cardRow[col] = String(tailIn[key] || '').trim(); } catch (e2) { console.warn('K-305 ЗБ:', e2.message); } }
   cardRow['Модель-снапшот'] = [e.name, e.model].filter(Boolean).join(' · ') || e.invNo || '';
@@ -11427,8 +11456,10 @@ async function saveSetupCard(body, who) {
     const params = String(ln.params || '').trim();
     const note = String(ln.note || '').trim();
     const holderIso = holderId == null ? String(ln.holderIso || '').trim().slice(0, 60) : '', insertIso = insertId == null ? String(ln.insertIso || '').trim().slice(0, 60) : ''; // K-307: инструмент вне каталога — ISO-код текстом
-    if (holderId == null && insertId == null && !holderIso && !insertIso && !overhang && !params && !note) continue; // пустой слот — не храним
+    const extraFilled = SETUP_LINE_EXTRA.some(([, key]) => String(ln[key] ?? '').trim());
+    if (holderId == null && insertId == null && !holderIso && !insertIso && !overhang && !params && !note && !extraFilled) continue; // пустой слот — не храним
     const lineRow = { '№ п/п': slot };
+    for (const [col, key] of SETUP_LINE_EXTRA) { const v = String(ln[key] ?? '').trim(); if (v) { try { await ncEnsureColumn('setup_card_lines', col, 'SingleLineText'); lineRow[col] = v.slice(0, 80); } catch {} } } // K-309
     if (holderIso) { try { await ncEnsureColumn('setup_card_lines', 'Державка (ISO, текст)', 'SingleLineText'); lineRow['Державка (ISO, текст)'] = holderIso; } catch {} }
     if (insertIso) { try { await ncEnsureColumn('setup_card_lines', 'Пластина (ISO, текст)', 'SingleLineText'); lineRow['Пластина (ISO, текст)'] = insertIso; } catch {} }
     if (toolPos) lineRow['Позиция инструмента'] = toolPos;

@@ -2370,6 +2370,9 @@
       if(v!==routePrevView){ routePrevView=v; try{window.scrollTo(0,0);}catch{} try{document.documentElement.scrollTop=0;document.body.scrollTop=0;}catch{} }
     }
     window.addEventListener('hashchange',route);
+    // K-310 (Анохин, 25.09): открытие карточки/формы внутри раздела кладётся в историю браузера, «Назад» возвращает в реестр.
+    function spaPush(h){ try{ if(location.hash!==h)history.pushState({spa:1},'',h); }catch{} }
+    function spaBack(fallback){ if(history.state&&history.state.spa){ history.back(); return; } if(location.hash===fallback)route(); else location.hash=fallback; }
 
     // ══ Раздел «Логистика» — Заявки на перевозку (ЗПер) · ТЗ 13.07.2026 ═══════
     //  Владелец раздела — Динара. ПЕРВЫЙ ПРОХОД (каркас «посмотреть вживую»).
@@ -2437,7 +2440,7 @@
         {key:'status',label:'Статус',w:168,cls:'nw',cell:s=>logiStBadge(s.status),sortVal:s=>LOGI_STATUSES.indexOf(s.status)},
       ];
       erpGrid(gh,{key:'logi-list',cols,rows,rowKey:s=>String(s.id),selKey:String(logiSelId),
-        onRow:s=>{ logiSelId=s.id; try{history.replaceState(null,'','#logistics/'+encodeURIComponent(s.id));}catch{} logiShowDetail(s.id); },
+        onRow:s=>{ logiSelId=s.id; try{spaPush('#logistics/'+encodeURIComponent(s.id));}catch{} logiShowDetail(s.id); },
         onEnter:s=>{ logiSelId=s.id; logiShowDetail(s.id); },
         info:`<span>Заявок: <b style="color:var(--ink)">${rows.length}</b></span>`});
       logiShowDetail(logiSelId);
@@ -5599,7 +5602,7 @@
         {key:'status',label:'Статус',w:190,cls:'nw',cell:r=>zpCell(r.status)+((r.kp&&/^(Согласовано|Выиграли)/.test(r.kp.status||'')&&!/Принят/.test(r.status||''))?` <span class="badge b-green" style="font-size:10px" title="Результат КП">${esc(r.kp.status)}</span>`:'')+((r.prodOrders||[]).length?` <span class="badge b-navy" style="font-size:10px" title="Заказы на производство: ${esc(r.prodOrders.map(o=>o.numPz).join(', '))}">ПЗ · ${r.prodOrders.length}</span>`:'')+((zpBucket(r)==='sent'&&!(r.kp&&r.kp.status))?` <span title="Укажите результат КП" style="margin-left:6px;font-size:11px;font-weight:700;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-m);padding:1px 6px">!</span>`:''),sortVal:r=>r.status},
       ];
       erpGrid(gh,{key:'sales-req',cols,rows,
-        onRow:r=>{ salesSelZp=r.numZp; salesOpenZp=r.numZp; try{history.replaceState(null,'','#sales/'+encodeURIComponent(r.numZp));}catch{} renderSales(document.getElementById('view')); },
+        onRow:r=>{ salesSelZp=r.numZp; salesOpenZp=r.numZp; try{spaPush('#sales/'+encodeURIComponent(r.numZp));}catch{} renderSales(document.getElementById('view')); },
         del:live?{key:'sales_requests',idOf:r=>r.id,reload:()=>{salesSelZp=null;SALES=null;renderSales(document.getElementById('view'));}}:undefined,
         info:`${srcChip(live)}<span>Запросов: <b style="color:var(--ink)">${rows.length}</b></span>`,
         toolbar:[{label:'+ Новый запрос',cls:'primary',onClick:()=>openCreateRequest()},{label:'Реестр (PDF)',onClick:()=>window.open('/api/sales/registry.pdf','_blank','noopener')},{label:'Печать сводки',onClick:()=>salesPrintDialog()}]});
@@ -6040,7 +6043,7 @@
 
     async function openCounterpartyCard(host,id){
       // deep-link: карточка контрагента адресуется хешем (по образцу '#orders/<№ ПЗ>')
-      try{history.replaceState(null,'','#counterparties/'+encodeURIComponent(id));}catch{}
+      try{spaPush('#counterparties/'+encodeURIComponent(id));}catch{}
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка карточки…</div>';
       let d; try{ d=await (await fetch('/api/counterparty?id='+encodeURIComponent(id))).json(); }catch(e){ host.innerHTML='<div class="card pad c-red">Ошибка: '+esc(e.message)+'</div>'; return; }
       if(!d||!d.contractor){ host.innerHTML='<div class="card pad">Карточка недоступна. <a href="#counterparties">← назад</a></div>'; return; }
@@ -6736,7 +6739,7 @@
           ${mode('build','Составление')}${mode('blank','Предпросмотр бланка Ф.3–З.1')}
         </div>
         <div id="kpBody" style="margin-top:var(--gap)"></div>`;
-      const back=host.querySelector('[data-act="kpback"]'); if(back)back.onclick=()=>{ salesKpZp=null; salesOpenZp=kpState.zp; salesSelZp=kpState.zp; salesTab='req'; try{history.replaceState(null,'','#sales/'+encodeURIComponent(kpState.zp));}catch{} renderSales(document.getElementById('view')); };
+      const back=host.querySelector('[data-act="kpback"]'); if(back)back.onclick=()=>{ salesKpZp=null; salesOpenZp=kpState.zp; salesSelZp=kpState.zp; salesTab='req'; try{spaPush('#sales/'+encodeURIComponent(kpState.zp));}catch{} renderSales(document.getElementById('view')); };
       host.querySelectorAll('[data-kpmode]').forEach(b=>b.onclick=()=>{ salesKpMode=b.dataset.kpmode; renderKpPage(host); });
       const st=host.querySelector('#kpSaveTop'); if(st&&!lock)st.onclick=async()=>{ st.disabled=true; const old=st.textContent; st.textContent='Сохранение…'; try{ await kpSave(); st.textContent='Сохранено ✓'; setTimeout(()=>{const e=document.getElementById('kpSaveTop'); if(e){e.textContent=old;e.disabled=false;}},1400); }catch{ st.disabled=false; st.textContent=old; } };
       const bt=host.querySelector('#kpBlankTop'); if(bt)bt.onclick=()=>{ salesKpMode='blank'; renderKpPage(host); };
@@ -8015,7 +8018,7 @@
       // в шапке карточки — znzCell(r.status) ниже); следующий шаг для них — «В работе».
       // deep-link: карточка ЗнЗ адресуется хешем — открытие фиксирует '#purchase/<№ ЗнЗ>'
       // (replaceState, без записи в историю — по образцу '#orders/<№ ПЗ>' в renderOrdersView)
-      try{history.replaceState(null,'','#purchase/'+encodeURIComponent(r.numZnz));}catch{}
+      try{spaPush('#purchase/'+encodeURIComponent(r.numZnz));}catch{}
       // K-138: статус заявки ВЫВОДИТСЯ из позиций, а переходы валидируются сервером по
       //  ХРАНИМОМУ полю. Считать шаги по выводимому нельзя — они разойдутся, и переход
       //  отобьётся с ошибкой «только соседний этап». Полоса и кнопки идут по statusStored.
@@ -9561,7 +9564,7 @@
         {key:'act',label:'',w:92,cls:'nw',cell:i=>i.belowMin?`<button class="tbtn amber" data-znz="${esc(i.code)}" style="padding:3px 9px;font-size:12px">ЗнЗ →</button>`:'',sortVal:i=>0},
       ];
       erpGrid(gh,{key:'wh-items',cols,rows,rowKey:i=>i.code,selKey:whSelCode,rowClass:i=>(i.belowMin&&!i.customerOwned)?'row-def':'',
-        onRow:i=>{ whSelCode=i.code; try{history.replaceState(null,'','#warehouse/'+encodeURIComponent(i.code));}catch{} whShowDetail(i.code); },
+        onRow:i=>{ whSelCode=i.code; try{spaPush('#warehouse/'+encodeURIComponent(i.code));}catch{} whShowDetail(i.code); },
         onEnter:i=>{ whSelCode=i.code; whShowDetail(i.code); },
         info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
       whShowDetail(whSelCode);
@@ -9899,7 +9902,7 @@
         {key:'range',label:'Разброс цен (₽/ед)',w:190,align:'right',cls:'nw',cell:catRange,sortVal:i=>i.priceMin==null?-1:i.priceMin},
       ];
       erpGrid(gh,{key:'cat-items',cols,rows,rowKey:i=>String(i.id),selKey:String(catSelId),
-        onRow:i=>{ catSelId=i.id; try{history.replaceState(null,'','#catalog/'+encodeURIComponent(i.id));}catch{} catShowDetail(i.id); },
+        onRow:i=>{ catSelId=i.id; try{spaPush('#catalog/'+encodeURIComponent(i.id));}catch{} catShowDetail(i.id); },
         onEnter:i=>{ catSelId=i.id; catShowDetail(i.id); },
         del:live?{key:'catalog_canon',idOf:(r)=>r.id,reload:()=>{catCardCache={};CAT=null;renderCatalog(document.getElementById('view'));}}:undefined,
         info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
@@ -10296,7 +10299,7 @@
     async function retroOpen(id,opts){
       if(retroLoadingId!=null&&String(retroLoadingId)===String(id))return; // уже грузится — повторный клик игнорируем
       await retroEnsureRefs(); const d=retroDrawerHost(); retroSel=id; if(!(opts&&opts.keepTab))retroTab='act';
-      try{history.replaceState(null,'','#retro/'+encodeURIComponent(id));}catch{}
+      try{spaPush('#retro/'+encodeURIComponent(id));}catch{}
       d.classList.add('on'); retroLoadingId=id; const t0=Date.now();
       if(!(opts&&opts.keepTab)){ d.innerHTML=retroLoadingHtml(0); clearInterval(retroLoadTimer); retroLoadTimer=setInterval(()=>{ if(retroLoadingId==null||String(retroSel)!==String(id)){ clearInterval(retroLoadTimer); return; } const el=d.querySelector('.ui-spin'); if(el)d.innerHTML=retroLoadingHtml(Math.round((Date.now()-t0)/1000)); },1000); }
       else { const hb=d.querySelector('.eqd-h'); if(hb&&!hb.querySelector('.retro-reload')){ const sp=document.createElement('span'); sp.className='retro-reload ui-spin'; sp.title='обновляю…'; sp.style.cssText='position:absolute;right:52px;top:14px'; hb.style.position='relative'; hb.appendChild(sp); } }
@@ -10631,7 +10634,7 @@
     function onecDrawerOpen(id,opts){
       const it=((ONEC&&ONEC.items)||[]).find(i=>String(i.id)===String(id)); if(!it)return;
       const d=onecDrawerHost(); onecSel=it.id; if(!(opts&&opts.keepTab))onecDrTab='pass';
-      try{history.replaceState(null,'','#onec/'+encodeURIComponent(it.id));}catch{}
+      try{spaPush('#onec/'+encodeURIComponent(it.id));}catch{}
       d.classList.add('on'); onecGrid();
       const tabs=[['pass','Паспорт'],['stock','Остатки'+(it.warehouses.length?' · '+it.warehouses.length:'')],['canon','Канон']];
       d.innerHTML=`<div class="eqd-h">
@@ -10827,7 +10830,7 @@
     }
     async function eqDrawerOpen(id,opts){
       const d=eqDrawerHost(); eqSelId=id; if(!(opts&&opts.keepTab)) eqDrTab='pass';
-      try{history.replaceState(null,'','#equipment/'+encodeURIComponent(id));}catch{}
+      try{spaPush('#equipment/'+encodeURIComponent(id));}catch{}
       const fresh=!d.classList.contains('on'); d.classList.add('on');
       if(fresh||!eqCardCache[id]) d.innerHTML='<div class="card pad" style="color:var(--sub)">Загрузка карточки…</div>';
       if(eqTab==='reg')eqRegGrid(); // подсветить выбранную строку
@@ -11450,7 +11453,7 @@
     function siDrawerClose(resetHash){ const d=document.getElementById('si-drawer'); if(d){ d.classList.remove('on'); d.innerHTML=''; } siSel=null; siCard=null; siDraft=null; siGrid(); if(resetHash!==false){ try{history.replaceState(null,'','#si');}catch{} } }
     async function siOpen(id,opts){
       const d=siDrawerHost(); siSel=id; if(!(opts&&opts.keepTab))siTab='card';
-      try{history.replaceState(null,'','#si/'+encodeURIComponent(id));}catch{}
+      try{spaPush('#si/'+encodeURIComponent(id));}catch{}
       d.classList.add('on'); if(!(opts&&opts.keepTab))d.innerHTML='<div class="eqd-h"><div class="eqd-title"><span class="eqd-inv">…</span></div><button class="x" data-act="close" aria-label="Закрыть">✕</button><div class="eqd-sub">Загрузка карточки…</div></div>';
       siGrid();
       let card=null; try{ card=await (await fetch('/api/si/card?id='+encodeURIComponent(id))).json(); }catch(e){ card={error:String(e.message||e)}; }
@@ -11658,8 +11661,8 @@
       }
       gh.classList.toggle('has-act', tlSub!=='osn'); // K-89 п.3: включает sticky-колонку действия «Пополнение →»
       tlGridApi=erpGrid(gh,{key:'tl-'+tlSub,cols,rows,rowKey:i=>i.code,selKey:tlSel,rowClass:i=>((tlSub!=='osn'&&(i.belowMin||Number(i.balance)<=0))||i.calOverdue)?'row-def':'',
-        onRow:i=>{ tlSel=i.code; try{history.replaceState(null,'','#tools/'+encodeURIComponent(i.code));}catch{} tlBody(); },
-        onEnter:i=>{ tlSel=i.code; try{history.replaceState(null,'','#tools/'+encodeURIComponent(i.code));}catch{} tlBody(); },
+        onRow:i=>{ tlSel=i.code; try{spaPush('#tools/'+encodeURIComponent(i.code));}catch{} tlBody(); },
+        onEnter:i=>{ tlSel=i.code; try{spaPush('#tools/'+encodeURIComponent(i.code));}catch{} tlBody(); },
         info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
     }
     async function tlShowDetail(code){
@@ -12525,7 +12528,7 @@
       tlTab='items'; tlSub=tlViewSub(it); tlCat=''; tlFilter='all'; tlPlace=''; tlSel=code;
       document.querySelectorAll('#tlseg button').forEach(x=>x.classList.toggle('on',x.dataset.t==='items'));
       const h=document.getElementById('tlbody'); if(h)tlItemsBody(h);
-      try{history.replaceState(null,'','#tools/'+encodeURIComponent(code));}catch{}
+      try{spaPush('#tools/'+encodeURIComponent(code));}catch{}
     }
     // связка «державка → совместимые пластины → сплав → остаток» — из ISO-каталога (best-effort match по ISO в наименовании/коде)
     function tlFindHolderFor(it){
@@ -13871,7 +13874,7 @@
         {key:'act',label:'',w:104,cls:'nw',cell:i=>(i.belowMin||i.available<=0)?`<button class="tbtn green" data-repl="${esc(i.code)}" style="padding:3px 9px;font-size:12px">Приход →</button>`:'',sortVal:i=>0},
       ];
       mtGridApi=erpGrid(gh,{key:'mt',cols,rows,rowKey:i=>i.code,selKey:mtSel,rowClass:i=>(i.belowMin||i.available<=0)?'row-def':'',
-        onRow:i=>{ mtSel=i.code; try{history.replaceState(null,'','#metal/'+encodeURIComponent(i.code));}catch{} mtShowDetail(i.code); mtSyncDrawer(); },
+        onRow:i=>{ mtSel=i.code; try{spaPush('#metal/'+encodeURIComponent(i.code));}catch{} mtShowDetail(i.code); mtSyncDrawer(); },
         onEnter:i=>{ mtSel=i.code; mtShowDetail(i.code); mtSyncDrawer(); },
         info:`${srcChip(live)}<span>Позиций: <b style="color:var(--ink)">${rows.length}</b></span>`});
       mtShowDetail(mtSel); mtSyncDrawer();
@@ -14526,8 +14529,8 @@
       if(ordSel&&!rows.some(r=>r.o.numPz===ordSel))ordSel=null;
       host.innerHTML=`<div id="ocreate-panel"></div><div class="split wide md-stack"><div id="ogrid"></div><div class="detail" id="odetail"></div></div>`;
       ordApi=erpGrid(document.getElementById('ogrid'),{key:'orders',cols,rows,rowKey:r=>r.o.numPz,selKey:ordSel,
-        onRow:r=>{ordSel=r.o.numPz;try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}odShowDetail(ordSel);},
-        onEnter:r=>{ordSel=r.o.numPz;try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}odShowDetail(ordSel);}, // K-116: Enter — тот же дровер с вкладками                       // Enter — карточка целиком (модалка; полноэкранный роут — TODO)
+        onRow:r=>{ordSel=r.o.numPz;try{spaPush('#orders/'+encodeURIComponent(ordSel));}catch{}odShowDetail(ordSel);},
+        onEnter:r=>{ordSel=r.o.numPz;try{spaPush('#orders/'+encodeURIComponent(ordSel));}catch{}odShowDetail(ordSel);}, // K-116: Enter — тот же дровер с вкладками                       // Enter — карточка целиком (модалка; полноэкранный роут — TODO)
         onEsc:()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);},
         del:DATA.mode==='live'?{key:'orders',idOf:r=>r.o.id,reload:()=>load()}:undefined,
         info:`${srcChip(DATA.mode==='live')}${ordGrp?`<span class="badge b-navy">группа ${esc(ordGrp.replace(':',' · '))}</span> <a href="#" id="ord-grpclear" style="color:var(--blue)">снять</a>`:''}<span>Всего: <b style="color:var(--ink)">${rows.length}</b></span>${lateN?`<span class="c-red">Просрочено: <b>${lateN}</b></span>`:''}${otkN?`<span class="c-amber">Ждут ОТК: <b>${otkN}</b></span>`:''}`,
@@ -15334,7 +15337,7 @@
             msg.innerHTML=E?`<i class=ic-okc></i> Сохранено: ${esc(j.note||'изменений нет')}${j.chat&&j.chat.sent?' · обновлённая карточка отправлена в чат заказа':''}`
                            :`<i class=ic-okc></i> Создано производственное задание <b>${esc(j.numPz||'')}</b> · позиций: ${j.positions||positions.length}`; }
           btn.textContent=E?'Сохранено ✓':'Создано ✓';
-          ordSel=E?E.numPz:j.numPz; try{history.replaceState(null,'','#orders/'+encodeURIComponent(ordSel));}catch{}
+          ordSel=E?E.numPz:j.numPz; try{spaPush('#orders/'+encodeURIComponent(ordSel));}catch{}
           await load(); // load()→route() перерисует #orders: панель закроется, заказ будет выбран и открыт справа
         }catch(e){ errEl.textContent=(E?'Не удалось сохранить: ':'Не удалось создать: ')+(e.message||e); btn.disabled=false; btn.textContent=E?'Сохранить изменения':'Создать ПЗ'; }
       };
@@ -16632,7 +16635,7 @@
     }
     let SETUP_MACHINE=''; // K-297: выбранный станок в реестре КН
     async function renderSetupView(host,arg){
-      if(arg){ return openSetupCard(host,arg); }
+      if(arg){ if(arg==='new')return openSetupBuilder(host,null); const m=arg.match(/^(.+)\/edit$/); if(m)return openSetupBuilder(host,m[1]); return openSetupCard(host,arg); } // K-310
       const active=SETUP_KINDS.find(t=>t.kind===SETUP_KIND)||SETUP_KINDS[0];
       // Нерабочий подраздел — сразу заглушка, без запроса карт.
       if(!active.ready){
@@ -16675,11 +16678,16 @@
     // ── SVG-схема головки (Этап 2b+): круглый револьверный диск ИЛИ плоская гребёнка.
     //    Чистый SVG (пригоден к печати на 2c). data:{[pos]:{filled,holderIso,insertIso,overhang}}.
     //    interactive=true → добавляет прозрачные data-pos хит-зоны (клик по позиции).
+    // K-309: вид инструмента (наружный — резец наружу; осевой — в отверстии головки, вылет по Z) и положение режущей кромки (Sinumerik 808D, 1–8)
+    const SETUP_TOOL_KINDS=['наружный резец','торцовый / подрезной','канавочный / отрезной','резьбовой наружный','расточной резец','сверло','центровочное сверло','резьбовой внутренний','развёртка','метчик'];
+    const SETUP_AXIAL=new Set(['расточной резец','сверло','центровочное сверло','резьбовой внутренний','развёртка','метчик']);
+    const setupIsAxial=(k)=>SETUP_AXIAL.has(String(k||'').trim());
+    const SETUP_EDGE_POS=[['1','1 — кромка снизу-справа (расточной, от патрона)'],['2','2 — кромка снизу-слева (расточной, к патрону)'],['3','3 — кромка сверху-слева (наружный, к патрону — типовой)'],['4','4 — кромка сверху-справа (наружный, от патрона)'],['5','5 — кромка снизу по центру (расточной нейтральный)'],['6','6 — кромка слева по центру (торцовый / нейтральный)'],['7','7 — кромка сверху по центру (наружный нейтральный, канавочный)'],['8','8 — кромка справа по центру (нейтральный, от патрона)']];
     const headOverhangPx=(ov)=>{ const v=parseFloat(String(ov||'').replace(',','.').replace(/[^\d.]/g,'')); return (Number.isFinite(v)&&v>0)?Math.max(7,Math.min(v,60)*0.85):0; };
     // K-299 (редизайн, Александр 25.09): револьверная головка — многогранник с гнёздами на гранях, резцы наружу,
     //    рабочая позиция внизу у заготовки; занятые гнёзда — зелёные с кодом ISO, свободные — пунктир. Один вид, без «профиля».
     function headSVGRound(N,data,rot,interactive,selected){
-      const W=560,H=520,C=280,CY=240,R=132,Rin=44; const step=360/N, rotDeg=(rot||0)*step;
+      const W=560,H=440,C=280,CY=225,R=132,Rin=44; const step=360/N, rotDeg=(rot||0)*step;
       const ang=(i)=>(90+i*step+rotDeg)*Math.PI/180; // i=0 (T1) — внизу при rot=0 → рабочая
       const rWork=(((0-(rot||0))%N)+N)%N; // индекс позиции в рабочей точке (низ)
       const pt=(r,a)=>[C+r*Math.cos(a),CY+r*Math.sin(a)];
@@ -16692,21 +16700,21 @@
         <circle cx="${C}" cy="${CY}" r="7" fill="#b9c7d6"/>
         <text x="${C}" y="${CY-14}" font-size="10" fill="#7c8a99" text-anchor="middle">головка</text>
         <text x="${C}" y="${CY+2}" font-size="13" font-weight="700" fill="#31506a" text-anchor="middle">${N} поз.</text>`;
-      // рабочая зона: заготовка под головкой
-      const wy=CY+R+70; const work=`<rect x="${C-150}" y="${wy-9}" width="300" height="18" rx="3" fill="#e6edf5" stroke="#b9c7d6" stroke-width="1.5"/>
-        <line x1="${C-150}" y1="${wy}" x2="${C+150}" y2="${wy}" stroke="#9aa7b4" stroke-width="1" stroke-dasharray="6 4"/>
-        <text x="${C+156}" y="${wy+1}" font-size="9.5" fill="#7c8a99" dominant-baseline="central">ось заготовки</text>`;
+      const work='';
       let seats='',tools='',labels='',hits='';
       for(let i=0;i<N;i++){ const n=i+1, s=data[n]||{}, filled=!!s.filled, a=ang(i), deg=a*180/Math.PI, isWork=(i===rWork);
         const [sx,sy]=pt(R,a); const ov=headOverhangPx(s.overhang);
         const g=(inner)=>`<g transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)}) rotate(${(deg-90).toFixed(1)})">${inner}</g>`; // ось Y группы = наружу
-        if(isWork) seats+=`<path d="M ${C} ${CY} L ${pt(R+8,a-Math.PI/N).map(v=>v.toFixed(1)).join(' ')} A ${R+8} ${R+8} 0 0 1 ${pt(R+8,a+Math.PI/N).map(v=>v.toFixed(1)).join(' ')} Z" fill="#eaf2ff"/>`;
         // гнездо (паз) на грани
         seats+=g(`<rect x="-17" y="-12" width="34" height="14" rx="2" fill="${filled?'#d9efe2':'#eef2f6'}" stroke="${filled?'#15803d':'#b9c7d6'}" stroke-width="1.5"${filled?'':' stroke-dasharray="3 3"'}/>`);
-        if(filled){ const L=22+ov; // державка + резец наружу
+        if(filled&&s.axial){ // K-309: осевой инструмент (расточной/сверло) — торчит по Z, на виде сверху это ⊙ в гнезде
+          tools+=g(`<circle cx="0" cy="12" r="11" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/><circle cx="0" cy="12" r="3.5" fill="#c2410c"/>`);
+          const iso=String(s.holderIso||s.insertIso||''); const [lx,ly]=pt(R+46,a); const right=Math.cos(a)>0.15, left=Math.cos(a)<-0.15;
+          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#9a3412" font-family="monospace" text-anchor="${right?'start':(left?'end':'middle')}" dominant-baseline="central">⊙ ${esc(String(s.toolKind||'осевой').slice(0,14))}${iso?' · '+esc(iso.slice(0,14)):''}${s.overhang?` · Z ${esc(String(s.overhang))}`:''}</text>`;
+        } else if(filled){ const L=22+ov; // державка + резец наружу
           tools+=g(`<rect x="-8" y="0" width="16" height="${L.toFixed(1)}" rx="2" fill="#15803d" stroke="#0f6b3c" stroke-width="1"/><path d="M -8 ${L.toFixed(1)} L 8 ${L.toFixed(1)} L 0 ${(L+9).toFixed(1)} Z" fill="#0f8a4a"/>`);
           const iso=String(s.holderIso||s.insertIso||''); const [lx,ly]=pt(R+L+22,a); const right=Math.cos(a)>0.15, left=Math.cos(a)<-0.15;
-          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#31506a" font-family="monospace" text-anchor="${right?'start':(left?'end':'middle')}" dominant-baseline="central">${esc(iso.slice(0,16))}${s.overhang?`${iso?' · ':''}вылет ${esc(String(s.overhang))}`:''}</text>`;
+          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#31506a" font-family="monospace" text-anchor="${right?'start':(left?'end':'middle')}" dominant-baseline="central">${esc(iso.slice(0,16))}${s.overhang?`${iso?' · ':''}вылет ${esc(String(s.overhang))}`:''}${s.edgePos?` · кр.${esc(String(s.edgePos))}`:''}</text>`;
         }
         // номер позиции — внутри у грани
         const [bx,by]=pt(R-26,a);
@@ -16714,7 +16722,7 @@
         if(selected===n){ const [cx,cy]=pt(R+4,a); seats+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="26" fill="none" stroke="#2563eb" stroke-width="2.5"/>`; }
         if(interactive){ const [cx,cy]=pt(R-6,a); hits+=`<circle data-pos="${n}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="34" fill="transparent" style="cursor:pointer"/>`; }
       }
-      const wk=`<path d="M ${C-8} ${CY+R+50} L ${C+8} ${CY+R+50} L ${C} ${CY+R+38} Z" fill="#2563eb"/><text x="${C}" y="${CY+R+62}" font-size="9.5" fill="#2563eb" text-anchor="middle">рабочая позиция · T${rWork+1}</text>`;
+      const wk='';
       return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:560px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${work}${body}${seats}${tools}${labels}${wk}${hits}</svg>`;
     }
     function headSVGFlat(N,data,interactive,selected){
@@ -16735,27 +16743,28 @@
     //    Круглая головка: рабочая позиция (низ вида сверху) — крупно по центру, плюс соседние; синхронно вращается по rot.
     //    Плоская: линейный профиль всех N позиций. Клик по позиции → те же data-pos хит-зоны (interactive=true).
     function headSideRound(N,data,rot,interactive,selected){
-      const W=300,H=452, cY=H/2, rowGap=88, bodyX=210,bodyW=58,bodyTop=30,bodyBot=H-30;
-      const rWork=(((Math.round(N/2)-(rot||0))%N)+N)%N; // индекс позиции в рабочей точке (низ вида сверху)
-      const span=Math.min(2,Math.max(0,Math.floor((N-1)/2)));
-      const body=`<rect x="${bodyX}" y="${bodyTop}" width="${bodyW}" height="${bodyBot-bodyTop}" rx="12" fill="#fbfdff" stroke="#9fb4c8" stroke-width="2"/><line x1="${bodyX+bodyW/2}" y1="${bodyTop}" x2="${bodyX+bodyW/2}" y2="${bodyBot}" stroke="#dbe4ee" stroke-width="1.5"/>`;
-      const axis=`<line x1="26" y1="${bodyTop}" x2="26" y2="${bodyBot}" stroke="#c2ccd8" stroke-width="1.5" stroke-dasharray="4 4"/><text x="26" y="${bodyBot+16}" font-size="9" fill="#9aa7b4" text-anchor="middle">← деталь</text>`;
+      // K-309: вид сбоку (ось Z горизонтально, деталь слева). Диск головки — торцом. Осевой инструмент торчит по Z на длину вылета,
+      // наружный — державка на торце диска + носик резца радиально (его вылет — на виде сверху).
+      const rowGap=Math.max(34,Math.min(52,420/Math.max(1,N))), W=360, top=40, H=top+N*rowGap+40, bodyX=272,bodyW=48,bodyTop=top-10,bodyBot=top+N*rowGap+6;
+      const body=`<rect x="${bodyX}" y="${bodyTop}" width="${bodyW}" height="${(bodyBot-bodyTop).toFixed(1)}" rx="10" fill="#fbfdff" stroke="#9fb4c8" stroke-width="2"/><text x="${bodyX+bodyW/2}" y="${bodyBot+16}" font-size="9" fill="#9aa7b4" text-anchor="middle">диск головки</text>`;
+      const axis=`<line x1="22" y1="${bodyTop}" x2="22" y2="${bodyBot}" stroke="#c2ccd8" stroke-width="1.5" stroke-dasharray="4 4"/><text x="22" y="${bodyBot+16}" font-size="9" fill="#9aa7b4" text-anchor="middle">← деталь (Z)</text>`;
       let out='',hits='';
-      for(let k=-span;k<=span;k++){ const n=(((rWork+k)%N)+N)%N+1, s=data[n]||{}, filled=!!s.filled, y=cY+k*rowGap, big=(k===0), ov=headOverhangPx(s.overhang), mountX=bodyX, hy=big?14:10, tipX=mountX-24-ov;
-        if(big) out+=`<rect x="18" y="${(y-rowGap/2+4).toFixed(1)}" width="${bodyX-18}" height="${(rowGap-8).toFixed(1)}" rx="8" fill="#eef6ff"/>`;
-        out+=`<rect x="${mountX-4}" y="${(y-(big?15:11)).toFixed(1)}" width="8" height="${big?30:22}" rx="2" fill="#e6edf5" stroke="#c2ccd8" stroke-width="1"/>`;
-        if(filled){
-          out+=`<rect x="${mountX-24}" y="${(y-hy).toFixed(1)}" width="24" height="${hy*2}" rx="3" fill="#15803d" stroke="#0f6b3c" stroke-width="1"/>`;
-          out+=`<line x1="${mountX-24}" y1="${y}" x2="${tipX.toFixed(1)}" y2="${y}" stroke="#0f8a4a" stroke-width="${big?5:3.5}" stroke-linecap="round"/>`;
-          out+=`<circle cx="${tipX.toFixed(1)}" cy="${y}" r="${big?4:3}" fill="#0f8a4a"/>`;
-          if(s.overhang) out+=`<text x="${(tipX-7).toFixed(1)}" y="${y}" font-size="${big?10:9}" fill="#3f9b63" text-anchor="end" dominant-baseline="central">${esc(String(s.overhang||''))}</text>`;
-          const iso=String(s.holderIso||s.insertIso||''); if(iso) out+=`<text x="${(mountX-24).toFixed(1)}" y="${(y+hy+11).toFixed(1)}" font-size="8.5" fill="#31506a" text-anchor="end" font-family="monospace">${esc(iso.slice(0,14))}</text>`;
+      for(let i=0;i<N;i++){ const n=i+1, s=data[n]||{}, filled=!!s.filled, y=top+rowGap*i+rowGap/2, ov=headOverhangPx(s.overhang), mountX=bodyX, axial=!!s.axial;
+        out+=`<rect x="${mountX-4}" y="${(y-12).toFixed(1)}" width="8" height="24" rx="2" fill="#e6edf5" stroke="#c2ccd8" stroke-width="1"/>`;
+        let tipX=mountX-24;
+        if(filled&&axial){ const L=Math.max(30,ov*1.6); tipX=mountX-L;
+          out+=`<rect x="${(mountX-16).toFixed(1)}" y="${(y-9).toFixed(1)}" width="16" height="18" rx="2" fill="#c2410c" stroke="#9a3412" stroke-width="1"/><line x1="${mountX-16}" y1="${y}" x2="${tipX.toFixed(1)}" y2="${y}" stroke="#c2410c" stroke-width="5" stroke-linecap="round"/><circle cx="${tipX.toFixed(1)}" cy="${y}" r="4" fill="#c2410c"/>`;
+          out+=`<text x="${(tipX-7).toFixed(1)}" y="${y}" font-size="9.5" fill="#9a3412" text-anchor="end" dominant-baseline="central">${esc(String(s.toolKind||'осевой').slice(0,12))}${s.overhang?' · Z '+esc(String(s.overhang)):''}</text>`;
+        } else if(filled){
+          out+=`<rect x="${mountX-24}" y="${(y-10).toFixed(1)}" width="24" height="20" rx="3" fill="#15803d" stroke="#0f6b3c" stroke-width="1"/><path d="M ${mountX-24} ${(y-10).toFixed(1)} L ${mountX-24} ${(y-22).toFixed(1)} L ${mountX-14} ${(y-10).toFixed(1)} Z" fill="#0f8a4a"/>`;
+          const iso=String(s.holderIso||s.insertIso||'');
+          out+=`<text x="${(mountX-30).toFixed(1)}" y="${y}" font-size="9" fill="#31506a" text-anchor="end" dominant-baseline="central" font-family="monospace">${esc(iso.slice(0,14))}${s.overhang?`${iso?' · ':''}вылет ${esc(String(s.overhang))} ↑`:''}</text>`;
         } else out+=`<line x1="${mountX-14}" y1="${y}" x2="${mountX}" y2="${y}" stroke="#c2ccd8" stroke-width="2" stroke-dasharray="3 3"/>`;
-        out+=`<text x="${(mountX+bodyW/2).toFixed(1)}" y="${y}" font-size="${big?12:11}" font-weight="700" fill="${filled?'#15803d':'#7c8a99'}" text-anchor="middle" dominant-baseline="central">T${n}</text>`;
-        if(selected===n) out+=`<rect x="${(tipX-3).toFixed(1)}" y="${(y-(big?18:14)).toFixed(1)}" width="${(mountX+bodyW-tipX+6).toFixed(1)}" height="${big?36:28}" rx="7" fill="none" stroke="#2563eb" stroke-width="2.5"/>`;
+        out+=`<text x="${(mountX+bodyW/2).toFixed(1)}" y="${y}" font-size="11" font-weight="700" fill="${filled?(axial?'#c2410c':'#15803d'):'#7c8a99'}" text-anchor="middle" dominant-baseline="central">T${n}</text>`;
+        if(selected===n) out+=`<rect x="${(Math.min(tipX,mountX-24)-3).toFixed(1)}" y="${(y-rowGap/2+3).toFixed(1)}" width="${(mountX+bodyW-Math.min(tipX,mountX-24)+6).toFixed(1)}" height="${(rowGap-6).toFixed(1)}" rx="7" fill="none" stroke="#2563eb" stroke-width="2.5"/>`;
         if(interactive) hits+=`<rect data-pos="${n}" x="18" y="${(y-rowGap/2+2).toFixed(1)}" width="${bodyX+bodyW}" height="${(rowGap-4).toFixed(1)}" fill="transparent" style="cursor:pointer"/>`;
       }
-      const cap=`<text x="${W/2}" y="20" font-size="10.5" fill="var(--sl-500)" text-anchor="middle">профиль · рабочая T${rWork+1}${span>0?' + соседние':''}</text>`;
+      const cap=`<text x="${W/2}" y="18" font-size="10.5" fill="var(--sl-500)" text-anchor="middle">вид сбоку · вылет по Z (осевой) / радиальный (наружный ↑)</text>`;
       return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${cap}${axis}${body}${out}${hits}</svg>`;
     }
     function headSideFlat(N,data,interactive,selected){
@@ -16780,7 +16789,18 @@
       return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${cap}${axis}${body}${out}${hits}</svg>`;
     }
     const headSide=(shape,N,data,rot,interactive,selected)=>shape==='flat'?headSideFlat(N,data,interactive,selected):headSideRound(N,data,rot,interactive,selected);
-    const headViews=(shape,N,data,rot,interactive,selected,extraTop)=>`<div style="max-width:620px;margin:0 auto">${headSVG(shape,N,data,rot,interactive,selected)}${extraTop||''}<div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--sl-500);margin-top:6px"><span><span style="display:inline-block;width:10px;height:10px;background:#15803d;border-radius:2px;vertical-align:middle;margin-right:4px"></span>позиция занята · код державки/пластины и вылет</span><span><span style="display:inline-block;width:10px;height:10px;border:1.5px dashed #b9c7d6;border-radius:2px;vertical-align:middle;margin-right:4px"></span>свободно</span><span><span style="display:inline-block;width:10px;height:10px;background:#eaf2ff;border:1px solid #2563eb;border-radius:2px;vertical-align:middle;margin-right:4px"></span>рабочая позиция у заготовки</span></div></div>`;
+    // K-309: легенда схемы — что означает каждый значок (просьба Александра 25.09)
+    const HEAD_LEGEND=`<div style="margin-top:10px;border-top:1px dashed var(--line,#dbe4ee);padding-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:5px 22px;font-size:var(--fs-xs);color:var(--sl-600,#475569);line-height:1.35">
+      <div><svg width="26" height="18" viewBox="0 0 26 18" style="vertical-align:middle;margin-right:5px"><circle cx="9" cy="9" r="8" fill="#15803d"/><text x="9" y="12.5" font-size="8" font-weight="700" fill="#fff" text-anchor="middle" font-family="system-ui">T3</text></svg><b>T1…T8</b> — номер позиции (гнезда) головки; зелёный — инструмент назначен, серый — свободно</div>
+      <div><svg width="26" height="18" viewBox="0 0 26 18" style="vertical-align:middle;margin-right:5px"><rect x="1" y="4" width="24" height="10" rx="2" fill="#d9efe2" stroke="#15803d" stroke-width="1.5"/></svg><b>гнездо</b> на грани диска — паз под державку; пунктирное — пустое</div>
+      <div><svg width="34" height="18" viewBox="0 0 34 18" style="vertical-align:middle;margin-right:5px"><rect x="1" y="5" width="22" height="8" rx="1.5" fill="#15803d"/><path d="M23 4 L23 14 L31 9 Z" fill="#0f8a4a"/></svg><b>наружный резец</b> — торчит наружу от диска; длина бруска ∝ вылету (мм от торца державки до вершины)</div>
+      <div><svg width="26" height="18" viewBox="0 0 26 18" style="vertical-align:middle;margin-right:5px"><circle cx="13" cy="9" r="7" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/><circle cx="13" cy="9" r="2.5" fill="#c2410c"/></svg><b>⊙ осевой инструмент</b> (расточной резец, сверло, метчик) — сидит в отверстии гнезда и смотрит на нас, вдоль оси Z; его вылет виден на виде сбоку</div>
+      <div><span class="code" style="font-family:var(--mono);font-size:10px;margin-right:5px">PCLNR… · вылет 32 · кр.3</span>подпись у позиции: код державки или пластины (ISO), вылет в мм, <b>кр.N</b> — положение режущей кромки по схеме Sinumerik (1–8)</div>
+      <div><svg width="26" height="18" viewBox="0 0 26 18" style="vertical-align:middle;margin-right:5px"><circle cx="13" cy="9" r="8" fill="#e9eff6" stroke="#b9c7d6" stroke-width="1.5"/><circle cx="13" cy="9" r="2" fill="#b9c7d6"/></svg><b>«N поз.»</b> в центре — число позиций револьвера из паспорта станка (в карте не меняется)</div>
+      <div><svg width="34" height="18" viewBox="0 0 34 18" style="vertical-align:middle;margin-right:5px"><rect x="24" y="1" width="9" height="16" rx="2" fill="#fbfdff" stroke="#9fb4c8" stroke-width="1.5"/><line x1="6" y1="9" x2="22" y2="9" stroke="#c2410c" stroke-width="3" stroke-linecap="round"/><circle cx="6" cy="9" r="2.5" fill="#c2410c"/></svg><b>вид сбоку</b> — диск головки торцом (справа), деталь слева по оси Z; оранжевый стержень — вылет осевого инструмента по Z, зелёный блок с носиком ↑ — наружный резец (его вылет радиальный, см. вид сверху)</div>
+      <div><span style="color:#2563eb;font-weight:700;margin-right:5px">◯</span>синее кольцо — выбранная позиция в редакторе; клик по любой позиции открывает её карточку</div>
+    </div>`;
+    const headViews=(shape,N,data,rot,interactive,selected,extraTop)=>`<div style="max-width:980px;margin:0 auto"><div style="display:flex;gap:12px;align-items:flex-start;justify-content:center;flex-wrap:wrap"><div style="flex:1 1 420px;min-width:300px">${headSVG(shape,N,data,rot,interactive,selected)}</div><div style="flex:0 1 360px;min-width:260px">${headSide(shape,N,data,rot,interactive,selected)}</div></div>${extraTop||''}${HEAD_LEGEND}</div>`;
     // блок «Зажим и кулачки» для просмотра карты (Этап 2c) — по it.jaw
     function setupJawView(it){
       const j=(it&&it.jaw)||{};
@@ -16812,6 +16832,7 @@
     function toolStock(iso){ const k=String(iso||'').trim().toUpperCase(); if(!k||!TOOLS_STOCK)return null; const hit=TOOLS_STOCK.filter(t=>t.key.includes(k)); if(!hit.length)return {found:false,bal:0}; return {found:true,bal:hit.reduce((a,t)=>a+t.bal,0)}; }
     function stockBadge(iso){ const st=toolStock(iso); if(!st)return ''; if(!st.found||st.bal<=0)return `<span class="badge" style="color:#b45309;background:#fffbeb;border:1px solid #fde68a;margin-left:6px" title="В реестре инструмента нет остатка по этому ISO-коду">нет на складе</span>`; return `<span class="badge" style="color:#15803d;background:#f0fdf4;border:1px solid #bbf7d0;margin-left:6px">на складе ${st.bal}</span>`; }
     async function openSetupCard(host,id){
+      spaPush('#setup/'+encodeURIComponent(id)); // K-310
       host.innerHTML='<div class="card pad" style="color:var(--gray)">Загрузка карты наладки…</div>';
       let d; try{ [d]=await Promise.all([(await fetch('/api/setup-card?id='+encodeURIComponent(id))).json(),toolsStockLoad()]); }catch(e){ host.innerHTML='<div class="card pad c-red">Ошибка: '+esc(e.message)+'</div>'; return; }
       if(!d||!d.item){ host.innerHTML='<div class="card pad">Карта недоступна. <a href="#setup">← назад</a></div>'; if(host.querySelector('[href="#setup"]'))host.querySelector('[href="#setup"]').onclick=(e)=>{e.preventDefault();renderSetupView(host);}; return; }
@@ -16823,16 +16844,18 @@
       // SVG-схема головки: круглый диск-револьвер (T1…TN по кругу, вылет — радиальный выступ)
       // или плоская гребёнка (4 поз., вылет — вертикальный выступ). Заполненные — зелёные, пустые — серые.
       const svgData={};
-      for(let n=1;n<=N;n++){ const l=byPos[n]; const filled=!!(l&&(l.holderIso||l.insertIso||l.overhang||l.params||l.note));
-        svgData[n]=filled?{filled:true,holderIso:l.holderIso||'',insertIso:l.insertIso||'',insertGrade:l.insertGrade||'',overhang:l.overhang||''}:{filled:false}; }
+      for(let n=1;n<=N;n++){ const l=byPos[n]; const filled=!!(l&&(l.holderIso||l.insertIso||l.overhang||l.params||l.note||l.toolKind||l.edgePos));
+        svgData[n]=filled?{filled:true,holderIso:l.holderIso||'',insertIso:l.insertIso||'',insertGrade:l.insertGrade||'',overhang:l.overhang||'',toolKind:l.toolKind||'',edgePos:l.edgePos||'',axial:setupIsAxial(l.toolKind)}:{filled:false}; }
       const grid=`<div style="padding:6px 0 2px">${headViews(shape,N,svgData,0,false,null)}</div>`;
       const headLabel=shape==='flat'?'Плоская головка':'Револьверная головка';
       // таблица деталей только по заполненным слотам (вылет/параметры/примечание)
-      const det=filledN?`<table class="dt" style="font-size:13px;width:100%;margin-top:12px"><thead><tr><th style="width:56px">Слот</th><th>Державка (ISO)</th><th>Пластина (ISO)</th><th style="width:90px">Вылет</th><th>Параметры</th><th>Примечание</th></tr></thead><tbody>${lines.slice().sort((a,b)=>(a.pos||0)-(b.pos||0)).map(l=>`<tr>
+      const det=filledN?`<table class="dt" style="font-size:13px;width:100%;margin-top:12px"><thead><tr><th style="width:56px">Поз.</th><th style="width:150px">Вид · кромка</th><th>Державка (ISO)</th><th>Пластина (ISO)</th><th style="width:80px">Вылет</th><th style="width:230px">Корректоры X · Z · r · шир.</th><th>Параметры</th><th>Примечание</th></tr></thead><tbody>${lines.slice().sort((a,b)=>(a.pos||0)-(b.pos||0)).map(l=>`<tr>
           <td class="nw"><b style="color:var(--ink)">${esc(l.toolPos||('T'+l.pos))}</b></td>
+          <td style="font-size:12px">${l.toolKind?`<span style="color:${setupIsAxial(l.toolKind)?'#9a3412':'var(--ink)'}">${setupIsAxial(l.toolKind)?'⊙ ':''}${esc(l.toolKind)}</span>`:'<span class="c-gray">—</span>'}${l.edgePos?`<div class="c-gray">кромка <b style="color:var(--ink)">${esc(l.edgePos)}</b></div>`:''}</td>
           <td>${l.holderIso?`<span class="code" style="font-family:var(--mono)">${esc(l.holderIso)}</span>${l.holderMaker?` <span class="c-gray" style="font-size:12px">${esc(l.holderMaker)}</span>`:''}${l.holderInCatalog===false?' <span class="c-gray" style="font-size:11px">· вне каталога</span>':''}${stockBadge(l.holderIso)}`:'<span class="c-gray">—</span>'}</td>
           <td>${l.insertIso?`<span class="code" style="font-family:var(--mono)">${esc(l.insertIso)}</span>${l.insertGrade?` <span class="c-gray" style="font-size:12px">${esc(l.insertGrade)}</span>`:''}${l.insertInCatalog===false?' <span class="c-gray" style="font-size:11px">· вне каталога</span>':''}${stockBadge(l.insertIso)}`:'<span class="c-gray">—</span>'}</td>
-          <td class="nw c-gray">${esc(l.overhang||'—')}</td>
+          <td class="nw c-gray">${esc(l.overhang||'—')}${l.overhang&&setupIsAxial(l.toolKind)?' <span style="font-size:11px">по Z</span>':''}</td>
+          <td class="nw" style="font-size:12px;font-family:var(--mono)">${[l.lenX?'X '+esc(l.lenX):'',l.lenZ?'Z '+esc(l.lenZ):'',l.radius?'r '+esc(l.radius):'',l.width?'шир. '+esc(l.width):''].filter(Boolean).join(' · ')||'<span class="c-gray">—</span>'}</td>
           <td class="ell c-gray">${esc(l.params||'—')}</td>
           <td class="ell c-gray">${esc(l.note||'—')}</td></tr>`).join('')}</tbody></table>`:'';
       host.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
@@ -16853,13 +16876,14 @@
           ${(it.usedIn||[]).length?`<div class="tbl-wrap"><table class="dt" style="font-size:var(--fs-s);width:100%"><thead><tr><th style="width:150px">МК</th><th>Изделие</th><th style="width:70px">Оп.</th><th>Операция</th><th style="width:200px">Оборудование</th><th style="width:110px">Статус МК</th><th style="width:40px"></th></tr></thead><tbody>${it.usedIn.map(u=>`<tr><td class="nw"><a href="#routes/${u.routeId!=null?u.routeId:''}" class="code c-blue" style="text-decoration:none">${esc(u.mk)}</a></td><td class="ell">${esc(u.designation||u.routeName||'—')}</td><td class="nw"><b>${esc(u.opN)}</b></td><td class="ell">${esc(u.opName||'—')}</td><td class="ell c-gray">${esc(u.equipment||'—')}</td><td class="nw">${esc(u.statusMk||'—')}</td><td>${live?`<button class="btn btn--ghost btn--sm" data-unlink="${esc(u.mk)}|${esc(u.opN)}" title="Отвязать от операции">✕</button>`:''}</td></tr>`).join('')}</tbody></table></div>`
             :`<div style="font-size:var(--fs-s);color:var(--sub)">Пока ни одна операция МК не ссылается на эту карту. Одна карта наладки может входить в операции разных МК — привяжите её здесь или выберите в поле «Карта наладки» операции при правке МК.</div>`}
         </div>
-        <div class="card pad"><div class="row" style="margin-bottom:10px"><span class="sec-h">${esc(headLabel)} · позиции T1…T${N}</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">занято ${filledN} из ${N}</span></div>${grid}${det}
-          <div style="margin-top:9px;font-size:12px;color:var(--sl-500)">Позиция = гнездо головки. Пустая позиция — «свободно». Вылет показан выступом (радиальным на диске / вертикальным на гребёнке). Державка и пластина — из ISO-каталога инструмента (Этап 2a). Тип и число позиций — свойство станка (снапшот).</div></div>
         ${setupJawView(it)}
         ${(()=>{ const t=(it.tail||{}); const has=Object.values(t).some(v=>v&&v!=='не используется'); if(!has)return ''; const P=(l,v)=>`<div><div style="font-size:11px;color:var(--sl-500)">${l}</div><div style="font-weight:600;color:var(--ink)">${v||'<span style=\"color:var(--sl-500);font-weight:400\">—</span>'}</div></div>`; return `<div class="card pad" style="margin-top:var(--gap)"><div class="sec-h" style="margin-bottom:10px">Задняя бабка — оснащение</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px 18px;font-size:13px">${P('Оснащение',esc(t.tailKind))}${P('Конус / посадка',esc(t.tailTaper))}${P('Центр / патрон',esc(t.tailTool))}${P('Вылет пиноли, мм',esc(t.tailQuill))}${P('Усилие поджима',esc(t.tailForce))}${P('Примечание',esc(t.tailNote))}</div></div>`; })()}
+        ${(()=>{ const z=(it.zero||{}); const has=Object.values(z).some(v=>v); const P=(l,v,m)=>`<div><div style="font-size:11px;color:var(--sl-500)">${l}</div><div style="font-weight:600;color:var(--ink)${m?';font-family:var(--mono)':''}">${v||'<span style=\"color:var(--sl-500);font-weight:400\">—</span>'}</div></div>`; return `<div class="card pad" style="margin-top:var(--gap)"><div class="row" style="margin-bottom:10px"><span class="sec-h">Привязка детали — нуль детали</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">сначала деталь, потом инструмент</span></div>${has?`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px 18px;font-size:13px">${P('Смещение нулевой точки',esc(z.zeroOffset),true)}${P('Базовое смещение',esc(z.zeroBase),true)}${P('Примечание',esc(z.zeroNote))}${P('Нуль Z — метод',esc(z.zeroZMethod))}${P('Z0, мм',esc(z.zeroZ),true)}<div></div>${P('Нуль X — метод',esc(z.zeroXMethod))}${P('Ø детали для X, мм',esc(z.zeroX),true)}</div>`:'<div style="font-size:var(--fs-s);color:var(--sub)">Привязка не задана — при редактировании укажите смещение (G54…) и способ измерения по Z и X.</div>'}</div>`; })()}
+        <div class="card pad" style="margin-top:var(--gap)"><div class="row" style="margin-bottom:10px"><span class="sec-h">${esc(headLabel)} · позиции T1…T${N}</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">занято ${filledN} из ${N}</span></div>${grid}${det}
+          <div style="margin-top:9px;font-size:12px;color:var(--sl-500)">Позиция = гнездо головки. Пустая позиция — «свободно». Наружный резец показан выступом наружу, осевой (расточной, сверло) — знаком ⊙: он стоит в отверстии головки и торчит по оси Z, его вылет — от торца головки. Кромка — положение режущей кромки по схеме Sinumerik (1–8). Державка и пластина — из ISO-каталога инструмента (Этап 2a). Тип и число позиций — свойство станка (снапшот).</div></div>
         <div class="card pad" style="margin-top:var(--gap)"><div class="sec-h" style="margin-bottom:10px">История изменений</div>${(it.history||[]).length?`<div style="display:flex;flex-direction:column;gap:8px;font-size:var(--fs-s)">${it.history.map(h=>`<div style="display:flex;gap:10px"><span class="c-gray nw">${esc(h.when)}</span><span><b>${esc(h.who||'—')}</b> · ${esc(h.type)}${h.details?' — '+esc(h.details):''}</span></div>`).join('')}</div>`:'<span class="c-gray" style="font-size:var(--fs-s)">Записей нет</span>'}</div>
 `;
-      const back=host.querySelector('[href="#setup"]'); if(back)back.onclick=(e)=>{e.preventDefault(); renderSetupView(host);};
+      const back=host.querySelector('[href="#setup"]'); if(back)back.onclick=(e)=>{e.preventDefault(); spaBack('#setup');};
       const lk=host.querySelector('#st-link'); if(lk)lk.onclick=()=>setupLinkDialog(host,it);
       host.querySelectorAll('[data-unlink]').forEach(b=>b.onclick=async()=>{ const [mk,opN]=b.dataset.unlink.split('|'); if(!(await uiConfirm(`Отвязать ${it.no} от ${mk}, оп. ${opN}?`,{ok:'Отвязать'})))return; try{ await postJson('/api/setup-card/link',{id:it.id,mk,opN,unlink:true}); toast('Отвязано.','ok'); SETUP=null; RTSTP=null; openSetupCard(host,it.id); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } });
       const eb=host.querySelector('#st-edit'); if(eb)eb.onclick=()=>openSetupBuilder(host,it.id);
@@ -16882,6 +16906,7 @@
         try{ await postJson('/api/setup-card/link',{id:it.id,mk,opN}); w.remove(); toast(`${it.no} привязана к ${mk}, оп. ${opN}.`,'ok'); SETUP=null; RTSTP=null; openSetupCard(host,it.id); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); ok.disabled=false; } };
     }
     async function openSetupBuilder(host,cardId){
+      spaPush(cardId!=null?'#setup/'+encodeURIComponent(cardId)+'/edit':'#setup/new'); // K-310
       const cat=await loadSetupCat();
       if(!cat||cat.mode==='mock'){ toast('Конструктор карт наладки доступен только в LIVE-режиме (нужен токен NocoDB в «Настройках»).','err'); return; }
       const kindNow=(cardId!=null?null:(SETUP_KIND||'Токарная'));
@@ -16897,7 +16922,7 @@
       let init={item:{id:null,no:'',name:'',part:'',status:'Черновик',machineId:null,revolverSlots:null},lines:[]};
       if(cardId!=null){ try{ const d=await (await fetch('/api/setup-card?id='+encodeURIComponent(cardId))).json(); if(d&&d.item)init={item:d.item,lines:d.lines||[]}; }catch(e){} }
       // состояние слотов револьвера: номер слота (1..N) → {holderId,insertId,overhang,params,note}
-      const slots={}; (init.lines||[]).forEach(l=>{const n=Number(l.pos)||0; if(n>=1)slots[n]={holderId:(l.holderId!=null?String(l.holderId):''),insertId:(l.insertId!=null?String(l.insertId):''),holderIso:(l.holderId==null?(l.holderIso||''):''),insertIso:(l.insertId==null?(l.insertIso||''):''),overhang:l.overhang||'',params:l.params||'',note:l.note||''};});
+      const slots={}; (init.lines||[]).forEach(l=>{const n=Number(l.pos)||0; if(n>=1)slots[n]={holderId:(l.holderId!=null?String(l.holderId):''),insertId:(l.insertId!=null?String(l.insertId):''),holderIso:(l.holderId==null?(l.holderIso||''):''),insertIso:(l.insertId==null?(l.insertIso||''):''),overhang:l.overhang||'',params:l.params||'',note:l.note||'',toolKind:l.toolKind||'',edgePos:l.edgePos||'',lenX:l.lenX||'',lenZ:l.lenZ||'',radius:l.radius||'',width:l.width||''};});
       toolsStockLoad();
       const machineN=(id)=>{ const e=eqById[String(id)]; return e&&e.revolverSlots>0?e.revolverSlots:12; };
       const machineShape=(id)=>{ const e=eqById[String(id)]; return (e&&e.headShape)||'round'; };
@@ -16941,25 +16966,6 @@
             </div>
           </div>
           <div class="card pad" style="margin-top:var(--gap)">
-            <div class="row" style="margin-bottom:10px"><span class="sec-h" id="sb-headtitle">Головка станка — схема</span><span class="spacer"></span><span id="sb-slotinfo" style="font-size:12px;color:var(--sub)"></span></div>
-            <div style="font-size:12px;color:var(--sl-500);margin-bottom:10px">Клик по позиции на схеме → назначить державку/пластину, вылет, параметры или очистить. Пустая позиция = «свободно» (допустимо). Вылет показан выступом.</div>
-            <div id="sb-slotgrid"></div>
-            <div id="sb-slotedit" style="display:none;margin-top:14px;border:1px solid #cdd8e5;border-radius:9px;background:#f8fbff;padding:12px 14px">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b id="sb-se-title" style="color:var(--ink)">Слот</b><span class="spacer" style="flex:1"></span><button class="tbtn" id="sb-se-clear" style="color:var(--red)">Очистить слот</button></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
-                <div>${lbl('Державка')}<select id="sb-se-holder" style="${ist}"></select><input id="sb-se-holder-txt" style="${ist};margin-top:6px" placeholder="или ISO-код вручную — если державки ещё нет в каталоге"><div id="sb-se-holder-st" style="font-size:11px;margin-top:3px"></div></div>
-                <div>${lbl('Пластина')}<select id="sb-se-insert" style="${ist}"></select><input id="sb-se-insert-txt" style="${ist};margin-top:6px" placeholder="или ISO-код вручную — если пластины ещё нет в каталоге"><div id="sb-se-insert-st" style="font-size:11px;margin-top:3px"></div></div>
-                <div>${lbl('Вылет')}<input id="sb-se-overhang" style="${ist}" placeholder="мм"></div>
-                <div>${lbl('Параметры')}<input id="sb-se-params" style="${ist}" placeholder="S/n, f, ap…"></div>
-                <div style="grid-column:1/3">${lbl('Примечание')}<input id="sb-se-note" style="${ist}"></div>
-              </div>
-              <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
-                <button class="tbtn" id="sb-se-cancel">Отмена</button>
-                <button class="tbtn primary" id="sb-se-apply">Применить</button>
-              </div>
-            </div>
-          </div>
-          <div class="card pad" style="margin-top:var(--gap)">
             <div class="row" style="margin-bottom:10px"><span class="sec-h">Зажим заготовки и кулачки</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">патрон — из паспорта станка</span></div>
             <div style="font-size:12px;color:var(--sl-500);margin-bottom:10px">Патрон подтягивается из «Настроек оборудования» выбранного станка. Комплект кулачков — из библиотеки (раздел «Инструмент и оснастка»). Ниже — фактические параметры базирования операции.</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 14px">
@@ -16986,6 +16992,48 @@
               <div>${lbl('Примечание')}<input id="sb-tail-note" style="${ist}" value="${esc((init.item.tail||{}).tailNote||'')}"></div>
             </div>
           </div>
+          <div class="card pad" style="margin-top:var(--gap)">
+            <div class="row" style="margin-bottom:10px"><span class="sec-h">Привязка детали — нуль детали</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">сначала привязать деталь, потом инструмент</span></div>
+            <div style="font-size:12px;color:var(--sl-500);margin-bottom:10px">Смещение нулевой точки — как на экране станка (Sinumerik: Смещ. нул. точки → G54…). Нуль Z — по торцу детали (край детали → Z0), нуль X — по обточенному Ø (Ø детали → Длина X).</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px 18px">
+              <div>${lbl('Смещение нулевой точки')}<select id="sb-zero-offset" style="${ist}">${['','G54','G55','G56','G57','G58','G59','G500 (базовое)'].map(o=>`<option value="${escA(o)}"${((init.item.zero||{}).zeroOffset||'')===o?' selected':''}>${o||'— не задано —'}</option>`).join('')}</select></div>
+              <div>${lbl('Базовое смещение (G500)')}<input id="sb-zero-base" style="${ist}" value="${esc((init.item.zero||{}).zeroBase||'')}" placeholder="X / Z, мм — если используется"></div>
+              <div>${lbl('Примечание')}<input id="sb-zero-note" style="${ist}" value="${esc((init.item.zero||{}).zeroNote||'')}" placeholder="напр. нуль на правом торце после подрезки"></div>
+              <div>${lbl('Нуль Z — метод')}<select id="sb-zero-zm" style="${ist}">${['','касание торца детали (край детали → Z0)','торец кулачков + вылет заготовки','щуп / измерительная головка','по обработанному торцу'].map(o=>`<option value="${escA(o)}"${((init.item.zero||{}).zeroZMethod||'')===o?' selected':''}>${o||'— не задано —'}</option>`).join('')}</select></div>
+              <div>${lbl('Z0, мм')}<input id="sb-zero-z" style="${ist}" value="${esc((init.item.zero||{}).zeroZ||'')}" placeholder="обычно 0 (правый торец)"></div>
+              <div></div>
+              <div>${lbl('Нуль X — метод')}<select id="sb-zero-xm" style="${ist}">${['','обточить поясок и измерить Ø (Ø детали → Длина X)','Ø заготовки известен (по паспорту)','щуп / измерительная головка'].map(o=>`<option value="${escA(o)}"${((init.item.zero||{}).zeroXMethod||'')===o?' selected':''}>${o||'— не задано —'}</option>`).join('')}</select></div>
+              <div>${lbl('Ø детали для X, мм')}<input id="sb-zero-x" style="${ist}" value="${esc((init.item.zero||{}).zeroX||'')}" placeholder="измеренный Ø пояска"></div>
+            </div>
+          </div>
+          <div class="card pad" style="margin-top:var(--gap)">
+            <div class="row" style="margin-bottom:10px"><span class="sec-h" id="sb-headtitle">Головка станка — схема</span><span class="spacer"></span><span id="sb-slotinfo" style="font-size:12px;color:var(--sub)"></span></div>
+            <div style="font-size:12px;color:var(--sl-500);margin-bottom:10px">Клик по позиции на схеме → вид инструмента (наружный / осевой), державка и пластина, положение режущей кромки, вылет, корректоры X/Z. Наружный резец показан выступом наружу, осевой (расточной, сверло) — знаком ⊙: он стоит в отверстии головки и торчит по Z. Пустая позиция = «свободно».</div>
+            <div id="sb-slotgrid"></div>
+            <div id="sb-slotedit" style="display:none;margin-top:14px;border:1px solid #cdd8e5;border-radius:9px;background:#f8fbff;padding:12px 14px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b id="sb-se-title" style="color:var(--ink)">Слот</b><span class="spacer" style="flex:1"></span><button class="tbtn" id="sb-se-clear" style="color:var(--red)">Очистить слот</button></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
+                <div>${lbl('Державка')}<select id="sb-se-holder" style="${ist}"></select><input id="sb-se-holder-txt" style="${ist};margin-top:6px" placeholder="или ISO-код вручную — если державки ещё нет в каталоге"><div id="sb-se-holder-st" style="font-size:11px;margin-top:3px"></div></div>
+                <div>${lbl('Пластина')}<select id="sb-se-insert" style="${ist}"></select><input id="sb-se-insert-txt" style="${ist};margin-top:6px" placeholder="или ISO-код вручную — если пластины ещё нет в каталоге"><div id="sb-se-insert-st" style="font-size:11px;margin-top:3px"></div></div>
+                <div>${lbl('Вид инструмента')}<select id="sb-se-kind" style="${ist}"><option value="">— не указан —</option>${SETUP_TOOL_KINDS.map(k=>`<option value="${escA(k)}">${setupIsAxial(k)?'⊙ ':''}${esc(k)}</option>`).join('')}</select><div id="sb-se-kind-st" style="font-size:11px;margin-top:3px;color:#8a97a6"></div></div>
+                <div>${lbl('Положение режущей кромки')}<select id="sb-se-edge" style="${ist}"><option value="">— как на экране станка (1–8) —</option>${SETUP_EDGE_POS.map(([v,t])=>`<option value="${v}">${esc(t)}</option>`).join('')}</select></div>
+                <div>${lbl('Вылет')}<span id="sb-se-over-lbl"></span><input id="sb-se-overhang" style="${ist}" placeholder="мм"></div>
+                <div>${lbl('Параметры')}<input id="sb-se-params" style="${ist}" placeholder="S/n, f, ap…"></div>
+                <div style="grid-column:1/3;display:grid;grid-template-columns:repeat(4,1fr);gap:10px 14px;padding:10px 12px;background:#f1f5f9;border-radius:8px">
+                  <div style="grid-column:1/5;font-size:11px;color:#31506a"><b>Корректоры инструмента</b> — измеряются на станке после привязки детали: Длина X — по обточенному Ø, Длина Z — по касанию торца (Sinumerik: Измер. инстр. → ручн.)</div>
+                  <div>${lbl('Длина X')}<input id="sb-se-lenx" style="${ist}" placeholder="мм"></div>
+                  <div>${lbl('Длина Z')}<input id="sb-se-lenz" style="${ist}" placeholder="мм"></div>
+                  <div>${lbl('Радиус r')}<input id="sb-se-radius" style="${ist}" placeholder="мм"></div>
+                  <div>${lbl('Ширина пластины')}<input id="sb-se-width" style="${ist}" placeholder="мм (канавочный)"></div>
+                </div>
+                <div style="grid-column:1/3">${lbl('Примечание')}<input id="sb-se-note" style="${ist}"></div>
+              </div>
+              <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+                <button class="tbtn" id="sb-se-cancel">Отмена</button>
+                <button class="tbtn primary" id="sb-se-apply">Применить</button>
+              </div>
+            </div>
+          </div>
           <div id="sb-err" style="margin-top:10px;color:var(--red);font-size:13px"></div>
           <div style="margin-top:var(--gap);display:flex;gap:8px;justify-content:flex-end">
             <button class="btn" id="sb-cancel">Отмена</button>
@@ -16993,7 +17041,7 @@
           </div>
         </div>`;
       window.scrollTo(0,0);
-      const sbBack=()=>{ if(cardId!=null)openSetupCard(host,cardId); else renderSetupView(host); };
+      const sbBack=()=>spaBack(cardId!=null?'#setup/'+encodeURIComponent(cardId):'#setup');
       ['sb-back','sb-cancel','sb-cancel-top'].forEach(id=>{ const b=document.getElementById(id); if(b)b.onclick=sbBack; });
       const sbTop=document.getElementById('sb-save-top'); if(sbTop)sbTop.onclick=()=>document.getElementById('sb-save').click();
       const nInput=document.getElementById('sb-nslots'), machineSel=document.getElementById('sb-machine');
@@ -17003,7 +17051,10 @@
       const seOver=document.getElementById('sb-se-overhang'), seParams=document.getElementById('sb-se-params'), seNote=document.getElementById('sb-se-note'), seTitle=document.getElementById('sb-se-title');
       const headTitle=document.getElementById('sb-headtitle'), headInfo=document.getElementById('sb-headinfo');
       const curN=()=>{ let n=parseInt(nInput.value,10); if(!(n>=1))n=(curShape==='flat'?4:12); if(n>60)n=60; return n; };
-      const slotFilled=(s)=>!!(s&&(s.holderId||s.insertId||s.holderIso||s.insertIso||s.overhang||s.params||s.note));
+      const slotFilled=(s)=>!!(s&&(s.holderId||s.insertId||s.holderIso||s.insertIso||s.overhang||s.params||s.note||s.toolKind||s.edgePos||s.lenX||s.lenZ||s.radius||s.width));
+      const seKind=document.getElementById('sb-se-kind'), seEdge=document.getElementById('sb-se-edge'), seLenX=document.getElementById('sb-se-lenx'), seLenZ=document.getElementById('sb-se-lenz'), seRad=document.getElementById('sb-se-radius'), seWid=document.getElementById('sb-se-width');
+      const kindHint=()=>{ const ax=setupIsAxial(seKind.value); const st=document.getElementById('sb-se-kind-st'), ol=document.getElementById('sb-se-over-lbl'); st.textContent=seKind.value?(ax?'осевой — стоит в отверстии головки, торчит по оси Z; на схеме ⊙':'наружный — резец наружу, на схеме выступ'):''; ol.innerHTML=ax?'<span style="font-size:11px;color:#9a3412"> по Z, от торца головки</span>':'<span style="font-size:11px;color:#8a97a6"> от державки</span>'; };
+      seKind.onchange=kindHint;
       let curSlot=null;
       const updateHeadInfo=()=>{
         const isFlat=curShape==='flat';
@@ -17012,10 +17063,10 @@
       };
       const buildSvgData=(N)=>{ const d={}; for(let n=1;n<=N;n++){ const s=slots[n];
         if(slotFilled(s)){ const h=s.holderId?holderById[String(s.holderId)]:null, i=s.insertId?insertById[String(s.insertId)]:null;
-          d[n]={filled:true,holderIso:h?h.iso:(s.holderIso||''),insertIso:i?i.iso:(s.insertIso||''),insertGrade:i?i.grade:'',overhang:s.overhang||''}; } else d[n]={filled:false}; } return d; };
+          d[n]={filled:true,holderIso:h?h.iso:(s.holderIso||''),insertIso:i?i.iso:(s.insertIso||''),insertGrade:i?i.grade:'',overhang:s.overhang||'',toolKind:s.toolKind||'',edgePos:s.edgePos||'',axial:setupIsAxial(s.toolKind)}; } else d[n]={filled:false}; } return d; };
       const renderGrid=()=>{
         const N=curN(); let filled=0; for(let n=1;n<=N;n++)if(slotFilled(slots[n]))filled++;
-        const rotBar=curShape==='round'?`<div style="display:flex;gap:6px;justify-content:center;align-items:center;margin-top:4px"><button type="button" class="tbtn" id="sb-rot-ccw" title="Повернуть против часовой стрелки — крутит оба вида">↺</button><button type="button" class="tbtn" id="sb-rot-cw" title="Повернуть по часовой стрелке — крутит оба вида">↻</button><span style="font-size:11px;color:#8a97a6">повернуть головку (визуально, не сохраняется)</span></div>`:'';
+        const rotBar='';
         grid.innerHTML=headViews(curShape,N,buildSvgData(N),rot,true,curSlot,rotBar);
         slotInfo.textContent=`занято ${filled} из ${N}`;
         [...grid.querySelectorAll('[data-pos]')].forEach(el=>el.onclick=()=>openSlot(Number(el.dataset.pos)));
@@ -17028,6 +17079,7 @@
         seTitle.textContent=`Позиция T${n}`;
         seHolder.innerHTML=holderOpt(s.holderId||''); refreshInsertOpts(s.insertId||'');
         seOver.value=s.overhang||''; seParams.value=s.params||''; seNote.value=s.note||'';
+        seKind.value=s.toolKind||''; if(seKind.value!==(s.toolKind||''))seKind.value=''; seEdge.value=s.edgePos||''; seLenX.value=s.lenX||''; seLenZ.value=s.lenZ||''; seRad.value=s.radius||''; seWid.value=s.width||''; kindHint();
         const hTxt=document.getElementById('sb-se-holder-txt'), iTxt=document.getElementById('sb-se-insert-txt'); hTxt.value=s.holderIso||''; iTxt.value=s.insertIso||'';
         const stHint=(inp,box)=>{ const v=inp.value.trim(); const st=toolStock(v); box.innerHTML=!v?'':(st&&st.found&&st.bal>0?`<span style="color:#15803d">на складе ${st.bal}</span>`:`<span style="color:#b45309">нет на складе — карта сохранится, инструмент надо закупить/завести</span>`); };
         hTxt.oninput=()=>{ if(hTxt.value.trim())seHolder.value=''; stHint(hTxt,document.getElementById('sb-se-holder-st')); }; iTxt.oninput=()=>{ if(iTxt.value.trim())seInsert.value=''; stHint(iTxt,document.getElementById('sb-se-insert-st')); };
@@ -17041,7 +17093,7 @@
       seInsert.addEventListener('change',()=>{ if(seInsert.value){ const t=document.getElementById('sb-se-insert-txt'); t.value=''; const st=document.getElementById('sb-se-insert-st'); const i=insertById[String(seInsert.value)]; const reg=insertRegimes(i); st.innerHTML=reg?`<span style="color:#31506a">режимы с пластины: ${esc(reg)}${i.material?' · '+esc(i.material):''}</span>`:''; if(reg&&!seParams.value.trim())seParams.value=reg; } });
       document.getElementById('sb-se-apply').onclick=()=>{
         if(curSlot==null)return;
-        const s={holderId:seHolder.value||'',insertId:seInsert.value||'',holderIso:seHolder.value?'':document.getElementById('sb-se-holder-txt').value.trim(),insertIso:seInsert.value?'':document.getElementById('sb-se-insert-txt').value.trim(),overhang:seOver.value.trim(),params:seParams.value.trim(),note:seNote.value.trim()};
+        const s={holderId:seHolder.value||'',insertId:seInsert.value||'',holderIso:seHolder.value?'':document.getElementById('sb-se-holder-txt').value.trim(),insertIso:seInsert.value?'':document.getElementById('sb-se-insert-txt').value.trim(),overhang:seOver.value.trim(),params:seParams.value.trim(),note:seNote.value.trim(),toolKind:seKind.value,edgePos:seEdge.value,lenX:seLenX.value.trim(),lenZ:seLenZ.value.trim(),radius:seRad.value.trim(),width:seWid.value.trim()};
         if(slotFilled(s))slots[curSlot]=s; else delete slots[curSlot];
         editor.style.display='none'; curSlot=null; renderGrid();
       };
@@ -17100,17 +17152,17 @@
         if(!partVal){errEl.textContent='Выберите деталь (чертёж КД) — наладка ведётся под конкретную деталь.';return;}
         const N=curN();
         const lines=Object.keys(slots).map(Number).filter(n=>n>=1&&n<=N).sort((a,b)=>a-b)
-          .map(n=>({slot:n,toolPos:'T'+n,holderId:slots[n].holderId,insertId:slots[n].insertId,holderIso:slots[n].holderIso||'',insertIso:slots[n].insertIso||'',overhang:slots[n].overhang,params:slots[n].params,note:slots[n].note}))
-          .filter(l=>l.holderId||l.insertId||l.holderIso||l.insertIso||l.overhang||l.params||l.note);
+          .map(n=>({slot:n,toolPos:'T'+n,holderId:slots[n].holderId,insertId:slots[n].insertId,holderIso:slots[n].holderIso||'',insertIso:slots[n].insertIso||'',overhang:slots[n].overhang,params:slots[n].params,note:slots[n].note,toolKind:slots[n].toolKind||'',edgePos:slots[n].edgePos||'',lenX:slots[n].lenX||'',lenZ:slots[n].lenZ||'',radius:slots[n].radius||'',width:slots[n].width||''}))
+          .filter(l=>slotFilled(l));
         // вид операции: у существующей карты — её вид; у новой — активный подраздел (Токарная)
         const operationKind=(cardId!=null?(init.item.operationKind||'Токарная'):(SETUP_KIND||'Токарная'));
         const jaw={chuckType:jawChuck.value.trim(),chuckSetId:jawSet.value||'',jawSetNo:(jawSetById[String(jawSet.value)]||{}).setNo||'',
           jawTypeCard:jawType.value.trim(),jawClampDia:jawClamp.value.trim(),jawLen:jawLen.value.trim(),jawForce:jawForce.value.trim(),
           workpieceOverhang:jawOver.value.trim(),jawSupport:jawSup.value.trim(),jawRunout:jawRun.value.trim(),jawNote:jawNote.value.trim()};
-        const body={id:cardId,name,machineId,revolverSlots:N,headType:curHeadType,operationKind,purpose:document.getElementById('sb-purpose').value.trim(),part:partVal,lines,jaw,tail:{tailKind:document.getElementById('sb-tail-kind').value,tailTaper:document.getElementById('sb-tail-taper').value.trim(),tailTool:document.getElementById('sb-tail-tool').value.trim(),tailQuill:document.getElementById('sb-tail-quill').value.trim(),tailForce:document.getElementById('sb-tail-force').value.trim(),tailNote:document.getElementById('sb-tail-note').value.trim()}};
+        const body={id:cardId,name,machineId,revolverSlots:N,headType:curHeadType,operationKind,purpose:document.getElementById('sb-purpose').value.trim(),part:partVal,lines,jaw,tail:{tailKind:document.getElementById('sb-tail-kind').value,tailTaper:document.getElementById('sb-tail-taper').value.trim(),tailTool:document.getElementById('sb-tail-tool').value.trim(),tailQuill:document.getElementById('sb-tail-quill').value.trim(),tailForce:document.getElementById('sb-tail-force').value.trim(),tailNote:document.getElementById('sb-tail-note').value.trim()},zero:{zeroOffset:document.getElementById('sb-zero-offset').value,zeroBase:document.getElementById('sb-zero-base').value.trim(),zeroNote:document.getElementById('sb-zero-note').value.trim(),zeroZMethod:document.getElementById('sb-zero-zm').value,zeroZ:document.getElementById('sb-zero-z').value.trim(),zeroXMethod:document.getElementById('sb-zero-xm').value,zeroX:document.getElementById('sb-zero-x').value.trim()}};
         const btn=document.getElementById('sb-save'); btn.disabled=true; const ot=btn.textContent; btn.textContent='Сохранение…';
         try{ const r=await fetch('/api/setup-card/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          SETUP=null; toast(`Карта наладки ${esc(j.no||'')} сохранена · занято слотов: ${j.lines}`,'ok'); openSetupCard(host,j.id);
+          SETUP=null; toast(`Карта наладки ${esc(j.no||'')} сохранена · занято слотов: ${j.lines}`,'ok'); try{history.replaceState({spa:1},'','#setup/'+encodeURIComponent(j.id));}catch{} openSetupCard(host,j.id);
         }catch(e){ errEl.textContent='Не удалось сохранить: '+(e.message||e); btn.disabled=false; btn.textContent=ot; }
       };
     }

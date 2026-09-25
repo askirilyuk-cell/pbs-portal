@@ -14884,6 +14884,15 @@ const server = http.createServer(async (req, res) => {
       try { return sendJson(res, 200, await buildSetupCards()); }
       catch (e) { return sendJson(res, 200, { mode: 'mock', items: [], kpis: {}, dict: {}, warning: String(e.message || e) }); }
     }
+    if (p === '/api/setup-cards/runs') { // K-317: журнал фактических наладок по станку (события КН с «Данные (JSON)» × карты станка)
+      try {
+        const machineId = String(url.searchParams.get('machineId') || '');
+        const [cards, evs] = await Promise.all([ncListSoft('setup_cards'), ncListSoft('events')]);
+        const byNo = new Map(cards.filter((c) => !machineId || tcLinkIds(c['Станок']).map(String).includes(machineId) || String(c['Станок (id)'] || '') === machineId).map((c) => [String(c['№'] || '').trim(), c]));
+        const runs = evs.filter((e) => String(e['Объект'] || '').trim() === 'КН' && String(e['Данные (JSON)'] || '').includes('setup-run') && byNo.has(String(e['№ объекта'] || '').trim())).map((e) => { let d = {}; try { d = JSON.parse(e['Данные (JSON)']); } catch {} const c = byNo.get(String(e['№ объекта'] || '').trim()); return { when: String(e['Когда'] || '').slice(0, 16), who: e['Кто'] || '', no: String(e['№ объекта'] || '').trim(), cardId: c.Id ?? c.id, part: c['Деталь'] || '', name: c['Наименование'] || '', note: d.note || '', lines: Array.isArray(d.lines) ? d.lines : [] }; }).sort((a, b) => b.when.localeCompare(a.when));
+        return sendJson(res, 200, { ok: true, runs });
+      } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/setup-cards/catalog') { // справочники конструктора: станки + державки + пластины
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', equipment: [], holders: [], inserts: [], statuses: SETUP_STATUSES });
       try { return sendJson(res, 200, await buildSetupCatalog()); }

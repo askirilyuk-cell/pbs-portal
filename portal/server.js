@@ -3177,20 +3177,24 @@ async function updateZnzStatus(body, who) {
   const target = String(body.status || '').trim();
   if (!target) throw new Error('Не указан целевой статус.');
   const ti = ZNZ_STATUS_FLOW.indexOf(target);
-  if (ti < 0) throw new Error(`Недопустимый статус: ${target}`);
+  if (ti < 0 && target !== 'Отменена') throw new Error(`Недопустимый статус: ${target}`); // K-294: «Отменена» вне цикла — терминал, доступна с любого незакрытого этапа
   const rows = await ncListSoft('procurement_requests');
   const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
   if (!row) throw new Error('Заявка ЗнЗ не найдена.');
   const from = String(row['Статус'] || '').trim() || 'Новая';
   const ci = ZNZ_STATUS_FLOW.indexOf(from);
-  if (ci < 0) throw new Error(`Текущий статус вне цикла: «${from}».`);
+  if (ci < 0 && from !== 'Отменена') throw new Error(`Текущий статус вне цикла: «${from}».`);
   if (target === from) return { ok: true, id, from, to: target, unchanged: true };
   // правка владельца 22.07: согласование убрано из UI — «Новая» и «Согласована»
   // равнозначны для пользователя, поэтому прыжок через шаг «Согласована» в обе
   // стороны тоже разрешён (сам этап в ZNZ_STATUS_FLOW оставлен для совместимости
   // со старыми заявками, которые уже в статусе «Согласована»).
   const skipApproval = (from === 'Новая' && target === 'В работе') || (from === 'В работе' && target === 'Новая');
-  if (Math.abs(ti - ci) !== 1 && !skipApproval) throw new Error(`Переход «${from}» → «${target}» не разрешён: только соседний этап.`);
+  // K-294 (Рисалиева 25.09: «не могу ни принять, ни отменить»): отмена — с любого этапа кроме «Закрыта»; из «Отменена» — возврат только в «Новая»
+  const cancel = target === 'Отменена', uncancel = from === 'Отменена';
+  if (cancel && from === 'Закрыта') throw new Error('Закрытую заявку отменить нельзя.');
+  if (uncancel && target !== 'Новая') throw new Error('Отменённую заявку можно только вернуть в «Новая».');
+  if (!cancel && !uncancel && Math.abs(ti - ci) !== 1 && !skipApproval) throw new Error(`Переход «${from}» → «${target}» не разрешён: только соседний этап.`);
   await ncUpdate('procurement_requests', id, { 'Статус': target });
   // K-136: перевод в «В работе» кнопкой этапа тоже фиксирует, КТО взял — иначе
   //  заявка оказывалась «в работе» без исполнителя, и по доске непонятно, с кого спрашивать.
@@ -3203,7 +3207,7 @@ async function updateZnzStatus(body, who) {
     }
   }
   logEvent({ type: 'статус изменён', obj: 'ЗнЗ', objNum: String(row['№ ЗнЗ'] || '').trim() || `#${id}`,
-    from, to: target, who, details: String(row['Наименование'] || '') });
+    from, to: target, who, details: [String(row['Наименование'] || ''), body.reason ? 'причина: ' + String(body.reason).trim() : ''].filter(Boolean).join(' · ') });
   return { ok: true, id, from, to: target };
 }
 

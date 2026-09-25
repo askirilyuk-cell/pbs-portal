@@ -7413,7 +7413,8 @@
     const ZNZ_ACTION={'В работе':'Взять в работу','Размещена':'Разместить заказ','В пути':'Отгружено (в пути)','Принята':'Принять','Закрыта':'Закрыть'};
     // K-86 гейт перехода (мягкий): отдельной роли снабжения в RBAC пока нет —
     // разрешаем админу и в dev/mock (auth не настроен). TODO: уточнить схему ролей.
-    function znzCanAct(){ try{ if(typeof AUTH==='undefined'||!AUTH||!AUTH.auth||AUTH.configured===false)return true; return !!AUTH.isAdmin; }catch(e){ return true; } }
+    // K-294: раньше — только администратор; Снабжение/Кладовщик/Цех (право «Закупки» на запись) не видели ни одной кнопки этапа (Рисалиева 25.09)
+    function znzCanAct(){ try{ if(typeof AUTH==='undefined'||!AUTH||!AUTH.auth||AUTH.configured===false)return true; return !!AUTH.isAdmin||rbacAccess('purchase')==='write'; }catch(e){ return true; } }
     // K-102: «Принять в работу» — роли «Снабжение»/«Администратор» (ME.effectiveRoles из /api/me);
     // auth не настроен (dev/mock) → мягко разрешаем, как znzCanAct. Бэк гейтит независимо.
     function znzCanTake(){ try{ if(typeof AUTH==='undefined'||!AUTH||!AUTH.auth||AUTH.configured===false)return true;
@@ -7427,7 +7428,7 @@
     // получение» вместо полного акта ВК); СРОК_КАТ — позиции с датой изготовления/годности.
     const ZNZ_OFFICE_CATS=['ИТ/офис','Услуги','Прочее'];
     const ZNZ_SHELF_CATS=['Резина и пластик','Сварочные материалы'];
-    const ZNZ_DOT={'Новая':'gray','Согласована':'amber','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Закрыта':'gray'};
+    const ZNZ_DOT={'Новая':'gray','Согласована':'amber','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Закрыта':'gray','Отменена':'red'};
     // K-140: поток ПОЗИЦИИ — короче потока заявки: у позиции нет согласования и закрытия
     const ZNZ_ITEM_COLS=['Новая','В работе','Размещена','В пути','Принята','Отменена'];
     const ZNZ_ITEM_DOT={'Новая':'gray','В работе':'navy','Размещена':'blue','В пути':'blue','Принята':'green','Отменена':'gray'};
@@ -8147,6 +8148,10 @@
       const hasItems=(PROC.items||[]).some(i=>String(i.znzNum||'')===String(r.numZnz));
       if(canAct&&next&&next!=='В работе'&&!hasItems)acts.push(`<button class="tbtn primary" id="znz-next" data-to="${esc(next)}">→ ${esc(ZNZ_ACTION[next]||next)}</button>`);
       if(canAct&&prev&&!hasItems)acts.push(`<button class="tbtn" id="znz-prev" data-to="${esc(prev)}" title="Вернуть на предыдущий этап">← Вернуть</button>`);
+      // K-294: отмена заявки — с любого этапа кроме «Закрыта»; из «Отменена» — вернуть в «Новая»
+      const stNow=String(r.statusStored||r.status||'');
+      if(canAct&&stNow==='Отменена')acts.push(`<button class="tbtn" id="znz-uncancel" data-to="Новая" title="Вернуть отменённую заявку в работу (статус «Новая»)">↩ Вернуть в «Новая»</button>`);
+      else if(canAct&&stNow!=='Закрыта')acts.push(`<button class="tbtn" id="znz-cancel" data-to="Отменена" style="color:var(--red);border-color:#f3c9c9" title="Снять заявку: потребность отпала или закрыта иначе">✕ Отменить заявку</button>`);
       // К-92 (фаза 2, утв. владельцем): «Провести приёмку» — акт входного контроля Ф.3–Д.1
       // + опц. приход металла на склад. Видна на этапах, где физически уже что-то приходит.
       const canAccept=canAct&&['Размещена','В пути','Принята'].includes(r.status);
@@ -8203,10 +8208,10 @@
       //  uiAlert() с описанием несуществующей функции: формы заказа поставщику в ИСМ нет —
       //  ДП–К §9 её не предусматривает, и Ф.2–К не определён. Заявки на закупку достаточно.
       //  Заодно снят uiAlert() — канон §9 браузерные диалоги запрещает.
-      const doTransition=async(to,btn)=>{
+      const doTransition=async(to,btn,reason)=>{
         if(!to)return; if(btn)btn.disabled=true;
         try{
-          await postJson('/api/procurement/znz/status',{id:r.id,status:to});
+          await postJson('/api/procurement/znz/status',{id:r.id,status:to,reason:reason||''});
           PROC=null; // сброс кэша реестра → перечитать статусы
           try{PROC=await (await fetch('/api/procurement')).json();}catch(e){PROC={mode:'mock',requests:[],suppliers:[],orders:[],evaluations:[]};}
           const upd=(PROC.requests||[]).find(x=>x.numZnz===r.numZnz)||{...r,status:to};
@@ -8215,6 +8220,8 @@
       };
       const nb=document.getElementById('znz-next'); if(nb)nb.onclick=()=>doTransition(nb.dataset.to,nb);
       const pb=document.getElementById('znz-prev'); if(pb)pb.onclick=()=>doTransition(pb.dataset.to,pb);
+      const cb=document.getElementById('znz-cancel'); if(cb)cb.onclick=async()=>{ const why=await uiPrompt('Отменить заявку '+r.numZnz+'. Причина (попадёт в историю):',''); if(why===null)return; doTransition('Отменена',cb,why); };
+      const ub=document.getElementById('znz-uncancel'); if(ub)ub.onclick=()=>doTransition('Новая',ub,'возврат из отмены');
       const gs=host.querySelector('[data-gosup]'); if(gs)gs.onclick=()=>{const id=Number(gs.dataset.gosup);procTab='rop';openSupplierCard(document.getElementById('view'),id);};
       // переименование заявки (правка владельца 22.07): карандаш → инлайн-инпут → POST rename
       const namePencil=document.getElementById('znz-name-pencil');

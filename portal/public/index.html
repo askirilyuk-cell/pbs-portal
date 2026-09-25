@@ -16759,12 +16759,12 @@
           tools+=g(`<circle cx="0" cy="12" r="11" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/><circle cx="0" cy="12" r="3.5" fill="#c2410c"/>`);
           const iso=String(s.holderIso||s.insertIso||''); const [lx,ly]=pt(R+46,a); const right=Math.cos(a)>0.15, left=Math.cos(a)<-0.15;
           { const anc=right?'start':(left?'end':'middle'); const l2=[iso,s.overhang?`Z ${s.overhang}`:''].filter(Boolean).join(' · ');
-          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#9a3412" font-family="monospace" text-anchor="${anc}" dominant-baseline="central"><tspan x="${lx.toFixed(1)}" dy="${l2?'-0.6em':'0'}">⊙ ${esc(String(s.toolKind||'осевой'))}</tspan>${l2?`<tspan x="${lx.toFixed(1)}" dy="1.2em">${esc(l2)}</tspan>`:''}</text>`; }
+          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="10.5" fill="#9a3412" font-family="monospace" text-anchor="${anc}" dominant-baseline="central"><tspan x="${lx.toFixed(1)}" dy="${l2?'-0.6em':'0'}">⊙ ${esc(String(s.toolKind||'осевой'))}</tspan>${l2?`<tspan x="${lx.toFixed(1)}" dy="1.2em">${esc(l2)}</tspan>`:''}</text>`; }
         } else if(filled){ const L=22+ov; // державка + резец наружу
           tools+=g(`<rect x="-8" y="0" width="16" height="${L.toFixed(1)}" rx="2" fill="#15803d" stroke="#0f6b3c" stroke-width="1"/><path d="M -8 ${L.toFixed(1)} L 8 ${L.toFixed(1)} L 0 ${(L+9).toFixed(1)} Z" fill="#0f8a4a"/>`);
           const iso=String(s.holderIso||s.insertIso||''); const [lx,ly]=pt(R+L+22,a); const right=Math.cos(a)>0.15, left=Math.cos(a)<-0.15;
           { const anc=right?'start':(left?'end':'middle'); const l2=[s.overhang?`вылет ${s.overhang}`:'',s.edgePos?`кр.${s.edgePos}`:''].filter(Boolean).join(' · '); const l1=iso||(s.toolKind||'');
-          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#31506a" font-family="monospace" text-anchor="${anc}" dominant-baseline="central"><tspan x="${lx.toFixed(1)}" dy="${l1&&l2?'-0.6em':'0'}">${esc(l1)}</tspan>${l2?`<tspan x="${lx.toFixed(1)}" dy="${l1?'1.2em':'0'}">${esc(l2)}</tspan>`:''}</text>`; }
+          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="10.5" fill="#31506a" font-family="monospace" text-anchor="${anc}" dominant-baseline="central"><tspan x="${lx.toFixed(1)}" dy="${l1&&l2?'-0.6em':'0'}">${esc(l1)}</tspan>${l2?`<tspan x="${lx.toFixed(1)}" dy="${l1?'1.2em':'0'}">${esc(l2)}</tspan>`:''}</text>`; }
         }
         // номер позиции — внутри у грани
         const [bx,by]=pt(R-26,a);
@@ -16804,7 +16804,7 @@
         let tipX=mountX-24;
         if(filled&&axial){ const L=Math.max(30,ov*1.6); tipX=mountX-L;
           out+=`<rect x="${(mountX-16).toFixed(1)}" y="${(y-9).toFixed(1)}" width="16" height="18" rx="2" fill="#c2410c" stroke="#9a3412" stroke-width="1"/><line x1="${mountX-16}" y1="${y}" x2="${tipX.toFixed(1)}" y2="${y}" stroke="#c2410c" stroke-width="5" stroke-linecap="round"/><circle cx="${tipX.toFixed(1)}" cy="${y}" r="4" fill="#c2410c"/>`;
-          out+=`<text x="${(tipX-7).toFixed(1)}" y="${y}" font-size="9.5" fill="#9a3412" text-anchor="end" dominant-baseline="central">${esc(String(s.toolKind||'осевой').slice(0,12))}${s.overhang?' · Z '+esc(String(s.overhang)):''}</text>`;
+          out+=`<text x="${(tipX-7).toFixed(1)}" y="${y}" font-size="9.5" fill="#9a3412" text-anchor="end" dominant-baseline="central">${esc(String(s.toolKind||'осевой'))}${s.overhang?' · Z '+esc(String(s.overhang)):''}</text>`;
         } else if(filled){
           out+=`<rect x="${mountX-24}" y="${(y-10).toFixed(1)}" width="24" height="20" rx="3" fill="#15803d" stroke="#0f6b3c" stroke-width="1"/><path d="M ${mountX-24} ${(y-10).toFixed(1)} L ${mountX-24} ${(y-22).toFixed(1)} L ${mountX-14} ${(y-10).toFixed(1)} Z" fill="#0f8a4a"/>`;
           const iso=String(s.holderIso||s.insertIso||'');
@@ -16852,7 +16852,7 @@
     </div>`;
     // K-320: данные схемы из строк карты (карточка КН и киоск)
     const setupSvgData=(lines,N)=>{ const byPos={}; (lines||[]).forEach(l=>{ const n=Number(l.pos)||0; if(n>=1)byPos[n]=l; }); const d={}; for(let n=1;n<=N;n++){ const l=byPos[n]; const filled=!!(l&&(l.holderIso||l.insertIso||l.overhang||l.params||l.note||l.toolKind||l.edgePos)); d[n]=filled?{filled:true,holderIso:l.holderIso||'',insertIso:l.insertIso||'',insertGrade:l.insertGrade||'',overhang:l.overhang||'',toolKind:l.toolKind||'',edgePos:l.edgePos||'',axial:setupIsAxial(l.toolKind)}:{filled:false}; } return d; };
-    const headViews=(shape,N,data,rot,interactive,selected,extraTop,noLegend)=>`<div style="max-width:980px;margin:0 auto"><div style="display:flex;gap:12px;align-items:flex-start;justify-content:center;flex-wrap:wrap"><div style="flex:1 1 420px;min-width:300px">${headSVG(shape,N,data,rot,interactive,selected)}</div><div style="flex:0 1 360px;min-width:260px">${headSide(shape,N,data,rot,interactive,selected)}</div></div>${extraTop||''}${noLegend?'':HEAD_LEGEND}</div>`;
+    const headViews=(shape,N,data,rot,interactive,selected,extraTop,noLegend)=>`<div style="max-width:980px;margin:0 auto"><div style="display:flex;gap:12px;align-items:flex-start;justify-content:center;flex-wrap:wrap"><div style="flex:1 1 560px;min-width:320px">${headSVG(shape,N,data,rot,interactive,selected)}</div><div style="flex:0 1 340px;min-width:260px">${headSide(shape,N,data,rot,interactive,selected)}</div></div>${extraTop||''}${noLegend?'':HEAD_LEGEND}</div>`;
     // блок «Зажим и кулачки» для просмотра карты (Этап 2c) — по it.jaw
     function setupJawView(it){
       const j=(it&&it.jaw)||{};

@@ -16735,7 +16735,7 @@
     // K-299 (редизайн, Александр 25.09): револьверная головка — многогранник с гнёздами на гранях, резцы наружу,
     //    рабочая позиция внизу у заготовки; занятые гнёзда — зелёные с кодом ISO, свободные — пунктир. Один вид, без «профиля».
     function headSVGRound(N,data,rot,interactive,selected){
-      const W=560,H=440,C=280,CY=225,R=132,Rin=44; const step=360/N, rotDeg=(rot||0)*step;
+      const W=760,H=440,C=380,CY=225,R=132,Rin=44; const step=360/N, rotDeg=(rot||0)*step; // K-322: W 560→760 — подписи по бокам резались
       const ang=(i)=>(90+i*step+rotDeg)*Math.PI/180; // i=0 (T1) — внизу при rot=0 → рабочая
       const rWork=(((0-(rot||0))%N)+N)%N; // индекс позиции в рабочей точке (низ)
       const pt=(r,a)=>[C+r*Math.cos(a),CY+r*Math.sin(a)];
@@ -16758,11 +16758,13 @@
         if(filled&&s.axial){ // K-309: осевой инструмент (расточной/сверло) — торчит по Z, на виде сверху это ⊙ в гнезде
           tools+=g(`<circle cx="0" cy="12" r="11" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/><circle cx="0" cy="12" r="3.5" fill="#c2410c"/>`);
           const iso=String(s.holderIso||s.insertIso||''); const [lx,ly]=pt(R+46,a); const right=Math.cos(a)>0.15, left=Math.cos(a)<-0.15;
-          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#9a3412" font-family="monospace" text-anchor="${right?'start':(left?'end':'middle')}" dominant-baseline="central">⊙ ${esc(String(s.toolKind||'осевой').slice(0,14))}${iso?' · '+esc(iso.slice(0,14)):''}${s.overhang?` · Z ${esc(String(s.overhang))}`:''}</text>`;
+          { const anc=right?'start':(left?'end':'middle'); const l2=[iso,s.overhang?`Z ${s.overhang}`:''].filter(Boolean).join(' · ');
+          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#9a3412" font-family="monospace" text-anchor="${anc}" dominant-baseline="central"><tspan x="${lx.toFixed(1)}" dy="${l2?'-0.6em':'0'}">⊙ ${esc(String(s.toolKind||'осевой'))}</tspan>${l2?`<tspan x="${lx.toFixed(1)}" dy="1.2em">${esc(l2)}</tspan>`:''}</text>`; }
         } else if(filled){ const L=22+ov; // державка + резец наружу
           tools+=g(`<rect x="-8" y="0" width="16" height="${L.toFixed(1)}" rx="2" fill="#15803d" stroke="#0f6b3c" stroke-width="1"/><path d="M -8 ${L.toFixed(1)} L 8 ${L.toFixed(1)} L 0 ${(L+9).toFixed(1)} Z" fill="#0f8a4a"/>`);
           const iso=String(s.holderIso||s.insertIso||''); const [lx,ly]=pt(R+L+22,a); const right=Math.cos(a)>0.15, left=Math.cos(a)<-0.15;
-          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#31506a" font-family="monospace" text-anchor="${right?'start':(left?'end':'middle')}" dominant-baseline="central">${esc(iso.slice(0,16))}${s.overhang?`${iso?' · ':''}вылет ${esc(String(s.overhang))}`:''}${s.edgePos?` · кр.${esc(String(s.edgePos))}`:''}</text>`;
+          { const anc=right?'start':(left?'end':'middle'); const l2=[s.overhang?`вылет ${s.overhang}`:'',s.edgePos?`кр.${s.edgePos}`:''].filter(Boolean).join(' · '); const l1=iso||(s.toolKind||'');
+          labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" fill="#31506a" font-family="monospace" text-anchor="${anc}" dominant-baseline="central"><tspan x="${lx.toFixed(1)}" dy="${l1&&l2?'-0.6em':'0'}">${esc(l1)}</tspan>${l2?`<tspan x="${lx.toFixed(1)}" dy="${l1?'1.2em':'0'}">${esc(l2)}</tspan>`:''}</text>`; }
         }
         // номер позиции — внутри у грани
         const [bx,by]=pt(R-26,a);
@@ -16771,7 +16773,7 @@
         if(interactive){ const [cx,cy]=pt(R-6,a); hits+=`<circle data-pos="${n}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="34" fill="transparent" style="cursor:pointer"/>`; }
       }
       const wk='';
-      return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:560px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${work}${body}${seats}${tools}${labels}${wk}${hits}</svg>`;
+      return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:760px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,Segoe UI,Arial,sans-serif">${work}${body}${seats}${tools}${labels}${wk}${hits}</svg>`;
     }
     function headSVGFlat(N,data,interactive,selected){
       const cols=Math.max(1,N),cw=100,pad=26,barY=58,barH=26,W=pad*2+cols*cw,H=barY+barH+112;

@@ -7129,6 +7129,7 @@ async function buildBoardLive() {
       controlPoint: operation['Точка контроля'] || '', equipList, mk, routeAuthor: route['Автор'] || '',
       // K-216 (З-010): программа ЧПУ и карта наладки операции — оператору прямо в карте задачи
       drawingFiles: mk ? mkOpFiles(mk, 0, 'drawing') : [], kdDrawings: _parseKd(route['Чертежи КД']), kdChanged: mkKdFlag(route), // K-240 / K-242 / K-245
+      setupCardNo: String(operation['Карта наладки (№)'] || '').trim(), // K-318: КН операции — на киоск
       opNo: operation['№ операции'] || '', ncFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'nc') : [], setupFiles: mk ? mkOpFiles(mk, operation['№ операции'], 'setup') : [],
     };
   }
@@ -11109,11 +11110,14 @@ function setupCardListShape(c, eqById) {
 }
 // GET список карт наладки (+ KPI)
 // K-297: где карта наладки используется — операции МК с «Карта наладки (№)» = № КН (одна КН может входить в разные МК)
+// K-319: у операции нет колонки «№ МК» — маршрут задаётся связью routes_id; № МК берём из строки маршрута
+function opMkNo(op, routesById) { const direct = String(op['№ МК'] || '').trim(); if (direct) return direct; const r = routesById.get(String(op.routes_id ?? tcLinkIds(op['Маршруты'])[0] ?? '')); return r ? String(r['№ МК'] || '').trim() : ''; }
+const routesByIdMap = (routes) => new Map(routes.map((r) => [String(r.Id ?? r.id), r]));
 async function setupUsageMap() {
   const out = new Map(); let ops = [], routes = [];
   try { [ops, routes] = await Promise.all([ncListSoft('operations'), ncListSoft('routes')]); } catch { return out; }
-  const rt = new Map(routes.map((r) => [String(r['№ МК'] || '').trim(), r]));
-  for (const op of ops) { const no = String(op['Карта наладки (№)'] || '').trim(); if (!no) continue; const mk = String(op['№ МК'] || '').trim(); const r = rt.get(mk);
+  const rt = new Map(routes.map((r) => [String(r['№ МК'] || '').trim(), r])); const rById = routesByIdMap(routes);
+  for (const op of ops) { const no = String(op['Карта наладки (№)'] || '').trim(); if (!no) continue; const mk = opMkNo(op, rById); const r = rt.get(mk);
     if (!out.has(no)) out.set(no, []); out.get(no).push({ mk, routeId: r ? (r.Id ?? r.id) : null, opN: op['№ операции'] || '', opName: op['Операция'] || '', equipment: op['Оборудование'] || '', designation: r ? (r['Изделие / обозначение'] || '') : '', routeName: r ? (r['Наименование'] || '') : '', statusMk: r ? (r['Статус МК'] || '') : '' }); }
   return out;
 }
@@ -12749,7 +12753,7 @@ const server = http.createServer(async (req, res) => {
     //  НИЧЕГО не блокирует — существующие /api/* работают как раньше (роль лишь информативна).
     req.session = sessionFromReq(req);
     if (req.session && req.session.isStation) { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) { persistSessions(); req.session.operator = null; } else if (raw && raw.operator && req.method !== 'GET') raw.operator.at = Date.now(); } // K-206
-    if (req.session && req.session.isStation && p.startsWith('/api/') && !['/api/me', '/api/board', '/api/station', '/api/task', '/api/metal/blank', '/api/metal/blank-candidates', '/api/metal/find-blank', '/api/onec', '/api/routes/catalog', '/api/route/opfile', '/api/design/kd'].some((pre) => p === pre || p.startsWith(pre + '/') || p.startsWith(pre + '?'))) return sendJson(res, 403, { error: 'Пост участка: доступ только к рабочему месту.' }); // K-206
+    if (req.session && req.session.isStation && p.startsWith('/api/') && !['/api/me', '/api/board', '/api/station', '/api/task', '/api/metal/blank', '/api/metal/blank-candidates', '/api/metal/find-blank', '/api/onec', '/api/routes/catalog', '/api/route/opfile', '/api/design/kd'].some((pre) => p === pre || p.startsWith(pre + '/') || p.startsWith(pre + '?')) && !((p === '/api/setup-card' && req.method === 'GET') || p === '/api/setup-card/run' || p === '/api/setup-card/file' || p === '/api/setup-card.pdf')) return sendJson(res, 403, { error: 'Пост участка: доступ только к рабочему месту.' }); // K-206; K-318: пост читает КН операции, пишет факт наладки
     req.roles = sessionPortalRoles(req.session);           // мультироль: эффективный набор портальных ролей
     req.role = req.roles[0] || 'guest';                    // первичная (для сообщений/обратной совместимости)
     if (p === '/api/me') return handleMe(req, res);
@@ -14903,7 +14907,7 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 501, { error: 'Только в LIVE-режиме.' });
       try { const body = await readBody(req); const id = Number(body.id); const mk = String(body.mk || '').trim(); const opN = String(body.opN || '').trim(); if (!id || !mk || !opN) throw new Error('Нужны id карты, № МК и № операции.');
         const card = (await ncListSoft('setup_cards')).find((c) => (c.Id ?? c.id) === id); if (!card) throw new Error('Карта наладки не найдена.'); const no = String(card['№'] || '').trim();
-        const op = (await ncListSoft('operations')).find((o) => String(o['№ МК'] || '').trim() === mk && String(o['№ операции'] || '').trim() === opN); if (!op) throw new Error(`Операция ${opN} в ${mk} не найдена.`);
+        const rById = routesByIdMap(await ncListSoft('routes')); const op = (await ncListSoft('operations')).find((o) => opMkNo(o, rById) === mk && String(o['№ операции'] || '').trim() === opN); if (!op) throw new Error(`Операция ${opN} в ${mk} не найдена.`); // K-319
         const cur = String(op['Карта наладки (№)'] || '').trim(); const next = body.unlink ? '' : no;
         if (!body.unlink && cur && cur !== no) throw new Error(`К операции уже привязана ${cur} — сначала отвяжите её.`);
         await ncUpdate('operations', op.Id ?? op.id, { 'Карта наладки (№)': next });
@@ -14913,8 +14917,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/setup-card/mk-ops' && req.method === 'GET') { // МК с операциями для выбора привязки
       if (!isLive()) return sendJson(res, 200, { routes: [] });
-      try { const [routes, ops] = await Promise.all([ncListSoft('routes'), ncListSoft('operations')]); const byMk = new Map();
-        for (const o of ops) { const mk = String(o['№ МК'] || '').trim(); if (!byMk.has(mk)) byMk.set(mk, []); byMk.get(mk).push({ n: o['№ операции'] || '', name: o['Операция'] || '', equipment: o['Оборудование'] || '', setupCardNo: o['Карта наладки (№)'] || '' }); }
+      try { const [routes, ops] = await Promise.all([ncListSoft('routes'), ncListSoft('operations')]); const byMk = new Map(); const rById = routesByIdMap(routes);
+        for (const o of ops) { const mk = opMkNo(o, rById); if (!byMk.has(mk)) byMk.set(mk, []); byMk.get(mk).push({ n: o['№ операции'] || '', name: o['Операция'] || '', equipment: o['Оборудование'] || '', setupCardNo: o['Карта наладки (№)'] || '' }); }
         const list = routes.map((r) => { const mk = String(r['№ МК'] || '').trim(); return { id: r.Id ?? r.id, mk, name: r['Наименование'] || '', designation: r['Изделие / обозначение'] || '', statusMk: r['Статус МК'] || '', ops: (byMk.get(mk) || []).sort((a, b) => Number(a.n) - Number(b.n)) }; }).filter((r) => r.mk && !/архив/i.test(r.statusMk)).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
         return sendJson(res, 200, { routes: list }); } catch (e) { return sendJson(res, 200, { routes: [], warning: String(e.message || e) }); }
     }
@@ -15004,7 +15008,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/setup-card') { // карта наладки + её строки (с раскрытием державки/пластины)
       if (!isLive()) return sendJson(res, 200, { mode: 'mock' });
-      try { const d = await buildSetupCard(url.searchParams.get('id')); return d ? sendJson(res, 200, d) : sendJson(res, 404, { error: 'карта наладки не найдена' }); }
+      try { let id = url.searchParams.get('id'); const no = String(url.searchParams.get('no') || '').trim(); if (!id && no) { const cards = await ncListSoft('setup_cards'); const c = cards.find((x) => String(x['№'] || '').trim() === no); id = c ? (c.Id ?? c.id) : null; } // K-318
+        const d = id != null ? await buildSetupCard(id) : null; return d ? sendJson(res, 200, d) : sendJson(res, 404, { error: 'карта наладки не найдена' }); }
       catch (e) { return sendJson(res, 200, { mode: 'mock', warning: String(e.message || e) }); }
     }
     // ── Библиотека комплектов кулачков (Этап 2c): справочник chuck_jaws ──

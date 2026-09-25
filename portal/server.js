@@ -10897,6 +10897,7 @@ function tcInsertShape(r) {
   return {
     id: r.Id ?? r.id, iso,
     grade: r['Сплав / марка'] || '',
+    chipbreaker: r['Стружколом'] || '', makerCode: r['Код изготовителя'] || '', isoGroups: r['Группы ISO'] || '', ap: r['ap, мм'] || '', fn: r['f, мм/об'] || '', vc: r['vc, м/мин'] || '', material: r['Материал / твёрдость'] || '', // K-308
     procType: whLinkVal(r['Тип обработки']) || String(r['Тип обработки'] || ''),
     maker: r['Производитель'] || '',
     status: whLinkVal(r['Статус']) || String(r['Статус'] || '') || 'Активна',
@@ -10909,7 +10910,7 @@ function tcHolderShape(r, insById) {
   const compatIds = tcLinkIds(r['Совместимые пластины']);
   return {
     id: r.Id ?? r.id, iso,
-    holderType: whLinkVal(r['Тип державки']) || String(r['Тип державки'] || ''),
+    holderType: whLinkVal(r['Тип державки']) || String(r['Тип державки'] || ''), makerCode: r['Код изготовителя'] || '',
     maker: r['Производитель'] || '',
     status: whLinkVal(r['Статус']) || String(r['Статус'] || '') || 'Активна',
     note: r['Примечание'] || '',
@@ -10948,6 +10949,7 @@ async function buildToolCatalogCard(kind, id) {
   return { mode: 'live', kind: 'inserts', item: tcInsertShape(it) };
 }
 // upsert пластины (уникальность по ISO-коду — на уровне эндпоинта, т.к. NocoDB CE ненадёжно ставит DB-unique)
+const TC_INSERT_EXTRA = [['Стружколом', 'chipbreaker', 'SingleLineText'], ['Код изготовителя', 'makerCode', 'SingleLineText'], ['Группы ISO', 'isoGroups', 'SingleLineText'], ['ap, мм', 'ap', 'SingleLineText'], ['f, мм/об', 'fn', 'SingleLineText'], ['vc, м/мин', 'vc', 'SingleLineText'], ['Материал / твёрдость', 'material', 'SingleLineText']]; // K-308
 async function toolInsertSave(body) {
   const iso = String(body.iso || '').trim();
   if (!iso && (body.id == null || body.id === '')) { const e = new Error('Укажите ISO-код пластины (iso).'); e.status = 400; throw e; }
@@ -10957,6 +10959,8 @@ async function toolInsertSave(body) {
   const patch = {};
   const put = (col, v) => { const s = (v == null ? '' : String(v)).trim(); if (s) patch[col] = s; };
   put('Сплав / марка', body.grade); put('Производитель', body.maker); put('Примечание', body.note);
+  // K-308: режимы резания и атрибуты с этикетки (Korloy: ap/fn/vc номинал и диапазон, группы ISO P/M/K/N/S/H, стружколом, код) — в карту наладки подставляются при выборе пластины
+  for (const [col, key, uidt] of TC_INSERT_EXTRA) { if (body[key] != null) { try { await ncEnsureColumn('tool_inserts', col, uidt); patch[col] = String(body[key]).trim(); } catch (e2) { console.warn('K-308 tool_inserts:', e2.message); } } }
   if (TC_INSERT_PROC.includes(String(body.procType || '').trim())) patch['Тип обработки'] = String(body.procType).trim();
   if (TC_STATUSES.includes(String(body.status || '').trim())) patch['Статус'] = String(body.status).trim();
   let id, code, created;
@@ -10981,6 +10985,7 @@ async function toolHolderSave(body) {
   const patch = {};
   const put = (col, v) => { const s = (v == null ? '' : String(v)).trim(); if (s) patch[col] = s; };
   put('Производитель', body.maker); put('Примечание', body.note);
+  if (body.makerCode != null) { try { await ncEnsureColumn('tool_holders', 'Код изготовителя', 'SingleLineText'); patch['Код изготовителя'] = String(body.makerCode).trim(); } catch {} } // K-308
   if (TC_HOLDER_TYPES.includes(String(body.holderType || '').trim())) patch['Тип державки'] = String(body.holderType).trim();
   if (TC_STATUSES.includes(String(body.status || '').trim())) patch['Статус'] = String(body.status).trim();
   let id, code, created;
@@ -11120,7 +11125,7 @@ async function buildSetupCatalog() {
     // migrate-041: патрон/шпиндель/державки станка — карта наладки тянет патрон отсюда
     chuckType: e.chuckTypeEq, chuckDia: e.chuckDia, spindleBore: e.spindleBore, holderSecExt: e.holderSecExt, holderSecInt: e.holderSecInt }; })
     .sort((a, b) => String(a.name || a.model).localeCompare(String(b.name || b.model), 'ru'));
-  const insItems = inserts.map((r) => ({ id: r.Id ?? r.id, iso: String(r['ISO-код'] || '').trim(), grade: r['Сплав / марка'] || '', status: whLinkVal(r['Статус']) || String(r['Статус'] || '') || 'Активна' }))
+  const insItems = inserts.map((r) => ({ id: r.Id ?? r.id, iso: String(r['ISO-код'] || '').trim(), grade: r['Сплав / марка'] || '', chipbreaker: r['Стружколом'] || '', isoGroups: r['Группы ISO'] || '', ap: r['ap, мм'] || '', fn: r['f, мм/об'] || '', vc: r['vc, м/мин'] || '', material: r['Материал / твёрдость'] || '', status: whLinkVal(r['Статус']) || String(r['Статус'] || '') || 'Активна' }))
     .sort((a, b) => String(a.iso).localeCompare(String(b.iso), 'ru'));
   const holderItems = holders.map((r) => ({ id: r.Id ?? r.id, iso: String(r['ISO-код'] || '').trim(), maker: r['Производитель'] || '', compatIds: tcLinkIds(r['Совместимые пластины']).map(Number).filter(Number.isFinite) }))
     .sort((a, b) => String(a.iso).localeCompare(String(b.iso), 'ru'));

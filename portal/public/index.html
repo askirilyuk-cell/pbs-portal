@@ -12278,13 +12278,21 @@
           ${isoFieldHtml('holders',edit?item.iso:'')}
           <div style="grid-column:span 6">${FLAB('Тип державки')}<select id="tc-htype" style="${FINP}">${opt(TC_HTYPES,edit?item.holderType:'')}</select></div>
           <div style="grid-column:span 6">${FLAB('Производитель')}<input id="tc-maker" style="${FINP}" value="${esc(edit?item.maker:'')}" placeholder="Sandvik / Iscar …"></div>
-          <div style="grid-column:span 6">${FLAB('Статус')}<select id="tc-status" style="${FINP}">${TC_STAT.map(o=>`<option${(edit?item.status:'Активна')===o?' selected':''}>${esc(o)}</option>`).join('')}</select></div>
+          <div style="grid-column:span 3">${FLAB('Код изготовителя')}<input id="tc-mcode" style="${FINP}" value="${esc(edit?(item.makerCode||''):'')}" placeholder="с этикетки"></div>
+          <div style="grid-column:span 3">${FLAB('Статус')}<select id="tc-status" style="${FINP}">${TC_STAT.map(o=>`<option${(edit?item.status:'Активна')===o?' selected':''}>${esc(o)}</option>`).join('')}</select></div>
           <div style="grid-column:span 12">${FLAB('Примечание')}<input id="tc-note" style="${FINP}" value="${esc(edit?item.note:'')}"></div>`;
       } else {
         title=edit?('Пластина '+esc(item.iso)):'Новая пластина (ISO 1832)'; op='ISO 1832 · MVP по ISO-коду';
         fields=`
           ${isoFieldHtml('inserts',edit?item.iso:'')}
-          <div style="grid-column:span 6">${FLAB('Сплав / марка')}<input id="tc-grade" style="${FINP}" value="${esc(edit?item.grade:'')}" placeholder="напр. GC4225"></div>
+          <div style="grid-column:span 6">${FLAB('Сплав / марка')}<input id="tc-grade" style="${FINP}" value="${esc(edit?item.grade:'')}" placeholder="напр. PC8110"></div>
+          <div style="grid-column:span 3">${FLAB('Стружколом')}<input id="tc-chip" style="${FINP}" value="${esc(edit?(item.chipbreaker||''):'')}" placeholder="MP / PM / …"></div>
+          <div style="grid-column:span 3">${FLAB('Код изготовителя')}<input id="tc-mcode" style="${FINP}" value="${esc(edit?(item.makerCode||''):'')}" placeholder="с этикетки"></div>
+          <div style="grid-column:span 12">${FLAB('Группы обрабатываемых материалов ISO')}<div id="tc-groups" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${[['P','сталь','#1e88e5'],['M','нерж.','#f9a825'],['K','чугун','#e53935'],['N','цветные','#43a047'],['S','жаропрочные','#fb8c00'],['H','закалённые','#757575']].map(([g,t,c])=>`<label style="display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid var(--line);border-radius:var(--r-s);font-size:var(--fs-s);cursor:pointer"><input type="checkbox" data-isog="${g}"${(edit&&String(item.isoGroups||'').includes(g))?' checked':''}><b style="color:${c}">${g}</b> <span class="c-gray">${t}</span></label>`).join('')}</div></div>
+          <div style="grid-column:span 4">${FLAB('ap, мм — номинал (диапазон)')}<input id="tc-ap" style="${FINP}" value="${esc(edit?(item.ap||''):'')}" placeholder="2.00 (0.50–4.00)"></div>
+          <div style="grid-column:span 4">${FLAB('f, мм/об — номинал (диапазон)')}<input id="tc-fn" style="${FINP}" value="${esc(edit?(item.fn||''):'')}" placeholder="0.23 (0.15–0.45)"></div>
+          <div style="grid-column:span 4">${FLAB('vc, м/мин — номинал (диапазон)')}<input id="tc-vc" style="${FINP}" value="${esc(edit?(item.vc||''):'')}" placeholder="60 (40–80)"></div>
+          <div style="grid-column:span 12">${FLAB('Материал / твёрдость (для чего пластина у нас)')}<input id="tc-mat" style="${FINP}" value="${esc(edit?(item.material||''):'')}" placeholder="напр. 45 HRC, наплавка"></div>
           <div style="grid-column:span 6">${FLAB('Тип обработки')}<select id="tc-proc" style="${FINP}">${opt(TC_PROC,edit?item.procType:'')}</select></div>
           <div style="grid-column:span 6">${FLAB('Производитель')}<input id="tc-maker" style="${FINP}" value="${esc(edit?item.maker:'')}" placeholder="Sandvik / Iscar …"></div>
           <div style="grid-column:span 6">${FLAB('Статус')}<select id="tc-status" style="${FINP}">${TC_STAT.map(o=>`<option${(edit?item.status:'Активна')===o?' selected':''}>${esc(o)}</option>`).join('')}</select></div>
@@ -12327,8 +12335,9 @@
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
         const iso=V('tc-iso'); if(!iso){ err.textContent='Укажите ISO-код.'; toast('Укажите ISO-код.','err'); return; }
         const body={iso,maker:V('tc-maker'),status:V('tc-status'),note:V('tc-note')};
+        body.makerCode=V('tc-mcode');
         if(kind==='holders'){ body.holderType=V('tc-htype'); body.compatIds=[...compatSel]; }
-        else { body.grade=V('tc-grade'); body.procType=V('tc-proc'); }
+        else { body.grade=V('tc-grade'); body.procType=V('tc-proc'); body.chipbreaker=V('tc-chip'); body.isoGroups=[...document.querySelectorAll('[data-isog]:checked')].map(c=>c.dataset.isog).join(''); body.ap=V('tc-ap'); body.fn=V('tc-fn'); body.vc=V('tc-vc'); body.material=V('tc-mat'); }
         if(edit)body.id=item.id;
         const ep=kind==='holders'?'holder':'insert';
         const btn=document.getElementById('tc-save'); btn.disabled=true; btn.textContent='Сохранение…';
@@ -16833,7 +16842,8 @@
         </div>
         <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:var(--gap)">
           <div style="grid-column:1/3"><div style="font-size:12px;color:var(--sl-500)">Наименование</div><div style="color:var(--ink);font-weight:600">${esc(it.name||'—')}</div></div>
-          <div><div style="font-size:12px;color:var(--sl-500)">Назначение</div><div>${esc(it.purpose||it.part||'—')}</div></div>
+          <div><div style="font-size:12px;color:var(--sl-500)">Деталь</div><div style="font-weight:600;color:var(--ink)"><a href="#design" class="c-blue" style="text-decoration:none">${esc(it.part||'—')}</a></div></div>
+          <div><div style="font-size:12px;color:var(--sl-500)">Назначение</div><div>${esc(it.purpose||'—')}</div></div>
           <div><div style="font-size:12px;color:var(--sl-500)">Дата</div><div>${esc(it.date||'—')}</div></div>
           <div style="grid-column:1/3"><div style="font-size:12px;color:var(--sl-500)">Станок</div><div style="color:var(--ink);font-weight:600">${esc(it.machine||'—')}${it.machineInvNo?` <span class="c-gray" style="font-weight:400">· инв. ${esc(it.machineInvNo)}</span>`:''}</div></div>
           <div><div style="font-size:12px;color:var(--sl-500)">Тип головки</div><div style="color:var(--ink);font-weight:600">${esc(it.headType||(shape==='flat'?'Плоская':'Револьверная круглая'))}</div></div>
@@ -16896,6 +16906,9 @@
       let curShape = init.item.headShape || (init.item.machineId!=null?machineShape(init.item.machineId):'round');
       let curHeadType = init.item.headType || (init.item.machineId!=null?machineHeadType(init.item.machineId):'');
       let rot=0; // визуальный поворот диска (шагов), не персистится
+      if(!DESIGN){ try{ DESIGN=await (await fetch('/api/design')).json(); }catch(e){ DESIGN={projects:[],kd:[]}; } }
+      const kdItems=((DESIGN&&DESIGN.kd)||[]).filter(k=>k.elemType!=='Оснастка'&&k.elemType!=='Стандартное').map(k=>({id:String(k.docNo||'').replace(/^ПБС\./,''),label:String(k.docNo||'').replace(/^ПБС\./,''),sub:k.name||'',search:String(k.docNo||'')+' '+(k.name||'')}));
+      let partVal=String(init.item.part||'').trim();
       let initN = (init.item.revolverSlots&&init.item.revolverSlots>0)?init.item.revolverSlots : (init.item.machineId!=null?machineN(init.item.machineId):12);
       const ist='width:100%;padding:7px 9px;border:1px solid var(--sl-300);border-radius:var(--r-m);font:inherit;font-size:13px;background:#fff';
       const lbl=(t,req)=>`<div style="font-size:12px;color:var(--sl-500);font-weight:600;margin-bottom:4px">${esc(t)}${req?' <span style="color:var(--red)">*</span>':''}</div>`;
@@ -16904,7 +16917,9 @@
       const holderOpt=(def)=>`<option value="">— державка —</option>`+holders.map(h=>`<option value="${h.id}"${String(h.id)===String(def)?' selected':''}>${esc(h.iso+(h.maker?' · '+h.maker:''))}</option>`).join('');
       // пластины, совместимые с державкой (по compatIds); пусто у державки → все пластины
       const insertsFor=(holderId)=>{ const h=holderById[String(holderId)]; if(h&&h.compatIds&&h.compatIds.length){ const set=new Set(h.compatIds.map(String)); const f=inserts.filter(i=>set.has(String(i.id))); if(f.length)return f; } return inserts; };
-      const insertOpt=(holderId,def)=>`<option value="">— пластина —</option>`+insertsFor(holderId).map(i=>`<option value="${i.id}"${String(i.id)===String(def)?' selected':''}>${esc(i.iso+(i.grade?' · '+i.grade:''))}</option>`).join('');
+      const insertOpt=(holderId,def)=>`<option value="">— пластина —</option>`+insertsFor(holderId).map(i=>`<option value="${i.id}"${String(i.id)===String(def)?' selected':''}>${esc(i.iso+(i.chipbreaker?'-'+i.chipbreaker:'')+(i.grade?' · '+i.grade:'')+(i.isoGroups?' · '+i.isoGroups:''))}</option>`).join('');
+      // K-308: режимы резания с пластины → поле «Параметры» позиции (если пусто)
+      const insertRegimes=(i)=>i?[i.ap?'ap '+i.ap+' мм':'',i.fn?'f '+i.fn+' мм/об':'',i.vc?'vc '+i.vc+' м/мин':''].filter(Boolean).join(' · '):'';
       // K-296: конструктор — страница раздела (как карточки ЗП/ПЗ), а не модалка с синей шапкой
       host.innerHTML=`<div class="card pad" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
           <button class="btn" id="sb-back">← ${cardId!=null?'К карте':'К реестру'}</button>
@@ -16920,7 +16935,8 @@
               <div style="grid-column:1/3">${lbl('Наименование')}<input id="sb-name" style="${ist}" value="${esc(init.item.name||'')}" placeholder="необязательно — соберётся из станка, кулачков и позиций"></div>
               <div>${lbl('Дата')}<div style="padding:7px 0;font-size:var(--fs-s);color:var(--sl-700)">${esc(init.item.date||new Date().toLocaleDateString('ru-RU'))}</div></div>
               <div style="grid-column:1/3">${lbl('Станок',true)}<select id="sb-machine" style="${ist}">${eqOpt(init.item.machineId)}</select></div>
-              <div style="grid-column:1/3">${lbl('Назначение')}<input id="sb-purpose" style="${ist}" value="${esc(init.item.purpose||'')}" placeholder="для чего наладка — напр. корпуса пакеров Ø168–219, наружная обточка"><div style="font-size:11px;color:#8a97a6;margin-top:3px">Деталь и чертёж определяются операциями МК, к которым привязана карта</div></div>
+              <div style="grid-column:1/3">${lbl('Деталь (чертёж КД)',true)}<div id="sb-part-cb"></div><div style="font-size:11px;color:#8a97a6;margin-top:3px">из реестра КД; наладка ведётся под конкретную деталь (решение 25.09)</div></div>
+              <div style="grid-column:1/3">${lbl('Назначение')}<input id="sb-purpose" style="${ist}" value="${esc(init.item.purpose||'')}" placeholder="что делаем — напр. наружная обточка, торцовка"></div>
               <div>${lbl('Позиций головки',true)}<input id="sb-nslots" type="number" min="1" max="60" step="1" style="${ist}" value="${initN}"><div id="sb-headinfo" style="font-size:11px;color:#8a97a6;margin-top:3px"></div></div>
             </div>
           </div>
@@ -16981,6 +16997,7 @@
       ['sb-back','sb-cancel','sb-cancel-top'].forEach(id=>{ const b=document.getElementById(id); if(b)b.onclick=sbBack; });
       const sbTop=document.getElementById('sb-save-top'); if(sbTop)sbTop.onclick=()=>document.getElementById('sb-save').click();
       const nInput=document.getElementById('sb-nslots'), machineSel=document.getElementById('sb-machine');
+      const partCb=comboBox(document.getElementById('sb-part-cb'),{items:kdItems,value:partVal,placeholder:'децим. № или наименование детали…',onPick:(it)=>{ partVal=it.id; }});
       const grid=document.getElementById('sb-slotgrid'), editor=document.getElementById('sb-slotedit'), slotInfo=document.getElementById('sb-slotinfo');
       const seHolder=document.getElementById('sb-se-holder'), seInsert=document.getElementById('sb-se-insert');
       const seOver=document.getElementById('sb-se-overhang'), seParams=document.getElementById('sb-se-params'), seNote=document.getElementById('sb-se-note'), seTitle=document.getElementById('sb-se-title');
@@ -17021,7 +17038,7 @@
         if(!holders.length&&!inserts.length){ let hh=document.getElementById('sb-se-emptyhint'); if(!hh){ hh=document.createElement('div'); hh.id='sb-se-emptyhint'; hh.style.cssText='margin-top:8px;font-size:var(--fs-s);color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-s);padding:8px 11px'; hh.innerHTML='Справочник державок и пластин пуст — списки ниже нечем заполнить. Заведите их в <a href="#tools" style="color:var(--blue)">Инструмент и оснастка → Каталог → Державки (ISO 5608) / Пластины (ISO 1832)</a>, затем вернитесь в карту.'; editor.prepend(hh); } }
       };
       seHolder.onchange=()=>{ const cur=seInsert.value; seInsert.innerHTML=insertOpt(seHolder.value,cur); if(seInsert.value!==cur)seInsert.value=''; if(seHolder.value){ const t=document.getElementById('sb-se-holder-txt'); t.value=''; document.getElementById('sb-se-holder-st').innerHTML=''; } };
-      seInsert.addEventListener('change',()=>{ if(seInsert.value){ const t=document.getElementById('sb-se-insert-txt'); t.value=''; document.getElementById('sb-se-insert-st').innerHTML=''; } });
+      seInsert.addEventListener('change',()=>{ if(seInsert.value){ const t=document.getElementById('sb-se-insert-txt'); t.value=''; const st=document.getElementById('sb-se-insert-st'); const i=insertById[String(seInsert.value)]; const reg=insertRegimes(i); st.innerHTML=reg?`<span style="color:#31506a">режимы с пластины: ${esc(reg)}${i.material?' · '+esc(i.material):''}</span>`:''; if(reg&&!seParams.value.trim())seParams.value=reg; } });
       document.getElementById('sb-se-apply').onclick=()=>{
         if(curSlot==null)return;
         const s={holderId:seHolder.value||'',insertId:seInsert.value||'',holderIso:seHolder.value?'':document.getElementById('sb-se-holder-txt').value.trim(),insertIso:seInsert.value?'':document.getElementById('sb-se-insert-txt').value.trim(),overhang:seOver.value.trim(),params:seParams.value.trim(),note:seNote.value.trim()};
@@ -17080,6 +17097,7 @@
         const name=document.getElementById('sb-name').value.trim();
         const machineId=machineSel.value;
         if(!machineId){errEl.textContent='Выберите станок (обязательное поле).';return;}
+        if(!partVal){errEl.textContent='Выберите деталь (чертёж КД) — наладка ведётся под конкретную деталь.';return;}
         const N=curN();
         const lines=Object.keys(slots).map(Number).filter(n=>n>=1&&n<=N).sort((a,b)=>a-b)
           .map(n=>({slot:n,toolPos:'T'+n,holderId:slots[n].holderId,insertId:slots[n].insertId,holderIso:slots[n].holderIso||'',insertIso:slots[n].insertIso||'',overhang:slots[n].overhang,params:slots[n].params,note:slots[n].note}))
@@ -17089,7 +17107,7 @@
         const jaw={chuckType:jawChuck.value.trim(),chuckSetId:jawSet.value||'',jawSetNo:(jawSetById[String(jawSet.value)]||{}).setNo||'',
           jawTypeCard:jawType.value.trim(),jawClampDia:jawClamp.value.trim(),jawLen:jawLen.value.trim(),jawForce:jawForce.value.trim(),
           workpieceOverhang:jawOver.value.trim(),jawSupport:jawSup.value.trim(),jawRunout:jawRun.value.trim(),jawNote:jawNote.value.trim()};
-        const body={id:cardId,name,machineId,revolverSlots:N,headType:curHeadType,operationKind,purpose:document.getElementById('sb-purpose').value.trim(),lines,jaw,tail:{tailKind:document.getElementById('sb-tail-kind').value,tailTaper:document.getElementById('sb-tail-taper').value.trim(),tailTool:document.getElementById('sb-tail-tool').value.trim(),tailQuill:document.getElementById('sb-tail-quill').value.trim(),tailForce:document.getElementById('sb-tail-force').value.trim(),tailNote:document.getElementById('sb-tail-note').value.trim()}};
+        const body={id:cardId,name,machineId,revolverSlots:N,headType:curHeadType,operationKind,purpose:document.getElementById('sb-purpose').value.trim(),part:partVal,lines,jaw,tail:{tailKind:document.getElementById('sb-tail-kind').value,tailTaper:document.getElementById('sb-tail-taper').value.trim(),tailTool:document.getElementById('sb-tail-tool').value.trim(),tailQuill:document.getElementById('sb-tail-quill').value.trim(),tailForce:document.getElementById('sb-tail-force').value.trim(),tailNote:document.getElementById('sb-tail-note').value.trim()}};
         const btn=document.getElementById('sb-save'); btn.disabled=true; const ot=btn.textContent; btn.textContent='Сохранение…';
         try{ const r=await fetch('/api/setup-card/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
           SETUP=null; toast(`Карта наладки ${esc(j.no||'')} сохранена · занято слотов: ${j.lines}`,'ok'); openSetupCard(host,j.id);

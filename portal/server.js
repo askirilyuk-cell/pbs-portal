@@ -12753,7 +12753,7 @@ const server = http.createServer(async (req, res) => {
     //  НИЧЕГО не блокирует — существующие /api/* работают как раньше (роль лишь информативна).
     req.session = sessionFromReq(req);
     if (req.session && req.session.isStation) { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) { persistSessions(); req.session.operator = null; } else if (raw && raw.operator && req.method !== 'GET') raw.operator.at = Date.now(); } // K-206
-    if (req.session && req.session.isStation && p.startsWith('/api/') && !['/api/me', '/api/board', '/api/station', '/api/task', '/api/metal/blank', '/api/metal/blank-candidates', '/api/metal/find-blank', '/api/onec', '/api/routes/catalog', '/api/route/opfile', '/api/design/kd'].some((pre) => p === pre || p.startsWith(pre + '/') || p.startsWith(pre + '?')) && !((p === '/api/setup-card' && req.method === 'GET') || p === '/api/setup-card/run' || p === '/api/setup-card/file' || p === '/api/setup-card.pdf')) return sendJson(res, 403, { error: 'Пост участка: доступ только к рабочему месту.' }); // K-206; K-318: пост читает КН операции, пишет факт наладки
+    if (req.session && req.session.isStation && p.startsWith('/api/') && !['/api/me', '/api/board', '/api/station', '/api/task', '/api/metal/blank', '/api/metal/blank-candidates', '/api/metal/find-blank', '/api/onec', '/api/routes/catalog', '/api/route/opfile', '/api/design/kd'].some((pre) => p === pre || p.startsWith(pre + '/') || p.startsWith(pre + '?')) && !((p === '/api/setup-card' && req.method === 'GET') || p === '/api/setup-card/run' || p === '/api/setup-card/file' || p === '/api/setup-card.pdf' || p === '/api/chuck-jaw/file')) return sendJson(res, 403, { error: 'Пост участка: доступ только к рабочему месту.' }); // K-206; K-318: пост читает КН операции, пишет факт наладки
     req.roles = sessionPortalRoles(req.session);           // мультироль: эффективный набор портальных ролей
     req.role = req.roles[0] || 'guest';                    // первичная (для сообщений/обратной совместимости)
     if (p === '/api/me') return handleMe(req, res);
@@ -14926,6 +14926,7 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 501, { error: 'Только в LIVE-режиме.' });
       try {
         const body = await readBody(req);
+        if (req.session && req.session.isStation && !(req.session.operator && req.session.operator.fio)) { const e = new Error('Сначала представьтесь на посту (бейдж) — наладка записывается на исполнителя.'); e.status = 403; throw e; } // K-324
         const cardId = Number(body.id); if (!Number.isFinite(cardId)) throw new Error('Не указан id карты.');
         const cards = await ncListSoft('setup_cards'); const card = cards.find((c) => Number(c.Id ?? c.id) === cardId); if (!card) throw new Error('Карта не найдена.');
         const no = String(card['№'] || '').trim() || String(cardId);

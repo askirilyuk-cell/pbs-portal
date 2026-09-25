@@ -10862,6 +10862,11 @@ const TC_INSERT_PROC = ['Точение', 'Фрезерование', 'Раст�
 const TC_HOLDER_TYPES = ['Токарная наружная', 'Расточная', 'Канавочная', 'Резьбовая'];
 const TC_STATUSES = ['Активна', 'Архив'];
 const TC_PHOTO_ROOT = path.join(__dirname, '.data', 'tool-catalog');
+// K-315: эскизы/фото карты наладки — .data/setup-cards/<id>/ (печатаются в блоке «Эскиз наладки» Ф.15)
+const SC_FILE_ROOT = path.join(__dirname, '.data', 'setup-cards');
+function scDir(id, create) { const safe = String(id || '').replace(/[^0-9]/g, ''); if (!safe) return null; const dir = path.join(SC_FILE_ROOT, safe); if (create) { try { fs.mkdirSync(dir, { recursive: true }); } catch {} } return dir; }
+function scFiles(id) { try { const dir = scDir(id); if (!dir) return []; return fs.readdirSync(dir).filter((f) => TC_FILE_EXT.test(f)).sort(); } catch { return []; } }
+function scImageDataUri(id, rel) { try { const dir = scDir(id); if (!dir) return ''; const t = path.normalize(path.join(dir, rel)); if (!t.startsWith(dir + path.sep)) return ''; const ext = (t.split('.').pop() || '').toLowerCase(); const mime = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' }[ext]; if (!mime) return ''; const st = fs.statSync(t); if (st.size > 12 * 1024 * 1024) return ''; return `data:${mime};base64,` + fs.readFileSync(t).toString('base64'); } catch { return ''; } }
 const TC_FILE_EXT = /\.(pdf|png|jpe?g|gif|webp|bmp|tiff?)$/i;
 // каталог файлов позиции: .data/tool-catalog/{inserts|holders}/<ISO sanitized>/
 function tcDir(kind, iso, create) {
@@ -11176,6 +11181,7 @@ async function buildSetupCard(id) {
   try { item.usedIn = (await setupUsageMap()).get(String(item.no || '').trim()) || []; } catch { item.usedIn = []; } // K-297
   // строки: фильтр в JS (DEF-25 — where молча игнорится)
   const rows = lines.filter((l) => setupLineOfCard(l, cardId)).map((l) => setupLineShape(l, holderById, insertById)).sort((a, b) => (a.pos || 0) - (b.pos || 0));
+  item.files = scFiles(id); // K-315
   try { const evs = await ncListSoft('events'); item.history = evs.filter((e) => String(e['Объект'] || '').trim() === 'КН' && String(e['№ объекта'] || '').trim() === String(item.no || '').trim()).sort((a, b) => String(b['Когда'] || '').localeCompare(String(a['Когда'] || ''))).map((e) => ({ when: String(e['Когда'] || '').slice(0, 16), who: e['Кто'] || '', type: e['Тип события'] || '', details: e['Детали'] || '' })); } catch { item.history = []; } // K-302
   return { mode: 'live', item, lines: rows };
 }
@@ -11202,7 +11208,7 @@ function setupHeadSvgTop(shape, N, byPos) {
   let poly = ''; for (let i = 0; i < N; i++) { const [x, y] = pt(R / Math.cos(Math.PI / N), ang(i) + Math.PI / N); poly += (i ? ' L ' : 'M ') + x.toFixed(1) + ' ' + y.toFixed(1); }
   let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" font-family="Arial">`;
   s += `<path d="${poly} Z" fill="#F2F6FB" stroke="#1F4E79" stroke-width="1.5"/><circle cx="${cx}" cy="${cy}" r="24" fill="#DCE6F2" stroke="#1F4E79"/><text x="${cx}" y="${cy + 4}" font-size="10" fill="#1F4E79" text-anchor="middle">${N} поз.</text>`;
-  s += `<line x1="${cx - 90}" y1="${cy + R + 42}" x2="${cx + 90}" y2="${cy + R + 42}" stroke="#94a3b8" stroke-dasharray="5 3"/><text x="${cx}" y="${cy + R + 54}" font-size="8" fill="#64748b" text-anchor="middle">ось заготовки · рабочая позиция T1</text>`;
+  // K-315: без «оси заготовки» и без ISO-подписей на схеме — коды в таблице позиций, подписи на схеме резались и наезжали друг на друга
   for (let i = 0; i < N; i++) { const n = i + 1, l = byPos[n] || {}, f = filled(n), a = ang(i), deg = a * 180 / Math.PI, [sx, sy] = pt(R, a);
     const g = (inner) => `<g transform="translate(${sx.toFixed(1)} ${sy.toFixed(1)}) rotate(${(deg - 90).toFixed(1)})">${inner}</g>`;
     s += g(`<rect x="-11" y="-8" width="22" height="9" rx="1.5" fill="${f ? '#DCE6F2' : '#fff'}" stroke="#1F4E79" stroke-width="1"${f ? '' : ' stroke-dasharray="2 2"'}/>`);
@@ -11210,7 +11216,7 @@ function setupHeadSvgTop(shape, N, byPos) {
     else if (f) { const ov = Math.max(6, Math.min(40, (parseFloat(String(l.overhang || '').replace(',', '.')) || 0) * 0.6 || 14)); s += g(`<rect x="-5" y="0" width="10" height="${ov.toFixed(1)}" fill="#1F4E79"/><path d="M -5 ${ov.toFixed(1)} L 5 ${ov.toFixed(1)} L 0 ${(ov + 6).toFixed(1)} Z" fill="#1F4E79"/>`); }
     const [bx, by] = pt(R - 18, a);
     s += `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="9" fill="${f ? '#1F4E79' : '#fff'}" stroke="#1F4E79" stroke-width="1"/><text x="${bx.toFixed(1)}" y="${(by + 3.2).toFixed(1)}" font-size="8" font-weight="bold" fill="${f ? '#fff' : '#1F4E79'}" text-anchor="middle">T${n}</text>`;
-    if (f) { const [lx, ly] = pt(R + 46, a); const iso = String(l.holderIso || l.insertIso || '').slice(0, 14); const right = Math.cos(a) > 0.15, left = Math.cos(a) < -0.15; s += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="7" fill="#1F4E79" text-anchor="${right ? 'start' : (left ? 'end' : 'middle')}" dominant-baseline="central">${hesc(iso)}${l.axial ? ' ⊙' : ''}</text>`; }
+    if (f && l.overhang && !l.axial) { const [lx, ly] = pt(R + 40 + Math.max(6, Math.min(40, (parseFloat(String(l.overhang || '').replace(',', '.')) || 0) * 0.6 || 14)), a); s += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="7" fill="#1F4E79" text-anchor="middle" dominant-baseline="central">${hesc(String(l.overhang))}</text>`; }
   }
   s += `<text x="8" y="${H - 6}" font-size="7.5" fill="#64748b">■ наружный (резец наружу)   ⊙ осевой — расточной / сверло (вылет по Z, см. вид сбоку)</text>`;
   return s + `</svg>`;
@@ -11344,7 +11350,9 @@ function buildSetupCardHtml(d) {
     </table>
 
     <div class="sec">Эскиз наладки</div>
-    <div class="esk">МЕСТО ПОД ЭСКИЗ (закрепление детали, привязка нуля, схема обработки)</div>
+    ${(() => { const imgs = (it.files || []).filter((f) => /\.(png|jpe?g|gif|webp|bmp)$/i.test(f)).slice(0, 2).map((f) => scImageDataUri(it.id, f)).filter(Boolean); const others = (it.files || []).filter((f) => !/\.(png|jpe?g|gif|webp|bmp)$/i.test(f));
+      if (!imgs.length) return `<div class="esk">МЕСТО ПОД ЭСКИЗ (закрепление детали, привязка нуля, схема обработки)${others.length ? ` · приложено в портале: ${hesc(others.join(', '))}` : ''}</div>`;
+      return `<div style="display:flex;gap:8px;justify-content:center;align-items:flex-start;page-break-inside:avoid">${imgs.map((u) => `<img src="${u}" style="max-width:${imgs.length > 1 ? '48%' : '100%'};max-height:118mm;object-fit:contain;border:1px solid #C4D2E2;border-radius:3px">`).join('')}</div>${others.length ? `<div class="g" style="margin-top:3px">Также приложено в портале: ${hesc(others.join(', '))}</div>` : ''}`; })()}
 
     <div class="sign">
       <div class="box">Технолог (составил): ${dash(it.author)}</div>
@@ -14896,6 +14904,47 @@ const server = http.createServer(async (req, res) => {
         for (const o of ops) { const mk = String(o['№ МК'] || '').trim(); if (!byMk.has(mk)) byMk.set(mk, []); byMk.get(mk).push({ n: o['№ операции'] || '', name: o['Операция'] || '', equipment: o['Оборудование'] || '', setupCardNo: o['Карта наладки (№)'] || '' }); }
         const list = routes.map((r) => { const mk = String(r['№ МК'] || '').trim(); return { id: r.Id ?? r.id, mk, name: r['Наименование'] || '', designation: r['Изделие / обозначение'] || '', statusMk: r['Статус МК'] || '', ops: (byMk.get(mk) || []).sort((a, b) => Number(a.n) - Number(b.n)) }; }).filter((r) => r.mk && !/архив/i.test(r.statusMk)).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
         return sendJson(res, 200, { routes: list }); } catch (e) { return sendJson(res, 200, { routes: [], warning: String(e.message || e) }); }
+    }
+    if (p === '/api/setup-card/upload' && req.method === 'POST') { // K-315: эскиз/фото наладки → .data/setup-cards/<id>/
+      if (!isLive()) return sendJson(res, 501, { error: 'Загрузка файлов доступна только в LIVE-режиме.' });
+      const ct = String(req.headers['content-type'] || '');
+      const bm = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ct);
+      if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
+      let raw; try { raw = await readRawBody(req, 64 * 1024 * 1024); } catch (e) { return sendJson(res, 413, { error: String(e.message || e) }); }
+      const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim());
+      const dir = scDir(fields.id, true);
+      if (!dir) return sendJson(res, 400, { error: 'Не указан id карты наладки.' });
+      if (!files.length) return sendJson(res, 400, { error: 'Файлы не переданы.' });
+      const saved = [], skipped = [];
+      for (const f of files) {
+        if (!TC_FILE_EXT.test(String(f.filename))) { skipped.push(String(f.filename)); continue; }
+        const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
+        rel ? saved.push(rel) : skipped.push(String(f.filename));
+      }
+      try { const ss = sessionFromReq(req); logEvent({ obj: 'КН', objNum: String(fields.no || fields.id), type: 'эскиз', details: 'добавлены файлы: ' + saved.join(', '), who: (ss && (ss.name || ss.user)) || '' }); } catch {}
+      return sendJson(res, 200, { ok: true, saved, skipped, files: scFiles(fields.id) });
+    }
+    if (p === '/api/setup-card/file' && req.method === 'GET') { // K-315: отдача эскиза (traversal-guard; dl=1 — скачивание)
+      const id = url.searchParams.get('id') || '', rel = url.searchParams.get('rel') || '';
+      const dir = scDir(id);
+      if (!dir) { res.writeHead(404); return res.end('Путь к файлу не задан'); }
+      const target = path.normalize(path.join(dir, rel));
+      if (target !== dir && !target.startsWith(dir + path.sep)) { res.writeHead(403); return res.end('Доступ запрещён'); }
+      let st; try { st = fs.statSync(target); } catch { res.writeHead(404); return res.end('Файл не найден'); }
+      if (!st.isFile()) { res.writeHead(404); return res.end('Не файл'); }
+      const ext = (target.split('.').pop() || '').toLowerCase();
+      const ctp = FILE_MIME[ext] || MIME['.' + ext] || 'application/octet-stream';
+      const fn = encodeURIComponent(path.basename(target));
+      res.writeHead(200, { 'Content-Type': ctp, 'Content-Length': st.size, 'Content-Disposition': `${url.searchParams.get('dl') === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${fn}`, 'Cache-Control': 'private, max-age=60' });
+      return fs.createReadStream(target).pipe(res);
+    }
+    if (p === '/api/setup-card/file/delete' && req.method === 'POST') { // K-315: удалить эскиз
+      const body = await readBody(req).catch(() => ({}));
+      const dir = scDir(body.id); if (!dir) return sendJson(res, 400, { error: 'Не указан id карты.' });
+      const target = path.normalize(path.join(dir, String(body.rel || '')));
+      if (!target.startsWith(dir + path.sep)) return sendJson(res, 403, { error: 'Доступ запрещён.' });
+      try { fs.unlinkSync(target); } catch (e) { return sendJson(res, 404, { error: 'Файл не найден.' }); }
+      return sendJson(res, 200, { ok: true, files: scFiles(body.id) });
     }
     if (p === '/api/setup-card/save' && req.method === 'POST') { // создать/обновить карту + пересоздать строки
       if (!isLive()) return sendJson(res, 501, { error: 'Сохранение карты наладки доступно только в LIVE-режиме: задайте токен NocoDB.' });

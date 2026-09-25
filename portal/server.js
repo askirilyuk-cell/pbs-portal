@@ -11053,10 +11053,19 @@ function setupCardListShape(c, eqById) {
   };
 }
 // GET список карт наладки (+ KPI)
+// K-297: где карта наладки используется — операции МК с «Карта наладки (№)» = № КН (одна КН может входить в разные МК)
+async function setupUsageMap() {
+  const out = new Map(); let ops = [], routes = [];
+  try { [ops, routes] = await Promise.all([ncListSoft('operations'), ncListSoft('routes')]); } catch { return out; }
+  const rt = new Map(routes.map((r) => [String(r['№ МК'] || '').trim(), r]));
+  for (const op of ops) { const no = String(op['Карта наладки (№)'] || '').trim(); if (!no) continue; const mk = String(op['№ МК'] || '').trim(); const r = rt.get(mk);
+    if (!out.has(no)) out.set(no, []); out.get(no).push({ mk, routeId: r ? (r.Id ?? r.id) : null, opN: op['№ операции'] || '', opName: op['Операция'] || '', equipment: op['Оборудование'] || '', designation: r ? (r['Изделие / обозначение'] || '') : '', routeName: r ? (r['Наименование'] || '') : '', statusMk: r ? (r['Статус МК'] || '') : '' }); }
+  return out;
+}
 async function buildSetupCards() {
-  const [cards, eqRows] = await Promise.all([ncListSoft('setup_cards'), ncListSoft('equipment')]);
+  const [cards, eqRows, usage] = await Promise.all([ncListSoft('setup_cards'), ncListSoft('equipment'), setupUsageMap()]);
   const eqById = {}; eqRows.forEach((r) => { eqById[String(r.Id ?? r.id)] = eqShape(r); });
-  const items = cards.map((c) => setupCardListShape(c, eqById)).sort((a, b) => String(b.no).localeCompare(String(a.no), 'ru'));
+  const items = cards.map((c) => { const it = setupCardListShape(c, eqById); it.usedIn = usage.get(String(it.no || '').trim()) || []; return it; }).sort((a, b) => String(b.no).localeCompare(String(a.no), 'ru'));
   const kpis = {
     total: items.length,
     draft: items.filter((i) => i.status === 'Черновик').length,
@@ -11112,6 +11121,7 @@ async function buildSetupCard(id) {
   jaw.stationChuckDia = eq ? eq.chuckDia : null;
   jaw.stationSpindleBore = eq ? eq.spindleBore : null;
   item.jaw = jaw;
+  try { item.usedIn = (await setupUsageMap()).get(String(item.no || '').trim()) || []; } catch { item.usedIn = []; } // K-297
   // строки: фильтр в JS (DEF-25 — where молча игнорится)
   const rows = lines.filter((l) => setupLineOfCard(l, cardId)).map((l) => setupLineShape(l, holderById, insertById)).sort((a, b) => (a.pos || 0) - (b.pos || 0));
   return { mode: 'live', item, lines: rows };
@@ -14769,6 +14779,26 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', equipment: [], holders: [], inserts: [], statuses: SETUP_STATUSES });
       try { return sendJson(res, 200, await buildSetupCatalog()); }
       catch (e) { return sendJson(res, 200, { mode: 'mock', equipment: [], holders: [], inserts: [], statuses: SETUP_STATUSES, warning: String(e.message || e) }); }
+    }
+    // K-297: привязать/отвязать КН к операции МК (из карточки КН); операции — по «№ МК» + «№ операции»
+    if (p === '/api/setup-card/link' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Только в LIVE-режиме.' });
+      try { const body = await readBody(req); const id = Number(body.id); const mk = String(body.mk || '').trim(); const opN = String(body.opN || '').trim(); if (!id || !mk || !opN) throw new Error('Нужны id карты, № МК и № операции.');
+        const card = (await ncListSoft('setup_cards')).find((c) => (c.Id ?? c.id) === id); if (!card) throw new Error('Карта наладки не найдена.'); const no = String(card['№'] || '').trim();
+        const op = (await ncListSoft('operations')).find((o) => String(o['№ МК'] || '').trim() === mk && String(o['№ операции'] || '').trim() === opN); if (!op) throw new Error(`Операция ${opN} в ${mk} не найдена.`);
+        const cur = String(op['Карта наладки (№)'] || '').trim(); const next = body.unlink ? '' : no;
+        if (!body.unlink && cur && cur !== no) throw new Error(`К операции уже привязана ${cur} — сначала отвяжите её.`);
+        await ncUpdate('operations', op.Id ?? op.id, { 'Карта наладки (№)': next });
+        logEvent({ type: 'комментарий', obj: 'МК', objNum: mk, who: eventWho(req, svc), details: body.unlink ? `оп. ${opN}: отвязана карта наладки ${no}` : `оп. ${opN}: привязана карта наладки ${no}` });
+        return sendJson(res, 200, { ok: true, no, mk, opN, linked: !body.unlink }); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/setup-card/mk-ops' && req.method === 'GET') { // МК с операциями для выбора привязки
+      if (!isLive()) return sendJson(res, 200, { routes: [] });
+      try { const [routes, ops] = await Promise.all([ncListSoft('routes'), ncListSoft('operations')]); const byMk = new Map();
+        for (const o of ops) { const mk = String(o['№ МК'] || '').trim(); if (!byMk.has(mk)) byMk.set(mk, []); byMk.get(mk).push({ n: o['№ операции'] || '', name: o['Операция'] || '', equipment: o['Оборудование'] || '', setupCardNo: o['Карта наладки (№)'] || '' }); }
+        const list = routes.map((r) => { const mk = String(r['№ МК'] || '').trim(); return { id: r.Id ?? r.id, mk, name: r['Наименование'] || '', designation: r['Изделие / обозначение'] || '', statusMk: r['Статус МК'] || '', ops: (byMk.get(mk) || []).sort((a, b) => Number(a.n) - Number(b.n)) }; }).filter((r) => r.mk && !/архив/i.test(r.statusMk)).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
+        return sendJson(res, 200, { routes: list }); } catch (e) { return sendJson(res, 200, { routes: [], warning: String(e.message || e) }); }
     }
     if (p === '/api/setup-card/save' && req.method === 'POST') { // создать/обновить карту + пересоздать строки
       if (!isLive()) return sendJson(res, 501, { error: 'Сохранение карты наладки доступно только в LIVE-режиме: задайте токен NocoDB.' });

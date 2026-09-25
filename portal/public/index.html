@@ -10839,6 +10839,7 @@
       const sec=eqSecById(it.sectionId), site=sec?(sec.site||''):'';
       const tabs=[['pass','Паспорт'],['tasks','Задачи'+(tk.length?' · '+tk.length:'')],['mnt','ТО'],['docs','Документы'+(docs.length?' · '+docs.length:'')],['buy','Закупка']];
       if(eqIsTurning(it))tabs.push(['ttx','ТТХ']);
+      tabs.push(['kn','Карты наладки']); // K-297
       if(!tabs.some(t=>t[0]===eqDrTab))eqDrTab='pass';
       d.innerHTML=`<div class="eqd-h">
           <div class="eqd-title"><span class="eqd-inv">${esc(it.invNo||'—')}</span>${eqStCell(it.status)}${it.isCnc?eqCncChip:''}${it.category?`<span class="st st--neutral">${esc(it.category)}</span>`:''}</div>
@@ -10895,6 +10896,12 @@
             <div class="eqd-f" style="grid-column:span 2">${F('Ссылка на закупку',refHtml)}</div>
           </div>
           <a class="ui-btn ui-btn--ghost" href="#purchase" style="text-decoration:none">Открыть раздел «Закупки» →</a>`;
+      } else if(eqDrTab==='kn'){
+        h.innerHTML='<div class="eqd-sub">Загрузка карт наладки…</div>';
+        (async()=>{ let d; try{ d=await (await fetch('/api/setup-cards')).json(); }catch(e){ d={items:[]}; } if(eqDrTab!=='kn')return;
+          const list=(d.items||[]).filter(r=>String(r.machineId)===String(it.id));
+          h.innerHTML=(list.length?`<div class="tbl-wrap"><table class="dt" style="font-size:var(--fs-s);width:100%"><thead><tr><th style="width:130px">№ КН</th><th>Наименование</th><th style="width:140px">Деталь</th><th style="width:150px">В МК</th><th style="width:110px">Статус</th></tr></thead><tbody>${list.map(r=>`<tr><td class="nw"><a href="#setup/${encodeURIComponent(r.id)}" class="code c-blue" style="text-decoration:none">${esc(r.no)}</a></td><td class="ell">${esc(r.name||'—')}</td><td class="ell c-gray">${esc(r.part||'—')}</td><td class="ell">${(r.usedIn||[]).map(u=>`<a href="#routes/${u.routeId!=null?u.routeId:''}" class="badge b-navy" style="text-decoration:none;margin-right:4px">${esc(String(u.mk).replace('МК-',''))}·${esc(u.opN)}</a>`).join('')||'<span class="c-gray">—</span>'}</td><td class="nw">${setupStatusChip(r.status)}</td></tr>`).join('')}</tbody></table></div>`
+            :`<div class="eqd-sub">Карт наладки на этот станок пока нет.</div>`)+`<div style="margin-top:10px"><a class="btn btn--sm" href="#setup" style="text-decoration:none">Раздел «Карты наладки» →</a></div>`; })();
       } else if(eqDrTab==='ttx'){
         h.innerHTML=`<div class="eqd-grid">
             ${F('Тип головки',esc(it.headType))}${F('Позиций револьвера',eqVal(it.revolverSlots),true)}${F('Патрон — тип',esc(it.chuckTypeEq))}
@@ -15682,7 +15689,9 @@
         <div data-toolbox="${i}" style="max-height:150px;overflow:auto;border:1px solid var(--line2);border-radius:var(--r-m);padding:6px;background:#fff">${rows}</div>
         <div class="rt-hint" data-toolsel="${i}" style="margin-top:5px">${sel.size?('Выбрано ('+sel.size+'): '+esc([...sel].join('; '))):'Не выбрано'}</div></div>`;
     }
-    function rtSetupOptions(cur){ const items=((rtWiz.setup&&rtWiz.setup.items)||[]); const c=String(cur||'').trim(); let h='<option value="">— не привязана —</option>'; if(c&&!items.some(x=>String(x.no)===c))h+=`<option value="${rtEscA(c)}" selected>${esc(c)} (вне справочника)</option>`; return h+items.map(x=>`<option value="${rtEscA(x.no)}"${String(x.no)===c?' selected':''}>${esc(x.no)}${x.name?' · '+esc(x.name):''}</option>`).join(''); }
+    function rtSetupOptions(cur,equipment){ let items=((rtWiz.setup&&rtWiz.setup.items)||[]); const c=String(cur||'').trim(); let h='<option value="">— не привязана —</option>';
+      // K-297: карты наладки — под конкретный станок: сначала карты оборудования операции, остальные ниже
+      const eq=String(equipment||'').toLowerCase(); if(eq){ const same=items.filter(x=>{ const m=String(x.machine||'').toLowerCase(); return m&&(eq.includes(m)||m.includes(eq)); }); const rest=items.filter(x=>!same.includes(x)); items=same.concat(rest); } if(c&&!items.some(x=>String(x.no)===c))h+=`<option value="${rtEscA(c)}" selected>${esc(c)} (вне справочника)</option>`; return h+items.map(x=>`<option value="${rtEscA(x.no)}"${String(x.no)===c?' selected':''}>${esc(x.no)}${x.name?' · '+esc(x.name):''}</option>`).join(''); }
     function rtCtrlOptions(cur){ const map={'нет':'— нет —','С':'С — самоконтроль','ОТК':'ОТК'}; const c=String(cur||'нет'); return ((rtWiz.cat.controlPoints)||['нет','С','ОТК']).map(o=>`<option value="${esc(o)}"${o===c?' selected':''}>${esc(map[o]||o)}</option>`).join(''); }
     const rtSetupIdByNo=(no)=>{ const it=((rtWiz.setup&&rtWiz.setup.items)||[]).find(x=>String(x.no)===String(no)); return it?it.id:null; };
 
@@ -16279,7 +16288,7 @@
       const sid=op.setupCardNo?rtSetupIdByNo(op.setupCardNo):null;
       const needSetup=rtOpNeedsSetup(op)||String(op.setupCardNo||'').trim();
       const setupRow=needSetup?`<div class="rt-setup"><span class="sic">${RT_SVG_SETUP}</span>
-          <div style="flex:1;min-width:180px"><div style="font-size:13px;font-weight:600;color:var(--ink)">Карта наладки</div><select class="rt-inp" data-of="setupCardNo" style="margin-top:5px">${rtSetupOptions(op.setupCardNo)}</select></div>
+          <div style="flex:1;min-width:180px"><div style="font-size:13px;font-weight:600;color:var(--ink)">Карта наладки</div><select class="rt-inp" data-of="setupCardNo" style="margin-top:5px">${rtSetupOptions(op.setupCardNo,op.equipment)}</select></div>
           ${op.setupCardNo?(sid!=null?`<a class="rt-file" href="#setup/${encodeURIComponent(sid)}"><i class=ic-doc></i> Открыть ${esc(op.setupCardNo)}</a>`:`<span class="rt-file"><i class=ic-doc></i> ${esc(op.setupCardNo)}</span>`):'<span class="rt-hint">не привязана — выберите из справочника</span>'}</div>`:'';
       return `<div class="rt-op${op._open?' open':''}" data-idx="${i}">
         <div class="rt-ohead"><span class="rt-onum">${i+1}</span><div style="min-width:0"><div class="rt-oname">${esc(nm)}</div><div class="rt-osub">${esc(sub)}</div></div>${chip}<span class="rt-omove" style="margin-left:auto;display:inline-flex;gap:4px"><button type="button" class="tbtn" data-opmove="-1" data-opi="${i}" title="Переместить операцию выше" style="padding:2px 8px"${i===0?' disabled':''}><i class=ic-arrup></i></button><button type="button" class="tbtn" data-opmove="1" data-opi="${i}" title="Переместить операцию ниже" style="padding:2px 8px"${i===(rtWiz.ops.length-1)?' disabled':''}><i class=ic-arrdown></i></button><button type="button" class="tbtn" data-optpl="${i}" title="Сохранить операцию как шаблон — потом добавляется одной кнопкой" style="padding:2px 8px"><i class=ic-star></i></button></span><span class="rt-oarr" style="margin-left:6px">${RT_SVG_ARR}</span></div>
@@ -16606,6 +16615,7 @@
         <div style="font-size:14px;color:var(--sl-500);max-width:440px;margin:0 auto;line-height:1.5">Раздел в разработке. Конструктор карт наладки для этого вида операций появится в одном из следующих обновлений портала.</div>
       </div>`;
     }
+    let SETUP_MACHINE=''; // K-297: выбранный станок в реестре КН
     async function renderSetupView(host,arg){
       if(arg){ return openSetupCard(host,arg); }
       const active=SETUP_KINDS.find(t=>t.kind===SETUP_KIND)||SETUP_KINDS[0];
@@ -16620,17 +16630,25 @@
       if(!SETUP){ try{SETUP=await (await fetch('/api/setup-cards')).json();}catch(e){SETUP={mode:'mock',warning:String(e.message||e),items:[]};} }
       const allItems=(SETUP&&SETUP.items)||[]; const live=SETUP.mode==='live'; const k=SETUP.kpis||{};
       // фильтр по виду операции (на фронте); пусто → «Токарная» (fallback для старых карт)
-      const items=allItems.filter(r=>((r.operationKind||'Токарная')===SETUP_KIND));
+      const itemsKind=allItems.filter(r=>((r.operationKind||'Токарная')===SETUP_KIND));
+      // K-297: карты наладки — по конкретному станку (просьба Александра 25.09): чипы станков + фильтр
+      const machines=[...new Map(itemsKind.filter(r=>r.machine).map(r=>[String(r.machineId??r.machine),{id:String(r.machineId??r.machine),name:r.machine,n:0}])).values()];
+      itemsKind.forEach(r=>{ const m=machines.find(x=>x.id===String(r.machineId??r.machine)); if(m)m.n++; });
+      if(SETUP_MACHINE&&!machines.some(m=>m.id===SETUP_MACHINE))SETUP_MACHINE='';
+      const items=SETUP_MACHINE?itemsKind.filter(r=>String(r.machineId??r.machine)===SETUP_MACHINE):itemsKind;
+      const machBar=machines.length?`<div class="dos-filters" style="margin-top:8px"><button class="dos-chip ${SETUP_MACHINE?'':'on'}" data-stm="">Все станки · ${itemsKind.length}</button>${machines.map(m=>`<button class="dos-chip ${SETUP_MACHINE===m.id?'on':''}" data-stm="${esc(m.id)}">${esc(m.name)} · ${m.n}</button>`).join('')}</div>`:'';
       const tag=srcChip(live, live?(items.length+' карт'):'демо');
       host.innerHTML=`<div class="filters"><span style="font-size:13px;color:var(--sub)">Карты наладки станков: инструментальная оснастка операции (державки + пластины из ISO-каталога)</span><span class="spacer" style="margin-left:auto"></span>${tag}</div>
-        ${setupTabsBar(host)}
+        ${setupTabsBar(host)}${machBar}
         <div id="stgrid" style="margin-top:8px"></div>`;
       host.querySelectorAll('.st-subtab').forEach(b=>b.onclick=()=>{ if(b.dataset.kind===SETUP_KIND)return; SETUP_KIND=b.dataset.kind; renderSetupView(host); });
+      host.querySelectorAll('[data-stm]').forEach(b=>b.onclick=()=>{ SETUP_MACHINE=b.dataset.stm; renderSetupView(host); });
       const cols=[
         {key:'no',label:'№ КН',w:150,cls:'code',cell:r=>esc(r.no||'—'),sortVal:r=>r.no},
         {key:'name',label:'Наименование',cls:'ell',cell:r=>`<span title="${esc(r.name)}" style="font-weight:600;color:var(--ink)">${esc(r.name||'—')}</span>`,sortVal:r=>r.name},
         {key:'machine',label:'Станок',w:220,cls:'ell c-gray',cell:r=>esc(r.machine||'—'),sortVal:r=>r.machine},
         {key:'part',label:'Деталь',w:160,cls:'ell c-gray',cell:r=>esc(r.part||'—'),sortVal:r=>r.part},
+        {key:'used',label:'В МК',w:150,cls:'ell',cell:r=>(r.usedIn||[]).length?`<span title="${esc((r.usedIn||[]).map(u=>u.mk+' оп. '+u.opN).join('\n'))}">${(r.usedIn||[]).map(u=>`<a href="#routes/${u.routeId!=null?u.routeId:''}" class="badge b-navy" style="text-decoration:none;margin-right:4px" onclick="event.stopPropagation()">${esc(String(u.mk).replace('МК-',''))}·${esc(u.opN)}</a>`).join('')}</span>`:'<span class="c-gray">—</span>',sortVal:r=>(r.usedIn||[]).length},
         {key:'status',label:'Статус',w:130,cls:'nw',cell:r=>setupStatusChip(r.status),sortVal:r=>r.status},
         {key:'date',label:'Дата',w:110,cls:'nw c-gray',cell:r=>esc(r.date||'—'),sortVal:r=>r.date},
       ];
@@ -16782,7 +16800,7 @@
       host.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
           <a href="#setup" class="c-blue" style="font-size:13px;text-decoration:none">← Карты наладки</a>
           <span class="code" style="font-size:16px">${esc(it.no||'')}</span>${setupStatusChip(it.status)}
-          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${live?`<button class="tbtn" id="st-edit"><i class=ic-pencil></i> Редактировать</button><a class="pbtn" href="/api/setup-card.pdf?id=${encodeURIComponent(it.id)}" target="_blank" rel="noopener" title="Печать карты наладки на бланке Ф.15–Д.1">${aico('print',14)} Печать / Выгрузить PDF</a>`:`<button class="tbtn" disabled title="Печать доступна в LIVE-режиме (нужен токен NocoDB)" style="opacity:.55;cursor:not-allowed"><i class=ic-print></i> Печать (LIVE)</button>`}</span>
+          <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${live?`<button class="btn" id="st-edit"><i class=ic-pencil></i> Редактировать</button><a class="pbtn" href="/api/setup-card.pdf?id=${encodeURIComponent(it.id)}" target="_blank" rel="noopener" title="Печать карты наладки на бланке Ф.15–Д.1">${aico('print',14)} Печать / Выгрузить PDF</a>`:`<button class="tbtn" disabled title="Печать доступна в LIVE-режиме (нужен токен NocoDB)" style="opacity:.55;cursor:not-allowed"><i class=ic-print></i> Печать (LIVE)</button>`}</span>
         </div>
         <div class="card pad" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 18px;font-size:13px;margin-bottom:var(--gap)">
           <div style="grid-column:1/3"><div style="font-size:12px;color:var(--sl-500)">Наименование</div><div style="color:var(--ink);font-weight:600">${esc(it.name||'—')}</div></div>
@@ -16794,9 +16812,32 @@
         </div>
         <div class="card pad"><div class="row" style="margin-bottom:10px"><span class="sec-h">${esc(headLabel)} · позиции T1…T${N}</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">занято ${filledN} из ${N}</span></div>${grid}${det}
           <div style="margin-top:9px;font-size:12px;color:var(--sl-500)">Позиция = гнездо головки. Пустая позиция — «свободно». Вылет показан выступом (радиальным на диске / вертикальным на гребёнке). Державка и пластина — из ISO-каталога инструмента (Этап 2a). Тип и число позиций — свойство станка (снапшот).</div></div>
-        ${setupJawView(it)}`;
+        ${setupJawView(it)}
+        <div class="card pad" style="margin-top:var(--gap)"><div class="row" style="margin-bottom:10px"><span class="sec-h">Используется в операциях МК</span><span class="spacer"></span>${live?`<button class="btn btn--sm" id="st-link">＋ Привязать к операции МК</button>`:''}</div>
+          ${(it.usedIn||[]).length?`<div class="tbl-wrap"><table class="dt" style="font-size:var(--fs-s);width:100%"><thead><tr><th style="width:150px">МК</th><th>Изделие</th><th style="width:70px">Оп.</th><th>Операция</th><th style="width:200px">Оборудование</th><th style="width:110px">Статус МК</th><th style="width:40px"></th></tr></thead><tbody>${it.usedIn.map(u=>`<tr><td class="nw"><a href="#routes/${u.routeId!=null?u.routeId:''}" class="code c-blue" style="text-decoration:none">${esc(u.mk)}</a></td><td class="ell">${esc(u.designation||u.routeName||'—')}</td><td class="nw"><b>${esc(u.opN)}</b></td><td class="ell">${esc(u.opName||'—')}</td><td class="ell c-gray">${esc(u.equipment||'—')}</td><td class="nw">${esc(u.statusMk||'—')}</td><td>${live?`<button class="btn btn--ghost btn--sm" data-unlink="${esc(u.mk)}|${esc(u.opN)}" title="Отвязать от операции">✕</button>`:''}</td></tr>`).join('')}</tbody></table></div>`
+            :`<div style="font-size:var(--fs-s);color:var(--sub)">Пока ни одна операция МК не ссылается на эту карту. Одна карта наладки может входить в операции разных МК — привяжите её здесь или выберите в поле «Карта наладки» операции при правке МК.</div>`}
+        </div>`;
       const back=host.querySelector('[href="#setup"]'); if(back)back.onclick=(e)=>{e.preventDefault(); renderSetupView(host);};
+      const lk=host.querySelector('#st-link'); if(lk)lk.onclick=()=>setupLinkDialog(host,it);
+      host.querySelectorAll('[data-unlink]').forEach(b=>b.onclick=async()=>{ const [mk,opN]=b.dataset.unlink.split('|'); if(!(await uiConfirm(`Отвязать ${it.no} от ${mk}, оп. ${opN}?`,{ok:'Отвязать'})))return; try{ await postJson('/api/setup-card/link',{id:it.id,mk,opN,unlink:true}); toast('Отвязано.','ok'); SETUP=null; RTSTP=null; openSetupCard(host,it.id); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } });
       const eb=host.querySelector('#st-edit'); if(eb)eb.onclick=()=>openSetupBuilder(host,it.id);
+    }
+    // K-297: привязка карты наладки к операции МК из карточки КН (МК → операция; сначала операции на том же станке)
+    async function setupLinkDialog(host,it){
+      let d; try{ d=await (await fetch('/api/setup-card/mk-ops')).json(); }catch(e){ d={routes:[]}; }
+      const routes=d.routes||[]; if(!routes.length){ toast('Маршрутных карт нет.','warn'); return; }
+      const w=document.createElement('div'); w.className='ui-dlg';
+      const norm=(x)=>String(x||'').toLowerCase();
+      const sameMachine=(op)=>{ const m=norm(it.machine), e=norm(op.equipment); return !!(m&&e&&(e.includes(m)||m.includes(e))); };
+      w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Привязать ${esc(it.no)} к операции МК</div><div class="ui-dlg-t">Станок карты: <b>${esc(it.machine||'—')}</b>. Операции на этом станке помечены ●; к операции, у которой уже есть карта, привязать нельзя — сначала отвяжите её там.</div>
+        <div class="dlg-form"><div class="field full"><label>Маршрутная карта</label><select id="sl-mk"><option value="">— выберите МК —</option>${routes.map(r=>`<option value="${esc(r.mk)}">${esc(r.mk)} · ${esc(r.designation||r.name||'')}${r.statusMk?' · '+esc(r.statusMk):''}</option>`).join('')}</select></div>
+          <div class="field full"><label>Операция</label><select id="sl-op" disabled><option value="">— сначала МК —</option></select></div></div>
+        <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok" disabled>Привязать</button></div></div>`;
+      document.body.appendChild(w); const $$=(q)=>w.querySelector(q); $$('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+      $$('#sl-mk').onchange=()=>{ const r=routes.find(x=>x.mk===$$('#sl-mk').value); const sel=$$('#sl-op'); sel.disabled=!r; sel.innerHTML=r?(`<option value="">— операция —</option>`+r.ops.map(o=>`<option value="${esc(o.n)}"${o.setupCardNo&&o.setupCardNo!==it.no?' disabled':''}>${sameMachine(o)?'● ':''}${esc(o.n)} · ${esc(o.name||'')}${o.equipment?' · '+esc(o.equipment):''}${o.setupCardNo?' · КН '+esc(o.setupCardNo):''}</option>`).join('')):'<option value="">— сначала МК —</option>'; $$('[data-d="ok"]').disabled=true; };
+      $$('#sl-op').onchange=()=>{ $$('[data-d="ok"]').disabled=!$$('#sl-op').value; };
+      $$('[data-d="ok"]').onclick=async()=>{ const mk=$$('#sl-mk').value, opN=$$('#sl-op').value; if(!mk||!opN)return; const ok=$$('[data-d="ok"]'); ok.disabled=true;
+        try{ await postJson('/api/setup-card/link',{id:it.id,mk,opN}); w.remove(); toast(`${it.no} привязана к ${mk}, оп. ${opN}.`,'ok'); SETUP=null; RTSTP=null; openSetupCard(host,it.id); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); ok.disabled=false; } };
     }
     async function openSetupBuilder(host,cardId){
       const cat=await loadSetupCat();
@@ -16825,9 +16866,14 @@
       // пластины, совместимые с державкой (по compatIds); пусто у державки → все пластины
       const insertsFor=(holderId)=>{ const h=holderById[String(holderId)]; if(h&&h.compatIds&&h.compatIds.length){ const set=new Set(h.compatIds.map(String)); const f=inserts.filter(i=>set.has(String(i.id))); if(f.length)return f; } return inserts; };
       const insertOpt=(holderId,def)=>`<option value="">— пластина —</option>`+insertsFor(holderId).map(i=>`<option value="${i.id}"${String(i.id)===String(def)?' selected':''}>${esc(i.iso+(i.grade?' · '+i.grade:''))}</option>`).join('');
-      modal.style.width='min(1080px,97vw)';
-      modal.innerHTML=`<div class="mh"><b>${cardId!=null?'Редактирование карты наладки':'Новая карта наладки'}</b><span class="op">${cardId!=null?esc(init.item.no||''):'№ КН присвоится автоматически'}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
-        <div class="mb">
+      // K-296: конструктор — страница раздела (как карточки ЗП/ПЗ), а не модалка с синей шапкой
+      host.innerHTML=`<div class="card pad" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:var(--gap)">
+          <button class="btn" id="sb-back">← ${cardId!=null?'К карте':'К реестру'}</button>
+          <span class="code" style="font-size:var(--fs-l);color:var(--navy);font-weight:700">${cardId!=null?esc(init.item.no||'КН'):'Новая карта наладки'}</span>
+          <span style="font-size:var(--fs-s);color:var(--sub)">${cardId!=null?'редактирование · '+esc(init.item.name||''):'Ф.13–Д.1 · № КН присвоится автоматически'}</span>
+          <span style="margin-left:auto;display:flex;gap:8px"><button class="btn" id="sb-cancel-top">Отмена</button><button class="btn btn--primary" id="sb-save-top">${cardId!=null?'Сохранить':'Создать карту'}</button></span>
+        </div>
+        <div>
           <div class="card pad">
             <div class="sec-h" style="margin-bottom:10px">Реквизиты карты</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px 18px">
@@ -16875,12 +16921,14 @@
           </div>
           <div id="sb-err" style="margin-top:10px;color:var(--red);font-size:13px"></div>
           <div style="margin-top:var(--gap);display:flex;gap:8px;justify-content:flex-end">
-            <button class="tbtn" id="sb-cancel">Отмена</button>
-            <button class="tbtn primary" id="sb-save">${cardId!=null?'Сохранить изменения':'Создать карту'}</button>
+            <button class="btn" id="sb-cancel">Отмена</button>
+            <button class="btn btn--primary" id="sb-save">${cardId!=null?'Сохранить изменения':'Создать карту'}</button>
           </div>
         </div>`;
-      modal.classList.add('open'); mscrim.classList.add('open');
-      document.getElementById('mx').onclick=closeModal; document.getElementById('sb-cancel').onclick=closeModal;
+      window.scrollTo(0,0);
+      const sbBack=()=>{ if(cardId!=null)openSetupCard(host,cardId); else renderSetupView(host); };
+      ['sb-back','sb-cancel','sb-cancel-top'].forEach(id=>{ const b=document.getElementById(id); if(b)b.onclick=sbBack; });
+      const sbTop=document.getElementById('sb-save-top'); if(sbTop)sbTop.onclick=()=>document.getElementById('sb-save').click();
       const nInput=document.getElementById('sb-nslots'), machineSel=document.getElementById('sb-machine');
       const grid=document.getElementById('sb-slotgrid'), editor=document.getElementById('sb-slotedit'), slotInfo=document.getElementById('sb-slotinfo');
       const seHolder=document.getElementById('sb-se-holder'), seInsert=document.getElementById('sb-se-insert');
@@ -16972,7 +17020,7 @@
         const body={id:cardId,name,machineId,revolverSlots:N,headType:curHeadType,operationKind,status:document.getElementById('sb-status').value,part:document.getElementById('sb-part').value.trim(),lines,jaw};
         const btn=document.getElementById('sb-save'); btn.disabled=true; const ot=btn.textContent; btn.textContent='Сохранение…';
         try{ const r=await fetch('/api/setup-card/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          closeModal(); SETUP=null; toast(`Карта наладки ${esc(j.no||'')} сохранена · занято слотов: ${j.lines}`,'ok'); openSetupCard(host,j.id);
+          SETUP=null; toast(`Карта наладки ${esc(j.no||'')} сохранена · занято слотов: ${j.lines}`,'ok'); openSetupCard(host,j.id);
         }catch(e){ errEl.textContent='Не удалось сохранить: '+(e.message||e); btn.disabled=false; btn.textContent=ot; }
       };
     }

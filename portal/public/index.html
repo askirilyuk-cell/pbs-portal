@@ -16872,6 +16872,9 @@
       const eqAll=cat.equipment||[]; // K-298: в подразделе «Токарные операции» — только токарные станки (Александр 25.09: «отображается вообще всё оборудование»)
       const eqKind=(e)=>{ const t=String(e.name||'')+' '+String(e.model||'')+' '+String(e.subtype||''); if((kindNow||'Токарная')==='Токарная')return /токар/i.test(t); if(kindNow==='Фрезерная')return /фрез|обрабатывающий центр/i.test(t); return true; };
       const equipment=eqAll.filter(eqKind), holders=cat.holders||[], inserts=cat.inserts||[], statuses=cat.statuses||['Черновик','Утверждена','Архив'];
+      // K-304: патроны — из справочника «Инструмент и оснастка → Зажимные устройства» (выпадающий список, как везде в портале)
+      let clamps=[]; try{ const tj=await (await fetch('/api/tools')).json(); clamps=(tj.items||[]).filter(i=>i.isClamp); }catch(e){}
+      const clampLabel=(c)=>`${c.invNo||c.code||''} · ${c.name||''}`.replace(/^ · /,'');
       const holderById={}; holders.forEach(h=>holderById[String(h.id)]=h);
       const insertById={}; inserts.forEach(i=>insertById[String(i.id)]=i);
       const eqById={}; eqAll.forEach(e=>eqById[String(e.id)]=e);
@@ -16937,7 +16940,7 @@
             <div class="row" style="margin-bottom:10px"><span class="sec-h">Зажим заготовки и кулачки</span><span class="spacer"></span><span style="font-size:12px;color:var(--sub)">патрон — из паспорта станка</span></div>
             <div style="font-size:12px;color:var(--sl-500);margin-bottom:10px">Патрон подтягивается из «Настроек оборудования» выбранного станка. Комплект кулачков — из библиотеки (раздел «Инструмент и оснастка»). Ниже — фактические параметры базирования операции.</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 14px">
-              <div style="grid-column:1/3">${lbl('Патрон (тип)')}<input id="sb-jaw-chuckType" style="${ist}" placeholder="из паспорта станка"><div id="sb-jaw-sethint" style="font-size:11px;color:#8a97a6;margin-top:3px"></div></div>
+              <div style="grid-column:1/3">${lbl('Патрон')}<select id="sb-jaw-chuckType" style="${ist}"><option value="">— не выбран —</option>${clamps.map(c=>`<option value="${escA(clampLabel(c))}" data-inv="${escA(c.invNo||'')}">${esc(clampLabel(c))}</option>`).join('')}</select><div id="sb-jaw-chuckhint" style="font-size:11px;color:#8a97a6;margin-top:3px"></div><div id="sb-jaw-sethint" style="font-size:11px;color:#8a97a6;margin-top:3px"></div></div>
               <div>${lbl('Комплект кулачков (библиотека)')}<select id="sb-jaw-set" style="${ist}"></select></div>
               <div>${lbl('Тип кулачков')}<input id="sb-jaw-type" style="${ist}" placeholder="сырые / расточенные…"></div>
               <div>${lbl('Ø зажима (факт)')}<input id="sb-jaw-clampdia" style="${ist}" placeholder="напр. Ø140 H9"></div>
@@ -17020,14 +17023,19 @@
       const stationChuck=(id)=>{ const e=eqById[String(id)]; if(!e)return ''; const p=[]; if(e.chuckDia!=null)p.push('Ø'+e.chuckDia); if(e.chuckType)p.push(e.chuckType); return p.join(' · '); };
       const fillSetOpts=(selId)=>{ const mid=machineSel.value;
         // приоритет комплектам, привязанным к выбранному станку; затем прочие
-        const mine=chuckJaws.filter(s=>String(s.stationId)===String(mid));
-        const rest=chuckJaws.filter(s=>String(s.stationId)!==String(mid));
+        const ch=selectedChuck(); const byChuck=ch?chuckJaws.filter(s=>s.chuckInv&&s.chuckInv===ch.invNo):[];
+        const mine=byChuck.length?byChuck:chuckJaws.filter(s=>String(s.stationId)===String(mid));
+        const rest=chuckJaws.filter(s=>!mine.includes(s));
         const optOf=s=>`<option value="${s.id}"${String(selId||'')===String(s.id)?' selected':''}>${esc(s.setNo+(s.jawType?' · '+s.jawType:'')+(s.jawCount?' · '+s.jawCount+'кул.':'')+(s.clampDia?' · '+s.clampDia:''))}</option>`;
         // K-301 (Александр 25.09: «патрон/кулачки должны быть закреплены»): у станка с привязанными комплектами показываем только их; без привязки — все, с пометкой
         jawSet.innerHTML='<option value="">— не выбран —</option>'+(mine.length?mine.map(optOf).join(''):(rest.length?`<optgroup label="К станку ничего не привязано — все комплекты">${rest.map(optOf).join('')}</optgroup>`:''));
-        const hint=document.getElementById('sb-jaw-sethint'); if(hint)hint.textContent=mine.length?'комплекты, привязанные к станку (Инструмент и оснастка → Зажимные устройства)':'к станку не привязан ни один комплект — привяжите в библиотеке комплектов';
+        const hint=document.getElementById('sb-jaw-sethint'); if(hint)hint.textContent=byChuck.length?'комплекты, привязанные к этому патрону (библиотека комплектов кулачков)':(mine.length?'комплекты, привязанные к станку':'к патрону/станку не привязан ни один комплект — привяжите в библиотеке комплектов');
       };
-      const lockChuck=()=>{ const sc=machineSel.value?stationChuck(machineSel.value):''; jawChuck.readOnly=!!sc; jawChuck.title=sc?'Из паспорта станка — правится в карточке станка (ТТХ)':''; jawChuck.style.background=sc?'var(--sl-50)':'#fff'; if(sc)jawChuck.value=sc; };
+      const chuckOfStation=(mid)=>{ const e=eqById[String(mid)]; if(!e)return null; const txt=String(e.chuckType||''); const byInv=clamps.find(c=>c.invNo&&txt.includes(c.invNo)); if(byInv)return byInv; const en=String(e.name||'').toLowerCase(), ei=String(e.invNo||'').toLowerCase(); return clamps.find(c=>{ const loc=String(c.location||'').toLowerCase(); return (ei&&loc.includes(ei))||(en&&loc.includes(en)); })||null; };
+      const selectedChuck=()=>{ const o=jawChuck.options[jawChuck.selectedIndex]; const inv=o&&o.dataset.inv; return inv?clamps.find(c=>c.invNo===inv):null; };
+      const lockChuck=()=>{ const c=machineSel.value?chuckOfStation(machineSel.value):null; const hint=document.getElementById('sb-jaw-chuckhint');
+        if(c){ jawChuck.value=clampLabel(c); jawChuck.disabled=true; if(hint)hint.textContent='штатный патрон станка — из карточки станка (ТТХ / зажимное устройство «На станке»)'; }
+        else { jawChuck.disabled=false; if(hint)hint.textContent=machineSel.value?'за станком патрон не закреплён — выберите из справочника или закрепите в карточке станка':''; } };
       const lockJawType=()=>{ const s=jawSetById[String(jawSet.value)]; jawType.readOnly=!!(s&&s.jawType); jawType.style.background=(s&&s.jawType)?'var(--sl-50)':'#fff'; if(s&&s.jawType)jawType.value=s.jawType; };
       // префилл из карты (снапшот полей)
       jawChuck.value=jaw0.chuckType||''; jawType.value=jaw0.jawTypeCard||''; jawClamp.value=jaw0.jawClampDia||'';
@@ -17035,12 +17043,13 @@
       jawSup.value=jaw0.jawSupport||''; jawRun.value=jaw0.jawRunout||''; jawNote.value=jaw0.jawNote||'';
       fillSetOpts(jaw0.chuckSetId);
       // если патрон в карте пуст — подставить из паспорта станка
-      if(!jawChuck.value && machineSel.value)jawChuck.value=stationChuck(machineSel.value);
-      lockChuck(); lockJawType();
+      if(jawChuck.value===''&&jaw0.chuckType){ const o=document.createElement('option'); o.value=jaw0.chuckType; o.textContent=jaw0.chuckType+' (из карты)'; jawChuck.appendChild(o); jawChuck.value=jaw0.chuckType; }
+      lockChuck(); fillSetOpts(jaw0.chuckSetId); lockJawType();
+      jawChuck.onchange=()=>{ jawSet.value=''; fillSetOpts(''); lockJawType(); };
       jawSet.onchange=()=>{ const s=jawSetById[String(jawSet.value)]; lockJawType(); if(!s)return;
         if(!jawClamp.value&&s.clampDia)jawClamp.value=s.clampDia; };
       // при смене станка — обновить список комплектов «под этот станок» и подставить патрон из паспорта
-      machineSel.addEventListener('change',()=>{ jawSet.value=''; fillSetOpts(''); lockChuck(); lockJawType(); });
+      machineSel.addEventListener('change',()=>{ jawSet.value=''; lockChuck(); fillSetOpts(''); lockJawType(); });
       document.getElementById('sb-save').onclick=async()=>{
         const errEl=document.getElementById('sb-err'); errEl.textContent='';
         const name=document.getElementById('sb-name').value.trim();

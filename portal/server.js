@@ -11109,7 +11109,7 @@ async function buildSetupCatalog() {
   const holderItems = holders.map((r) => ({ id: r.Id ?? r.id, iso: String(r['ISO-код'] || '').trim(), maker: r['Производитель'] || '', compatIds: tcLinkIds(r['Совместимые пластины']).map(Number).filter(Number.isFinite) }))
     .sort((a, b) => String(a.iso).localeCompare(String(b.iso), 'ru'));
   // библиотека кулачков (migrate-041): для выбора комплекта в блоке «Кулачки» карты; stationId — привязка к патрону станка
-  const jawItems = jaws.map((r) => { const s = cjShape(r, eqById); return { id: s.id, setNo: s.setNo, jawType: s.jawType, jawCount: s.jawCount, clampDia: s.clampDia, condition: s.condition, compat: s.compat, stationId: s.stationId, location: s.location }; })
+  const jawItems = jaws.map((r) => { const s = cjShape(r, eqById); return { id: s.id, setNo: s.setNo, jawType: s.jawType, jawCount: s.jawCount, clampDia: s.clampDia, condition: s.condition, compat: s.compat, stationId: s.stationId, location: s.location, chuckInv: s.chuckInv, exec: s.exec }; }) // K-304: привязка комплекта к патрону
     .sort((a, b) => String(a.setNo).localeCompare(String(b.setNo), 'ru'));
   return { mode: 'live', equipment, holders: holderItems, inserts: insItems, chuckJaws: jawItems, statuses: SETUP_STATUSES };
 }

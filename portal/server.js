@@ -11212,7 +11212,7 @@ function setupHeadSvgTop(shape, N, byPos) {
   const W = 300, H = 300, cx = 150, cy = 140, R = 78, step = 360 / N;
   const ang = (i) => (90 + i * step) * Math.PI / 180; const pt = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
   let poly = ''; for (let i = 0; i < N; i++) { const [x, y] = pt(R / Math.cos(Math.PI / N), ang(i) + Math.PI / N); poly += (i ? ' L ' : 'M ') + x.toFixed(1) + ' ' + y.toFixed(1); }
-  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" font-family="Arial">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W * 1.35}px;height:auto;display:block;margin:0 auto" xmlns="http://www.w3.org/2000/svg" font-family="Arial">`;
   s += `<path d="${poly} Z" fill="#F2F6FB" stroke="#1F4E79" stroke-width="1.5"/><circle cx="${cx}" cy="${cy}" r="24" fill="#DCE6F2" stroke="#1F4E79"/><text x="${cx}" y="${cy + 4}" font-size="10" fill="#1F4E79" text-anchor="middle">${N} поз.</text>`;
   // K-315: без «оси заготовки» и без ISO-подписей на схеме — коды в таблице позиций, подписи на схеме резались и наезжали друг на друга
   for (let i = 0; i < N; i++) { const n = i + 1, l = byPos[n] || {}, f = filled(n), a = ang(i), deg = a * 180 / Math.PI, [sx, sy] = pt(R, a);
@@ -11224,22 +11224,32 @@ function setupHeadSvgTop(shape, N, byPos) {
     s += `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="9" fill="${f ? '#1F4E79' : '#fff'}" stroke="#1F4E79" stroke-width="1"/><text x="${bx.toFixed(1)}" y="${(by + 3.2).toFixed(1)}" font-size="8" font-weight="bold" fill="${f ? '#fff' : '#1F4E79'}" text-anchor="middle">T${n}</text>`;
     if (f && l.overhang && !l.axial) { const [lx, ly] = pt(R + 40 + Math.max(6, Math.min(40, (parseFloat(String(l.overhang || '').replace(',', '.')) || 0) * 0.6 || 14)), a); s += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="7" fill="#1F4E79" text-anchor="middle" dominant-baseline="central">${hesc(String(l.overhang))}</text>`; }
   }
-  s += `<text x="8" y="${H - 6}" font-size="7.5" fill="#64748b">■ наружный (резец наружу)   ⊙ осевой — расточной / сверло (вылет по Z, см. вид сбоку)</text>`;
+  s += `<text x="${W / 2}" y="${H - 6}" font-size="7" fill="#64748b" text-anchor="middle">■ наружный резец · ⊙ осевой (расточной, сверло) — вылет по Z на виде сбоку</text>`;
   return s + `</svg>`;
 }
 function setupHeadSvgSide(shape, N, byPos) {
+  // K-325: как на экране — диск головки торцом справа, деталь слева по Z; осевой инструмент — стержень по Z ∝ вылету,
+  //        наружный — державка на торце + радиальный носик (его вылет — на виде сверху). Без букв X/Z в диске (были непонятны).
   const filled = (n) => { const l = byPos[n]; return !!(l && (l.holderIso || l.insertIso || l.overhang || l.params || l.note || l.toolKind)); };
-  const cnt = Math.max(1, Math.min(N, 12));
-  let s = `<svg viewBox="0 0 236 ${20 + cnt * 13 + 20}" width="236" height="${20 + cnt * 13 + 20}" xmlns="http://www.w3.org/2000/svg" font-family="Arial">`;
-  s += `<rect x="150" y="8" width="34" height="${cnt * 13 + 8}" rx="4" fill="#DCE6F2" stroke="#1F4E79"/>`;
-  for (let i = 0; i < cnt; i++) { const n = i + 1, l = byPos[n] || {}, y = 14 + i * 13 + 6, f = filled(n);
-    const ov = f ? Math.max(10, Math.min(120, (parseFloat(String(l.overhang || '').replace(',', '.')) || 0) * 0.5 || 24)) : 0;
-    if (f && l.axial) { s += `<rect x="${(150 - ov).toFixed(1)}" y="${(y - 2.5).toFixed(1)}" width="${ov.toFixed(1)}" height="5" fill="#1F4E79"/><circle cx="${(150 - ov).toFixed(1)}" cy="${y}" r="3" fill="#1F4E79"/>`; }
-    else if (f) { s += `<rect x="${(150 - 22).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="22" height="8" fill="#1F4E79"/><rect x="${(150 - 22 - Math.min(ov, 40)).toFixed(1)}" y="${(y - 1.5).toFixed(1)}" width="${Math.min(ov, 40).toFixed(1)}" height="3" fill="#1F4E79"/>`; }
-    else s += `<line x1="136" y1="${y}" x2="150" y2="${y}" stroke="#94a3b8" stroke-dasharray="2 2"/>`;
-    s += `<text x="${(150 - (f ? (l.axial ? ov : 22 + Math.min(ov, 40)) : 14) - 4).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="8" fill="#1F4E79" text-anchor="end">T${n}${f && l.overhang ? ' · ' + hesc(String(l.overhang)) : ''}</text>`;
-    s += `<text x="167" y="${(y + 3).toFixed(1)}" font-size="7.5" fill="#1F4E79" text-anchor="middle">${f && l.axial ? 'Z' : (f ? 'X' : '')}</text>`; }
-  s += `<text x="118" y="${20 + cnt * 13 + 14}" font-size="7.5" fill="#64748b" text-anchor="middle">← вылет: осевой — по Z из головки, наружный — от державки</text>`;
+  const cnt = Math.max(1, Math.min(N, 16)), rowGap = Math.max(26, Math.min(40, 360 / cnt)), W = 360, top = 26, H = top + cnt * rowGap + 30;
+  const bodyX = 272, bodyW = 48, bodyTop = top - 8, bodyBot = top + cnt * rowGap + 4;
+  const ovPx = (v) => { const x = parseFloat(String(v || '').replace(',', '.').replace(/[^\d.]/g, '')); return (Number.isFinite(x) && x > 0) ? Math.max(7, Math.min(x, 60) * 0.85) : 0; };
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="height:auto;display:block" xmlns="http://www.w3.org/2000/svg" font-family="Arial">`;
+  s += `<rect x="${bodyX}" y="${bodyTop}" width="${bodyW}" height="${(bodyBot - bodyTop).toFixed(1)}" rx="8" fill="#F2F6FB" stroke="#1F4E79" stroke-width="1.5"/><text x="${bodyX + bodyW / 2}" y="${bodyBot + 12}" font-size="7.5" fill="#64748b" text-anchor="middle">диск головки</text>`;
+  s += `<line x1="22" y1="${bodyTop}" x2="22" y2="${bodyBot}" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/><text x="22" y="${bodyBot + 12}" font-size="7.5" fill="#64748b" text-anchor="middle">← деталь (Z)</text>`;
+  for (let i = 0; i < cnt; i++) { const n = i + 1, l = byPos[n] || {}, f = filled(n), y = top + rowGap * i + rowGap / 2, ov = ovPx(l.overhang), axial = !!l.axial;
+    s += `<rect x="${bodyX - 3}" y="${(y - 9).toFixed(1)}" width="6" height="18" rx="1.5" fill="#DCE6F2" stroke="#94a3b8" stroke-width="0.8"/>`;
+    if (f && axial) { const L = Math.max(28, ov * 1.6), tipX = bodyX - L;
+      s += `<rect x="${(bodyX - 14).toFixed(1)}" y="${(y - 7).toFixed(1)}" width="14" height="14" rx="1.5" fill="#1F4E79"/><line x1="${bodyX - 14}" y1="${y}" x2="${tipX.toFixed(1)}" y2="${y}" stroke="#1F4E79" stroke-width="4" stroke-linecap="round"/><circle cx="${tipX.toFixed(1)}" cy="${y}" r="3" fill="#1F4E79"/>`;
+      s += `<text x="${(tipX - 6).toFixed(1)}" y="${(y + 2.5).toFixed(1)}" font-size="7.5" fill="#1F4E79" text-anchor="end">${hesc(String(l.toolKind || 'осевой'))}${l.overhang ? ' · Z ' + hesc(String(l.overhang)) : ''}</text>`;
+    } else if (f) {
+      s += `<rect x="${bodyX - 22}" y="${(y - 8).toFixed(1)}" width="22" height="16" rx="2" fill="#1F4E79"/><path d="M ${bodyX - 22} ${(y - 8).toFixed(1)} L ${bodyX - 22} ${(y - 17).toFixed(1)} L ${bodyX - 13} ${(y - 8).toFixed(1)} Z" fill="#2E75B6"/>`;
+      const iso = String(l.holderIso || l.insertIso || '');
+      s += `<text x="${(bodyX - 28).toFixed(1)}" y="${(y + 2.5).toFixed(1)}" font-size="7.5" fill="#1F4E79" text-anchor="end">${hesc(iso)}${l.overhang ? `${iso ? ' · ' : ''}вылет ${hesc(String(l.overhang))} ↑` : ''}</text>`;
+    } else s += `<line x1="${bodyX - 12}" y1="${y}" x2="${bodyX}" y2="${y}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="2 2"/>`;
+    s += `<text x="${bodyX + bodyW / 2}" y="${(y + 3).toFixed(1)}" font-size="8.5" font-weight="bold" fill="${f ? (axial ? '#9a3412' : '#1F4E79') : '#94a3b8'}" text-anchor="middle">T${n}</text>`;
+  }
+  s += `<text x="${W / 2}" y="${H - 4}" font-size="7" fill="#64748b" text-anchor="middle">стержень влево — вылет осевого по Z; блок с носиком ↑ — наружный резец (вылет радиальный, см. вид сверху)</text>`;
   return s + `</svg>`;
 }
 function buildSetupCardHtml(d) {
@@ -11292,7 +11302,7 @@ function buildSetupCardHtml(d) {
     .g{color:#7a8794;font-size:8.5px}
     .schema{border:1px solid #C4D2E2;border-radius:3px;padding:6px;text-align:center;background:#fff}
     .schema .cap{font-size:8.5px;color:#64748b;margin-bottom:2px}
-    .schrow{display:flex;gap:8px}
+    .schrow{display:flex;gap:8px;align-items:stretch} .schrow .schema{display:flex;flex-direction:column} .schrow .schema svg{flex:1}
     .esk{border:1px dashed #9aa7b5;border-radius:3px;min-height:120px;display:flex;align-items:center;justify-content:center;color:#9aa7b5;font-size:10px;margin-top:8px}
     table.jaw{width:100%;border-collapse:collapse;font-size:9.5px}
     table.kv{width:100%;border-collapse:collapse;font-size:9.5px;page-break-inside:avoid} table.kv td{border:1px solid #C4D2E2;padding:3px 6px} table.kv td:nth-child(odd){width:22%;background:#F2F6FB;color:#41546a;font-size:9px} table.kv td:nth-child(even){font-weight:600;color:#1c2b3a}

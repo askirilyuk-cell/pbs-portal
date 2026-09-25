@@ -6507,6 +6507,7 @@ async function createCounterparty(body) {
   put('Регион', body.region); put('Отрасль', body.industry); put('Тип', body.type);
   put('Контактное лицо', body.contact); put('Тел./Email', body.contacts);
   put('Связь с холдингом', body.holding); put('Примечание', body.note);
+  if (role === 'Поставщик') { put('Категория продукции', body.productCat); put('Статус в РОП', body.ropStatus || 'На контроле'); } // K-295: карточка РОП при заведении поставщика
   const created = await ncCreateMany('sales_counterparties', [row]);
   const c = Array.isArray(created) ? created[0] : created;
   return { ok: true, existed: false, id: c.Id ?? c.id, name, inn, region: String(body.region || '').trim(), roles: [role] };
@@ -13501,6 +13502,12 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, out);
     }
     // K-86 смена статуса ЗнЗ (переход по этапам ±1) — DEF-30
+    // K-295: «+ Поставщик» в реестре РОП — для ролей с правом «Закупки» (у Снабжения раздел «Контрагенты» только на просмотр)
+    if (p === '/api/procurement/supplier/create' && req.method === 'POST') {
+      if (!isLive()) return sendJson(res, 501, { error: 'Заведение поставщика доступно только в LIVE-режиме.' });
+      try { const body = await readBody(req); const out = await createCounterparty({ ...body, role: 'Поставщик' }); logEvent({ type: out.existed ? 'комментарий' : 'создан', obj: 'Контрагент', objNum: out.name, who: eventWho(req, svc), details: out.existed ? 'поставщик уже был (по ИНН), добавлена роль «Поставщик»' : 'заведён поставщик из реестра РОП' + (body.productCat ? ' · ' + String(body.productCat) : '') }); return sendJson(res, 200, out); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/procurement/znz/status' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Смена статуса доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);

@@ -7673,7 +7673,33 @@
       erpGrid(h,{key:'proc-rop',cols,rows:sup,onRow:s=>openSupplierCard(viewHost,s.id),
         del:PROC.mode==='live'?{key:'sales_counterparties',idOf:s=>s.id,reload:()=>{PROC=null;CPS=null;renderProcurement(document.getElementById('view'));}}:undefined,
         info:`${srcChip(PROC.mode==='live')}<span>Поставщиков: <b style="color:var(--ink)">${sup.length}</b></span><span class="c-gray">A 75–100 · B 50–74 · C &lt;50</span>`,
-        toolbar:[{label:'+ Поставщик',cls:'primary',disabled:true,title:'Добавление поставщика — в разработке'}]});
+        toolbar:[{label:'+ Поставщик',cls:'primary',disabled:!(PROC.mode==='live'&&znzCanAct()),title:PROC.mode==='live'?'Завести поставщика в реестр одобренных поставщиков':'Только в LIVE-режиме',onClick:()=>supplierNewDialog(viewHost)}]});
+    }
+    // K-295: заведение поставщика из реестра РОП (просьба Рисалиевой 25.09). Контрагент с ролью «Поставщик» + поля РОП; дедуп по ИНН на сервере.
+    function supplierNewDialog(viewHost){
+      const w=document.createElement('div'); w.className='ui-dlg';
+      const ROP_ST=['На контроле','Активен','Исключён'];
+      w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Новый поставщик</div><div class="ui-dlg-t">Заводится как контрагент с ролью «Поставщик» и попадает в реестр одобренных поставщиков (РОП). Если ИНН уже есть в базе — к существующему контрагенту добавится роль.</div>
+        <div class="dlg-form">
+          <div class="field full"><label>Наименование *</label><input id="sn-name" maxlength="200" placeholder="ООО «…»"></div>
+          <div class="field"><label>ИНН</label><input id="sn-inn" maxlength="12" placeholder="10 или 12 цифр"></div>
+          <div class="field"><label>КПП</label><input id="sn-kpp" maxlength="9"></div>
+          <div class="field"><label>Краткое наименование</label><input id="sn-short"></div>
+          <div class="field"><label>Регион / город</label><input id="sn-region"></div>
+          <div class="field"><label>Категория продукции</label><input id="sn-cat" placeholder="Металл, РТИ, комплектующие, услуги…"></div>
+          <div class="field"><label>Статус в РОП</label><select id="sn-st">${ROP_ST.map(x=>`<option${x==='На контроле'?' selected':''}>${x}</option>`).join('')}</select></div>
+          <div class="field"><label>Контактное лицо</label><input id="sn-contact"></div>
+          <div class="field"><label>Телефон / Email</label><input id="sn-contacts"></div>
+          <div class="field full"><label>Примечание</label><input id="sn-note" maxlength="300"></div>
+        </div>
+        <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Завести</button></div></div>`;
+      document.body.appendChild(w); const $$=(q)=>w.querySelector(q); $$('[data-d="cancel"]').onclick=()=>w.remove(); w.onclick=(e)=>{ if(e.target===w)w.remove(); };
+      $$('[data-d="ok"]').onclick=async()=>{ const g=(id)=>$$('#'+id).value.trim(); const name=g('sn-name'); if(name.length<2){ toast('Укажите наименование.','warn'); return; } const inn=g('sn-inn'); if(inn&&!/^\d{10}(\d{2})?$/.test(inn)){ toast('ИНН — 10 или 12 цифр.','warn'); return; }
+        const ok=$$('[data-d="ok"]'); ok.disabled=true; ok.textContent='Сохранение…';
+        try{ const j=await postJson('/api/procurement/supplier/create',{name,inn,kpp:g('sn-kpp'),shortName:g('sn-short'),region:g('sn-region'),productCat:g('sn-cat'),ropStatus:g('sn-st'),contact:g('sn-contact'),contacts:g('sn-contacts'),note:g('sn-note')});
+          w.remove(); toast(j.existed?`Контрагент с ИНН ${inn} уже был — добавлена роль «Поставщик».`:`Поставщик «${name}» заведён.`,'ok'); PROC=null; CPS=null;
+          try{ PROC=await (await fetch('/api/procurement')).json(); }catch(e){} renderProcurement(document.getElementById('view')); if(j.id!=null)openSupplierCard(viewHost||document.getElementById('view'),j.id); }
+        catch(e){ toast('Не удалось: '+(e.message||e),'err'); ok.disabled=false; ok.textContent='Завести'; } };
     }
 
     // ── Форма создания ЗнЗ (цеховая Ф.4–К / плановая Ф.1–К) ──

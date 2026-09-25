@@ -11182,6 +11182,8 @@ async function buildSetupCard(id) {
   // строки: фильтр в JS (DEF-25 — where молча игнорится)
   const rows = lines.filter((l) => setupLineOfCard(l, cardId)).map((l) => setupLineShape(l, holderById, insertById)).sort((a, b) => (a.pos || 0) - (b.pos || 0));
   item.files = scFiles(id); // K-315
+  // K-316: фактические наладки — события «Наладка выполнена» с колонкой «Данные (JSON)» {kind:'setup-run', lines:[{pos,lenX,lenZ,radius,note}], note}
+  try { const evs = await ncListSoft('events'); item.runs = evs.filter((e) => String(e['Объект'] || '').trim() === 'КН' && String(e['№ объекта'] || '').trim() === String(item.no || '').trim() && String(e['Данные (JSON)'] || '').includes('setup-run')).map((e) => { let d = {}; try { d = JSON.parse(e['Данные (JSON)']); } catch {} return { when: String(e['Когда'] || '').slice(0, 16), who: e['Кто'] || '', note: d.note || '', lines: Array.isArray(d.lines) ? d.lines : [] }; }).sort((a, b) => b.when.localeCompare(a.when)); } catch { item.runs = []; }
   try { const evs = await ncListSoft('events'); item.history = evs.filter((e) => String(e['Объект'] || '').trim() === 'КН' && String(e['№ объекта'] || '').trim() === String(item.no || '').trim()).sort((a, b) => String(b['Когда'] || '').localeCompare(String(a['Когда'] || ''))).map((e) => ({ when: String(e['Когда'] || '').slice(0, 16), who: e['Кто'] || '', type: e['Тип события'] || '', details: e['Детали'] || '' })); } catch { item.history = []; } // K-302
   return { mode: 'live', item, lines: rows };
 }
@@ -11252,8 +11254,9 @@ function buildSetupCardHtml(d) {
       <td>${l.insertIso ? `<span class="mono">${hesc(l.insertIso)}</span>${l.insertGrade ? ` <span class="g">${hesc(l.insertGrade)}</span>` : ''}` : '<span class="g">—</span>'}</td>
       <td class="c">${dash(l.overhang)}${l.axial ? ' <span class="g">Z</span>' : ''}</td>
       <td>${[l.lenX ? 'X ' + hesc(l.lenX) : '', l.lenZ ? 'Z ' + hesc(l.lenZ) : '', l.radius ? 'r ' + hesc(l.radius) : '', l.width ? 'шир. ' + hesc(l.width) : ''].filter(Boolean).join(' · ') || '<span class="g">—</span>'}</td>
+      <td style="color:#9aa7b5;font-size:8px">X ______ Z ______ r ____</td>
       <td>${[l.params, l.note].filter(Boolean).map(hesc).join(' · ') || '<span class="g">—</span>'}</td></tr>`).join('')
-    : `<tr><td colspan="7" style="text-align:center;color:#888;padding:14px">Позиции инструмента не заданы.</td></tr>`;
+    : `<tr><td colspan="8" style="text-align:center;color:#888;padding:14px">Позиции инструмента не заданы.</td></tr>`;
   const jawRow = (lbl, val) => `<tr><td class="jk">${hesc(lbl)}</td><td class="jv">${dash(val)}</td></tr>`;
   const foot = `<div class="ft">
       <div>ООО "ПБС". ИНН: 3918015359, КПП: 391801001, ОГРН: 1203900013679, ОКПО: 46249207.</div>
@@ -11343,9 +11346,10 @@ function buildSetupCardHtml(d) {
       <tr><td>Нуль X — метод</td><td>${dash((it.zero || {}).zeroXMethod)}</td><td>Ø детали, мм</td><td>${dash((it.zero || {}).zeroX)}</td></tr>
       ${(it.zero || {}).zeroNote ? `<tr><td>Примечание</td><td colspan="3">${hesc((it.zero || {}).zeroNote)}</td></tr>` : ''}</table>
     <div class="sec">Позиции инструмента</div>
+    <div class="g" style="margin:-3px 0 4px">Корректоры (Длина X / Длина Z / r) в карте — референс с последней наладки, не требование: наладчик измеряет на станке (Измер. инстр.), сверяет с картой (расхождение больше 0,5 мм — инструмент стоит иначе), вписывает факт и вносит его в портал («Зафиксировать наладку»). Износ в карту не пишется.</div>
     <table class="pos">
-      <colgroup><col style="width:6%"><col style="width:14%"><col style="width:15%"><col style="width:15%"><col style="width:7%"><col style="width:20%"><col style="width:23%"></colgroup>
-      <thead><tr><th>Поз.</th><th>Вид · кромка</th><th>Державка (ISO)</th><th>Пластина (ISO · марка)</th><th>Вылет</th><th>Корректоры: X · Z · r · шир.</th><th>Режимы · примечание</th></tr></thead>
+      <colgroup><col style="width:6%"><col style="width:13%"><col style="width:14%"><col style="width:14%"><col style="width:6%"><col style="width:17%"><col style="width:13%"><col style="width:17%"></colgroup>
+      <thead><tr><th>Поз.</th><th>Вид · кромка</th><th>Державка (ISO)</th><th>Пластина (ISO · марка)</th><th>Вылет</th><th>Корректоры по карте<br><span style="font-weight:400;font-size:8px">референс с последней наладки</span></th><th>Факт на станке<br><span style="font-weight:400;font-size:8px">X / Z / r — вписать</span></th><th>Режимы · примечание</th></tr></thead>
       <tbody>${rowsTr}</tbody>
     </table>
 
@@ -14905,6 +14909,27 @@ const server = http.createServer(async (req, res) => {
         const list = routes.map((r) => { const mk = String(r['№ МК'] || '').trim(); return { id: r.Id ?? r.id, mk, name: r['Наименование'] || '', designation: r['Изделие / обозначение'] || '', statusMk: r['Статус МК'] || '', ops: (byMk.get(mk) || []).sort((a, b) => Number(a.n) - Number(b.n)) }; }).filter((r) => r.mk && !/архив/i.test(r.statusMk)).sort((a, b) => String(b.mk).localeCompare(String(a.mk), 'ru'));
         return sendJson(res, 200, { routes: list }); } catch (e) { return sendJson(res, 200, { routes: [], warning: String(e.message || e) }); }
     }
+    if (p === '/api/setup-card/run' && req.method === 'POST') { // K-316: «Наладка выполнена» — факт корректоров по позициям → событие + референс в строках карты
+      if (!isLive()) return sendJson(res, 501, { error: 'Только в LIVE-режиме.' });
+      try {
+        const body = await readBody(req);
+        const cardId = Number(body.id); if (!Number.isFinite(cardId)) throw new Error('Не указан id карты.');
+        const cards = await ncListSoft('setup_cards'); const card = cards.find((c) => Number(c.Id ?? c.id) === cardId); if (!card) throw new Error('Карта не найдена.');
+        const no = String(card['№'] || '').trim() || String(cardId);
+        const who = eventWho(req, svc);
+        const lines = (Array.isArray(body.lines) ? body.lines : []).map((l) => ({ pos: Number(l.pos) || 0, lenX: String(l.lenX ?? '').trim(), lenZ: String(l.lenZ ?? '').trim(), radius: String(l.radius ?? '').trim(), note: String(l.note ?? '').trim() })).filter((l) => l.pos >= 1 && (l.lenX || l.lenZ || l.radius || l.note));
+        if (!lines.length) throw new Error('Не заполнено ни одной позиции.');
+        try { await ncEnsureColumn('events', 'Данные (JSON)', 'LongText'); } catch {}
+        const details = 'Наладка выполнена: ' + lines.map((l) => `T${l.pos}` + (l.lenX ? ' X ' + l.lenX : '') + (l.lenZ ? ' Z ' + l.lenZ : '') + (l.radius ? ' r ' + l.radius : '') + (l.note ? ' (' + l.note + ')' : '')).join('; ') + (body.note ? ' · ' + String(body.note).trim() : '');
+        await ncCreateMany('events', [{ '№ объекта': no, 'Тип события': 'комментарий', 'Объект': 'КН', 'Когда': new Date().toISOString().replace('T', ' ').slice(0, 19), 'Кто': who, 'Детали': details.slice(0, 2000), 'Данные (JSON)': JSON.stringify({ kind: 'setup-run', lines, note: String(body.note || '').trim() }) }]);
+        // референс в строках карты = последняя наладка
+        if (body.updateCard !== false) {
+          const all = await ncListSoft('setup_card_lines'); const mine = all.filter((l) => setupLineOfCard(l, cardId));
+          for (const l of lines) { const row = mine.find((r) => Number(r['№ п/п']) === l.pos); if (!row) continue; const patch = {}; if (l.lenX) patch['Длина X'] = l.lenX; if (l.lenZ) patch['Длина Z'] = l.lenZ; if (l.radius) patch['Радиус'] = l.radius; if (Object.keys(patch).length) { try { for (const col of Object.keys(patch)) await ncEnsureColumn('setup_card_lines', col, 'SingleLineText'); await ncUpdate('setup_card_lines', row.Id ?? row.id, patch); } catch (e2) { console.warn('K-316 строка не обновлена:', e2.message); } } }
+        }
+        return sendJson(res, 200, { ok: true, no, lines: lines.length });
+      } catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e) }); }
+    }
     if (p === '/api/setup-card/upload' && req.method === 'POST') { // K-315: эскиз/фото наладки → .data/setup-cards/<id>/
       if (!isLive()) return sendJson(res, 501, { error: 'Загрузка файлов доступна только в LIVE-режиме.' });
       const ct = String(req.headers['content-type'] || '');
@@ -14921,7 +14946,7 @@ const server = http.createServer(async (req, res) => {
         const rel = await saveFileUnique(dir, dir, path.basename(String(f.filename)), f.data);
         rel ? saved.push(rel) : skipped.push(String(f.filename));
       }
-      try { const ss = sessionFromReq(req); logEvent({ obj: 'КН', objNum: String(fields.no || fields.id), type: 'эскиз', details: 'добавлены файлы: ' + saved.join(', '), who: (ss && (ss.name || ss.user)) || '' }); } catch {}
+      try { logEvent({ obj: 'КН', objNum: String(fields.no || fields.id), type: 'файл приложен', details: 'эскиз наладки: ' + saved.join(', '), who: eventWho(req, svc) }); } catch {}
       return sendJson(res, 200, { ok: true, saved, skipped, files: scFiles(fields.id) });
     }
     if (p === '/api/setup-card/file' && req.method === 'GET') { // K-315: отдача эскиза (traversal-guard; dl=1 — скачивание)

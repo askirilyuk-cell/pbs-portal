@@ -1533,7 +1533,7 @@ function parseProductClass(raw, subName, grpName) {
     return { groupCode, subCode, label };
   });
 }
-const salesStep = (st) => { const s = String(st || ''); if (/Принят/.test(s)) return 5; if (/В работе \(договор/.test(s)) return 4; if (/оферт|КП отправлено|Ожидание/i.test(s)) return 3; if (/КП готовится/.test(s)) return 3; if (/На оценке/.test(s)) return 2; if (/Отклон|Проигр|Отозв/.test(s)) return 3; return 1; };
+const salesStep = (st) => { const s = String(st || ''); if (/Принят/.test(s)) return 5; if (/В работе \(договор|^Выигран$/.test(s)) return 4; if (/оферт|КП отправлено|Ожидание/i.test(s)) return 3; if (/КП готовится/.test(s)) return 3; if (/На оценке/.test(s)) return 2; if (/Отклон|Проигр|Отозв/.test(s)) return 3; return 1; };
 
 // раздел «Продажи» из NocoDB (таблицы Запросы продаж / Заказы продаж) → форма портала
 async function buildSalesLive() {
@@ -1568,9 +1568,11 @@ async function buildSalesLive() {
       stage: o['Текущий этап'] || '', status: o['Статус'] || '', srcZp, owner: o['Ответственный'] || '', positions, bridges,
     };
   });
+  // K-293: события ленты по ЗП (смена статуса/результата КП, привязка ПЗ, сумма) — в «Историю» карточки
+  let evByZp = new Map(); try { const evs = await ncListSoft('events'); for (const e of evs) { if (String(e['Объект'] || '').trim() !== 'ЗП') continue; const k = String(e['№ объекта'] || '').trim(); if (!evByZp.has(k)) evByZp.set(k, []); evByZp.get(k).push(e); } } catch {}
   const requests = creq.map((z) => {
     const status = z['Статус'] || '', kpNo = z['№ КП'] || '', kpSum = z['Сумма КП, руб.'], kpDate = z['Дата КП'], kpRes = z['Результат КП'] || '';
-    const kp = (kpNo || (kpSum != null && kpSum !== '') || kpDate) ? { ofNo: kpNo || '—', date: salesDate(kpDate), sum: salesMoney(kpSum), perUnit: '', status: kpRes } : null;
+    const kp = (kpNo || (kpSum != null && kpSum !== '') || kpDate || kpRes) ? { ofNo: kpNo || '—', date: salesDate(kpDate), sum: salesMoney(kpSum), perUnit: '', status: kpRes } : null; // K-293: результат без КП в портале тоже показываем
     const lovNo = z['№ ЛОВ'] || '', evalRes = z['Результат оценки'] || '';
     // «решение по ЛОВ» для карточки/гейта ЗКЗ: положительная оценка (или уже принятый статус) → «Принято»
     const decided = evalRes === 'Выполнимо' || evalRes === 'Невыполнимо' || /Принят/.test(status);
@@ -1579,6 +1581,9 @@ async function buildSalesLive() {
     if (kpDate) history.push({ date: salesDateShort(kpDate), text: 'КП' + (kpNo ? ' ' + kpNo : '') + ' сформировано/отправлено' });
     if (z['Дата оценки']) history.push({ date: salesDateShort(z['Дата оценки']), text: 'Оценка выполнимости' + (z['Результат оценки'] ? ': ' + z['Результат оценки'] : '') });
     if (z['Дата поступления']) history.push({ date: salesDateShort(z['Дата поступления']), text: 'Запрос зарегистрирован' + (z['Источник'] ? ' (' + z['Источник'] + ')' : '') });
+    for (const e of (evByZp.get(String(z['№ запроса'] || '').trim()) || [])) { const t = String(e['Тип события'] || ''); const who = String(e['Кто'] || '').trim(); const from = String(e['Было'] || '').trim(), to = String(e['Стало'] || '').trim(); const det = String(e['Детали'] || '').trim();
+      if (t === 'создан') continue; history.push({ date: salesDateShort(String(e['Когда'] || '').slice(0, 10)), text: [who, t === 'статус изменён' ? `статус: ${from || '—'} → ${to || '—'}` : '', det].filter(Boolean).join(' — ') }); }
+    history.sort((a, b) => String(b.date).split('.').reverse().join('').localeCompare(String(a.date).split('.').reverse().join('')));
     const kpStale = /КП отправлено/.test(status) && kpDate && !kpRes && (Date.now() - Date.parse(kpDate)) > 10 * 864e5;
     return {
       id: z.Id ?? z.id,
@@ -5638,8 +5643,8 @@ async function createSalesRequest(body, who) {
 
 // Обновление карточки запроса ЗП (для «далее с ним работать» из агента/MCP).
 // Ищем по № запроса (zp) или по id. Патчим только whitelist-поля.
-const SALES_UPDATE_FIELDS = { status: 'Статус', note: 'Примечание', owner: 'Ответственный', stage: 'Этап' };
-async function updateSalesRequest(body, svc) {
+const SALES_UPDATE_FIELDS = { status: 'Статус', note: 'Примечание', owner: 'Ответственный', stage: 'Этап', sumKp: 'Сумма КП, руб.' }; // K-293: сумма КП вручную (КП часто делают в Word вне портала)
+async function updateSalesRequest(body, svc, who) {
   const zp = String(body.zp || '').trim();
   const id = body.id != null && body.id !== '' ? Number(body.id) : null;
   if (!zp && id == null) throw new Error('Укажите № запроса (zp) или id.');
@@ -5652,13 +5657,19 @@ async function updateSalesRequest(body, svc) {
   for (const [key, col] of Object.entries(SALES_UPDATE_FIELDS)) {
     if (body[key] != null && body[key] !== '') patch[col] = String(body[key]).trim();
   }
-  if (!Object.keys(patch).length) throw new Error('Нет полей для обновления (status/note/owner/stage).');
+  if (patch['Сумма КП, руб.'] != null) { const n = Number(String(patch['Сумма КП, руб.']).replace(/\s/g, '').replace(',', '.')); if (!Number.isFinite(n) || n < 0) throw new Error('Сумма КП должна быть числом.'); patch['Сумма КП, руб.'] = n; }
+  if (body.sumKp === '' && body.clearSum) patch['Сумма КП, руб.'] = null; // явная очистка
+  if (!Object.keys(patch).length) throw new Error('Нет полей для обновления (status/note/owner/stage/sumKp).');
   // след автора-агента: дописываем в примечание, если он его не переопределил
   if (svc?.actor && patch['Примечание'] == null && body.appendNote) {
     const prev = String(row['Примечание'] || '').trim();
     patch['Примечание'] = (prev ? prev + '\n' : '') + `[${svc.actor}] ${body.appendNote}`;
   }
   await ncUpdate('sales_requests', row.Id ?? row.id, patch);
+  // K-293: смена статуса и суммы КП — в ленту событий (история карточки ЗП)
+  const zpNo = String(row['№ запроса'] || '').trim(); const w = who || (svc && svc.actor) || '';
+  if (patch['Статус'] != null && patch['Статус'] !== String(row['Статус'] || '').trim()) logEvent({ type: 'статус изменён', obj: 'ЗП', objNum: zpNo, from: String(row['Статус'] || ''), to: patch['Статус'], who: w, details: body.reason ? String(body.reason) : 'вручную' });
+  if ('Сумма КП, руб.' in patch && String(patch['Сумма КП, руб.'] ?? '') !== String(row['Сумма КП, руб.'] ?? '')) logEvent({ type: 'комментарий', obj: 'ЗП', objNum: zpNo, who: w, details: `сумма КП: ${row['Сумма КП, руб.'] != null && row['Сумма КП, руб.'] !== '' ? Number(row['Сумма КП, руб.']).toLocaleString('ru-RU') : '—'} → ${patch['Сумма КП, руб.'] != null ? Number(patch['Сумма КП, руб.']).toLocaleString('ru-RU') : '—'} ₽ без НДС (вручную)` });
   return { ok: true, zp: row['№ запроса'], id: row.Id ?? row.id, patch };
 }
 
@@ -6015,10 +6026,13 @@ async function salesLinkOrder(body, session) {
   const next = body.unlink ? cur.filter((x) => x !== zp) : [...new Set([...cur, zp])];
   await ncUpdate('orders', o.Id ?? o.id, { '№ ЗП': next.join(', ') });
   logEvent({ type: 'комментарий', obj: 'ПЗ', objNum: numPz, who: (session && session.fio) || '', details: body.unlink ? `отвязан от запроса ${zp}` : `привязан к запросу ${zp}` });
+  logEvent({ type: 'комментарий', obj: 'ЗП', objNum: zp, who: (session && session.fio) || '', details: body.unlink ? `отвязан заказ ${numPz}` : `привязан заказ на производство ${numPz}` });
+  // K-293: есть заказ на производство → запрос на стадии договора (если ещё не там и не проигран результатом)
+  if (!body.unlink) { const st = String(req['Статус'] || '').trim(); const kr = String(req['Результат КП'] || ''); if (/^(Новый|КП готовится|КП отправлено|Проигран)$/.test(st) && !/^(Проиграли|Отказались)/.test(kr)) { await ncUpdate('sales_requests', req.Id ?? req.id, { 'Статус': 'Выигран' }); logEvent({ type: 'статус изменён', obj: 'ЗП', objNum: zp, from: st, to: 'Выигран', who: (session && session.fio) || '', details: `по привязке заказа ${numPz}` }); } }
   return { ok: true, zp, numPz, numZp: next.join(', ') };
 }
 // исход КП (§5.3.7/§5.4) — проставляется вручную продажами; двигает статус ЗП по канону.
-async function setKpResult(body) {
+async function setKpResult(body, who) {
   const zp = String(body.zp || '').trim();
   if (!zp) throw new Error('Не указан № запроса (ЗП).');
   const rawResult = String(body.result || '').trim();
@@ -6030,7 +6044,13 @@ async function setKpResult(body) {
   const reqRow = await findSalesRequest(zp);
   if (!reqRow) throw new Error(`Запрос «${zp}» не найден.`);
   const patch = { 'Результат КП': result }; // '' → снять результат
+  const stNow = String(reqRow['Статус'] || '').trim(); const hasKp = !!(reqRow['№ КП'] || reqRow['Дата КП']);
+  // K-293: результат КП двигает статус ЗП в обе стороны (замечания 25.09: из «Проигран» нельзя было выйти, выигранные висели «Новый»)
+  const settled = /Принят|В работе \(договор/.test(stNow);
   if (!isReset && (result === 'Проиграли' || result === 'Отказались')) patch['Статус'] = 'Проигран'; // терминал (канон migrate-021)
+  else if (KP_RESULT_ORDER_OK.has(result)) { if (!settled) patch['Статус'] = 'Выигран'; }
+  else if (result === 'Отправлено') { if (/^(Новый|КП готовится|Проигран)$/.test(stNow)) patch['Статус'] = 'КП отправлено'; }
+  else if (isReset) { if (stNow === 'Проигран') patch['Статус'] = hasKp ? 'КП отправлено' : 'Новый'; }
   // K-66: «Выиграли частично» — фиксируем сумму (и опц. объём/примечание) выигранной
   // части, чтобы дальнейший ЗКЗ формировался на неё. Поля из migrate-033 (до APPLY
   // NocoDB молча игнорит неизвестные колонки — логика result не ломается).
@@ -6042,6 +6062,8 @@ async function setKpResult(body) {
     if (body.wonPartNote != null) patch['Объём/примечание выигранной части'] = String(body.wonPartNote).trim();
   }
   await ncUpdate('sales_requests', reqRow.Id ?? reqRow.id, patch);
+  const prevRes = String(reqRow['Результат КП'] || '').trim(); if (prevRes !== result) logEvent({ type: 'комментарий', obj: 'ЗП', objNum: zp, who: who || '', details: `результат КП: ${prevRes || '—'} → ${result || '—'}` + (patch['Сумма выигранной части'] != null ? ` · выигранная часть ${Number(patch['Сумма выигранной части']).toLocaleString('ru-RU')} ₽` : '') });
+  if (patch['Статус'] && patch['Статус'] !== stNow) logEvent({ type: 'статус изменён', obj: 'ЗП', objNum: zp, from: stNow, to: patch['Статус'], who: who || '', details: 'по результату КП' });
   const effWon = ('Сумма выигранной части' in patch) ? patch['Сумма выигранной части'] : reqRow['Сумма выигранной части'];
   return { ok: true, zp, result, orderGate: kpOrderGateOpen(result, effWon), partial: result === KP_RESULT_PARTIAL };
 }
@@ -12782,7 +12804,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/sales/requests/update' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Обновление запроса доступно только в LIVE-режиме: задайте токен NocoDB.' });
-      try { return sendJson(res, 200, await updateSalesRequest(await readBody(req), svc)); }
+      try { return sendJson(res, 200, await updateSalesRequest(await readBody(req), svc, eventWho(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/sales/order/create' && req.method === 'POST') {
@@ -12825,7 +12847,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/sales/link-order' && req.method === 'POST') { try { return sendJson(res, 200, await salesLinkOrder(await readBody(req), sessionFromReq(req))); } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
     if (p === '/api/sales/kp/result' && req.method === 'POST') {
       if (!isLive()) return sendJson(res, 501, { error: 'Фиксация исхода КП доступна только в LIVE-режиме: задайте токен NocoDB.' });
-      try { return sendJson(res, 200, await setKpResult(await readBody(req))); }
+      try { return sendJson(res, 200, await setKpResult(await readBody(req), eventWho(req, svc))); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/counterparties/create' && req.method === 'POST') {

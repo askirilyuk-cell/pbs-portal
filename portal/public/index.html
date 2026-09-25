@@ -5465,7 +5465,7 @@
       status:(a,b)=>String(a.status||'').localeCompare(String(b.status||''),'ru'),
       owner:(a,b)=>String(a.owner||'').localeCompare(String(b.owner||''),'ru'),
     };
-    const ZP_DOT={'Новый':'gray','На оценке':'navy','На оценке (ЛОВ)':'navy','КП готовится':'blue','КП отправлено':'amber','Оферта · в работе':'amber','Окончательная оферта':'amber','Ожидание ответа':'amber','Принято → заказ':'green','Принято (→ заказ)':'green','Принят (→ЗКЗ)':'green','В работе (договор/спецификация)':'blue','Отклонено':'red','Отклонён':'red','Проигран':'red','Отозван':'gray','Отклонено заказчиком':'red','Отклонено нами':'red','На согласовании руководства':'navy','В архиве':'gray'};
+    const ZP_DOT={'Новый':'gray','На оценке':'navy','На оценке (ЛОВ)':'navy','КП готовится':'blue','КП отправлено':'amber','Оферта · в работе':'amber','Окончательная оферта':'amber','Ожидание ответа':'amber','Принято → заказ':'green','Принято (→ заказ)':'green','Принят (→ЗКЗ)':'green','Выигран':'green','В работе (договор/спецификация)':'blue','Отклонено':'red','Отклонён':'red','Проигран':'red','Отозван':'gray','Отклонено заказчиком':'red','Отклонено нами':'red','На согласовании руководства':'navy','В архиве':'gray'};
     const ZKZ_DOT={'Подтверждён':'navy','В производстве':'blue','Контроль':'amber','Готов к отгрузке':'blue','Отгружен':'green','Закрыт':'gray'};
     const POS_DOT={'В работе':'blue','В очереди':'gray','Закупка':'amber','Контроль':'amber','Выполнено':'green','Готово':'green'};
     // Ярлык статуса ЗП без «(ЛОВ)» — ЛОВ убран из UI (2026-07-14). Значение статуса в БД/истории
@@ -6263,7 +6263,9 @@
             ${kpResHint}</div>`;
       // page-раскладка: управляющий селектор «Результат КП» уезжает в боковой рельс (kpResRail), в основной колонке его нет
       const kpResStepInline = layout==='page' ? '' : kpResStep;
-      const kpResRail=`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Результат КП</div>
+      // K-293: сумма КП вручную — КП часто готовят в Word вне портала; без суммы сводка «Сумма КП в работе» врёт
+      const kpSumManual=rbacAccess('sales')==='write'?`<div style="margin-top:10px;display:flex;align-items:end;gap:8px;flex-wrap:wrap"><div class="field" style="margin:0"><label>Сумма КП, ₽ без НДС (вручную)</label><input id="kp-sum-man" class="inp" type="number" step="0.01" min="0" style="width:180px" value="${esc(String(z.sumKpNum??''))}" placeholder="КП сделано вне портала"></div><button class="btn btn--sm" data-act="kpsum">Сохранить</button></div>`:'';
+      const kpResRail=`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Результат КП</div>${zpBucket(z)==='rej'&&rbacAccess('sales')==='write'?`<div style="margin-bottom:10px"><button class="btn btn--sm" data-act="unlose" title="Снять «Проигран»: статус вернётся к «${z.kp?'КП отправлено':'Новый'}», результат КП очистится">↩ Вернуть в работу</button></div>`:''}
             <select id="kpCardResult" style="${kpResSelStyle};width:100%;min-width:0;box-sizing:border-box">${kpResOptsHtml}</select>
             ${kpResHint?`<div style="margin-top:9px">${kpResHint}</div>`:''}</div>`;
       const kp=z.kp?`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">Коммерческое предложение</div>
@@ -6273,7 +6275,7 @@
             ${z.kp.sum?`<div>${lblSm('Сумма')}<div style="font-weight:700;color:var(--ink)">${esc(z.kp.sum)}</div></div>`:''}
             ${z.kp.perUnit?`<div>${lblSm('Цена/шт')}<div>${esc(z.kp.perUnit)}</div></div>`:''}
             <div style="margin-left:auto;display:flex;align-items:center;gap:8px">${z.kp.status?`<span style="font-size:12px;color:var(--amber);background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-s);padding:3px 9px">⧖ ${esc(z.kp.status)}</span>`:''}<button class="tbtn" data-act="kpopen">Открыть конструктор КП</button></div>
-          </div>${kpResStepInline}</div>`:`<div class="card pad"><div class="sec-h" style="margin-bottom:6px">Коммерческое предложение</div><div style="font-size:13px;color:var(--sub)">КП ещё не сформировано.</div>${kpResStepInline}</div>`;
+          </div>${(!z.kp.sum||z.kp.sum==='—')?kpSumManual:''}${kpResStepInline}</div>`:`<div class="card pad"><div class="sec-h" style="margin-bottom:6px">Коммерческое предложение</div><div style="font-size:13px;color:var(--sub)">КП в портале не сформировано.</div>${kpSumManual}${kpResStepInline}</div>`;
       const hist=`<div class="card pad"><div class="sec-h" style="margin-bottom:10px">История</div>
         <div style="display:flex;flex-direction:column;gap:10px;font-size:13px">
           ${(z.history||[]).map(h=>`<div style="display:flex;gap:8px"><span style="color:var(--sl-500);white-space:nowrap">${esc(h.date)}</span><span>${esc(h.text)}</span></div>`).join('')||'<span class="c-gray">—</span>'}</div></div>`;
@@ -6338,13 +6340,25 @@
       const kcr=root.querySelector('#kpCardResult'); if(kcr)kcr.onchange=async()=>{
         const v=kcr.value;
         // K-66/DEF-29: «Выиграли частично» требует сумму выигранной части — не инлайним поле, открываем штатный конструктор (ветка 3112–3114 → kpWonSum/kpWonSave)
-        if(v==='Выиграли частично'){ kcr.value=(z.kp&&z.kp.status)||''; openKpConstructor(z.numZp); return; }
+        if(v==='Выиграли частично'){ // K-293: раньше уводило в конструктор КП и ничего не сохраняло (замечание 25.09)
+          const w=document.createElement('div'); w.className='ui-dlg';
+          w.innerHTML=`<div class="ui-dlg-box"><div class="ui-dlg-h">Выиграли частично · ${esc(z.numZp)}</div><div class="ui-dlg-t">Укажите сумму выигранной части — на неё формируется заказ (ЗКЗ) и считается сводка.</div>
+            <div class="dlg-form"><div class="field"><label>Сумма выигранной части, ₽ без НДС</label><input id="wp-sum" type="number" step="0.01" min="0" value="${esc(String(z.wonSum||''))}"></div>
+            <div class="field full"><label>Объём / примечание (необязательно)</label><input id="wp-note" maxlength="300" value="${esc(String(z.wonNote||''))}" placeholder="например: лоты 1–3 из 5, договор МТР26-2837"></div></div>
+            <div class="ui-dlg-b"><button class="btn" data-d="cancel">Отмена</button><button class="btn btn--primary" data-d="ok">Сохранить</button></div></div>`;
+          document.body.appendChild(w); w.querySelector('[data-d="cancel"]').onclick=()=>{ w.remove(); kcr.value=(z.kp&&z.kp.status)||''; };
+          w.querySelector('[data-d="ok"]').onclick=async()=>{ const sum=Number(w.querySelector('#wp-sum').value); if(!(sum>0)){ toast('Укажите сумму выигранной части (> 0).','warn'); return; }
+            try{ const j=await postJson('/api/sales/kp/result',{zp:z.numZp,result:v,wonPartSum:sum,wonPartNote:w.querySelector('#wp-note').value}); w.remove(); toast(`Результат КП: Выиграли частично · ${kpMoney(sum)} ₽${j.orderGate?' · заказ (ЗКЗ) доступен':''}`,'ok'); salesSelZp=z.numZp; SALES=null; renderSales(document.getElementById('view')); }
+            catch(e){ toast('Не удалось: '+(e.message||e),'err'); } };
+          return; }
         // остальные 6 исходов — прямое сохранение через существующую kpSetResult
         kcr.disabled=true; kpState={zp:z.numZp,d:{kpResult:(z.kp&&z.kp.status)||''},rows:[],locked:false};
         await kpSetResult(v);
         salesSelZp=z.numZp; SALES=null; renderSales(document.getElementById('view'));
       };
       const ob=root.querySelector('[data-act="order"]'); if(ob&&canOrder)ob.onclick=()=>createZkzFromReq(z,ob);
+      const ksb=root.querySelector('[data-act="kpsum"]'); if(ksb)ksb.onclick=async()=>{ const v=root.querySelector('#kp-sum-man').value.trim(); ksb.disabled=true; try{ await postJson('/api/sales/requests/update',v===''?{zp:z.numZp,sumKp:'',clearSum:true}:{zp:z.numZp,sumKp:v}); toast(v===''?'Сумма КП очищена.':`Сумма КП: ${kpMoney(Number(v))} ₽ без НДС`,'ok'); salesSelZp=z.numZp; SALES=null; renderSales(document.getElementById('view')); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); ksb.disabled=false; } };
+      const ulb=root.querySelector('[data-act="unlose"]'); if(ulb)ulb.onclick=async()=>{ if(!(await uiConfirm(`Вернуть ${z.numZp} в работу? Результат КП будет снят, статус — «${z.kp?'КП отправлено':'Новый'}».`,{ok:'Вернуть'})))return; try{ await postJson('/api/sales/kp/result',{zp:z.numZp,result:''}); toast('Запрос возвращён в работу.','ok'); salesSelZp=z.numZp; SALES=null; renderSales(document.getElementById('view')); }catch(e){ toast('Не удалось: '+(e.message||e),'err'); } };
       wireInnHints(root);   // K-98: подсказка «без ИНН» у заказчика запроса
       loadReqFiles(z.numZp);
     }

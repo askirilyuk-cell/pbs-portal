@@ -16843,10 +16843,13 @@
     async function openSetupBuilder(host,cardId){
       const cat=await loadSetupCat();
       if(!cat||cat.mode==='mock'){ toast('Конструктор карт наладки доступен только в LIVE-режиме (нужен токен NocoDB в «Настройках»).','err'); return; }
-      const equipment=cat.equipment||[], holders=cat.holders||[], inserts=cat.inserts||[], statuses=cat.statuses||['Черновик','Утверждена','Архив'];
+      const kindNow=(cardId!=null?null:(SETUP_KIND||'Токарная'));
+      const eqAll=cat.equipment||[]; // K-298: в подразделе «Токарные операции» — только токарные станки (Александр 25.09: «отображается вообще всё оборудование»)
+      const eqKind=(e)=>{ const t=String(e.name||'')+' '+String(e.model||'')+' '+String(e.subtype||''); if((kindNow||'Токарная')==='Токарная')return /токар/i.test(t); if(kindNow==='Фрезерная')return /фрез|обрабатывающий центр/i.test(t); return true; };
+      const equipment=eqAll.filter(eqKind), holders=cat.holders||[], inserts=cat.inserts||[], statuses=cat.statuses||['Черновик','Утверждена','Архив'];
       const holderById={}; holders.forEach(h=>holderById[String(h.id)]=h);
       const insertById={}; inserts.forEach(i=>insertById[String(i.id)]=i);
-      const eqById={}; equipment.forEach(e=>eqById[String(e.id)]=e);
+      const eqById={}; eqAll.forEach(e=>eqById[String(e.id)]=e);
       let init={item:{id:null,no:'',name:'',part:'',status:'Черновик',machineId:null,revolverSlots:null},lines:[]};
       if(cardId!=null){ try{ const d=await (await fetch('/api/setup-card?id='+encodeURIComponent(cardId))).json(); if(d&&d.item)init={item:d.item,lines:d.lines||[]}; }catch(e){} }
       // состояние слотов револьвера: номер слота (1..N) → {holderId,insertId,overhang,params,note}
@@ -16862,7 +16865,7 @@
       const ist='width:100%;padding:7px 9px;border:1px solid var(--sl-300);border-radius:var(--r-m);font:inherit;font-size:13px;background:#fff';
       const lbl=(t,req)=>`<div style="font-size:12px;color:var(--sl-500);font-weight:600;margin-bottom:4px">${esc(t)}${req?' <span style="color:var(--red)">*</span>':''}</div>`;
       const opt=(arr,def)=>arr.map(o=>`<option${String(o)===String(def)?' selected':''}>${esc(o)}</option>`).join('');
-      const eqOpt=(def)=>`<option value="">— выбрать станок —</option>`+equipment.map(e=>`<option value="${e.id}"${String(e.id)===String(def)?' selected':''}>${esc((e.name||e.model||('ОБ id'+e.id))+(e.invNo?' · инв.'+e.invNo:'')+(e.model&&e.name?' · '+e.model:'')+' · '+(e.headShape==='flat'?'плоская':'револьвер')+' '+(e.revolverSlots||12)+' поз.')}</option>`).join('');
+      const eqOpt=(def)=>`<option value="">— выбрать станок —</option>`+equipment.map(e=>`<option value="${e.id}"${String(e.id)===String(def)?' selected':''}>${esc((e.name||e.model||('ОБ id'+e.id))+(e.invNo?' · инв.'+e.invNo:'')+(e.model&&e.name?' · '+e.model:'')+' · '+((e.revolverSlotsRaw>0||e.headType)?((e.headShape==='flat'?'плоская':'револьвер')+' '+(e.revolverSlotsRaw||e.revolverSlots||12)+' поз.'):'головка не описана в паспорте'))}</option>`).join('');
       const holderOpt=(def)=>`<option value="">— державка —</option>`+holders.map(h=>`<option value="${h.id}"${String(h.id)===String(def)?' selected':''}>${esc(h.iso+(h.maker?' · '+h.maker:''))}</option>`).join('');
       // пластины, совместимые с державкой (по compatIds); пусто у державки → все пластины
       const insertsFor=(holderId)=>{ const h=holderById[String(holderId)]; if(h&&h.compatIds&&h.compatIds.length){ const set=new Set(h.compatIds.map(String)); const f=inserts.filter(i=>set.has(String(i.id))); if(f.length)return f; } return inserts; };
@@ -16974,7 +16977,10 @@
       };
       document.getElementById('sb-se-clear').onclick=()=>{ if(curSlot!=null)delete slots[curSlot]; editor.style.display='none'; curSlot=null; renderGrid(); };
       document.getElementById('sb-se-cancel').onclick=()=>{ editor.style.display='none'; curSlot=null; };
-      machineSel.onchange=()=>{ const id=machineSel.value; if(id){ nInput.value=machineN(id); curShape=machineShape(id); curHeadType=machineHeadType(id); rot=0; } editor.style.display='none'; curSlot=null; updateHeadInfo(); renderGrid(); };
+      // K-298: если в паспорте станка задана головка (тип и/или число позиций) — в карте эти поля только для чтения; правятся в карточке станка (ТТХ)
+      const lockHead=()=>{ const id=machineSel.value; const e=id?eqById[String(id)]:null; const fromPassport=!!(e&&((e.revolverSlotsRaw>0)||e.headType)); nInput.disabled=fromPassport; nInput.title=fromPassport?'Из паспорта станка — правится в карточке станка (вкладка ТТХ)':''; if(headInfo&&fromPassport)headInfo.textContent=(e.headType?e.headType+' · ':'')+(e.revolverSlotsRaw>0?e.revolverSlotsRaw+' поз. · ':'')+'из паспорта станка, в карте не меняется'; else if(headInfo&&e)headInfo.textContent='в паспорте станка головка не описана — укажите в карточке станка (ТТХ), пока число позиций вводится вручную'; };
+      machineSel.onchange=()=>{ const id=machineSel.value; if(id){ nInput.value=machineN(id); curShape=machineShape(id); curHeadType=machineHeadType(id); rot=0; } editor.style.display='none'; curSlot=null; updateHeadInfo(); lockHead(); renderGrid(); };
+      lockHead();
       nInput.onchange=()=>{ editor.style.display='none'; curSlot=null; renderGrid(); };
       updateHeadInfo(); renderGrid();
       // ── блок «Зажим и кулачки»: патрон из паспорта станка + комплект из библиотеки ──

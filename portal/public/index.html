@@ -17006,7 +17006,9 @@
         seHolder.innerHTML=holderOpt(s.holderId||''); refreshInsertOpts(s.insertId||'');
         seOver.value=s.overhang||''; seParams.value=s.params||''; seNote.value=s.note||'';
         renderGrid(); // подсветить выбранную позицию на схеме
-        editor.style.display='block'; editor.scrollIntoView({behavior:'smooth',block:'nearest'});
+        editor.style.display='block'; editor.scrollIntoView({behavior:'smooth',block:'center'});
+        // K-306: пустой ISO-каталог — подсказать, где заводить державки/пластины (иначе списки в редакторе позиции пустые)
+        if(!holders.length&&!inserts.length){ let hh=document.getElementById('sb-se-emptyhint'); if(!hh){ hh=document.createElement('div'); hh.id='sb-se-emptyhint'; hh.style.cssText='margin-top:8px;font-size:var(--fs-s);color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-s);padding:8px 11px'; hh.innerHTML='Справочник державок и пластин пуст — списки ниже нечем заполнить. Заведите их в <a href="#tools" style="color:var(--blue)">Инструмент и оснастка → Каталог → Державки (ISO 5608) / Пластины (ISO 1832)</a>, затем вернитесь в карту.'; editor.prepend(hh); } }
       };
       seHolder.onchange=()=>{ const cur=seInsert.value; seInsert.innerHTML=insertOpt(seHolder.value,cur); if(seInsert.value!==cur)seInsert.value=''; };
       document.getElementById('sb-se-apply').onclick=()=>{

@@ -13261,7 +13261,7 @@
         const bi=st.blankInfo||{};
         const matOpts=st.matList.map(x=>`<option value="${x.kind}:${x.id}" ${m&&m.kind===x.kind&&String(m.id)===String(x.id)?'selected':''}>${esc(matLabel(x))}${x.kind==='stock'?' · доступно '+mtNum(x.available)+' кг':' · '+mtNum(x.weight)+' кг'}</option>`).join('');
         host.innerHTML=`<div class="cut-wrap">
-          <div class="cut-nav" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="st-back" id="cut-back">← К задачам участка</button><span class="cut-note">Экран оператора · <a href="#" id="cut-classic" style="color:var(--navy)">классическая карта Ф.14</a></span></div>
+          <div class="cut-nav" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="st-back" id="cut-back">← К задачам участка</button></div>
           <div class="cut-top">
             <div>${kiosk?`<button class="st-back cut-back-k" id="cut-back2">← Задачи</button>`:``}<div class="k">Заказ · позиция</div><b class="cut-mono">${esc(t.numPz||'')}${t.posNo!==''&&t.posNo!=null?' / '+esc(String(t.posNo)):''}</b><div class="sm">${t.orderDue?'срок '+esc(fmt(t.orderDue)):''}${t.customer?' · '+esc(t.customer):''}</div></div>
             <div class="mid"><div><div class="k">Изделие</div><b>${esc(t.partName||'—')}</b>${t.drawing?`<div class="sm">чертёж ${(t.kdDrawings||[]).length?`<a href="/api/design/kd/file?doc=${encodeURIComponent(t.kdDrawings[0].doc||'')}" target="_blank" rel="noopener" style="color:#9cc4ff;text-decoration:underline">${esc(t.drawing)} — открыть</a>`:esc(t.drawing)}</div>`:''}${(t.drawingFiles||[]).map(f=>`<div class="sm"><a href="/api/route/opfile?mk=${encodeURIComponent(t.mk||'')}&op=0&kind=drawing&rel=${encodeURIComponent(f)}" target="_blank" rel="noopener" style="color:#9cc4ff;text-decoration:underline">${esc(f)}</a></div>`).join('')}${t.kdChanged?`<div class="sm" style="color:#ffd37a;font-weight:700">⚠ чертёж изменён (ред. ${esc(String(t.kdChanged.rev??''))}): ${esc(t.kdChanged.what||'')}</div>`:''}</div>
@@ -13330,7 +13330,6 @@
       const wire=()=>{
         host.querySelector('#cut-back').onclick=()=>renderStation(host);
         const back2=host.querySelector('#cut-back2'); if(back2)back2.onclick=()=>renderStation(host);
-        host.querySelector('#cut-classic').onclick=(e)=>{ e.preventDefault(); cutClassic=true; renderStationTask(host,t.id); cutClassic=false; };
         const ob=host.querySelector('#cut-op'); if(ob)ob.onclick=()=>stationOperatorDialog(()=>renderStationTask(host,t.id));
         const scan=host.querySelector('#cut-scan'); if(scan){ scan.onkeydown=async(e)=>{ if(e.key!=='Enter')return; e.preventDefault(); const code=scan.value.trim().toUpperCase(); if(!code)return; if(/^(СОТР|SOTR)-/.test(code)){ /* K-282: сканер шлёт латиницу (Code128 от asciiBar) */ try{ await stationSetOperator({badge:code}); renderStationTask(host,t.id); }catch(err){ toast(err.message,'err'); scan.select(); } return; } // K-206: бейдж сотрудника — смена оператора
           if(noOp){ toast('Сначала представьтесь: отсканируйте свой бейдж.','err'); return; }

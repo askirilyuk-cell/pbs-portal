@@ -8991,6 +8991,7 @@ function eqShape(r) {
     cncControl: String(r['Стойка ЧПУ'] || '').trim(),
     cncIp: String(r['Адрес стойки (сеть)'] || '').trim(),
     cncLink: String(r['Как подключён'] || '').trim(),
+    cncScreen: String(r['Экран стойки (адрес)'] || '').trim(), // K-330
   };
 }
 // эффективное число позиций револьвера станка: из паспорта или дефолт 12 (станки бывают с меньшим числом гнёзд)
@@ -9092,7 +9093,7 @@ async function eqEnsureTurningCols() {
 }
 // создать/обновить оборудование (автонумер ОБ-NNN при создании) + привязка к участку
 // K-329: стойка ЧПУ и сеть станка — колонки создаются на лету (FORWARD-TOLERANT)
-const EQ_CNC_FIELDS = [['Стойка ЧПУ', 'cncControl'], ['Адрес стойки (сеть)', 'cncIp'], ['Как подключён', 'cncLink']];
+const EQ_CNC_FIELDS = [['Стойка ЧПУ', 'cncControl'], ['Адрес стойки (сеть)', 'cncIp'], ['Как подключён', 'cncLink'], ['Экран стойки (адрес)', 'cncScreen']];
 async function equipmentSave(body) {
   for (const [col, key] of EQ_CNC_FIELDS) { if (body[key] != null && String(body[key]).trim()) { try { await ncEnsureColumn('equipment', col, 'SingleLineText'); } catch {} } }
   const rows = await ncListSoft('equipment');

@@ -10881,6 +10881,7 @@
       const tabs=[['pass','Паспорт'],['tasks','Задачи'+(tk.length?' · '+tk.length:'')],['mnt','ТО'],['docs','Документы'+(docs.length?' · '+docs.length:'')],['buy','Закупка']];
       if(eqIsTurning(it))tabs.push(['ttx','ТТХ']);
       tabs.push(['kn','Карты наладки']); // K-297
+      if(it.cncScreen)tabs.push(['screen','Экран стойки']); // K-330
       if(!tabs.some(t=>t[0]===eqDrTab))eqDrTab='pass';
       d.innerHTML=`<div class="eqd-h">
           <div class="eqd-title"><span class="eqd-inv">${esc(it.invNo||'—')}</span>${eqStCell(it.status)}${it.isCnc?eqCncChip:''}${it.category?`<span class="st st--neutral">${esc(it.category)}</span>`:''}</div>
@@ -10952,12 +10953,22 @@
             box.innerHTML=runs.length?`<div class="tbl-wrap"><table class="dt" style="font-size:var(--fs-s);width:100%"><thead><tr><th style="width:110px">Когда</th><th style="width:130px">Карта</th><th style="width:130px">Деталь</th><th style="width:150px">Кто</th><th>Позиции: X · Z · r</th></tr></thead><tbody>${runs.map(r=>`<tr><td class="nw c-gray">${esc(r.when)}</td><td class="nw"><a href="#setup/${encodeURIComponent(r.cardId)}" class="code c-blue" style="text-decoration:none">${esc(r.no)}</a></td><td class="ell">${esc(r.part||'—')}</td><td class="ell">${esc(r.who||'—')}</td><td>${(r.lines||[]).map(l=>`<span style="display:inline-block;margin:1px 10px 1px 0"><b>T${esc(String(l.pos))}</b> <span style="font-family:var(--mono)">${esc(l.lenX||'—')} · ${esc(l.lenZ||'—')} · ${esc(l.radius||'—')}</span></span>`).join('')}${r.note?` <span class="c-gray">· ${esc(r.note)}</span>`:''}</td></tr>`).join('')}</tbody></table></div>`
               :'Наладок на этом станке ещё не фиксировали (кнопка «Зафиксировать наладку» в карточке карты наладки).'; }catch(e){}
           })();
+      } else if(eqDrTab==='screen'){
+        // K-330: экран стойки ЧПУ через браузер (noVNC на киоске). Только просмотр: управление — с пульта станка.
+        h.innerHTML=`<div class="eqd-sub" style="margin-bottom:8px">Живой экран стойки <b>${esc(it.cncControl||'ЧПУ')}</b>${it.cncIp?` · ${esc(it.cncIp)}`:''}. Только просмотр: движение осей и пуск цикла — с пульта станка.</div>
+          <div style="border:1px solid var(--line2);border-radius:var(--r-m);overflow:hidden;background:#111">
+            <iframe src="${escA(it.cncScreen)}" style="width:100%;height:62vh;border:0;display:block" allow="fullscreen"></iframe>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+            <a class="btn btn--sm" href="${escA(it.cncScreen)}" target="_blank" rel="noopener" style="text-decoration:none">Открыть в отдельном окне</a>
+            <span class="c-gray" style="font-size:var(--fs-s);align-self:center">если экран пустой — стойка выключена или нет связи с постом</span>
+          </div>`;
       } else if(eqDrTab==='ttx'){
         h.innerHTML=`<div class="eqd-grid">
             ${F('Тип головки',esc(it.headType))}${F('Позиций револьвера',eqVal(it.revolverSlots),true)}${F('Патрон — тип',esc(it.chuckTypeEq))}
             ${F('Ø патрона, мм',eqVal(it.chuckDia),true)}${F('Проходное отверстие шпинделя, мм',eqVal(it.spindleBore),true)}${F('Сечение державок (наружн.)',esc(it.holderSecExt),true)}
             ${F('Сечение державок (внутр.), Ø',esc(it.holderSecInt),true)}
-            ${F('Стойка ЧПУ',esc(it.cncControl))}${F('Адрес стойки (сеть)',esc(it.cncIp),true)}${F('Как подключён',esc(it.cncLink))}
+            ${F('Стойка ЧПУ',esc(it.cncControl))}${F('Адрес стойки (сеть)',esc(it.cncIp),true)}${F('Как подключён',esc(it.cncLink))}${F('Экран стойки (адрес)',esc(it.cncScreen))}
           </div>
           <div class="eqd-sub">Характеристики используются конструктором карт наладки и комплектов кулачков.</div>`;
       }
@@ -11210,6 +11221,7 @@
             <div style="grid-column:span 4">${FLAB('Стойка ЧПУ')}<input id="eqf-cncControl" style="${FINP}" value="${v('cncControl')}" placeholder="напр. SINUMERIK 828D"></div>
             <div style="grid-column:span 4">${FLAB('Адрес стойки (сеть)')}<input id="eqf-cncIp" style="${FINP}" value="${v('cncIp')}" placeholder="напр. 192.168.215.1"></div>
             <div style="grid-column:span 4">${FLAB('Как подключён')}<input id="eqf-cncLink" style="${FINP}" value="${v('cncLink')}" placeholder="напр. кабелем к киоску поста"></div>
+            <div style="grid-column:span 12">${FLAB('Экран стойки (адрес для просмотра)')}<input id="eqf-cncScreen" style="${FINP}" value="${v('cncScreen')}" placeholder="напр. http://192.168.1.110:6080/vnc.html?autoconnect=1&resize=scale&view_only=1"></div>
             <div style="grid-column:span 6">${FLAB('Сечение державок — внутр., Ø')}<input id="eqf-holderSecInt" style="${FINP}" value="${v('holderSecInt')}" placeholder="напр. 40"></div>
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="eqf-notes" style="${FINP}" value="${v('notes')}"></div>
           </div>
@@ -11233,7 +11245,7 @@
           commissionedAt:V('eqf-commissionedAt'), to1Last:V('eqf-to1Last'), to1Next:V('eqf-to1Next'),
           isCnc:V('eqf-isCnc'), notes:V('eqf-notes'), sectionId:V('eqf-section'),
           headType:V('eqf-headType'), revolverSlots:V('eqf-revolverSlots'), spindleBore:V('eqf-spindleBore'),
-          chuckTypeEq:V('eqf-chuckTypeEq'), chuckDia:V('eqf-chuckDia'), holderSecExt:V('eqf-holderSecExt'), holderSecInt:V('eqf-holderSecInt'), cncControl:V('eqf-cncControl'), cncIp:V('eqf-cncIp'), cncLink:V('eqf-cncLink') };
+          chuckTypeEq:V('eqf-chuckTypeEq'), chuckDia:V('eqf-chuckDia'), holderSecExt:V('eqf-holderSecExt'), holderSecInt:V('eqf-holderSecInt'), cncControl:V('eqf-cncControl'), cncIp:V('eqf-cncIp'), cncLink:V('eqf-cncLink'), cncScreen:V('eqf-cncScreen') };
         if(edit)body.id=it.id;
         if(!body.name){ err.textContent='Укажите наименование оборудования.'; toast('Укажите наименование.','err'); return; }
         const btn=document.getElementById('eqf-save'); btn.disabled=true; btn.textContent='Сохранение…';

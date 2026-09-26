@@ -13308,9 +13308,10 @@
                 <div class="cut-note">Скан подтверждает, из чего режем; если пруток другой — выберите его, списание пойдёт с правильной карточки.${m&&bi.blank&&bi.blank.grade&&m.grade&&String(m.grade).toLowerCase()!==String(bi.blank.grade).toLowerCase()?' <b style="color:#b91c1c">Марка отличается от МК ('+esc(bi.blank.grade)+')!</b>':''}</div>
               </div></div>
               <div class="cut-card"><div class="h">Ход операции</div><div class="c">
-                <div class="cut-kv"><span class="k">Начата</span><span>${st.startedAt?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+cutElapsed(st.startedAt):'—'}</span><span class="k">Норма / факт</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'} / ${st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10+' ч':'—'}</span></div>
+                <div class="cut-kv"><span class="k">Начата</span><span>${st.startedAt?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+cutElapsed(st.startedAt):'—'}</span><span class="k">Норма</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'}${(t.factTime!==''&&t.factTime!=null)?` · факт ${esc(String(t.factTime))} ч`:''}</span></div>
+                <div class="cut-kv"><span class="k">Идёт (календарно)</span><span class="cut-mono">${st.startedAt?esc(cutElapsed(st.startedAt)):'—'}</span><span class="k"></span><span class="cut-hint" style="font-size:12px;color:#94a3b8">обед, ночь и переходы на другие детали сюда входят</span></div>
                 <div class="cut-btns">
-                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?'<span class="cut-pill wip">операция идёт · время считается общее</span>':`<button class="cut-btn big pri" id="cut-start">▶ Начать</button>`)}
+                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?'<span class="cut-pill wip">операция идёт</span>':'<span class="cut-pill">в очереди · начнётся сама при первом замере</span>')}
                   <button class="cut-btn big ok" id="cut-finish" ${done&&st.status!=='Выполнено'?'':'disabled'}>Завершить → ${t.nextOp?'передать на оп. '+esc(String(t.nextOp.num))+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'на склад/сборку'}</button>
                 </div>
                 <div class="cut-btns"><button class="cut-btn ghost sm" id="cut-labels" ${acc?'':'disabled'}>🖨 Бирки на заготовки</button><button class="cut-btn ghost sm" id="cut-save">Сохранить</button><span class="cut-note" id="cut-msg"></span></div>
@@ -13376,7 +13377,8 @@
               if(m.kind==='remnant'){ const w=Number(m.weight)||0; const bl=st.barLen||0; body.qtyValue=bl>0?Math.round(w*mm/bl*1000)/1000:w; if(st.remMode==='do'&&rem!=null&&rem>0&&bl>0){ body.scrapValue=Math.round(w*rem/bl*1000)/1000; body.scrapUnit='кг'; } }
               else if((st.remMode==='do'||st.remMode==='scrap')&&rem!=null&&rem>0){ body.scrapValue=rem; body.scrapUnit='мм'; body.remMode=st.remMode; } else body.remMode='keep';
               const j=await postJson('/api/metal/blank/issue',body); toast(`Списано ${mtNum(j.qtyKg)} кг (${j.code||m.code})${j.remnant?' · деловой остаток '+j.remnant.code:''}${j.scrapKg?' · в обрезь '+mtNum(j.scrapKg)+' кг':''}`,'ok'); }
-            const hours=st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10:null;
+            // K-333: календарное время в «факт часов» не пишем — в нём обед, ночь и переходы. Факт вводит оператор/мастер.
+            const hours=null;
             await saveTask({status:'Выполнено',factQty:accepted(),factTime:(t.factTime!==''&&t.factTime!=null)?t.factTime:(hours||''),finishedAt:cutNow(),note:(t.note||'')+(units.some(u=>unitState(u)==='x')?' брак: '+units.filter(u=>unitState(u)==='x').map(u=>'№'+u.unit).join(', '):'')});
             st.status='Выполнено'; setMsg('Операция завершена ✓'); paint();
             if(await uiConfirm('Напечатать бирки на принятые заготовки?',{ok:'Печать',cancel:'Позже'}))cutLabelsPrint(t,units,st.mat);

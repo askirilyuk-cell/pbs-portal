@@ -2182,18 +2182,22 @@
       let ctrl='';
       if(ME.isAdmin){
         const roles=ME.portalRoles||[];
-        const cur=ME.viewAs||'Администратор';
-        ctrl=`<select class="auth-as" id="rbac-viewas" title="Смотреть как роль">`
+        const cur=ME.viewAsUser?'@user':(ME.viewAs||'Администратор');
+        ctrl=`<select class="auth-as" id="rbac-viewas" title="Смотреть как роль или конкретный сотрудник">`
           +`<option value="">Админ · всё</option>`
-          +roles.filter(r=>r!=='Администратор').map(r=>`<option value="${esc(r)}"${cur===r?' selected':''}>как: ${esc(RBAC_ROLE_LABEL[r]||r)}</option>`).join('')
+          +`<option value="@pick">как сотрудник…</option>`
+          +(ME.viewAsUser?`<option value="@user" selected>как: ${esc(ME.viewAsUser.name)}</option>`:'')
+          +`<optgroup label="Роль">`+roles.filter(r=>r!=='Администратор').map(r=>`<option value="${esc(r)}"${cur===r?' selected':''}>как: ${esc(RBAC_ROLE_LABEL[r]||r)}</option>`).join('')+`</optgroup>`
           +`</select>`;
       }
-      const viewAsBadge=ME.viewAs?`<span class="auth-viewas" title="Активна роль просмотра">Смотрю как ${esc(RBAC_ROLE_LABEL[ME.viewAs]||ME.viewAs)}</span><button class="auth-reset" id="rbac-reset">В админа</button>`:'';
+      const viewAsBadge=ME.viewAsUser?`<span class="auth-viewas" title="Роли: ${esc((ME.viewAsUser.roles||[]).map(r=>RBAC_ROLE_LABEL[r]||r).join(' + '))}">Смотрю как ${esc(ME.viewAsUser.name)}</span><button class="auth-reset" id="rbac-reset">В админа</button>`
+        :(ME.viewAs?`<span class="auth-viewas" title="Активна роль просмотра">Смотрю как ${esc(RBAC_ROLE_LABEL[ME.viewAs]||ME.viewAs)}</span><button class="auth-reset" id="rbac-reset">В админа</button>`:'');
       box.innerHTML=`<span class="auth-role"><i></i>${esc(RBAC_ROLE_LABEL[role]||role)}</span>${viewAsBadge}${ctrl}`
         +`<span class="auth-user"><span class="auth-ava">${esc(ini)}</span><span class="auth-fio" title="${esc(ME.position||'')}">${esc(ME.name||'')}</span></span>`
         +`<button class="auth-out" id="rbac-out">Выйти</button>`;
       const vs=document.getElementById('rbac-viewas');
-      if(vs)vs.onchange=async()=>{ const r=vs.value; try{ if(!r){await _fetch('/api/admin/reset-view',{method:'POST'});} else {await _fetch('/api/admin/view-as',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:r})});} }catch{} location.reload(); };
+      const vsPrev=vs?vs.value:''; // K-327: исходное значение — вернуть после открытия диалога
+      if(vs)vs.onchange=async()=>{ const r=vs.value; if(r==='@user')return; if(r==='@pick'){ vs.value=vsPrev; viewAsUserDialog(); return; } try{ if(!r){await _fetch('/api/admin/reset-view',{method:'POST'});} else {await _fetch('/api/admin/view-as',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:r})});} }catch{} location.reload(); };
       const rb=document.getElementById('rbac-reset'); if(rb)rb.onclick=async()=>{ try{await _fetch('/api/admin/reset-view',{method:'POST'});}catch{} location.reload(); };
       const out=document.getElementById('rbac-out'); if(out)out.onclick=()=>{ location.href='/auth/logout'; };
     }
@@ -2252,6 +2256,21 @@
     }
 
     // --- роутер по разделам навигации (hash) ----------------------------------
+    // K-327: «Смотреть как сотрудник» — выбор сотрудника Bitrix, видно его роли и разделы; после выбора портал показывает ровно его права
+    async function viewAsUserDialog(){
+      const w=document.createElement('div'); w.className='ui-dlg'; w.innerHTML=`<div class="ui-dlg-box wide" role="dialog" aria-modal="true" style="width:min(860px,96vw)"><div class="ui-dlg-h">Смотреть портал как сотрудник</div><div class="ui-dlg-t">Портал покажет ровно те разделы и права, что у выбранного сотрудника. Ваши данные и вход не меняются; вернуться — «В админа».</div><div id="vau-cb"></div><div id="vau-info" style="margin-top:10px;font-size:13px;color:var(--sl-600);overflow-wrap:anywhere">Загрузка сотрудников…</div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn ui-btn--primary" data-d="ok" disabled>Смотреть как выбранный</button></div></div>`;
+      document.body.appendChild(w); const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
+      let users=[]; try{ const j=await (await _fetch('/api/admin/users-access')).json(); users=j.users||[]; }catch{}
+      const info=w.querySelector('#vau-info'), ok=w.querySelector('[data-d="ok"]'); let pick=null;
+      const lab=(k)=>TITLES[k]||k; const rl=(r)=>RBAC_ROLE_LABEL[r]||r;
+      const show=(u)=>{ pick=u; ok.disabled=!u; if(!u){ info.innerHTML=''; return; }
+        info.innerHTML=`<div><b>${esc(u.name)}</b>${u.position?' · '+esc(u.position):''}</div><div style="margin-top:4px">Роли: <b>${esc((u.roles||[]).map(rl).join(' + '))}</b> <span class="c-gray">${u.manual?'(назначены вручную в Настройках → Роли)':'(по отделу Bitrix)'}</span></div>
+          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center"><span class="c-gray">Правит (${u.write.length}):</span> ${u.write.map(k=>`<span class="badge" style="background:#dcfce7;color:#166534;margin:2px">${esc(lab(k))}</span>`).join('')||'—'}</div>
+          <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center"><span class="c-gray">Только смотрит (${u.view.length}):</span> ${u.view.map(k=>`<span class="badge" style="background:#eef2f7;color:#334155;margin:2px">${esc(lab(k))}</span>`).join('')||'—'}</div>`; };
+      info.innerHTML=users.length?'Начните вводить фамилию.':'Список сотрудников недоступен (нет связи с Bitrix).';
+      comboBox(w.querySelector('#vau-cb'),{items:users.map(u=>({id:u.id,label:`${u.name}${u.position?' · '+u.position:''} — ${(u.roles||[]).map(rl).join(' + ')}`,u})),placeholder:'фамилия сотрудника…',onPick:(it)=>show(it.u)});
+      ok.onclick=async()=>{ if(!pick)return; ok.disabled=true; try{ const r=await _fetch('/api/admin/view-as',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:pick.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); location.reload(); }catch(e){ ok.disabled=false; toast('Не удалось: '+(e.message||e),'err'); } };
+    }
     const TITLES={board:'Производственная доска',station:'Рабочее место',orders:'Заказы (ПЗ)',routes:'Маршруты (Ф.13)',setup:'Карты наладки',control:'Контроль качества',
       counterparties:'Контрагенты',settings:'Настройки',sales:'Продажи (ДП–З.1)',lov:'Оценки выполнимости (ЛОВ)',purchase:'Закупки',catalog:'Каталог канон-номенклатуры',onec:'Материалы по 1С',retro:'Бухгалтерия · производство',cabinet:'Мой кабинет',nc:'Несоответствия и КД',eco:'Экология',ot:'Охрана труда',docs:'Документы ИСМ',design:'Проектирование (КД/ТД)',dossier:'Досье проекта (расчёты, испытания, фото)',warehouse:'Склад (ДП–СХ)',equipment:'Участки и оборудование (ДП–О.3)',tools:'Инструмент и оснастка (ДП–О.3.1)',si:'Средства измерения (СИ)',metal:'Учёт остатков металла',prodgroups:'Продуктовые группы',logistics:'Логистика · Заявки на перевозку'};
     // заглушки блоков ИСМ — тексты по утверждённым процедурам/Руководству ИСМ (ИСМ-РК)

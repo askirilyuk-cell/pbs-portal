@@ -11939,7 +11939,7 @@ const RBAC_MATRIX = {
   // ОТК — Входной контроль/Приказы-Штампы-Утверждения ✏; Заказы/КД/Склад/Маршруты/Документы 👁.
   'ОТК': { dossier: 'write', control: 'write', board: 'view', station: 'view', orders: 'view', design: 'view', warehouse: 'view', onec: 'view', routes: 'view', docs: 'view' },
   // Инструментальщик — Инструмент ✏; всё остальное 👁; Настройки — нет (Анохин: работает с инструментом, остальное просмотр).
-  'Инструментальщик': { _all: 'view', tools: 'write', settings: null },
+  'Инструментальщик': { _all: 'view', tools: 'write', settings: null, sales: null, counterparties: null, logistics: null, eco: null, ot: null, lov: null }, // K-328 (Александр 26.09): Анохину не нужны продажи, контрагенты, логистика, экология, ОТ, ЛОВ
   // Наблюдатель — всё 👁; Настройки — нет.
   'Наблюдатель': { _all: 'view', settings: null },
   // Сотрудник (отдел не сопоставлен) — минимум: общая доска/заказы + реестр документов.
@@ -11983,6 +11983,7 @@ function rbacAccessMapMulti(roles) {
 // с откатом на снимок сессии (portalRoles) / первичную роль.
 function sessionPortalRoles(session) {
   if (!session) return ['guest'];
+  if (session.isAdmin && session.viewAsUser && Array.isArray(session.viewAsUser.roles) && session.viewAsUser.roles.length) return session.viewAsUser.roles; // K-327
   if (session.isAdmin && session.effectiveRole) return [session.effectiveRole];
   const ov = ROLE_OVERRIDES[String(session.userId)];
   if (ov) { const a = (Array.isArray(ov) ? ov : [ov]).filter(Boolean); if (a.length) return a; }
@@ -12416,6 +12417,7 @@ function handleMe(req, res) {
     department: (s.depts && s.depts[0]) || null, departments: s.depts || [],
     role, effectiveRole, effectiveRoles, isAdmin: !!s.isAdmin, live: isLive(),
     viewAs: (s.isAdmin && s.effectiveRole && s.effectiveRole !== role) ? s.effectiveRole : null,
+    viewAsUser: (s.isAdmin && s.viewAsUser) ? s.viewAsUser : null, // K-327
     roles: s.roles || [], bypass: !!s.bypass,
     isStation: !!s.isStation, station: s.station || null, operator: (() => { const raw = stationSessionRaw(req); if (raw && stationTouch(raw)) persistSessions(); return raw && raw.operator ? { id: raw.operator.id, fio: raw.operator.fio, role: raw.operator.role, since: raw.operator.since } : null; })(), // K-206
     // K-49 Шаг 2/3: флаг enforcement + ОБЪЕДИНЁННАЯ карта доступа набора ролей (для скрытия/read-only на фронте).
@@ -12427,16 +12429,24 @@ async function handleViewAs(req, res) {
   const s = sessionFromReq(req);
   if (!s || !s.isAdmin) return sendJson(res, 403, { error: 'Переключение роли доступно только администратору.' });
   const body = await readBody(req);
+  if (body.userId != null && String(body.userId).trim()) { // K-327: «смотреть как сотрудник» — его набор ролей (назначение → отдел → «Сотрудник»)
+    const uid = String(body.userId).trim(); if (!/^\d+$/.test(uid)) return sendJson(res, 400, { error: 'Нужен числовой id сотрудника Bitrix.' });
+    let u = null; try { const r = await bitrixCall('user.get', { ID: uid }); u = Array.isArray(r) ? r[0] : (r && r.result && r.result[0]); } catch {}
+    if (!u) return sendJson(res, 404, { error: 'Сотрудник не найден в Bitrix.' });
+    const roles = resolvePortalRoles(u); const name = `${u.LAST_NAME || ''} ${u.NAME || ''}`.trim() || ('id' + uid);
+    sessions[s.sid].viewAsUser = { id: uid, name, roles, position: u.WORK_POSITION || '' }; sessions[s.sid].effectiveRole = roles[0]; persistSessions();
+    return sendJson(res, 200, { ok: true, viewAsUser: sessions[s.sid].viewAsUser });
+  }
   const role = String(body.role || '').trim();
   if (!role) return sendJson(res, 400, { error: 'Не указана роль (role).' });
   if (!PORTAL_ROLES.includes(role)) return sendJson(res, 400, { error: 'Неизвестная роль: ' + role, allowed: PORTAL_ROLES });
-  sessions[s.sid].effectiveRole = role; persistSessions();
+  sessions[s.sid].effectiveRole = role; delete sessions[s.sid].viewAsUser; persistSessions();
   return sendJson(res, 200, { ok: true, effectiveRole: role });
 }
 function handleResetView(req, res) {
   const s = sessionFromReq(req);
   if (!s || !s.isAdmin) return sendJson(res, 403, { error: 'Переключение роли доступно только администратору.' });
-  delete sessions[s.sid].effectiveRole; persistSessions();
+  delete sessions[s.sid].effectiveRole; delete sessions[s.sid].viewAsUser; persistSessions();
   return sendJson(res, 200, { ok: true, effectiveRole: s.role || 'Администратор' });
 }
 // K-49: управление ручными назначениями ролей (только Админ).
@@ -12461,7 +12471,7 @@ const ROLE_ABOUT = {
   'Кладовщик': 'Склад, металл, инструмент и оснастка, средства измерения, каталог, закупки, ежемесячные списания в бухгалтерии.',
   'Снабжение': 'Закупки, склад, каталог, материалы 1С, перевозки. Бухгалтерия и контрагенты — просмотр.',
   'ОТК': 'Контроль качества: очередь операций на контроль (годен / брак по единицам), акты входного и приёмочного контроля, несоответствия. Доска, рабочее место, маршрутные карты и чертежи — просмотр.',
-  'Инструментальщик': 'Инструмент, оснастка и средства измерения — ведёт; остальные разделы видит.',
+  'Инструментальщик': 'Инструмент, оснастка и средства измерения — ведёт; производственные разделы видит. Продажи, контрагенты, ЛОВ, логистика, экология и ОТ закрыты.',
   'Наблюдатель': 'Видит все разделы, ничего не меняет.',
 };
 async function handleRolesGet(req, res) {
@@ -12768,6 +12778,15 @@ const server = http.createServer(async (req, res) => {
     req.role = req.roles[0] || 'guest';                    // первичная (для сообщений/обратной совместимости)
     if (p === '/api/me') return handleMe(req, res);
     if (p === '/api/admin/view-as' && req.method === 'POST') { await handleViewAs(req, res); return; }
+    if (p === '/api/admin/users-access' && req.method === 'GET') { // K-327: сотрудники Bitrix → набор ролей → разделы (запись/просмотр)
+      const s0 = req.session; if (!s0 || !s0.isAdmin) return sendJson(res, 403, { error: 'Только администратор.' });
+      try { const out = []; let start = 0;
+        for (let i = 0; i < 10; i++) { const r = await bitrixCall('user.get', { FILTER: { ACTIVE: true }, start }); const batch = Array.isArray(r) ? r : (r.items || []); out.push(...batch); if (batch.length < 50) break; start += 50; }
+        const users = out.filter((u) => u && u.ID && (u.USER_TYPE || 'employee') === 'employee').map((u) => { const roles = resolvePortalRoles(u); const acc = rbacAccessMapMulti(roles); const w = [], v = []; for (const [k, a] of Object.entries(acc)) { if (a === 'write') w.push(k); else if (a === 'view') v.push(k); }
+          return { id: String(u.ID), name: `${u.LAST_NAME || ''} ${u.NAME || ''}`.trim() || ('id' + u.ID), position: u.WORK_POSITION || '', roles, manual: !!ROLE_OVERRIDES[String(u.ID)], write: w, view: v }; }).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        return sendJson(res, 200, { ok: true, users });
+      } catch (e) { return sendJson(res, 200, { ok: false, users: [], warning: String(e.message || e) }); }
+    }
     if (p === '/api/admin/reset-view' && req.method === 'POST') { await handleResetView(req, res); return; }
     if (p === '/api/admin/roles' && req.method === 'GET') { await handleRolesGet(req, res); return; }
     if (p === '/api/admin/roles' && req.method === 'POST') { await handleRolesPost(req, res); return; }

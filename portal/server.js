@@ -7013,6 +7013,11 @@ function buildTaskPatch(body) {
   if (patch['Статус'] === 'Выполнено' && !patch['Дата факт.'] && !body.factDate) {
     patch['Дата факт.'] = new Date().toISOString().slice(0, 10);
   }
+  // K-332 (Александр 26.09): оператор статусы не нажимает. Начало ставится само при переходе в «В работе»,
+  //  завершение — при «Выполнено». Из них считается календарное время операции (график смен — отдельная задача).
+  const nowStamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  if (patch['Статус'] === 'В работе' && !('startedAt' in body)) patch['_autoStart'] = nowStamp;
+  if (patch['Статус'] === 'Выполнено' && !('finishedAt' in body)) patch['Завершено (факт)'] = nowStamp;
   return patch;
 }
 
@@ -14440,7 +14445,13 @@ const server = http.createServer(async (req, res) => {
       try {
         // лента событий: старый статус задачи нужен ДО записи (best-effort, не гейт)
         let evTask = null;
-        if (patch['Статус']) { try { evTask = (await ncListSoft('tasks')).find((x) => String(x.Id ?? x.id) === String(body.id)) || null; } catch { /* soft */ } }
+        if (patch['Статус'] || patch['_autoStart']) { try { evTask = (await ncListSoft('tasks')).find((x) => String(x.Id ?? x.id) === String(body.id)) || null; } catch { /* soft */ } }
+        if (patch['_autoStart']) { // K-332: отметка начала ставится один раз, повторные сохранения её не сдвигают
+          const started = String((evTask && evTask['Начато (факт)']) || '').trim();
+          if (!started) { try { await ncEnsureColumn('tasks', 'Начато (факт)', 'SingleLineText'); } catch {} patch['Начато (факт)'] = patch['_autoStart']; }
+          delete patch['_autoStart'];
+        }
+        if (patch['Завершено (факт)']) { try { await ncEnsureColumn('tasks', 'Завершено (факт)', 'SingleLineText'); } catch {} }
         if (Object.keys(patch).length) await ncUpdate('tasks', body.id, patch);
         // DEF-04: при смене статуса задачи — идемпотентно пересчитать статус ПЗ (best-effort,
         // не влияет на успех сохранения задачи; на доске статус в любом случае выводится на лету).

@@ -13908,6 +13908,7 @@
           <span style="margin-left:auto"></span>
           <button class="tbtn" id="mt-inv" title="Сверка учётных остатков с фактическим наличием на складе"><i class=ic-board2></i> Инвентаризация</button>
           <button class="tbtn" id="mt-find" title="Что есть на складе под задачу — просмотр, без списаний"><i class=ic-search></i> Найти заготовку</button>
+          <button class="tbtn" id="mt-labels" title="Бирка на пруток: по ней пост подтверждает материал. Правило участка: есть бирка — металл заведён в портале"><i class=ic-print></i> Бирки</button>
           <button class="tbtn primary" id="mt-move">↹ Операция</button>
           <button class="tbtn green" id="mt-new">+ Позиция</button>
         </div>
@@ -13927,6 +13928,7 @@
       const rs=host.querySelector('#mt-reset'); if(rs)rs.onclick=()=>{mtRoll='all';mtGrade='';mtFilter='all';mtShowZero=true;mtSel=null;mtItemsBody(host);};
       const mv=host.querySelector('#mt-move'); if(mv)mv.onclick=()=>{const it=items.find(x=>x.code===mtSel)||items[0];openMetalMove(it,'');};
       const nw=host.querySelector('#mt-new'); if(nw)nw.onclick=()=>openMetalEdit(null);
+      const lb=host.querySelector('#mt-labels'); if(lb)lb.onclick=()=>mtLabelsDialog(null);
       const iv=host.querySelector('#mt-inv'); if(iv)iv.onclick=()=>{mtMode='inv';mtInvFacts={};mtBody();};
       const fd=host.querySelector('#mt-find'); if(fd)fd.onclick=()=>{mtMode='find';mtBody();};
       const sz=host.querySelector('#mt-showzero'); if(sz)sz.onchange=()=>{mtShowZero=sz.checked;mtGrid();};
@@ -14014,6 +14016,7 @@
           <button class="tbtn primary" data-act="move">↹ Операция</button>
           <button class="tbtn" data-act="spend">Списать металл</button>
           <button class="tbtn" data-act="edit">Изменить</button>
+          <button class="tbtn" data-act="label" title="Печать бирки на пруток (58×40 мм)"><i class=ic-print></i> Бирка</button>
         </div>
         <div class="card pad" style="display:flex;gap:8px;flex-wrap:wrap">
           ${mk('Остаток',mtNum(it.balance)+' кг','var(--navy)')}
@@ -14033,6 +14036,8 @@
             ${kv('Норма пересчёта',it.norm>0?(mtNum(it.norm)+' кг/ед'):'—')}
             ${kv('Склад',esc(it.warehouse))}
             ${kv('Ячейка',esc(it.cell))}
+            ${kv('Код 1С',it.code1c?`<span class="code" style="font-weight:700;color:var(--navy)">${esc(it.code1c)}</span>`:'<span style="color:#b45309">не привязан — склад не сверить с бухгалтерией</span>')}
+            ${kv('Наименование в 1С',esc(it.name1c))}
           </div>
         </div>
         <div class="card pad">
@@ -14043,6 +14048,7 @@
       const mb=host.querySelector('[data-act="move"]'); if(mb)mb.onclick=()=>openMetalMove(it,'');
       const sb=host.querySelector('[data-act="spend"]'); if(sb)sb.onclick=()=>openMetalMove(it,'Расход');
       const eb=host.querySelector('[data-act="edit"]'); if(eb)eb.onclick=()=>openMetalEdit(it);
+      const lb2=host.querySelector('[data-act="label"]'); if(lb2)lb2.onclick=()=>mtLabelsDialog([it.code]);
       const cb=host.querySelector('[data-act="close"]'); if(cb)cb.onclick=mtCloseDrawer;
     }
 
@@ -14141,6 +14147,40 @@
       };
     }
 
+    // ── K-336: бирки на прутки. Правило участка (владелец, 26.09): есть бирка — металл заведён
+    //  в портале, нет бирки — не заведён. Code128 хранит код латиницей (МС-0067 → MS-0067):
+    //  сканер на посту кириллицу не отдаёт (см. K-282), а именно этим кодом оператор
+    //  подтверждает материал на экране отрезки.
+    function mtLabelsDialog(codes){
+      const list=(MT&&MT.items)||[];
+      const only=Array.isArray(codes)&&codes.length?codes.map(String):null;
+      const pool=only?list.filter(i=>only.includes(i.code)):list.filter(i=>(i.balance||0)>0);
+      if(!pool.length){ toast(only?'Карточка не найдена.':'Нет карточек с остатком: бирку вешают на то, что физически лежит на складе. Сначала оприходуйте металл («↹ Операция» → Приход).','warn'); return; }
+      const chosen=new Set(pool.map(i=>i.code));
+      const rows=pool.map(i=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--sl-100);font-size:13px"><input type="checkbox" data-mc="${esc(i.code)}" checked><span class="code" style="font-weight:700;color:var(--navy)">${esc(i.code)}</span><span>${esc([i.rollType,i.size].filter(Boolean).join(' '))}${i.grade?' · '+esc(i.grade):''}</span><span style="margin-left:auto;color:var(--sl-500)">${mtNum(i.balance)} кг${i.code1c?'':' · без кода 1С'}</span></label>`).join('');
+      const noOnec=pool.filter(i=>!i.code1c).length;
+      const w=document.createElement('div'); w.className='ui-dlg';
+      w.innerHTML=`<div class="ui-dlg-box" role="dialog" style="width:min(740px,94vw)"><div class="ui-dlg-h">Бирки на металл</div><div class="ui-dlg-t">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="display:grid;gap:10px;align-content:start">
+            <label>Размер бирки<br><select id="ml-size" class="rt-inp" style="width:100%"><option value="58x40">58 × 40 мм — рулон этикеток, ходовой</option><option value="100x50">100 × 50 мм — как бирки заготовок с поста</option><option value="58x30">58 × 30 мм — узкая, только код и место</option></select></label>
+            <label>Код на бирке<br><select id="ml-code" class="rt-inp" style="width:100%"><option value="code128">Штрихкод Code128 — читает сканер на посту</option><option value="qr">QR — открывает карточку прутка в портале</option></select></label>
+            <div class="c-gray" style="font-size:13px" id="ml-note"></div>
+          </div>
+          <div><div class="eqd-sec" style="margin-top:0">Карточки · <span id="ml-cnt">${pool.length}</span></div><div style="max-height:44vh;overflow:auto">${rows}</div>
+          ${noOnec?`<div style="margin-top:8px;font-size:12px;color:#b45309">Без кода 1С: ${noOnec}. Такая бирка напечатается, но сверить склад с бухгалтерией по ней не получится — привяжите карточку к номенклатуре 1С в «Изменить».</div>`:''}</div>
+        </div></div><div class="ui-dlg-b"><button class="ui-btn" data-d="cancel">Отмена</button><button class="ui-btn ui-btn--primary" data-d="ok">Печать</button></div></div>`;
+      document.body.appendChild(w);
+      const note=w.querySelector('#ml-note'), cs=w.querySelector('#ml-code');
+      const paint=()=>{ note.innerHTML='На бирке: код карточки (МС-…), что это за прокат, ГОСТ и плавка, место хранения и код 1С. '+(cs.value==='qr'?'QR ведёт на карточку прутка — с телефона в цеховой сети видно остаток и все движения; на посту нужен 2D-сканер.':'Code128 содержит код латиницей (МС-0067 → MS-0067): любой USB-сканер подставит пруток в «Подтвердить материал» на экране отрезки.'); };
+      cs.onchange=paint; paint();
+      const close=()=>w.remove(); w.querySelector('[data-d="cancel"]').onclick=close; w.onclick=(e)=>{ if(e.target===w)close(); };
+      w.querySelectorAll('[data-mc]').forEach(c=>c.onchange=()=>{ c.checked?chosen.add(c.dataset.mc):chosen.delete(c.dataset.mc); w.querySelector('#ml-cnt').textContent=chosen.size; });
+      w.querySelector('[data-d="ok"]').onclick=()=>{ if(!chosen.size){ toast('Отметьте хотя бы одну карточку.','warn'); return; }
+        const size=w.querySelector('#ml-size').value, code=cs.value; close();
+        window.open('/api/metal/labels?size='+encodeURIComponent(size)+'&code='+encodeURIComponent(code)+'&codes='+encodeURIComponent([...chosen].join(',')),'_blank'); };
+    }
+
     // ── Форма заведения / правки позиции остатка ──
     function openMetalEdit(it){
       if(!MT||MT.mode!=='live'){ toast('Заведение доступно только в LIVE-режиме (нужен токен NocoDB).','err'); return; }
@@ -14160,6 +14200,13 @@
             <div style="grid-column:span 6">${FLAB('Ячейка')}<input id="me-cell" style="${FINP}" value="${esc(it.cell||'')}"></div>
             ${edit?'':`<div style="grid-column:span 4">${FLAB('Стартовый остаток, кг')}<input id="me-bal" type="number" step="any" style="${FINP}" placeholder="0"></div>`}
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="me-note" style="${FINP}" value="${esc(it.note||'')}"></div>
+            <div style="grid-column:span 12;background:#f7f9fc;border:1px solid var(--sl-200);border-radius:var(--r-s);padding:10px 12px">
+              <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sl-500)">Что это по бухучёту (1С)</div>
+              <div style="font-size:12px;color:var(--sl-500);margin:4px 0 7px">По этой номенклатуре склад сверяется с бухгалтерией, и её код попадёт на бирку. Ищите по названию («круг 250», «труба квадрат») или по коду (БП-00004284).</div>
+              <input id="me-1cq" style="${FINP}" placeholder="круг 250 · труба квадрат 50 · БП-00004284" autocomplete="off">
+              <div id="me-1cres" style="margin-top:6px"></div>
+              <div id="me-1csel" style="margin-top:7px;font-size:13px"></div>
+            </div>
           </div>
           <div id="me-err" style="margin-top:12px;color:#b91c1c;font-size:13px"></div>
           <div style="margin-top:14px;padding-top:13px;border-top:1px solid var(--sl-200);display:flex;align-items:center;gap:10px">
@@ -14170,16 +14217,35 @@
             </div></div></div>`;
       modal.classList.add('open'); mscrim.classList.add('open');
       document.getElementById('mx').onclick=closeModal; document.getElementById('me-cancel').onclick=closeModal;
+      // K-336: привязка карточки к номенклатуре 1С — «определить, что это по бухучёту», и код на бирку
+      let pick1c=it.code1c?{code:it.code1c,name:it.name1c||'',key:it.key1c||''}:null, t1c=null;
+      const paint1c=()=>{ const h=document.getElementById('me-1csel'); if(!h)return;
+        h.innerHTML=pick1c?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="code" style="font-weight:700;color:var(--navy)">${esc(pick1c.code)}</span><span>${esc(pick1c.name||'')}</span>${pick1c.balance!=null?`<span style="color:var(--sl-500)">в 1С ${mtNum(pick1c.balance)} ${esc(pick1c.unit||'')}</span>`:''}<button class="tbtn" id="me-1cclr" style="padding:2px 8px;font-size:12px">убрать</button></div>`
+          :'<span style="color:#b45309">Не привязано к 1С: бирка напечатается без кода бухучёта, сверка склада с 1С по этой карточке не сойдётся.</span>';
+        const c=document.getElementById('me-1cclr'); if(c)c.onclick=()=>{pick1c=null;paint1c();}; };
+      const q1=document.getElementById('me-1cq');
+      if(q1)q1.oninput=()=>{ clearTimeout(t1c); const v=q1.value.trim(); const rh=document.getElementById('me-1cres'); if(!rh)return;
+        if(v.length<2){ rh.innerHTML=''; return; }
+        rh.innerHTML='<span style="font-size:12px;color:var(--sl-500)">ищу в номенклатуре 1С…</span>';
+        t1c=setTimeout(async()=>{ try{ const j=await (await fetch('/api/metal/onec-search?q='+encodeURIComponent(v))).json(); const rows=j.items||[];
+            rh.innerHTML=rows.length?`<div style="max-height:186px;overflow:auto;border:1px solid var(--sl-200);border-radius:var(--r-s);background:#fff">${rows.map((r,i)=>`<div class="me-1copt" data-i="${i}" style="padding:6px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--sl-100)"><b style="color:var(--navy)">${esc(r.code)}</b> ${esc(r.name)}<div style="font-size:11px;color:var(--sl-500)">${r.hasStock?('остаток '+mtNum(r.balance)+' '+esc(r.unit||'')):'нет остатка в 1С'}${r.warehouses?' · '+esc(r.warehouses):''}</div></div>`).join('')}</div>${j.total>rows.length?`<div style="font-size:11px;color:var(--sl-500);margin-top:3px">первые ${rows.length} из ${j.total} — уточните запрос</div>`:''}`
+              :'<span style="font-size:12px;color:#b45309">Ничего не нашлось. Проверьте написание или обновите зеркало в разделе «1С».</span>';
+            rh.querySelectorAll('.me-1copt').forEach(el=>el.onclick=()=>{ pick1c=rows[+el.dataset.i]; rh.innerHTML=''; q1.value=''; paint1c(); });
+          }catch(e){ rh.innerHTML='<span style="font-size:12px;color:#b91c1c">не удалось: '+esc(e.message||e)+'</span>'; } },350); };
+      paint1c();
       document.getElementById('me-save').onclick=async()=>{
         const err=document.getElementById('me-err'); err.textContent='';
         const V=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
         const roll=V('me-roll'); const body={ grade:V('me-grade'), rollType:roll==='—'?'':roll, size:V('me-size'), gost:V('me-gost'), norm:V('me-norm'), minStock:V('me-min'), warehouse:V('me-wh'), cell:V('me-cell'), note:V('me-note') };
+        if(pick1c){ body.code1c=pick1c.code||''; body.name1c=pick1c.name||''; body.key1c=pick1c.key||''; }
         if(edit)body.id=it.id; else if(V('me-bal'))body.balance=Number(V('me-bal'));
         if(!body.grade){ err.textContent='Укажите марку.'; toast('Укажите марку.','err'); return; }
         const btn=document.getElementById('me-save'); btn.disabled=true; btn.textContent='Сохранение…';
         try{ const j=await postJson('/api/metal/save',body);
           toast(`Позиция ${j.code} ${j.created?'заведена':'обновлена'}.`,'ok');
-          MT=null; mtCardCache={}; mtSel=j.code; closeModal(); renderMetal(document.getElementById('view'));
+          MT=null; mtCardCache={}; mtSel=j.code; closeModal(); await renderMetal(document.getElementById('view'));
+          // K-336: заведение без бирки не считается — пруток в цехе останется «незаведённым»
+          if(await uiConfirm(`Карточка ${j.code} ${j.created?'заведена':'обновлена'}. Напечатать бирку и повесить на пруток?`,{ok:'Печать бирки',cancel:'Позже'})) mtLabelsDialog([j.code]);
         }catch(e){ err.textContent=e.message; toast('Не сохранено: '+e.message,'err'); btn.disabled=false; btn.textContent=edit?'Сохранить':'Завести'; }
       };
     }

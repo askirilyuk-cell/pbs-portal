@@ -10049,6 +10049,8 @@ function metalShape(it, movements, remnants) {
     unitLabel: rollType === 'Круг' ? 'прутков' : (rollType === 'Труба' ? 'м' : 'листов'),
     belowMin, stockLevel, warehouse: it['Склад по умолчанию'] || '', cell: it['Ячейка'] || '',
     note: it['Примечание'] || '', canonId, lastIncoming,
+    // K-336: привязка к номенклатуре 1С (сверка склада с бухучётом, печать бирки)
+    code1c: String(it['Код 1С'] || '').trim(), name1c: String(it['Наименование 1С'] || '').trim(), key1c: String(it['Ключ 1С'] || '').trim(),
   };
 }
 // GET-модель раздела: реестр остатков + KPI + сигналы дефицита + доступно
@@ -10128,6 +10130,8 @@ async function metalNextRemnantCode() {
 const METAL_WRITE = {
   'Марка': 'grade', 'Типоразмер': 'size', 'ГОСТ': 'gost', 'Ед. изм.': 'unit',
   'Склад по умолчанию': 'warehouse', 'Ячейка': 'cell', 'Примечание': 'note',
+  // K-336: чем этот пруток является по бухучёту — ставится при заведении карточки, идёт на бирку
+  'Код 1С': 'code1c', 'Наименование 1С': 'name1c', 'Ключ 1С': 'key1c',
 };
 function metalBuildPatch(body) {
   const patch = {};
@@ -10162,6 +10166,90 @@ async function metalSave(body) {
     created = true;
   }
   return { ok: true, id, code, created };
+}
+// ── K-336: «есть бирка → заведено в портале» (правило участка, владелец 26.09) ─────────────
+//  Кладовщик находит в цехе пруток без бирки, определяет по 1С, что это, заводит карточку
+//  МС-NNNN и тут же печатает бирку. Дальше пост участка подтверждает материал сканом этой
+//  бирки (Code128 хранит код латиницей, MS-0067 — с поста кириллицу не набрать, см. K-282).
+//  GET /api/metal/onec-search?q= — подбор номенклатуры из зеркала «Материалы 1С» (K-156).
+let _metalOnecCache = { at: 0, rows: [] };
+async function metalOnecSearch(q) {
+  const needle = String(q || '').trim().toLowerCase();
+  // зеркало 1С — 4+ тыс. строк, ncList режет на 1000: читаем постранично и держим 5 минут в памяти
+  if (!_metalOnecCache.rows.length || Date.now() - _metalOnecCache.at > 5 * 60 * 1000) {
+    try { _metalOnecCache = { at: Date.now(), rows: await ncListAll('onec_items') }; } catch { _metalOnecCache = { at: Date.now(), rows: [] }; }
+  }
+  const rows = _metalOnecCache.rows;
+  const shape = (r) => ({
+    key: String(r['Ключ 1С'] || '').trim(), code: String(r['Код 1С'] || '').trim(),
+    name: String(r['Наименование'] || '').trim(), unit: String(r['ЕИ'] || '').trim(),
+    group: String(r['Группа'] || '').trim(), balance: whNum(r['Остаток']), cost: whNum(r['Себестоимость']),
+    warehouses: String(r['Остатки по складам'] || '').trim(), hasStock: r['Есть остаток'] === true || r['Есть остаток'] === 1,
+    syncedAt: String(r['Синхронизировано'] || '').trim(),
+  });
+  let list = rows.filter((r) => !(r['Пометка удаления'] === true || r['Пометка удаления'] === 1) && !(r['Услуга'] === true || r['Услуга'] === 1)).map(shape);
+  if (needle) list = list.filter((x) => x.name.toLowerCase().includes(needle) || x.code.toLowerCase().includes(needle));
+  // сначала то, что реально лежит на складе: искомый пруток скорее там, чем в архивной номенклатуре
+  list.sort((x, y) => (Number(y.hasStock) - Number(x.hasStock)) || (y.balance - x.balance) || x.name.localeCompare(y.name, 'ru'));
+  return { items: list.slice(0, 25), total: list.length, syncedAt: (list[0] && list[0].syncedAt) || '' };
+}
+// GET /api/metal/labels?codes=МС-0067,МС-0068&size=&code= — бирки на прутки.
+//  Размеры: 58×40 (ходовой рулон), 100×50 (как бирки заготовок с поста), 58×30 (узкая).
+const METAL_LABEL_SIZES = { '58x40': { w: 58, h: 40 }, '100x50': { w: 100, h: 50 }, '58x30': { w: 58, h: 30 } };
+async function metalLabelsHtml(codes, size, codeKind) {
+  const sz = METAL_LABEL_SIZES[size] || METAL_LABEL_SIZES['58x40'];
+  const [items, movements, remnants] = await Promise.all([ncListSoft('metal_stock'), ncListSoft('metal_movements'), ncListSoft('metal_remnants')]);
+  const want = (codes || []).map((c) => String(c).trim().toUpperCase()).filter(Boolean);
+  let rows = items.map((it) => metalShape(it, movements, remnants));
+  if (want.length) rows = rows.filter((r) => want.includes(String(r.code).toUpperCase()));
+  rows.sort((x, y) => String(x.code).localeCompare(String(y.code), 'ru'));
+  // плавка/сертификат — из последнего прихода по карточке (прослеживаемость на самой бирке)
+  const heatOf = (code) => {
+    let best = null;
+    for (const m of movements) { const mv = metalParseMovement(m); if (mv.op !== 'Приход' || mv.code !== code || !mv.heatNo) continue; const id = Number(mv.id) || 0; if (!best || id > best.id) best = { id, heatNo: mv.heatNo }; }
+    return best ? best.heatNo : '';
+  };
+  const base = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '') || 'http://nas-pbs:4173';
+  const big = sz.w >= 90, narrow = sz.h <= 32;
+  const F = big ? { code: 26, main: 13, line: 9.5, foot: 7.5, qr: 20, bar: 8 }
+    : (narrow ? { code: 15, main: 8.5, line: 6.2, foot: 5.4, qr: 12, bar: 5 }
+      : { code: 19, main: 11, line: 7.6, foot: 6.4, qr: 15, bar: 6.5 });
+  const qr = codeKind === 'qr' && !!qrcodeLib;
+  const today = new Date().toISOString().slice(0, 10).split('-').reverse().join('.');
+  const cards = rows.map((r) => {
+    const what = [r.rollType, r.size].filter(Boolean).join(' ') + (r.grade ? ' · ' + r.grade : '');
+    const heat = heatOf(r.code);
+    const place = [r.warehouse, r.cell].filter(Boolean).join(' · ');
+    const onec = r.code1c ? r.code1c + (r.name1c && !narrow ? ' · ' + r.name1c : '') : 'код 1С не указан';
+    const lines = [
+      r.gost || heat ? [r.gost, heat ? 'плавка ' + heat : ''].filter(Boolean).join(' · ') : '',
+      place ? 'место: ' + place : 'место хранения не указано',
+      '1С: ' + onec,
+      // остаток на бирку НЕ пишем (владелец, 26.09): он меняется после каждого реза, бумажка
+      // мгновенно врёт. Бирка несёт только неизменное: код карточки, что это, плавку, место, 1С.
+      // примечание карточки на бирку тоже не идёт: это служебный текст склада, не признак прутка.
+    ].filter(Boolean);
+    const codeBlock = qr ? `<div class="qr">${qrSvg(base + '/#metal/' + encodeURIComponent(r.code), F.qr)}</div>`
+      : `<div class="bc">${code128Svg(asciiBar(r.code), 30)}<div class="bt">${hesc(asciiBar(r.code))}</div></div>`;
+    return `<div class="lb"><div class="top"><div class="txt"><div class="cd">${hesc(r.code)}</div>`
+      + `<div class="mn">${hesc(what || '—')}</div>`
+      + lines.map((l) => `<div class="ln">${hesc(l)}</div>`).join('')
+      + `</div>${qr ? codeBlock : ''}</div>`
+      + `${qr ? '' : codeBlock}`
+      + `<div class="ft">ООО «Петробалт Сервис» · ${hesc(today)}</div></div>`;
+  }).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Бирки на металл ${sz.w}×${sz.h} мм</title><style>`
+    + `@page{size:${sz.w}mm ${sz.h}mm;margin:0}body{margin:0;font-family:system-ui,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
+    + `.lb{width:${sz.w}mm;height:${sz.h}mm;box-sizing:border-box;padding:${narrow ? '1mm 1.6mm' : '1.8mm 2.4mm'};page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}`
+    + `.top{display:flex;gap:2mm;align-items:flex-start;min-width:0}.txt{min-width:0;flex:1}`
+    + `.cd{font-size:${F.code}pt;font-weight:800;line-height:1.02;letter-spacing:.01em}`
+    + `.mn{font-size:${F.main}pt;font-weight:700;line-height:1.1;margin-top:.4mm;overflow-wrap:anywhere}`
+    + `.ln{font-size:${F.line}pt;line-height:1.2;color:#111;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}`
+    + `.qr{flex:0 0 auto;line-height:0}.qr svg{display:block}`
+    + `.bc{line-height:0;margin-top:.8mm}.bc svg{width:100%;height:${F.bar}mm;display:block}.bt{font-size:${F.foot}pt;letter-spacing:.06em;text-align:center;line-height:1.25;margin-top:.3mm;font-family:ui-monospace,Menlo,monospace}`
+    + `.ft{font-size:${F.foot}pt;color:#444;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`
+    + `@media screen{body{background:#eee;padding:10px}.lb{background:#fff;margin:0 0 6px;border:.2mm dashed #999}}`
+    + `</style></head><body>${cards || '<p>Карточки металла не найдены.</p>'}<scr` + `ipt>setTimeout(function(){window.print()},300)</scr` + `ipt></body></html>`;
 }
 // POST /api/metal/move — операции с металлом → журнал + пересчёт «Остаток после» + кэш реестра
 async function metalMove(body) { return withClientOpId(body && body.clientOpId, () => metalMoveImpl(body)); }
@@ -14849,6 +14937,17 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 200, { mode: 'mock', items: [] });
       try { return sendJson(res, 200, await buildMetalIntake()); }
       catch (e) { return sendJson(res, 200, { mode: 'mock', items: [], warning: String(e.message || e) }); }
+    }
+    if (p === '/api/metal/onec-search') { // K-336: «что это по бухучёту» — подбор номенклатуры 1С при заведении карточки
+      if (!isLive()) return sendJson(res, 200, { items: [], total: 0, warning: 'нужен токен NocoDB' });
+      try { return sendJson(res, 200, await metalOnecSearch(url.searchParams.get('q'))); }
+      catch (e) { return sendJson(res, 200, { items: [], total: 0, warning: String(e.message || e) }); }
+    }
+    if (p === '/api/metal/labels' && req.method === 'GET') { // K-336: бирки на прутки (58×40 / 100×50 / 58×30)
+      try {
+        const html = await metalLabelsHtml(String(url.searchParams.get('codes') || '').split(',').filter(Boolean), url.searchParams.get('size') || '58x40', url.searchParams.get('code') || 'code128');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html);
+      } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
     if (p === '/api/metal/save' && req.method === 'POST') { // заведение/правка позиции (автонумер МС-NNNN)
       if (!isLive()) return sendJson(res, 501, { error: 'Заведение позиции металла доступно только в LIVE-режиме: задайте токен NocoDB.' });

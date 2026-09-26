@@ -12974,7 +12974,9 @@
       const C=t.control||{};
       const ctl=(C.point&&C.point!=='нет')?([C.what,C.tol,C.si].filter(Boolean).join(' · ')+(C.point?` (${esc(C.point)})`:'')):'';
       // «Выполнено» рабочий вручную не ставит — оно производное от приёмки журнала (кнопка «Закрыть задачу»)
-      const statusBtns=['В очереди','В работе','Приостановлено'].map(s=>`<button class="st-sbtn ${s===t.status?'on':''}" data-st="${esc(s)}" ${ro?'disabled':''}>${esc(s)}</button>`).join('');
+      // K-331 (Александр 26.09): паузы на чай и перерывы оператор не отмечает — нужно общее производственное время.
+      //  Кнопка «Приостановлено» убрана с экрана оператора; если статус уже стоит (поставлен мастером) — показываем как есть.
+      const statusBtns=(['В очереди','В работе'].concat(t.status==='Приостановлено'?['Приостановлено']:[])).map(s=>`<button class="st-sbtn ${s===t.status?'on':''}" data-st="${esc(s)}" ${ro?'disabled':''}>${esc(s)}</button>`).join('');
       const normStr=p=>[p.norm,p.tol].filter(x=>x!==''&&x!=null).join(' ');
       const byProg=(t.params||[]).some(p=>/^программа/i.test(p.name||'')&&/^по УП/i.test(String(p.norm||''))); // K-252: режимы задаёт программа — оператору нечего вводить
       const paramRows=(t.params||[]).filter(p=>!(byProg&&/^программа/i.test(p.name||''))).map(p=>`<div class="st-param">
@@ -13295,7 +13297,7 @@
               <div class="cut-card"><div class="h">Ход операции</div><div class="c">
                 <div class="cut-kv"><span class="k">Начата</span><span>${st.startedAt?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+cutElapsed(st.startedAt):'—'}</span><span class="k">Норма / факт</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'} / ${st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10+' ч':'—'}</span></div>
                 <div class="cut-btns">
-                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?`<button class="cut-btn" id="cut-pause">⏸ Приостановить…</button>`:`<button class="cut-btn big pri" id="cut-start">▶ ${st.status==='Приостановлено'?'Продолжить':'Начать'}</button>`)}
+                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?'<span class="cut-pill wip">операция идёт · время считается общее</span>':`<button class="cut-btn big pri" id="cut-start">▶ ${st.status==='Приостановлено'?'Продолжить':'Начать'}</button>`)}
                   <button class="cut-btn big ok" id="cut-finish" ${done&&st.status!=='Выполнено'?'':'disabled'}>Завершить → ${t.nextOp?'передать на оп. '+esc(String(t.nextOp.num))+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'на склад/сборку'}</button>
                 </div>
                 <div class="cut-btns"><button class="cut-btn ghost sm" id="cut-labels" ${acc?'':'disabled'}>🖨 Бирки на заготовки</button><button class="cut-btn ghost sm" id="cut-save">Сохранить</button><span class="cut-note" id="cut-msg"></span></div>

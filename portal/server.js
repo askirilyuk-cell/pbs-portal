@@ -8987,6 +8987,10 @@ function eqShape(r) {
     spindleBore: eqNum(r['Проходное отверстие шпинделя, мм']),
     holderSecExt: String(r['Сечение державок (наружн.)'] || '').trim(),
     holderSecInt: String(r['Сечение державок (внутр.), Ø'] || '').trim(),
+    // K-329: стойка ЧПУ и сетевое подключение станка (для обмена программами и данными инструмента)
+    cncControl: String(r['Стойка ЧПУ'] || '').trim(),
+    cncIp: String(r['Адрес стойки (сеть)'] || '').trim(),
+    cncLink: String(r['Как подключён'] || '').trim(),
   };
 }
 // эффективное число позиций револьвера станка: из паспорта или дефолт 12 (станки бывают с меньшим числом гнёзд)
@@ -9077,6 +9081,7 @@ function eqBuildPatch(body) {
   if (body.spindleBore != null && body.spindleBore !== '') patch['Проходное отверстие шпинделя, мм'] = Number(body.spindleBore);
   if (body.holderSecExt != null && String(body.holderSecExt).trim() !== '') patch['Сечение державок (наружн.)'] = String(body.holderSecExt).trim();
   if (body.holderSecInt != null && String(body.holderSecInt).trim() !== '') patch['Сечение державок (внутр.), Ø'] = String(body.holderSecInt).trim();
+  for (const [col, key] of EQ_CNC_FIELDS) { if (body[key] != null) patch[col] = String(body[key]).trim(); } // K-329
   return patch;
 }
 // migrate-041: колонки токарных ТТХ станка — defensive ensure (карта наладки/кулачки тянут патрон отсюда).
@@ -9086,7 +9091,10 @@ async function eqEnsureTurningCols() {
   for (const [t, u] of cols) { try { await ncEnsureColumn('equipment', t, u); } catch (e) { console.warn('equipment: колонка ТТХ не создана:', t, e.message); } }
 }
 // создать/обновить оборудование (автонумер ОБ-NNN при создании) + привязка к участку
+// K-329: стойка ЧПУ и сеть станка — колонки создаются на лету (FORWARD-TOLERANT)
+const EQ_CNC_FIELDS = [['Стойка ЧПУ', 'cncControl'], ['Адрес стойки (сеть)', 'cncIp'], ['Как подключён', 'cncLink']];
 async function equipmentSave(body) {
+  for (const [col, key] of EQ_CNC_FIELDS) { if (body[key] != null && String(body[key]).trim()) { try { await ncEnsureColumn('equipment', col, 'SingleLineText'); } catch {} } }
   const rows = await ncListSoft('equipment');
   const existing = (body.id != null && body.id !== '' && rows.find((r) => String(r.Id ?? r.id) === String(body.id)))
     || (body.invNo && rows.find((r) => String(r['Инв. №'] || '').trim() === String(body.invNo).trim()));

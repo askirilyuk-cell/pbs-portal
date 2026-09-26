@@ -10957,6 +10957,7 @@
             ${F('Тип головки',esc(it.headType))}${F('Позиций револьвера',eqVal(it.revolverSlots),true)}${F('Патрон — тип',esc(it.chuckTypeEq))}
             ${F('Ø патрона, мм',eqVal(it.chuckDia),true)}${F('Проходное отверстие шпинделя, мм',eqVal(it.spindleBore),true)}${F('Сечение державок (наружн.)',esc(it.holderSecExt),true)}
             ${F('Сечение державок (внутр.), Ø',esc(it.holderSecInt),true)}
+            ${F('Стойка ЧПУ',esc(it.cncControl))}${F('Адрес стойки (сеть)',esc(it.cncIp),true)}${F('Как подключён',esc(it.cncLink))}
           </div>
           <div class="eqd-sub">Характеристики используются конструктором карт наладки и комплектов кулачков.</div>`;
       }
@@ -11206,6 +11207,9 @@
             <div style="grid-column:span 6">${FLAB('Патрон — тип')}<input id="eqf-chuckTypeEq" style="${FINP}" value="${v('chuckTypeEq')}" placeholder="напр. 3-кулачковый гидравлический"></div>
             <div style="grid-column:span 6">${FLAB('Ø патрона, мм')}<input id="eqf-chuckDia" type="number" step="any" style="${FINP}" value="${edit&&it.chuckDia!=null?esc(String(it.chuckDia)):''}" placeholder="напр. 381"></div>
             <div style="grid-column:span 6">${FLAB('Сечение державок — наружн.')}<input id="eqf-holderSecExt" style="${FINP}" value="${v('holderSecExt')}" placeholder="напр. 32×32"></div>
+            <div style="grid-column:span 4">${FLAB('Стойка ЧПУ')}<input id="eqf-cncControl" style="${FINP}" value="${v('cncControl')}" placeholder="напр. SINUMERIK 828D"></div>
+            <div style="grid-column:span 4">${FLAB('Адрес стойки (сеть)')}<input id="eqf-cncIp" style="${FINP}" value="${v('cncIp')}" placeholder="напр. 192.168.215.1"></div>
+            <div style="grid-column:span 4">${FLAB('Как подключён')}<input id="eqf-cncLink" style="${FINP}" value="${v('cncLink')}" placeholder="напр. кабелем к киоску поста"></div>
             <div style="grid-column:span 6">${FLAB('Сечение державок — внутр., Ø')}<input id="eqf-holderSecInt" style="${FINP}" value="${v('holderSecInt')}" placeholder="напр. 40"></div>
             <div style="grid-column:span 12">${FLAB('Примечание')}<input id="eqf-notes" style="${FINP}" value="${v('notes')}"></div>
           </div>
@@ -11229,7 +11233,7 @@
           commissionedAt:V('eqf-commissionedAt'), to1Last:V('eqf-to1Last'), to1Next:V('eqf-to1Next'),
           isCnc:V('eqf-isCnc'), notes:V('eqf-notes'), sectionId:V('eqf-section'),
           headType:V('eqf-headType'), revolverSlots:V('eqf-revolverSlots'), spindleBore:V('eqf-spindleBore'),
-          chuckTypeEq:V('eqf-chuckTypeEq'), chuckDia:V('eqf-chuckDia'), holderSecExt:V('eqf-holderSecExt'), holderSecInt:V('eqf-holderSecInt') };
+          chuckTypeEq:V('eqf-chuckTypeEq'), chuckDia:V('eqf-chuckDia'), holderSecExt:V('eqf-holderSecExt'), holderSecInt:V('eqf-holderSecInt'), cncControl:V('eqf-cncControl'), cncIp:V('eqf-cncIp'), cncLink:V('eqf-cncLink') };
         if(edit)body.id=it.id;
         if(!body.name){ err.textContent='Укажите наименование оборудования.'; toast('Укажите наименование.','err'); return; }
         const btn=document.getElementById('eqf-save'); btn.disabled=true; btn.textContent='Сохранение…';

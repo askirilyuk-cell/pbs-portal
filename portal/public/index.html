@@ -12976,17 +12976,10 @@
       // «Выполнено» рабочий вручную не ставит — оно производное от приёмки журнала (кнопка «Закрыть задачу»)
       // K-331/K-332 (Александр 26.09): оператор статусы не нажимает вообще. «В работе» ставится сама при первом
       //  сохранении задания, «Выполнено» — кнопкой «Готово». Показываем состояние и календарное время операции.
-      const stElapsed=(from,to)=>{ const a=Date.parse(String(from||'').replace(' ','T')); if(!a)return ''; const b=to?Date.parse(String(to).replace(' ','T')):Date.now(); if(!b||b<a)return '';
-        const m=Math.round((b-a)/60000), d=Math.floor(m/1440), h=Math.floor((m%1440)/60), mm=m%60;
-        return (d?d+' сут ':'')+(d||h?h+' ч ':'')+mm+' мин'; };
+      // K-334: оператору показываем только состояние одним словом, без времён и подсказок
       const stStateBox=(()=>{ const st=t.status||'В очереди';
         const cls=st==='Выполнено'?'#15803d':(st==='В работе'?'#1F4E79':'#64748b');
-        const since=t.startedAt?` · начата ${esc(String(t.startedAt).slice(0,16).replace("T"," "))}`:'';
-        const el=t.startedAt?stElapsed(t.startedAt,t.status==='Выполнено'?(t.finishedAt||t.factDate):null):'';
-        return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <span style="font-size:20px;font-weight:800;color:${cls}">${esc(st)}</span>
-          <span class="pu" style="font-size:13px">${since}${el?` · идёт ${esc(el)}`:''}</span></div>
-          ${t.status==='В очереди'?'<div class="st-hint" style="margin-top:6px">Задача перейдёт «в работу» сама, как только вы сохраните первые данные. Отмечать начало не нужно.</div>':''}`; })();
+        return `<span style="font-size:20px;font-weight:800;color:${cls}">${esc(st)}</span>`; })();
       const statusBtns=stStateBox;
       const normStr=p=>[p.norm,p.tol].filter(x=>x!==''&&x!=null).join(' ');
       const byProg=(t.params||[]).some(p=>/^программа/i.test(p.name||'')&&/^по УП/i.test(String(p.norm||''))); // K-252: режимы задаёт программа — оператору нечего вводить
@@ -13308,10 +13301,9 @@
                 <div class="cut-note">Скан подтверждает, из чего режем; если пруток другой — выберите его, списание пойдёт с правильной карточки.${m&&bi.blank&&bi.blank.grade&&m.grade&&String(m.grade).toLowerCase()!==String(bi.blank.grade).toLowerCase()?' <b style="color:#b91c1c">Марка отличается от МК ('+esc(bi.blank.grade)+')!</b>':''}</div>
               </div></div>
               <div class="cut-card"><div class="h">Ход операции</div><div class="c">
-                <div class="cut-kv"><span class="k">Начата</span><span>${(st.startedAt&&st.status!=='В очереди')?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})):'—'}</span><span class="k">Норма</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'}${(t.factTime!==''&&t.factTime!=null)?` · факт ${esc(String(t.factTime))} ч`:''}</span></div>
-                ${(st.startedAt&&st.status==='В работе')?`<div class="cut-kv"><span class="k">Идёт (календарно)</span><span class="cut-mono">${esc(cutElapsed(st.startedAt))}</span><span class="k"></span><span style="font-size:12px;color:#94a3b8">обед, ночь и переходы на другие детали сюда входят</span></div>`:''}
+                <!-- K-334 (Александр 26.09): время и норму оператору не показываем — время фиксируется само, норма есть в блоке «Задание» -->
                 <div class="cut-btns">
-                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?'<span class="cut-pill wip">операция идёт</span>':'<span class="cut-pill">в очереди · начнётся сама при первом замере</span>')}
+                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':''}
                   <button class="cut-btn big ok" id="cut-finish" ${done&&st.status!=='Выполнено'?'':'disabled'}>Завершить → ${t.nextOp?'передать на оп. '+esc(String(t.nextOp.num))+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'на склад/сборку'}</button>
                 </div>
                 <div class="cut-btns"><button class="cut-btn ghost sm" id="cut-labels" ${acc?'':'disabled'}>🖨 Бирки на заготовки</button><button class="cut-btn ghost sm" id="cut-save">Сохранить</button><span class="cut-note" id="cut-msg"></span></div>

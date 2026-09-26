@@ -13310,7 +13310,7 @@
               <div class="cut-card"><div class="h">Ход операции</div><div class="c">
                 <div class="cut-kv"><span class="k">Начата</span><span>${st.startedAt?esc(new Date(st.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+cutElapsed(st.startedAt):'—'}</span><span class="k">Норма / факт</span><span class="cut-mono">${t.normTime!==''&&t.normTime!=null?esc(String(t.normTime))+' ч':'—'} / ${st.startedAt?Math.round((Date.now()-new Date(st.startedAt).getTime())/36e4)/10+' ч':'—'}</span></div>
                 <div class="cut-btns">
-                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?'<span class="cut-pill wip">операция идёт · время считается общее</span>':`<button class="cut-btn big pri" id="cut-start">▶ ${st.status==='Приостановлено'?'Продолжить':'Начать'}</button>`)}
+                  ${st.status==='Выполнено'?'<span class="cut-pill ok">операция завершена</span>':(st.status==='В работе'?'<span class="cut-pill wip">операция идёт · время считается общее</span>':`<button class="cut-btn big pri" id="cut-start">▶ Начать</button>`)}
                   <button class="cut-btn big ok" id="cut-finish" ${done&&st.status!=='Выполнено'?'':'disabled'}>Завершить → ${t.nextOp?'передать на оп. '+esc(String(t.nextOp.num))+(t.nextOp.section?' ('+esc(t.nextOp.section)+')':''):'на склад/сборку'}</button>
                 </div>
                 <div class="cut-btns"><button class="cut-btn ghost sm" id="cut-labels" ${acc?'':'disabled'}>🖨 Бирки на заготовки</button><button class="cut-btn ghost sm" id="cut-save">Сохранить</button><span class="cut-note" id="cut-msg"></span></div>

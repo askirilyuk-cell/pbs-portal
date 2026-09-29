@@ -680,7 +680,7 @@ function logiBrief(s) {
 }
 // «Заявка на перевозку» из карточки ПЗ: если есть открытая заявка на того же грузополучателя —
 // добавляем в неё лист по этому ПЗ (одна заявка = один грузополучатель, заказов много); иначе новая.
-async function logiFromOrder({ numPz, type, who, whoShort }) {
+async function logiFromOrder({ numPz, type, who, whoShort, silent }) {
   if (!/^ПЗ-\d{4}-\d{3}$/.test(numPz)) throw new Error('Укажите корректный № ПЗ.');
   const orders = await ncListSoft('orders');
   const o = orders.find((x) => String(x['№ ПЗ'] || '').trim() === numPz); if (!o) throw new Error(`ПЗ ${numPz} не найден.`);
@@ -701,8 +701,8 @@ async function logiFromOrder({ numPz, type, who, whoShort }) {
   s.updatedTs = new Date().toISOString();
   logiWrite(st);
   if (created) { try { await recEnsureTree('logistics', s.num); } catch (e) { console.warn('[K-339] папка', s.num, e.message); } }
-  const warnings = added ? await logiPzStatus({ packingLists: [{ orderPz: numPz }] }, 'Ожидает перевозки', who, whoShort, ['Выполнен']) : [];
-  if (added) await logiNotifyPz({ id: s.id, packingLists: [{ orderPz: numPz }] }, [`[B]🚚 По заказу ${numPz} ${created ? 'создана' : 'дополнена'} заявка на перевозку ${s.num}[/B]`, `${s.type} · грузополучатель: ${s.consignee || '—'}`, created ? '' : `В этой перевозке также: ${logiPzList(s).filter((x) => x !== numPz).join(', ') || '—'}`, 'Дальше: цех вносит места с габаритами и весом, логистика комплектует и передаёт перевозчику.']);
+  const warnings = (added && !silent) ? await logiPzStatus({ packingLists: [{ orderPz: numPz }] }, 'Ожидает перевозки', who, whoShort, ['Выполнен']) : [];
+  if (added && !silent) await logiNotifyPz({ id: s.id, packingLists: [{ orderPz: numPz }] }, [`[B]🚚 По заказу ${numPz} ${created ? 'создана' : 'дополнена'} заявка на перевозку ${s.num}[/B]`, `${s.type} · грузополучатель: ${s.consignee || '—'}`, created ? '' : `В этой перевозке также: ${logiPzList(s).filter((x) => x !== numPz).join(', ') || '—'}`, 'Дальше: цех вносит места с габаритами и весом, логистика комплектует и передаёт перевозчику.']);
   return { ok: true, shipment: s, created, added, warnings };
 }
 // «Перевозка» из карточки ЗнЗ: входящая к нам или транзит поставщик → заказчик
@@ -15640,7 +15640,8 @@ const server = http.createServer(async (req, res) => {
         if (!prev) { try { await recEnsureTree('logistics', cur.num); } catch (e) { console.warn('[K-339] папка', cur.num, e.message); } } // K-339: папка 6.4-Логистика/<год>/ЗПер-…
         const newPz = logiPzList(cur).filter((x) => !prevPz.includes(x));
         let warnings = [];
-        if (newPz.length) {
+        const silent = !!body.silent && !!(req.session && req.session.isAdmin); // K-339: история задним числом — без чатов и автостатусов
+        if (newPz.length && !silent) {
           const sub = { id: cur.id, num: cur.num, type: cur.type, consignee: cur.consignee, carrier: cur.carrier, packingLists: newPz.map((numPz) => ({ orderPz: numPz })) };
           warnings = await logiPzStatus(sub, 'Ожидает перевозки', eventWho(req, svc), eventWhoShort(req, svc), ['Выполнен']);
           await logiNotifyPz(sub, [`[B]🚚 Заказ добавлен в перевозку ${cur.num}[/B]`, `${cur.type} · грузополучатель: ${cur.consignee || '—'}`, `В перевозке: ${logiPzList(cur).join(', ')}`]);
@@ -15661,7 +15662,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { shipments: list, types: LOGI_TYPES, statuses: LOGI_STATUSES });
     }
     if (p === '/api/logistics/from-order' && req.method === 'POST') { // K-339: «Заявка на перевозку» из карточки ПЗ
-      try { const body = await readBody(req); return sendJson(res, 200, await logiFromOrder({ numPz: String(body.numPz || '').trim(), type: body.type, who: eventWho(req, svc), whoShort: eventWhoShort(req, svc) })); }
+      try { const body = await readBody(req); return sendJson(res, 200, await logiFromOrder({ numPz: String(body.numPz || '').trim(), type: body.type, who: eventWho(req, svc), whoShort: eventWhoShort(req, svc), silent: !!body.silent && !!(req.session && req.session.isAdmin) })); }
       catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     if (p === '/api/logistics/from-znz' && req.method === 'POST') { // K-339: «Перевозка» из карточки ЗнЗ
@@ -15706,7 +15707,9 @@ const server = http.createServer(async (req, res) => {
         logiWrite(st);
         let warnings = [], hint = '';
         const who = eventWho(req, svc), whoShort = eventWhoShort(req, svc);
-        if (to === 'Передано перевозчику' && !back) {
+        const silent = !!body.silent && !!(req.session && req.session.isAdmin);
+        if (silent) { /* история задним числом: ни чатов, ни автостатуса ПЗ */ }
+        else if (to === 'Передано перевозчику' && !back) {
           warnings = await logiPzStatus(s, 'Отгружен', who, whoShort);
           await logiNotifyPz(s, [`[B]🚚 Перевозка ${s.num} передана перевозчику[/B]`, `${s.carrier || (s.type === 'Самовывоз заказчиком' ? 'самовывоз заказчиком' : '—')}${s.ttnNo ? ' · ТН № ' + s.ttnNo + (s.ttnDate ? ' от ' + fmtDateRu(s.ttnDate) : '') : ''}`, `Мест: ${logiPlaces(s).length}, брутто ${logiPlaces(s).reduce((a, pk) => a + (Number(pk.weightBrutto) || 0), 0)} кг · ${s.consignee || ''}`]);
         } else if (to === 'Доставлено' && !back) {

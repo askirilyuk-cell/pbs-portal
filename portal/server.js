@@ -455,8 +455,16 @@ function buildChangeSheetHtml(code, docName, rows) {
 // ============================================================================
 const LOGI_FILE = path.join(__dirname, '.data', 'logistics.json');
 const DRAWMASS_FILE = path.join(__dirname, '.data', 'drawing-masses.json');
-const LOGI_TYPES = ['Отгрузка клиенту', 'Входящая', 'Внутренняя'];
-const LOGI_STATUSES = ['Черновик', 'Скомплектовано', 'Передано перевозчику', 'В пути', 'Доставлено'];
+// K-339 (модель согласована с владельцем 29.09.2026 на примерах из переписки по ПЗ):
+//  заявка заводится только на перевозки, которые организуем или оплачиваем мы; одна заявка =
+//  один грузополучатель и адрес, заказов и закупок внутри — сколько угодно; «Транзит» — купили
+//  и везём сразу заказчику мимо завода (кольца в Волгоград по ПЗ-008); «Самовывоз» — нужен,
+//  чтобы заказ стал «Отгружен», хотя перевозчик не наш. Поставки, которые везёт сам поставщик,
+//  заявкой не оформляются — только приёмкой по ЗнЗ (акт Ф.3).
+const LOGI_TYPES = ['Отгрузка клиенту', 'Транзит поставщик → заказчик', 'Входящая', 'Самовывоз заказчиком', 'Внутренняя'];
+const LOGI_STATUSES = ['Черновик', 'Скомплектовано', 'Передано перевозчику', 'В пути', 'Доставлено', 'Закрыто'];
+const LOGI_PAYERS = ['В цене заказа', 'Счёт заказчику отдельно', 'За наш счёт', 'Поставщик'];
+const LOGI_INBOUND = new Set(['Транзит поставщик → заказчик', 'Входящая']); // везём покупное — источник позиций ЗнЗ
 const drawKey = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 function logiRead() { try { const j = JSON.parse(fs.readFileSync(LOGI_FILE, 'utf8')); if (j && Array.isArray(j.shipments)) return j; } catch {} return { seq: 0, shipments: [] }; }
 function logiWrite(o) { try { fs.mkdirSync(path.dirname(LOGI_FILE), { recursive: true }); fs.writeFileSync(LOGI_FILE, JSON.stringify(o, null, 2)); return true; } catch { return false; } }
@@ -549,8 +557,12 @@ function logiNormPlace(pl) {
     id: (pl && pl.id) || ('pl' + Math.random().toString(36).slice(2, 8)),
     kind: String((pl && pl.kind) || ''), no: String((pl && pl.no) || ''),
     dims: String((pl && pl.dims) || ''), note: String((pl && pl.note) || ''),
+    // K-339: весогабариты места — гейт перед «Скомплектовано» («без габаритов перевозчик не примет заявку»)
+    weightBrutto: (pl && pl.weightBrutto !== '' && pl.weightBrutto != null) ? Number(pl.weightBrutto) : '',
+    weightNetto: (pl && pl.weightNetto !== '' && pl.weightNetto != null) ? Number(pl.weightNetto) : '',
     items: items.map((it) => ({
       posId: (it && it.posId != null) ? it.posId : null,
+      znzItemId: (it && it.znzItemId != null) ? it.znzItemId : null, // K-339: позиция заявки на закупку (входящая/транзит)
       numPos: String((it && it.numPos) || ''), name: String((it && it.name) || ''),
       drawing: String((it && it.drawing) || ''), unit: String((it && it.unit) || ''),
       qty: (it && it.qty !== '' && it.qty != null) ? Number(it.qty) : '',
@@ -566,6 +578,7 @@ function logiNormPackingList(x) {
     id: (x && x.id) || ('upl' + Math.random().toString(36).slice(2, 8)),
     plNo: String((x && x.plNo) || ''), orderPz: String((x && x.orderPz) || ''),
     orderId: (x && x.orderId != null) ? x.orderId : null, note: String((x && x.note) || ''),
+    znzNum: String((x && x.znzNum) || ''), znzId: (x && x.znzId != null) ? x.znzId : null, // K-339: лист по закупке
     places: places.map(logiNormPlace),
   };
 }
@@ -585,6 +598,10 @@ function logiNormShipment(x, prev) {
     planShip: S('planShip'), factShip: S('factShip'), planDeliver: S('planDeliver'), factDeliver: S('factDeliver'),
     saleZkz: S('saleZkz'), saleContract: S('saleContract'), purchaseReq: S('purchaseReq'),
     docs: S('docs'), note: S('note'),
+    // K-339
+    payer: LOGI_PAYERS.includes(S('payer')) ? S('payer') : (prev && prev.payer) || '',
+    ttnNo: S('ttnNo'), ttnDate: S('ttnDate'), receivedBy: S('receivedBy'),
+    closedTs: (prev && prev.closedTs) || '',
     packingLists: pls.map(logiNormPackingList),
     ts: (prev && prev.ts) || new Date().toISOString(),
     updatedTs: new Date().toISOString(),
@@ -594,6 +611,144 @@ function logiNextNum(store) {
   const year = new Date().getFullYear();
   store.seq = (store.seq || 0) + 1;
   return `ЗПер-${year}-${String(store.seq).padStart(3, '0')}`;
+}
+// ── K-339: связи заявки, гейты статусов, события в чаты ПЗ, автостатус ПЗ ─────────
+const logiPzList = (s) => [...new Set((s.packingLists || []).map((u) => String(u.orderPz || '').trim()).filter((x) => /^ПЗ-/.test(x)))];
+function logiZnzList(s) {
+  const set = new Set((s.packingLists || []).map((u) => String(u.znzNum || '').trim()).filter(Boolean));
+  for (const x of sourceRefList(s.purchaseReq)) if (/^ЗнЗ-/.test(x)) set.add(x);
+  return [...set];
+}
+const logiPlaces = (s) => (s.packingLists || []).flatMap((u) => u.places || []);
+// null — переход разрешён; строка — почему нельзя
+function logiGate(s, to) {
+  const cur = LOGI_STATUSES.indexOf(s.status), nxt = LOGI_STATUSES.indexOf(to);
+  if (nxt < 0) return 'Недопустимый статус.';
+  if (to === 'Скомплектовано') {
+    const places = logiPlaces(s);
+    if (!places.length) return 'Нет ни одного грузового места: добавьте упаковочный лист и места.';
+    const bad = places.filter((pk) => !String(pk.dims || '').trim() || !(Number(pk.weightBrutto) > 0));
+    if (bad.length) return `У ${bad.length} из ${places.length} мест не заполнены габариты или вес брутто — без них перевозчик не примет заявку. Заполняет цех при упаковке.`;
+    if (!String(s.consignee || '').trim()) return 'Не указан грузополучатель.';
+  }
+  if (to === 'Передано перевозчику') {
+    if (cur < LOGI_STATUSES.indexOf('Скомплектовано')) return 'Сначала «Скомплектовано»: заявка должна быть собрана с весогабаритами.';
+    if (s.type !== 'Самовывоз заказчиком' && !String(s.carrier || '').trim()) return 'Не указан перевозчик.';
+  }
+  if (to === 'В пути' && cur < LOGI_STATUSES.indexOf('Передано перевозчику')) return 'Сначала «Передано перевозчику».';
+  if (to === 'Доставлено' && cur < LOGI_STATUSES.indexOf('Передано перевозчику')) return 'Груз ещё не передан перевозчику.';
+  if (to === 'Закрыто' && s.status !== 'Доставлено') return 'Закрыть можно только доставленную перевозку.';
+  return null;
+}
+// сообщение в чат каждого связанного ПЗ (best-effort: сбой одного чата не мешает остальным)
+async function logiNotifyPz(s, lines) {
+  const c = cfg(); if (!c.BITRIX) return [];
+  const portal = String(c.PORTAL_BASE || '').replace(/\/+$/, '');
+  const sent = [];
+  for (const numPz of logiPzList(s)) {
+    const oc = orderChatFor(numPz); if (!oc) continue;
+    const L = lines.slice(); if (portal) L.push(`🚚 Перевозка в портале: ${portal}/#logistics/${encodeURIComponent(s.id)}`);
+    try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: L.filter(Boolean).join('\n') }); sent.push(numPz); }
+    catch (e) { console.warn('[K-339] чат заказа', numPz, e.message); }
+  }
+  return sent;
+}
+// автостатус ПЗ: заявка создана → «Ожидает перевозки» (из «Выполнен»), передано перевозчику → «Отгружен».
+// Только разрешённые рельсом переходы; остальное — предупреждение в ответ, без блокировки.
+async function logiPzStatus(s, to, who, whoShort, onlyFrom) {
+  const warnings = [];
+  if (!isLive()) return warnings;
+  let orders = []; try { orders = await ncListSoft('orders'); } catch { return warnings; }
+  for (const numPz of logiPzList(s)) {
+    const o = orders.find((x) => String(x['№ ПЗ'] || '').trim() === numPz); if (!o) continue;
+    const from = String(o['Статус'] || 'Размещён');
+    if (from === to) continue;
+    if (onlyFrom && !onlyFrom.includes(from)) continue;
+    if (!pzCanGo(from, to)) { warnings.push(`${numPz}: статус «${from}», в «${to}» не переводится (нужно пройти рельс вручную).`); continue; }
+    try { const r = await updateOrderStatus({ num: numPz, to }, who, whoShort); for (const w of (r.warnings || [])) warnings.push(`${numPz}: ${w}`); }
+    catch (e) { warnings.push(`${numPz}: ${e.message}`); }
+  }
+  return warnings;
+}
+const logiDescr = (s) => `${s.num} · ${s.type}${s.consignee ? ' · ' + s.consignee : ''}${s.carrier ? ' · ' + s.carrier : ''}`;
+// заявка для карточки ПЗ / ЗнЗ: краткая сводка
+function logiBrief(s) {
+  const places = logiPlaces(s);
+  return { id: s.id, num: s.num, type: s.type, status: s.status, consignee: s.consignee, consigneeAddr: s.consigneeAddr, carrier: s.carrier, payer: s.payer,
+    planShip: s.planShip, factShip: s.factShip, planDeliver: s.planDeliver, factDeliver: s.factDeliver, ttnNo: s.ttnNo, ttnDate: s.ttnDate,
+    places: places.length, brutto: places.reduce((a, pk) => a + (Number(pk.weightBrutto) || 0), 0), pz: logiPzList(s), znz: logiZnzList(s), updatedTs: s.updatedTs };
+}
+// «Заявка на перевозку» из карточки ПЗ: если есть открытая заявка на того же грузополучателя —
+// добавляем в неё лист по этому ПЗ (одна заявка = один грузополучатель, заказов много); иначе новая.
+async function logiFromOrder({ numPz, type, who, whoShort }) {
+  if (!/^ПЗ-\d{4}-\d{3}$/.test(numPz)) throw new Error('Укажите корректный № ПЗ.');
+  const orders = await ncListSoft('orders');
+  const o = orders.find((x) => String(x['№ ПЗ'] || '').trim() === numPz); if (!o) throw new Error(`ПЗ ${numPz} не найден.`);
+  const customer = String(o['Заказчик / Инициатор'] || '').trim();
+  const t = LOGI_TYPES.includes(type) ? type : 'Отгрузка клиенту';
+  const st = logiRead();
+  let s = st.shipments.find((x) => x.type === t && ['Черновик', 'Скомплектовано'].includes(x.status) && String(x.consignee || '').trim() === customer && customer);
+  let added = false, created = false;
+  if (!s) {
+    s = logiNormShipment({ type: t, status: 'Черновик', shipper: 'ООО «ПБС»', consignee: customer, payer: 'В цене заказа' }, null);
+    s.id = 'ship' + Date.now().toString(36); s.num = logiNextNum(st); st.shipments.push(s); created = true;
+  }
+  if (!(s.packingLists || []).some((u) => String(u.orderPz || '').trim() === numPz)) {
+    s.packingLists.push(logiNormPackingList({ plNo: 'УЛ по ' + numPz, orderPz: numPz, orderId: o.Id ?? o.id, places: [] }));
+    if (s.status === 'Скомплектовано') s.status = 'Черновик'; // добавили заказ — комплектацию надо подтвердить заново
+    added = true;
+  }
+  s.updatedTs = new Date().toISOString();
+  logiWrite(st);
+  if (created) { try { await recEnsureTree('logistics', s.num); } catch (e) { console.warn('[K-339] папка', s.num, e.message); } }
+  const warnings = added ? await logiPzStatus({ packingLists: [{ orderPz: numPz }] }, 'Ожидает перевозки', who, whoShort, ['Выполнен']) : [];
+  if (added) await logiNotifyPz({ id: s.id, packingLists: [{ orderPz: numPz }] }, [`[B]🚚 По заказу ${numPz} ${created ? 'создана' : 'дополнена'} заявка на перевозку ${s.num}[/B]`, `${s.type} · грузополучатель: ${s.consignee || '—'}`, created ? '' : `В этой перевозке также: ${logiPzList(s).filter((x) => x !== numPz).join(', ') || '—'}`, 'Дальше: цех вносит места с габаритами и весом, логистика комплектует и передаёт перевозчику.']);
+  return { ok: true, shipment: s, created, added, warnings };
+}
+// «Перевозка» из карточки ЗнЗ: входящая к нам или транзит поставщик → заказчик
+async function logiFromZnz({ numZnz, type }) {
+  if (!/^ЗнЗ-\d{4}-\d{3}$/.test(numZnz)) throw new Error('Укажите корректный № ЗнЗ.');
+  const reqs = await ncListSoft('procurement_requests');
+  const z = reqs.find((x) => String(x['№ ЗнЗ'] || '').trim() === numZnz); if (!z) throw new Error(`Заявка ${numZnz} не найдена.`);
+  const t = LOGI_INBOUND.has(type) ? type : 'Входящая';
+  const supplier = String(z['Выбранный поставщик'] || '').trim(), place = String(z['Место доставки'] || '').trim();
+  const pzs = sourceRefList(z['Триггер-источник (ЗКЗ/ПЗ/склад)']).filter((x) => /^ПЗ-/.test(x));
+  let consignee = 'ООО «ПБС»', consigneeAddr = place;
+  if (t !== 'Входящая' && pzs.length) { try { const orders = await ncListSoft('orders'); const o = orders.find((x) => String(x['№ ПЗ'] || '').trim() === pzs[0]); if (o) consignee = String(o['Заказчик / Инициатор'] || '').trim() || consignee; } catch {} }
+  const st = logiRead();
+  let s = st.shipments.find((x) => x.type === t && ['Черновик', 'Скомплектовано'].includes(x.status) && String(x.consignee || '').trim() === consignee && String(x.shipper || '').trim() === supplier);
+  let created = false, added = false;
+  if (!s) {
+    s = logiNormShipment({ type: t, status: 'Черновик', shipper: supplier, consignee, consigneeAddr, payer: 'За наш счёт', purchaseReq: numZnz }, null);
+    s.id = 'ship' + Date.now().toString(36); s.num = logiNextNum(st); st.shipments.push(s); created = true;
+  } else if (!sourceRefList(s.purchaseReq).includes(numZnz)) { s.purchaseReq = [s.purchaseReq, numZnz].filter(Boolean).join(', '); }
+  if (!(s.packingLists || []).some((u) => String(u.znzNum || '').trim() === numZnz)) {
+    // позиции закупки — сразу в один лист, места цех/логистика расставят при комплектации
+    let items = []; try { items = await listItemsForZnz(z.Id ?? z.id); } catch {}
+    s.packingLists.push(logiNormPackingList({ plNo: 'УЛ по ' + numZnz, znzNum: numZnz, znzId: z.Id ?? z.id, orderPz: t === 'Транзит поставщик → заказчик' ? (pzs[0] || '') : '', places: items.length ? [{ kind: 'Без упаковки', no: '1', dims: '', items: items.map((it) => ({ znzItemId: it.id, name: it.name, unit: it.unit, qty: it.qty ?? '' })) }] : [] }));
+    if (s.status === 'Скомплектовано') s.status = 'Черновик';
+    added = true;
+  }
+  s.updatedTs = new Date().toISOString();
+  logiWrite(st);
+  if (created) { try { await recEnsureTree('logistics', s.num); } catch (e) { console.warn('[K-339] папка', s.num, e.message); } }
+  if (added && pzs.length) await logiNotifyPz({ id: s.id, packingLists: pzs.map((numPz) => ({ orderPz: numPz })) }, [`[B]🚚 По закупке ${numZnz} ${created ? 'создана' : 'дополнена'} перевозка ${s.num}[/B]`, `${s.type} · от ${supplier || '—'} → ${consignee}${consigneeAddr ? ' (' + consigneeAddr + ')' : ''}`]);
+  return { ok: true, shipment: s, created, added };
+}
+// K-339: счёт оплачен → сообщение в чаты заказов, которые обеспечивает эта закупка
+async function notifyInvoicePaid(invoiceRow, payment) {
+  try {
+    const c = cfg(); if (!c.BITRIX || !invoiceRow) return;
+    const numZnz = String(invoiceRow['ЗнЗ (№)'] || '').trim(); if (!numZnz) return;
+    const reqs = await ncListSoft('procurement_requests');
+    const z = reqs.find((x) => String(x['№ ЗнЗ'] || '').trim() === numZnz); if (!z) return;
+    const chats = orderChatsFor(z['Триггер-источник (ЗКЗ/ПЗ/склад)']); if (!chats.length) return;
+    const amount = invoiceRow['Сумма, ₽'] != null ? Number(invoiceRow['Сумма, ₽']).toLocaleString('ru-RU') + ' ₽' : '';
+    for (const oc of chats) {
+      const msg = [`[B]💳 Оплачен счёт ${invoiceRow['№ счёта'] || ''} по закупке ${numZnz}[/B]`, `${invoiceRow['Поставщик'] || ''}${amount ? ' · ' + amount : ''}`, `Заказ ${oc.numPz}: срок поставки теперь считается от оплаты.`].join('\n');
+      try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: msg }); } catch (e) { console.warn('[K-339] оплата → чат', oc.numPz, e.message); }
+    }
+  } catch (e) { console.warn('[K-339] notifyInvoicePaid:', e.message); }
 }
 // печатный упаковочный лист (packing list) — фирменный стиль ИСМ (TNR/синий #1F4E79,
 // колонтитул «Страница N из M»). Код формы — placeholder (присваивает ИСМ по Ф.2–Л.1).
@@ -4588,6 +4743,10 @@ function payStatusToInvoiceStatus(status) {
 // новых колонок в таблице просто не пишет (см. каталог try/catch).
 async function savePaymentToInvoice(invoiceId, payment) {
   if (!payment) return;
+  // K-339: момент «стало Оплачено» — событие в чаты ПЗ (Динара привязывает срок металла к оплате)
+  let prevRow = null;
+  if (payStatusToInvoiceStatus(payment.status) === 'Оплачено') { try { prevRow = (await ncListSoft('invoices')).find((r) => String(r.Id ?? r.id) === String(invoiceId)) || null; } catch {} }
+  if (prevRow && String(prevRow['Статус оплаты'] || '').trim() !== 'Оплачено') notifyInvoicePaid(prevRow, payment);
   const patch = {
     'Статус оплаты': payStatusToInvoiceStatus(payment.status),
     'Оплата обновлена': new Date().toISOString(),
@@ -15450,7 +15609,7 @@ const server = http.createServer(async (req, res) => {
     // ── Раздел «Логистика» — Заявки на перевозку (ЗПер). Файловое хранилище. ──
     if (p === '/api/logistics' && req.method === 'GET') {
       const st = logiRead();
-      return sendJson(res, 200, { mode: 'file', shipments: st.shipments || [], types: LOGI_TYPES, statuses: LOGI_STATUSES });
+      return sendJson(res, 200, { mode: 'file', shipments: st.shipments || [], types: LOGI_TYPES, statuses: LOGI_STATUSES, payers: LOGI_PAYERS });
     }
     // список ПЗ + готовые позиции для конструктора упак. листа (масса теор. — из реестра чертежей)
     if (p === '/api/logistics/orders' && req.method === 'GET') {
@@ -15473,15 +15632,51 @@ const server = http.createServer(async (req, res) => {
         let prev = null;
         if (body.id != null) prev = st.shipments.find((s) => String(s.id) === String(body.id)) || null;
         const norm = logiNormShipment(body, prev);
+        if (prev) { norm.status = prev.status; norm.factShip = norm.factShip || prev.factShip; norm.factDeliver = norm.factDeliver || prev.factDeliver; } // K-339: статус меняется только шагами с гейтами (/status), форма его не трогает
+        const prevPz = prev ? logiPzList(prev) : [];
         if (!prev) { norm.id = 'ship' + Date.now().toString(36); norm.num = logiNextNum(st); st.shipments.push(norm); }
         else { Object.assign(prev, norm); }
+        const cur = prev || norm;
+        if (!prev) { try { await recEnsureTree('logistics', cur.num); } catch (e) { console.warn('[K-339] папка', cur.num, e.message); } } // K-339: папка 6.4-Логистика/<год>/ЗПер-…
+        const newPz = logiPzList(cur).filter((x) => !prevPz.includes(x));
+        let warnings = [];
+        if (newPz.length) {
+          const sub = { id: cur.id, num: cur.num, type: cur.type, consignee: cur.consignee, carrier: cur.carrier, packingLists: newPz.map((numPz) => ({ orderPz: numPz })) };
+          warnings = await logiPzStatus(sub, 'Ожидает перевозки', eventWho(req, svc), eventWhoShort(req, svc), ['Выполнен']);
+          await logiNotifyPz(sub, [`[B]🚚 Заказ добавлен в перевозку ${cur.num}[/B]`, `${cur.type} · грузополучатель: ${cur.consignee || '—'}`, `В перевозке: ${logiPzList(cur).join(', ')}`]);
+        }
         // побочно: сохранить теор. массы деталей из упак. листов в реестр чертежей (заводится один раз)
         for (const upl of norm.packingLists) for (const pk of upl.places) for (const it of pk.items) {
           if (it.drawing && it.massTheor !== '' && it.massTheor != null) drawMassSet(it.drawing, it.massTheor);
         }
         logiWrite(st);
-        return sendJson(res, 200, { ok: true, shipment: prev || norm });
+        return sendJson(res, 200, { ok: true, shipment: prev || norm, warnings });
       } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    // K-339: перевозки, связанные с ПЗ или ЗнЗ (блок «Перевозки» в карточках)
+    if (p === '/api/logistics/for' && req.method === 'GET') {
+      const pz = String(url.searchParams.get('pz') || '').trim(), znz = String(url.searchParams.get('znz') || '').trim();
+      const st = logiRead();
+      const list = st.shipments.filter((s) => (pz && logiPzList(s).includes(pz)) || (znz && logiZnzList(s).includes(znz))).map(logiBrief);
+      return sendJson(res, 200, { shipments: list, types: LOGI_TYPES, statuses: LOGI_STATUSES });
+    }
+    if (p === '/api/logistics/from-order' && req.method === 'POST') { // K-339: «Заявка на перевозку» из карточки ПЗ
+      try { const body = await readBody(req); return sendJson(res, 200, await logiFromOrder({ numPz: String(body.numPz || '').trim(), type: body.type, who: eventWho(req, svc), whoShort: eventWhoShort(req, svc) })); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/logistics/from-znz' && req.method === 'POST') { // K-339: «Перевозка» из карточки ЗнЗ
+      try { const body = await readBody(req); return sendJson(res, 200, await logiFromZnz({ numZnz: String(body.numZnz || '').trim(), type: body.type })); }
+      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+    }
+    if (p === '/api/logistics/znz' && req.method === 'GET') { // K-339: заявки на закупку для конструктора листа (входящая/транзит)
+      try {
+        const reqs = await ncListSoft('procurement_requests');
+        const out = [];
+        for (const z of reqs) { const n = String(z['№ ЗнЗ'] || '').trim(); if (!n) continue;
+          out.push({ id: z.Id ?? z.id, numZnz: n, name: z['Наименование'] || '', supplier: z['Выбранный поставщик'] || '', place: z['Место доставки'] || '', status: z['Статус'] || '', pz: sourceRefList(z['Триггер-источник (ЗКЗ/ПЗ/склад)']).filter((x) => /^ПЗ-/.test(x)) }); }
+        out.sort((a, b) => b.numZnz.localeCompare(a.numZnz, 'ru'));
+        return sendJson(res, 200, { znz: out });
+      } catch (e) { return sendJson(res, 200, { znz: [], warning: String(e.message || e) }); }
     }
     if (p === '/api/logistics/delete' && req.method === 'POST') {
       try {
@@ -15496,17 +15691,32 @@ const server = http.createServer(async (req, res) => {
         const body = await readBody(req); const st = logiRead();
         const s = st.shipments.find((x) => String(x.id) === String(body.id));
         if (!s) throw new Error('Заявка не найдена.');
-        if (!LOGI_STATUSES.includes(String(body.status))) throw new Error('Недопустимый статус.');
-        s.status = String(body.status); s.updatedTs = new Date().toISOString();
-        // TODO(связь с производством): при «Передано перевозчику»/«В пути»/«Доставлено» проставить
-        // в ПЗ статус «Отгружен». Пока ЗАГЛУШКА — фиксируем намерение локально, без записи в NocoDB.
-        let pzStub = [];
-        if (['Передано перевозчику', 'В пути', 'Доставлено'].includes(s.status)) {
-          pzStub = [...new Set((s.packingLists || []).map((u) => u.orderPz).filter(Boolean))];
-          s.pzShippedStub = pzStub;
-        }
+        const to = String(body.status || '');
+        if (!LOGI_STATUSES.includes(to)) throw new Error('Недопустимый статус.');
+        // K-339: гейты рельса перевозки — не блокируем откат назад, блокируем прыжки вперёд без данных
+        const back = LOGI_STATUSES.indexOf(to) < LOGI_STATUSES.indexOf(s.status);
+        if (!back) { const why = logiGate(s, to); if (why) throw new Error(why); }
+        if (to === 'Закрыто' && LOGI_INBOUND.has(s.type) === false && s.status !== 'Доставлено') throw new Error('Закрыть можно только доставленную перевозку.');
+        const today = new Date().toISOString().slice(0, 10);
+        if (to === 'Передано перевозчику' && !s.factShip) s.factShip = today;
+        if (to === 'Доставлено' && !s.factDeliver) s.factDeliver = today;
+        if (to === 'Закрыто') s.closedTs = new Date().toISOString();
+        if (body.ttnNo != null) s.ttnNo = String(body.ttnNo); if (body.ttnDate != null) s.ttnDate = String(body.ttnDate); if (body.receivedBy != null) s.receivedBy = String(body.receivedBy);
+        const from = s.status; s.status = to; s.updatedTs = new Date().toISOString(); delete s.pzShippedStub;
         logiWrite(st);
-        return sendJson(res, 200, { ok: true, status: s.status, pzShipStub: pzStub });
+        let warnings = [], hint = '';
+        const who = eventWho(req, svc), whoShort = eventWhoShort(req, svc);
+        if (to === 'Передано перевозчику' && !back) {
+          warnings = await logiPzStatus(s, 'Отгружен', who, whoShort);
+          await logiNotifyPz(s, [`[B]🚚 Перевозка ${s.num} передана перевозчику[/B]`, `${s.carrier || (s.type === 'Самовывоз заказчиком' ? 'самовывоз заказчиком' : '—')}${s.ttnNo ? ' · ТН № ' + s.ttnNo + (s.ttnDate ? ' от ' + fmtDateRu(s.ttnDate) : '') : ''}`, `Мест: ${logiPlaces(s).length}, брутто ${logiPlaces(s).reduce((a, pk) => a + (Number(pk.weightBrutto) || 0), 0)} кг · ${s.consignee || ''}`]);
+        } else if (to === 'Доставлено' && !back) {
+          await logiNotifyPz(s, [`[B]📦 Перевозка ${s.num} доставлена[/B]`, `${s.consignee || ''}${s.receivedBy ? ' · принял: ' + s.receivedBy : ''} · ${fmtDateRu(s.factDeliver)}`, 'Сканы подписанных документов от получателя — в папку перевозки «03-Перевозчик и накладные».']);
+          if (LOGI_INBOUND.has(s.type)) hint = `Покупное доставлено: проведите приёмку по ${logiZnzList(s).join(', ') || 'заявке на закупку'} (акт входного контроля Ф.3).`;
+        } else if (to === 'Скомплектовано' && !back) {
+          await logiNotifyPz(s, [`[B]📦 Перевозка ${s.num} скомплектована[/B]`, `Мест: ${logiPlaces(s).length}, брутто ${logiPlaces(s).reduce((a, pk) => a + (Number(pk.weightBrutto) || 0), 0)} кг. Логистика передаёт перевозчику.`]);
+        }
+        logEvent({ type: 'статус', obj: 'ЗПер', objNum: s.num, who: whoShort, details: `${from} → ${to}` });
+        return sendJson(res, 200, { ok: true, status: s.status, from, warnings, hint });
       } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
     }
     // реестр масс деталей по чертежам (карточка чертежа заполняется один раз — ТЗ §7)
@@ -15527,7 +15737,9 @@ const server = http.createServer(async (req, res) => {
       const st = logiRead();
       const s = st.shipments.find((x) => String(x.id) === String(url.searchParams.get('ship') || ''));
       if (!s) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Заявка не найдена.'); }
-      const pl = (s.packingLists || []).find((u) => String(u.id) === String(url.searchParams.get('pl') || ''));
+      const pl = url.searchParams.get('all') === '1'
+        ? { plNo: 'Сводный лист по ' + s.num, orderPz: logiPzList(s).concat(logiZnzList(s)).join(', '), note: s.note || '', places: logiPlaces(s) } // K-339: одна перевозка — несколько заказов
+        : (s.packingLists || []).find((u) => String(u.id) === String(url.searchParams.get('pl') || ''));
       if (!pl) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Упаковочный лист не найден.'); }
       const html = buildPackingListHtml(s, pl);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent('Упаковочный лист ' + (pl.plNo || s.num) + '.html')}`, 'Cache-Control': 'no-store' });

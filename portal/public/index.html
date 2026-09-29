@@ -1597,6 +1597,7 @@
     // action-иконки (взамен эмодзи <i class=ic-print></i><i class=ic-chat></i><i class=ic-folder></i><i class=ic-doc></i><i class=ic-trash></i>) — viewBox 20, stroke currentColor, инлайн
     const AICONS={
       print:'<path d="M6 7V3h8v4M6 14H4v-4h12v4h-2M6 12h8v5H6z"/>',
+      truck:'<path d="M2 5h10v9H2zM12 8h4l2 3v3h-6z"/><circle cx="5.5" cy="15.5" r="1.5"/><circle cx="14.5" cy="15.5" r="1.5"/>',
       chat:'<path d="M4 4h12v9H8l-4 3z"/>',
       folder:'<path d="M3 6.3A1.5 1.5 0 0 1 4.5 4.8H8l1.6 1.7h6A1.5 1.5 0 0 1 17 8v6a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14z"/>',
       doc:'<rect x="4" y="3" width="12" height="14" rx="1"/><path d="M7 8h6M7 11h4"/>',
@@ -2416,12 +2417,17 @@
     let LOGI={shipments:[],mode:'file'};
     let logiSelId=null, logiFilterType='all';
     let LOGI_ORDERS=null; // кэш ПЗ+позиций для конструктора упак. листа
-    const LOGI_TYPES=['Отгрузка клиенту','Входящая','Внутренняя'];
-    const LOGI_STATUSES=['Черновик','Скомплектовано','Передано перевозчику','В пути','Доставлено'];
+    // K-339: модель перевозок (решения владельца 29.09): заявка — только на то, что организуем/оплачиваем мы;
+    //  один грузополучатель на заявку; «Транзит» — покупное едет сразу заказчику; «Самовывоз» — чтобы заказ стал «Отгружен».
+    const LOGI_TYPES=['Отгрузка клиенту','Транзит поставщик → заказчик','Входящая','Самовывоз заказчиком','Внутренняя'];
+    const LOGI_STATUSES=['Черновик','Скомплектовано','Передано перевозчику','В пути','Доставлено','Закрыто'];
+    const LOGI_PAYERS=['В цене заказа','Счёт заказчику отдельно','За наш счёт','Поставщик'];
+    const LOGI_INBOUND=new Set(['Транзит поставщик → заказчик','Входящая']);
+    let LOGI_ZNZ=null; // кэш заявок на закупку для листа по закупке
     const LOGI_INCOTERMS=['EXW','FCA','FAS','FOB','CFR','CIF','CPT','CIP','DAP','DPU','DDP'];
     const LOGI_PLACE_KINDS=['Ящик','Паллета','Связка','Бухта','Контейнер','Рулон','Без упаковки'];
     const LOGI_TRANSPORT=['Авто','Ж/д','Море','Авиа','Самовывоз'];
-    const LOGI_ST_COLOR={'Черновик':'var(--sl-500)','Скомплектовано':'#b8860b','Передано перевозчику':'#2E75B6','В пути':'#2E75B6','Доставлено':'#1f7a3d'};
+    const LOGI_ST_COLOR={'Черновик':'var(--sl-500)','Скомплектовано':'#b8860b','Передано перевозчику':'#2E75B6','В пути':'#2E75B6','Доставлено':'#1f7a3d','Закрыто':'#475569'};
     const logiStBadge=(s)=>`<span style="display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:#fff;background:${LOGI_ST_COLOR[s]||'var(--sl-500)'}">${esc(s||'—')}</span>`;
     const logiN=(n)=>(n===''||n==null||isNaN(Number(n)))?'':(Math.round(Number(n)*1000)/1000);
     const logiDl=(id,arr)=>`<datalist id="${id}">${arr.map(o=>`<option value="${esc(o)}">`).join('')}</datalist>`;
@@ -2577,7 +2583,8 @@
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="tbtn primary" id="logi-edit" style="padding:6px 14px">Редактировать заявку</button>
-          <button class="tbtn green" id="logi-pl-add" style="padding:6px 14px">+ Упаковочный лист</button>
+          <button class="tbtn green" id="logi-pl-add" style="padding:6px 14px">+ Упаковочный лист ${LOGI_INBOUND.has(s.type)?'(по закупке)':'(по заказу)'}</button>
+          ${pls.length>1?`<button class="tbtn" id="logi-print-all" style="padding:6px 12px" title="Один лист на всю перевозку — для перевозчика">Сводный лист</button>`:''}
           <button class="tbtn" id="logi-del" style="padding:6px 12px;color:#b91c1c">Удалить</button>
         </div>
         <div style="margin-top:14px;border-top:1px solid var(--sl-200);padding-top:10px">
@@ -2589,7 +2596,11 @@
             <div>${kv('Перевозчик',esc(s.carrier))}${kv('Вид транспорта',esc(s.transport))}${kv('Базис (Инкотермс)',esc(s.incoterms))}${kv('Стоимость',s.cost?esc(s.cost)+' '+esc(s.currency||'₽'):'')}</div>
             <div>${kv('Отгрузка план / факт',[fmt(s.planShip),fmt(s.factShip)].filter(Boolean).join(' / '))}${kv('Доставка план / факт',[fmt(s.planDeliver),fmt(s.factDeliver)].filter(Boolean).join(' / '))}${kv('Продажа (ЗКЗ)',esc(s.saleZkz))}${kv('Договор',esc(s.saleContract))}</div>
           </div>
-          ${s.type==='Входящая'?`<div style="margin-top:4px">${kv('Заявка на закупку',esc(s.purchaseReq))}</div>`:''}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 20px;margin-top:6px;border-top:1px dashed var(--sl-200);padding-top:6px">
+            <div>${kv('Кто платит',esc(s.payer))}${kv('Транспортная накладная',s.ttnNo?esc(s.ttnNo)+(s.ttnDate?' от '+fmt(s.ttnDate):''):'')}${kv('Принял у получателя',esc(s.receivedBy))}</div>
+            <div>${kv('Заказы (ПЗ)',(s.packingLists||[]).map(u=>u.orderPz).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i).map(x=>`<a href="#orders/${encodeURIComponent(x)}" class="code c-blue">${esc(x)}</a>`).join(', '))}${kv('Закупки (ЗнЗ)',[...new Set((s.packingLists||[]).map(u=>u.znzNum).filter(Boolean).concat(String(s.purchaseReq||'').split(/[,;\s]+/).filter(x=>/^ЗнЗ-/.test(x))))].map(x=>`<a href="#purchase/${encodeURIComponent(x)}" class="code c-blue">${esc(x)}</a>`).join(', '))}${kv('Папка на NAS',s.num?`<span style="font-family:var(--mono);font-size:12px">06-Записи-ПБС/6.4-Логистика/${esc(String(s.num).slice(5,9))}/${esc(s.num)}</span>`:'')}</div>
+          </div>
+          ${LOGI_INBOUND.has(s.type)?`<div style="margin-top:4px;font-size:12px;color:var(--sl-500)">Покупное: после «Доставлено» проведите приёмку по заявке на закупку (акт входного контроля Ф.3).</div>`:''}
           ${s.docs?`<div style="margin-top:4px">${kv('Документы',esc(s.docs))}</div>`:''}
           ${s.note?`<div style="margin-top:4px">${kv('Примечание',esc(s.note))}</div>`:''}
         </div>
@@ -2601,6 +2612,7 @@
       </div>`;
       host.querySelector('#logi-edit').onclick=()=>openLogiShipment(s);
       host.querySelector('#logi-pl-add').onclick=()=>openPackingList(s.id,null);
+      const pa=host.querySelector('#logi-print-all'); if(pa)pa.onclick=()=>window.open(`/api/logistics/packing/print?ship=${encodeURIComponent(s.id)}&all=1`,'_blank');
       host.querySelector('#logi-del').onclick=async ()=>{
         if(!(await uiConfirm(`Удалить заявку ${s.num}? Действие необратимо.`)))return;
         try{ const r=await fetch('/api/logistics/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s.id})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
@@ -2608,9 +2620,13 @@
         }catch(e){ toast('Не удалено: '+e.message,'err'); }
       };
       host.querySelectorAll('.logi-st').forEach(b=>b.onclick=async()=>{
-        try{ const r=await fetch('/api/logistics/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s.id,status:b.dataset.st})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
-          let msg='Статус: '+b.dataset.st; if(j.pzShipStub&&j.pzShipStub.length)msg+=' · связь с ПЗ (отгружено) — заглушка, см. отчёт';
-          toast(msg,'ok'); LOGI=await (await fetch('/api/logistics')).json(); logiGrid();
+        const to=b.dataset.st; const body={id:s.id,status:to};
+        // K-339: на ключевых шагах спрашиваем то, без чего шаг бессмысленен (ТН, кто принял)
+        if(to==='Передано перевозчику'&&!s.ttnNo&&s.type!=='Самовывоз заказчиком'){ const v=await uiPrompt('Номер транспортной накладной (можно оставить пустым)',''); if(v===null)return; body.ttnNo=String(v||'').trim(); if(body.ttnNo)body.ttnDate=new Date().toISOString().slice(0,10); }
+        if(to==='Доставлено'&&!s.receivedBy){ const v=await uiPrompt('Кто принял груз у получателя',''); if(v===null)return; body.receivedBy=String(v||'').trim(); }
+        try{ const r=await fetch('/api/logistics/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+          toast('Статус: '+to,'ok'); (j.warnings||[]).forEach(w=>toast(w,'warn')); if(j.hint)toast(j.hint,'warn');
+          LOGI=await (await fetch('/api/logistics')).json(); logiGrid();
         }catch(e){ toast('Не изменено: '+e.message,'err'); }
       });
       host.querySelectorAll('.logi-pl-edit').forEach(b=>b.onclick=()=>openPackingList(s.id,b.dataset.pl));
@@ -2622,6 +2638,19 @@
         try{ await logiSaveShipment(cur); toast('Упаковочный лист удалён','ok'); }catch(e){ toast('Не удалено: '+e.message,'err'); }
       });
     }
+    // K-339: блок «Перевозки» в карточках ПЗ и ЗнЗ — только ссылки, файлы живут в папке перевозки
+    async function loadShipPanel(hostId,q){
+      const host=document.getElementById(hostId); if(!host)return;
+      let d; try{ d=await (await fetch('/api/logistics/for?'+(q.pz?'pz='+encodeURIComponent(q.pz):'znz='+encodeURIComponent(q.znz)))).json(); }catch{ return; }
+      if(!host.isConnected)return;
+      const list=d.shipments||[]; if(!list.length){ host.innerHTML=''; return; }
+      host.innerHTML=`<div class="card pad"><div class="sec-h" style="margin-bottom:6px">Перевозки <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub);font-size:12px">· ${list.length}</span></div>
+        ${list.map(s=>`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;padding:5px 0;border-top:1px solid var(--line2)">
+          <a href="#logistics/${encodeURIComponent(s.id)}" class="code c-blue" style="font-weight:700">${esc(s.num)}</a>${logiStBadge(s.status)}<span style="color:var(--sl-700)">${esc(s.type)}</span>
+          <span style="color:var(--sub)">→ ${esc(s.consignee||'—')}${s.carrier?' · '+esc(s.carrier):''}${s.places?' · мест '+s.places+(s.brutto?', '+logiN(s.brutto)+' кг':''):''}${s.ttnNo?' · ТН '+esc(s.ttnNo):''}</span>
+          ${(s.pz||[]).length>1?`<span style="color:var(--sub)">вместе с: ${s.pz.filter(x=>x!==q.pz).map(esc).join(', ')}</span>`:''}
+        </div>`).join('')}</div>`;
+    }
     // ── Форма заявки на перевозку (создать / править) — состав по ТЗ §5/§6 ──
     function openLogiShipment(sh){
       const G='display:grid;grid-template-columns:repeat(12,1fr);gap:12px';
@@ -2631,7 +2660,7 @@
       modal.innerHTML=`<div class="mh"><b>${sh?'Правка заявки на перевозку':'Новая заявка на перевозку'}</b><span class="op">Ф.1–ЛГ · ${sh?esc(sh.num||''):'№ ЗПер присвоится автоматически'}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
         <div class="mb" style="gap:0"><div style="${G}">
           <div style="grid-column:span 4">${FLAB('Тип заявки',true)}<select id="ls-type" style="${FINP}">${opt(LOGI_TYPES,cur.type)}</select></div>
-          <div style="grid-column:span 4">${FLAB('Статус')}<select id="ls-status" style="${FINP}">${opt(LOGI_STATUSES,cur.status)}</select></div>
+          <div style="grid-column:span 4">${FLAB('Статус')}<div style="${FINP};background:#f6f8fb;color:var(--sl-700)">${esc(cur.status||'Черновик')}</div><div style="font-size:11px;color:var(--sl-500);margin-top:2px">меняется шагами в карточке, не здесь</div><input type="hidden" id="ls-status" value="${esc(cur.status||'Черновик')}"></div>
           <div style="grid-column:span 4">${FLAB('Базис (Инкотермс)')}<input id="ls-incoterms" list="ls-inco" style="${FINP}" value="${esc(cur.incoterms||'')}" placeholder="DDP / FCA…">${logiDl('ls-inco',LOGI_INCOTERMS)}</div>
           <div style="grid-column:span 6">${FLAB('Грузоотправитель')}<input id="ls-shipper" style="${FINP}" value="${esc(cur.shipper||'')}" placeholder="ООО «Петробалт Сервис»"></div>
           <div style="grid-column:span 6">${FLAB('Грузополучатель')}<input id="ls-consignee" style="${FINP}" value="${esc(cur.consignee||'')}"></div>
@@ -2649,7 +2678,11 @@
           <div style="grid-column:span 3">${FLAB('Доставка — факт')}<input id="ls-factDeliver" type="date" style="${FINP}" value="${esc(cur.factDeliver||'')}"></div>
           <div style="grid-column:span 4">${FLAB('Продажа — ЗКЗ')}<input id="ls-saleZkz" style="${FINP}" value="${esc(cur.saleZkz||'')}" placeholder="№ заказа на продажу"></div>
           <div style="grid-column:span 4">${FLAB('Договор')}<input id="ls-saleContract" style="${FINP}" value="${esc(cur.saleContract||'')}"></div>
-          <div style="grid-column:span 4">${FLAB('Заявка на закупку (для входящих)')}<input id="ls-purchaseReq" style="${FINP}" value="${esc(cur.purchaseReq||'')}"></div>
+          <div style="grid-column:span 4">${FLAB('Заявка на закупку (для входящих)')}<input id="ls-purchaseReq" style="${FINP}" value="${esc(cur.purchaseReq||'')}" placeholder="ЗнЗ-2026-007, ЗнЗ-2026-009"></div>
+          <div style="grid-column:span 4">${FLAB('Кто платит за перевозку')}<select id="ls-payer" style="${FINP}"><option value="">—</option>${opt(LOGI_PAYERS,cur.payer||'')}</select></div>
+          <div style="grid-column:span 3">${FLAB('Транспортная накладная №')}<input id="ls-ttnNo" style="${FINP}" value="${esc(cur.ttnNo||'')}"></div>
+          <div style="grid-column:span 2">${FLAB('Дата ТН')}<input id="ls-ttnDate" type="date" style="${FINP}" value="${esc(cur.ttnDate||'')}"></div>
+          <div style="grid-column:span 3">${FLAB('Принял (у получателя)')}<input id="ls-receivedBy" style="${FINP}" value="${esc(cur.receivedBy||'')}"></div>
           <div style="grid-column:span 12">${FLAB('Документы (накладная, СФ, CMR, таможенные…)')}<input id="ls-docs" style="${FINP}" value="${esc(cur.docs||'')}" placeholder="перечень / ссылки"></div>
           <div style="grid-column:span 12">${FLAB('Примечание')}<input id="ls-note" style="${FINP}" value="${esc(cur.note||'')}"></div>
         </div>
@@ -2666,7 +2699,8 @@
           shipperContact:V('ls-shipperContact'), consigneeContact:V('ls-consigneeContact'),
           carrier:V('ls-carrier'), transport:V('ls-transport'), cost:V('ls-cost'), currency:V('ls-currency'),
           planShip:V('ls-planShip'), factShip:V('ls-factShip'), planDeliver:V('ls-planDeliver'), factDeliver:V('ls-factDeliver'),
-          saleZkz:V('ls-saleZkz'), saleContract:V('ls-saleContract'), purchaseReq:V('ls-purchaseReq'), docs:V('ls-docs'), note:V('ls-note') };
+          saleZkz:V('ls-saleZkz'), saleContract:V('ls-saleContract'), purchaseReq:V('ls-purchaseReq'), docs:V('ls-docs'), note:V('ls-note'),
+          payer:V('ls-payer'), ttnNo:V('ls-ttnNo'), ttnDate:V('ls-ttnDate'), receivedBy:V('ls-receivedBy') };
         if(sh){ body.id=sh.id; body.packingLists=sh.packingLists||[]; }
         const btn=document.getElementById('ls-save'); btn.disabled=true; btn.textContent='Сохранение…';
         try{ await logiSaveShipment(body, sh?'Заявка обновлена':'Заявка создана'); closeModal(); }
@@ -2677,16 +2711,22 @@
     async function openPackingList(shipmentId, plId){
       const sh=logiShipmentById(shipmentId); if(!sh){ toast('Заявка не найдена','err'); return; }
       modal.style.width='min(1040px,98vw)';
-      modal.innerHTML=`<div class="mh"><b>${plId?'Упаковочный лист':'Новый упаковочный лист'}</b><span class="op">Ф.2–ЛГ · 1 лист = 1 производственный заказ</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
+      const byZnz=LOGI_INBOUND.has(sh.type); // K-339: для входящей/транзита позиции берутся из заявки на закупку
+      modal.innerHTML=`<div class="mh"><b>${plId?'Упаковочный лист':'Новый упаковочный лист'}</b><span class="op">Ф.2–ЛГ · 1 лист = ${byZnz?'1 заявка на закупку':'1 производственный заказ'}</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
         <div class="mb" style="gap:0"><div id="upl-body" style="color:var(--sub)">Загрузка позиций из производственных заказов…</div></div>`;
       modal.classList.add('open'); mscrim.classList.add('open');
       document.getElementById('mx').onclick=closeModal;
       if(!LOGI_ORDERS){ try{ const j=await (await fetch('/api/logistics/orders')).json(); LOGI_ORDERS=j.orders||[]; }catch(e){ LOGI_ORDERS=[]; } }
+      if(byZnz&&!LOGI_ZNZ){ try{ const j=await (await fetch('/api/logistics/znz')).json(); LOGI_ZNZ=j.znz||[]; }catch(e){ LOGI_ZNZ=[]; } }
       // рабочая копия упак. листа
       const src=plId?(sh.packingLists||[]).find(u=>String(u.id)===String(plId)):null;
-      const pl=src?JSON.parse(JSON.stringify(src)):{ id:null, plNo:'', orderId:null, orderPz:'', note:'', places:[] };
+      const pl=src?JSON.parse(JSON.stringify(src)):{ id:null, plNo:'', orderId:null, orderPz:'', znzNum:'', znzId:null, note:'', places:[] };
       const nextId=(pfx)=>pfx+Math.random().toString(36).slice(2,8);
       const curOrder=()=>LOGI_ORDERS.find(o=>String(o.id)===String(pl.orderId));
+      const curZnz=()=>(LOGI_ZNZ||[]).find(z=>String(z.id)===String(pl.znzId));
+      let znzItems=[]; // позиции выбранной заявки на закупку
+      async function loadZnzPositions(){ znzItems=[]; if(!pl.znzId)return; try{ const j=await (await fetch('/api/procurement/znz/items?znzId='+encodeURIComponent(pl.znzId))).json(); znzItems=(j.items||[]).map(it=>({id:it.id,name:it.name||'',unit:it.unit||'',qty:it.qty??''})); }catch{} }
+      if(byZnz&&pl.znzId)await loadZnzPositions();
       // чтение полей DOM → модель (перед структурной перерисовкой)
       function syncDom(){
         const root=document.getElementById('upl-body'); if(!root)return;
@@ -2697,6 +2737,8 @@
           pk.kind=(pe.querySelector('[data-pf="kind"]')||{}).value||'';
           pk.no=(pe.querySelector('[data-pf="no"]')||{}).value||'';
           pk.dims=(pe.querySelector('[data-pf="dims"]')||{}).value||'';
+          pk.weightBrutto=(pe.querySelector('[data-pf="weightBrutto"]')||{}).value||'';
+          pk.weightNetto=(pe.querySelector('[data-pf="weightNetto"]')||{}).value||'';
           pe.querySelectorAll('[data-item]').forEach(ie=>{
             const it=pk.items.find(x=>x.id===ie.dataset.item); if(!it)return;
             it.qty=(ie.querySelector('[data-if="qty"]')||{}).value||'';
@@ -2711,7 +2753,10 @@
         const orderOpts=['<option value="">— выберите производственный заказ —</option>']
           .concat(LOGI_ORDERS.map(x=>`<option value="${esc(x.id)}"${String(x.id)===String(pl.orderId)?' selected':''}>${esc(x.numPz)} · ${esc(x.customer||'')}</option>`)).join('');
         // пул позиций заказа для добавления
-        const posOpts=(o?o.positions:[]).map(ps=>`<option value="${esc(ps.id)}">${esc(ps.numPos)} · ${esc(ps.name||'')}${ps.drawing?' · '+esc(ps.drawing):''} (${esc(String(ps.qty??''))} ${esc(ps.unit||'')}${ps.status?', '+esc(ps.status):''})</option>`).join('');
+        const posOpts=byZnz
+          ? znzItems.map(it=>`<option value="${esc(it.id)}">${esc(it.name)} (${esc(String(it.qty??''))} ${esc(it.unit||'')})</option>`).join('')
+          : (o?o.positions:[]).map(ps=>`<option value="${esc(ps.id)}">${esc(ps.numPos)} · ${esc(ps.name||'')}${ps.drawing?' · '+esc(ps.drawing):''} (${esc(String(ps.qty??''))} ${esc(ps.unit||'')}${ps.status?', '+esc(ps.status):''})</option>`).join('');
+        const znzOpts=byZnz?['<option value="">— выберите заявку на закупку —</option>'].concat((LOGI_ZNZ||[]).map(z=>`<option value="${esc(z.id)}"${String(z.id)===String(pl.znzId)?' selected':''}>${esc(z.numZnz)} · ${esc(z.name||'')}${z.supplier?' · '+esc(z.supplier):''}${z.pz&&z.pz.length?' · для '+esc(z.pz.join(', ')):''}</option>`)).join(''):'';
         let totQty=0,totT=0,totF=0;
         const placesHtml=pl.places.map((pk,pi)=>{
           const itemsHtml=(pk.items||[]).map(it=>{
@@ -2731,7 +2776,9 @@
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
               <div style="width:130px">${FLAB('Тип тары')}<input data-pf="kind" list="upl-kinds" value="${esc(pk.kind||'')}" style="${FINP};padding:6px 8px"></div>
               <div style="width:90px">${FLAB('№ места')}<input data-pf="no" value="${esc(pk.no||'')}" style="${FINP};padding:6px 8px"></div>
-              <div style="flex:1;min-width:150px">${FLAB('Габариты / примечание')}<input data-pf="dims" value="${esc(pk.dims||'')}" style="${FINP};padding:6px 8px" placeholder="Д×Ш×В, мм"></div>
+              <div style="flex:1;min-width:150px">${FLAB('Габариты Д×Ш×В, мм',true)}<input data-pf="dims" value="${esc(pk.dims||'')}" style="${FINP};padding:6px 8px" placeholder="400×960×960"></div>
+              <div style="width:96px">${FLAB('Брутто, кг',true)}<input data-pf="weightBrutto" type="number" step="any" value="${esc(String(pk.weightBrutto??''))}" style="${FINP};padding:6px 8px"></div>
+              <div style="width:96px">${FLAB('Нетто, кг')}<input data-pf="weightNetto" type="number" step="any" value="${esc(String(pk.weightNetto??''))}" style="${FINP};padding:6px 8px"></div>
               <button class="tbtn upl-place-del" data-place="${esc(pk.id)}" style="padding:6px 10px;color:#b91c1c">✕ место</button>
             </div>
             <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px">
@@ -2739,15 +2786,16 @@
                 <th style="padding:3px 5px">№ поз</th><th style="padding:3px 5px">Наименование / чертёж</th><th style="padding:3px 5px">Кол-во</th><th style="padding:3px 5px">Масса теор., кг</th><th style="padding:3px 5px">Масса факт., кг</th><th style="padding:3px 5px;text-align:right">Расхожд.</th><th></th></tr></thead>
               <tbody>${itemsHtml}</tbody></table>
             <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
-              <select class="upl-addpos" data-place="${esc(pk.id)}" style="${FINP};padding:5px 8px;max-width:520px"${o?'':' disabled'}><option value="">+ добавить позицию из заказа…</option>${posOpts}</select>
+              <select class="upl-addpos" data-place="${esc(pk.id)}" style="${FINP};padding:5px 8px;max-width:520px"${(byZnz?pl.znzId:o)?'':' disabled'}><option value="">+ добавить позицию из ${byZnz?'закупки':'заказа'}…</option>${posOpts}</select>
             </div></div>`;
         }).join('');
         const diffTot=(totF&&totT)?logiN(totF-totT):'';
         root.innerHTML=`${logiDl('upl-kinds',LOGI_PLACE_KINDS)}
           <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:12px">
-            <div style="grid-column:span 7">${FLAB('Производственный заказ (ПЗ)',true)}<select id="upl-order" style="${FINP}">${orderOpts}</select></div>
+            <div style="grid-column:span 7">${byZnz?`${FLAB('Заявка на закупку (ЗнЗ)',true)}<select id="upl-znz" style="${FINP}">${znzOpts}</select>`:`${FLAB('Производственный заказ (ПЗ)',true)}<select id="upl-order" style="${FINP}">${orderOpts}</select>`}</div>
             <div style="grid-column:span 5">${FLAB('№ упаковочного листа')}<input id="upl-no" value="${esc(pl.plNo||'')}" style="${FINP}" placeholder="напр. УЛ-01"></div>
           </div>
+          <div style="margin-top:6px;font-size:12px;color:#b45309">Габариты и вес брутто каждого места обязательны: без них заявку нельзя скомплектовать, перевозчик не примет. Заполняет тот, кто пакует.</div>
           <div style="margin-top:6px;font-size:12px;color:var(--sub)">Масса теор. подставляется из реестра чертежей (ТЗ §7); правка здесь сохранит её в реестр. Масса факт. — по взвешиванию.</div>
           <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
             <b style="font-size:13px;color:var(--ink)">Грузовые места</b>
@@ -2764,11 +2812,14 @@
       }
       function wire(){
         const root=document.getElementById('upl-body');
-        root.querySelector('#upl-order').onchange=(e)=>{ syncDom(); pl.orderId=e.target.value||null; const o=curOrder(); pl.orderPz=o?o.numPz:''; if(o&&!pl.plNo)pl.plNo='УЛ по '+o.numPz; render(); };
+        const os=root.querySelector('#upl-order'); if(os)os.onchange=(e)=>{ syncDom(); pl.orderId=e.target.value||null; const o=curOrder(); pl.orderPz=o?o.numPz:''; if(o&&!pl.plNo)pl.plNo='УЛ по '+o.numPz; render(); };
+        const zs=root.querySelector('#upl-znz'); if(zs)zs.onchange=async(e)=>{ syncDom(); pl.znzId=e.target.value||null; const z=curZnz(); pl.znzNum=z?z.numZnz:''; if(z&&!pl.plNo)pl.plNo='УЛ по '+z.numZnz; if(z&&sh.type==='Транзит поставщик → заказчик'&&z.pz&&z.pz.length&&!pl.orderPz)pl.orderPz=z.pz[0]; await loadZnzPositions(); render(); };
         root.querySelector('#upl-addplace').onclick=()=>{ syncDom(); pl.places.push({id:nextId('pk'),kind:LOGI_PLACE_KINDS[0],no:String(pl.places.length+1),dims:'',items:[]}); render(); };
         root.querySelectorAll('.upl-place-del').forEach(b=>b.onclick=()=>{ syncDom(); pl.places=pl.places.filter(x=>x.id!==b.dataset.place); render(); });
         root.querySelectorAll('.upl-item-del').forEach(b=>b.onclick=()=>{ syncDom(); const pk=pl.places.find(x=>x.id===b.dataset.place); if(pk)pk.items=pk.items.filter(x=>x.id!==b.dataset.itemid); render(); });
-        root.querySelectorAll('.upl-addpos').forEach(sel=>sel.onchange=()=>{ syncDom(); const pk=pl.places.find(x=>x.id===sel.dataset.place); const o=curOrder(); if(!pk||!o)return;
+        root.querySelectorAll('.upl-addpos').forEach(sel=>sel.onchange=()=>{ syncDom(); const pk=pl.places.find(x=>x.id===sel.dataset.place); if(!pk)return;
+          if(byZnz){ const it=znzItems.find(x=>String(x.id)===String(sel.value)); if(!it)return; pk.items.push({id:nextId('it'),znzItemId:it.id,numPos:'',name:it.name,drawing:'',unit:it.unit,qty:it.qty??'',massTheor:'',massFact:''}); render(); return; }
+          const o=curOrder(); if(!o)return;
           const ps=o.positions.find(p=>String(p.id)===String(sel.value)); if(!ps)return;
           pk.items.push({id:nextId('it'),posId:ps.id,numPos:ps.numPos,name:ps.name,drawing:ps.drawing,unit:ps.unit,qty:ps.qty??'',massTheor:ps.massTheor??'',massFact:''}); render(); });
         // живой пересчёт расхождения по массам
@@ -2781,8 +2832,9 @@
         root.querySelector('#upl-cancel').onclick=closeModal;
         root.querySelector('#upl-save').onclick=async()=>{
           syncDom();
-          if(!pl.orderId){ document.getElementById('upl-err').textContent='Выберите производственный заказ (ПЗ).'; return; }
-          if(!pl.plNo)pl.plNo='УЛ по '+(pl.orderPz||'');
+          if(byZnz){ if(!pl.znzId){ document.getElementById('upl-err').textContent='Выберите заявку на закупку (ЗнЗ).'; return; } }
+          else if(!pl.orderId){ document.getElementById('upl-err').textContent='Выберите производственный заказ (ПЗ).'; return; }
+          if(!pl.plNo)pl.plNo='УЛ по '+(byZnz?(pl.znzNum||''):(pl.orderPz||''));
           const cur=logiShipmentById(shipmentId); if(!cur){ toast('Заявка не найдена','err'); return; }
           cur.packingLists=cur.packingLists||[];
           if(pl.id){ const i=cur.packingLists.findIndex(u=>String(u.id)===String(pl.id)); if(i>=0)cur.packingLists[i]=pl; else cur.packingLists.push(pl); }
@@ -8163,7 +8215,7 @@
           <div class="sec-h" style="margin:0">Позиции</div><span id="znz-items-sum" style="font-size:13px;color:var(--sub)"></span>${itemAdd}
         </div>
         <div id="znz-item-form"></div>
-        <div id="znz-items-list"><div class="c-gray" style="font-size:13px">загрузка позиций…</div></div></div>`;
+        <div id="znz-items-list"><div class="c-gray" style="font-size:13px">загрузка позиций…</div></div></div><div id="znz-ship-panel"></div>`;
       // быстрое улучшение 4 (премортем, утв. владельцем «Остальное да»): секция «Акты входного
       // контроля» — персистентный список уже проведённых приёмок этой заявки (не только сводка
       // сразу после «Провести приёмку», которая пропадает при перезагрузке страницы). Каждый акт —
@@ -8234,6 +8286,7 @@
       // + опц. приход металла на склад. Видна на этапах, где физически уже что-то приходит.
       const canAccept=canAct&&['Размещена','В пути','Принята'].includes(r.status);
       if(canAccept)acts.push('<button class="tbtn primary" id="znz-accept-btn" style="background:#2e7d32;border-color:#2e7d32">Провести приёмку</button>');
+      if(PROC.mode==='live'&&r.numZnz&&!['Закрыта','Отменена'].includes(String(r.statusStored||r.status||'')))acts.push('<button class="tbtn" id="znz-ship-btn" title="Перевозка покупного: только если доставку организуем мы. Поставку силами поставщика оформлять не надо — только приёмка (Ф.3)"><i class=ic-truck></i> Перевозка</button>'); // K-339
       const acceptHost=canAccept?'<div id="znz-accept-host"></div>':'';
       // K-102: «Принять в работу» (Снабжение/Админ, LIVE, пока никто не взял) + бейдж «В работе у»
       // K-139: проверки статуса тут не было вовсе — «Принять в работу» предлагалась
@@ -8274,6 +8327,16 @@
       wireCopyLink(host);
       wireInnHints(host);   // K-98: подсказка «без ИНН» у поставщика заказа (счёт/оплата без ИНН не свяжутся с 1С)
       const acceptBtn=document.getElementById('znz-accept-btn'); if(acceptBtn)acceptBtn.onclick=()=>openZnzAcceptFormInline(r);
+      // K-339: перевозка покупного — входящая к нам или транзит сразу заказчику
+      loadShipPanel('znz-ship-panel',{znz:r.numZnz});
+      const shipBtn=document.getElementById('znz-ship-btn'); if(shipBtn)shipBtn.onclick=async()=>{
+        let type='Входящая';
+        if(!(await uiConfirm({title:'Перевозка по '+r.numZnz,text:'Входящая — покупное едет к нам на завод.\nТранзит — покупаем и везём сразу заказчику, минуя завод (как кольца в Волгоград).\nЕсли везёт сам поставщик, заявка не нужна: только приёмка по Ф.3.',ok:'Входящая к нам',cancel:'Другой вариант…'}))){
+          if(!(await uiConfirm({title:'Транзит заказчику по '+r.numZnz,text:'Покупное поедет от поставщика сразу к заказчику. Грузополучатель подставится из заказа, которому служит закупка.',ok:'Транзит заказчику',cancel:'Отмена'})))return;
+          type='Транзит поставщик → заказчик'; }
+        shipBtn.disabled=true;
+        try{ const j=await postJson('/api/logistics/from-znz',{numZnz:r.numZnz,type}); toast(j.created?`Создана перевозка ${j.shipment.num}`:`Закупка добавлена в перевозку ${j.shipment.num}`,'ok'); location.hash='#logistics/'+encodeURIComponent(j.shipment.id); }
+        catch(e){ shipBtn.disabled=false; toast('Не удалось: '+(e.message||e),'err'); } };
       // K-86 этап 3: секция «Позиции» (многопозиционная заявка) — асинхронная загрузка (degrade-safe)
       loadZnzItems(r,canAct);
       // быстрое улучшение 4: секция «Акты входного контроля» — асинхронная загрузка (degrade-safe)
@@ -14858,10 +14921,12 @@
         <div style="display:flex;gap:4px;border-bottom:1px solid var(--bd)" id="od-tabs">${tabs.map(([k,l])=>`<button data-tab="${k}" style="font:inherit;font-size:13px;font-weight:600;padding:8px 13px;border:0;border-bottom:2px solid ${ordTab===k?'var(--navy)':'transparent'};background:none;color:${ordTab===k?'var(--navy)':'var(--sl-500)'};cursor:pointer">${l}</button>`).join('')}</div>
         <div id="od-body"></div>
         <div id="od-znz-panel"></div>
+        <div id="od-ship-panel"></div>
         <div class="card pad" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
           <span id="od-chat" style="margin-right:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--sub)"></span>
           ${odCanEdit(o)?`<button class="ui-btn" id="od-edit-btn" title="Правка реквизитов и позиций Ф.1–П.2 (добавить / изменить / удалить позиции)"><i class=ic-pencil></i> Реквизиты и позиции</button>`:''}
           <button class="ui-btn" id="od-znz-btn" title="Разместить заявку на закупку под этот заказ (ЗнЗ с источником ${esc(o.numPz)})"><i class=ic-box></i> Заявка на закупку</button>
+          ${['Выполнен','Ожидает перевозки','В работе'].includes(o.status)?`<button class="ui-btn" id="od-ship-btn" title="Отгрузка заказчику: если открыта перевозка на того же грузополучателя — заказ добавится в неё"><i class=ic-truck></i> Заявка на перевозку</button>`:''}
           ${routeBtns}
           <a class="pbtn" href="/api/print/pz/${encodeURIComponent(o.numPz)}" target="_blank" rel="noopener">${aico('print',14)} Печать ПЗ (Ф.1–П.2)</a>
         </div>
@@ -14875,6 +14940,19 @@
           <div id="od-del-confirm" style="margin-top:9px"></div></div>`:''}`;
       const xb=host.querySelector('#od-x'); if(xb)xb.onclick=()=>{ordSel=null;try{history.replaceState(null,'','#orders');}catch{}if(ordApi)ordApi.selectKey(null);odShowDetail(null);};
       wireCopyLink(host);
+      // K-339: перевозки этого заказа + кнопка создания
+      loadShipPanel('od-ship-panel',{pz:o.numPz});
+      const shb=host.querySelector('#od-ship-btn'); if(shb)shb.onclick=async()=>{
+        // uiDialog отдаёт false и на «Отмена», и на Esc — поэтому два шага, чтобы Esc не превращался в самовывоз
+        let type='Отгрузка клиенту';
+        if(!(await uiConfirm({title:'Заявка на перевозку по '+o.numPz,text:'Отгрузка клиенту — везём мы (в цене заказа или отдельным счётом).\nСамовывоз — заказчик забирает сам; заявка нужна, чтобы заказ стал «Отгружен».',ok:'Отгрузка клиенту',cancel:'Другой вариант…'}))){
+          if(!(await uiConfirm({title:'Самовывоз заказчиком по '+o.numPz,text:'Заказчик заберёт груз сам. От нас — упаковочный лист, паспорт качества и доверенность водителя.',ok:'Самовывоз заказчиком',cancel:'Отмена'})))return;
+          type='Самовывоз заказчиком'; }
+        shb.disabled=true;
+        try{ const j=await postJson('/api/logistics/from-order',{numPz:o.numPz,type});
+          toast(j.created?`Создана заявка ${j.shipment.num}. Дальше: места с габаритами и весом.`:`Заказ добавлен в перевозку ${j.shipment.num} (тот же грузополучатель).`,'ok'); (j.warnings||[]).forEach(w=>toast(w,'warn'));
+          location.hash='#logistics/'+encodeURIComponent(j.shipment.id);
+        }catch(e){ shb.disabled=false; toast('Не удалось: '+(e.message||e),'err'); } };
       odWireFlow(host,o);
       odWireChat(o);   // K-102: «Чат заказа: chatNNN [задать]» (оверлей order-chats.json)
       const zb=host.querySelector('#od-znz-btn'); if(zb)zb.onclick=()=>odToggleZnzPanel(o);

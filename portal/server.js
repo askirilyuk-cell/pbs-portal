@@ -3177,7 +3177,8 @@ async function createZnzRequest(body) {
     } catch (e) { console.warn('ЗнЗ: уведомление проверяющему не отправлено:', e.message); reviewerNotified = { ok: false, error: String(e.message || e) }; }
   }
 
-  return { ok: true, numZnz, id, status, type, itemsCreated, notified, reviewerNotified, orderChatNotified };
+  let folderCreated = false; if (cfg().RECORDS) { try { folderCreated = !!(await ensureZnzFolder(numZnz)); } catch (e) { console.warn('[K-338] папка ЗнЗ', numZnz, e.message); } } // K-338
+  return { ok: true, numZnz, id, status, type, itemsCreated, notified, reviewerNotified, orderChatNotified, folderCreated };
 }
 
 // --- K-86 смена статуса ЗнЗ по этапам (DEF-30) -------------------------------
@@ -5132,6 +5133,154 @@ async function createSalesFolderTree(zp) {
   if (!_atomicMkTree(folder, SALES_STAGES)) return null;
   return folder;
 }
+// ══ K-338: папки записей ПЗ, ЗнЗ и логистики на NAS (решение владельца 29.09.2026) ══════
+//  До этого портал заводил папки только для ЗП (6.1-Продажи); папки ПЗ в 6.2-Производство
+//  делали руками (5 из 15 заказов), заявки на закупку и перевозки папок не имели вовсе.
+//  Переписка по 12 ПЗ показала: документы живут в чате Bitrix, цех не видит спецификацию,
+//  упаковочный лист выходит в 2–3 версиях, а «где лежит» спрашивают в каждом заказе.
+//  Одна схема на три раздела: <RECORDS>/<раздел>/<год>/<№ документа[ суффикс]>/<этапы>.
+//  Спецификацию из ЗП в папку ПЗ НЕ копируем — там цены, производству их видеть не надо;
+//  в карточке ПЗ даётся ссылка на папку ЗП тем, у кого есть доступ к продажам.
+const ORDER_STAGES = ['00-Основание', '01-Заказ', '02-КД и технология', '03-Материалы и покупные', '04-Производство', '05-Качество', '06-Отгрузка', '07-Переписка'];
+// ручные папки 2026 года (002/006/007/010/011) заводились со своей нумерацией — приводим к единой
+const ORDER_STAGE_RENAMES = { '02-Технология': '02-КД и технология', '04-Сертификаты': '05-Качество', '05-Отгрузка': '06-Отгрузка', 'Фото': '04-Производство' };
+const ZNZ_STAGES = ['01-Заявка', '02-Предложения и счета', '03-Сертификаты и паспорта', '04-Входной контроль', '05-Переписка'];
+const LOGI_STAGES = ['01-Заявка', '02-Упаковочные листы', '03-Перевозчик и накладные', '04-Фото груза', '05-Переписка'];
+const REC_KINDS = {
+  orders: { section: '6.2-Производство', re: /^ПЗ-(\d{4})-\d{3}$/, stages: ORDER_STAGES, renames: ORDER_STAGE_RENAMES, label: 'заказа' },
+  znz: { section: '6.3-Закупки', re: /^ЗнЗ-(\d{4})-\d{3}$/, stages: ZNZ_STAGES, renames: {}, label: 'заявки на закупку' },
+  logistics: { section: '6.4-Логистика', re: /^ЗПер-(\d{4})-\d{3}$/, stages: LOGI_STAGES, renames: {}, label: 'перевозки' },
+};
+// найти существующую папку документа (без создания). null — нет записей / номер не по формату / папки нет
+function recFolder(kind, num) {
+  const K = REC_KINDS[kind]; const root = cfg().RECORDS; if (!K || !root) return null;
+  const m = K.re.exec(String(num || '').trim()); if (!m) return null;
+  const yearDir = path.join(root, K.section, m[1]);
+  let dirs; try { dirs = fs.readdirSync(yearDir); } catch { return null; }
+  const d = dirs.find((x) => x === num || x.startsWith(num + ' '));
+  return d ? path.join(yearDir, d) : null;
+}
+// путь, который показываем человеку («06-Записи-ПБС/6.2-Производство/2026/ПЗ-2026-011») и ссылка на File Station
+function recPublicPath(folderAbs) { const sp = fsSharePath(folderAbs); return sp ? sp.replace(/^\/+/, '') : ''; }
+function recFsUrl(folderAbs) {
+  const sp = fsSharePath(folderAbs); if (!sp) return '';
+  return `${cfg().FS_URL}/?launchApp=SYNO.SDS.App.FileStation3.Instance&launchParam=${encodeURIComponent('openfile=' + sp)}`;
+}
+// переименовать папку/файл под записями. Через FileStation (иначе Synology Drive не увидит), фолбэк — ФС.
+async function fsRename(absPath, newName) {
+  const sp = fsSharePath(absPath); if (!sp) throw new Error('FileStation: путь вне записей ИСМ');
+  await fsCall({ api: 'SYNO.FileStation.Rename', version: '2', method: 'rename', path: JSON.stringify([sp]), name: JSON.stringify([newName]) });
+}
+// создать/досоздать дерево папки документа: сама папка + этапы; старые имена этапов переименовать.
+// Идемпотентно: повторный вызов ничего не ломает. Возвращает {folder, created, renamed[], addedStages[]}|null.
+async function recEnsureTree(kind, num) {
+  const K = REC_KINDS[kind]; const root = cfg().RECORDS; if (!K || !root) return null;
+  const m = K.re.exec(String(num || '').trim()); if (!m) return null;
+  const yearDir = path.join(root, K.section, m[1]);
+  const sectionDir = path.join(root, K.section);
+  const out = { folder: null, created: false, renamed: [], addedStages: [] };
+  // раздел и год: 6.4-Логистика на NAS ещё не было — создаём и его
+  for (const d of [sectionDir, yearDir]) {
+    if (fs.existsSync(d)) continue;
+    if (fsEnabled() && fsSharePath(d)) { try { await fsCreateFolder(path.dirname(d), [path.basename(d)]); continue; } catch (e) { fsWarn('создание ' + path.basename(d), e); } }
+    try { fs.mkdirSync(d, { recursive: true }); } catch {}
+  }
+  let dirs = []; try { dirs = fs.readdirSync(yearDir); } catch {}
+  const existing = dirs.find((x) => x === num || x.startsWith(num + ' '));
+  let folder;
+  if (existing) folder = path.join(yearDir, existing);
+  else {
+    folder = path.join(yearDir, num);
+    if (fsEnabled() && fsSharePath(folder)) { try { await fsCreateFolder(yearDir, [num]); } catch (e) { fsWarn('создание папки ' + num, e); } }
+    if (!fs.existsSync(folder) && !_atomicMkTree(folder, [])) return null;
+    out.created = true;
+  }
+  out.folder = folder;
+  // старые имена этапов → новые (ручные папки 2026 года)
+  let subs = []; try { subs = fs.readdirSync(folder, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch {}
+  for (const [oldName, newName] of Object.entries(K.renames || {})) {
+    if (!subs.includes(oldName) || subs.includes(newName)) continue;
+    try {
+      if (fsEnabled()) await fsRename(path.join(folder, oldName), newName); else fs.renameSync(path.join(folder, oldName), path.join(folder, newName));
+      out.renamed.push(oldName + ' → ' + newName); subs = subs.map((x) => (x === oldName ? newName : x));
+    } catch (e) { fsWarn('переименование ' + oldName + ' в ' + num, e); }
+  }
+  // недостающие этапы
+  const missing = K.stages.filter((st) => !subs.includes(st));
+  if (missing.length) {
+    if (fsEnabled() && fsSharePath(folder)) { try { await fsCreateFolder(folder, missing); out.addedStages = missing; } catch (e) { fsWarn('этапы ' + num, e); } }
+    for (const st of missing) { const sd = path.join(folder, st); if (!fs.existsSync(sd)) { try { fs.mkdirSync(sd, { recursive: true }); if (!out.addedStages.includes(st)) out.addedStages.push(st); } catch {} } }
+  }
+  return out;
+}
+async function ensureOrderFolder(numPz) { const r = await recEnsureTree('orders', numPz); return r ? r.folder : null; }
+async function ensureZnzFolder(numZnz) { const r = await recEnsureTree('znz', numZnz); return r ? r.folder : null; }
+// ответ для карточки: файлы по этапам + где это лежит
+function recFilesPayload(kind, num, folder) {
+  const K = REC_KINDS[kind];
+  if (!folder) return { files: [], stages: K.stages, warning: `Папка ${K.label} ${num} ещё не создана.` };
+  return { files: walkSalesFiles(folder), folder: path.basename(folder), path: recPublicPath(folder), fsUrl: recFsUrl(folder), stages: K.stages };
+}
+// сохранить загруженные файлы в папку этапа (ZIP — распаковать в подпапку по имени архива). Общее для ЗП и ПЗ.
+async function recSaveUploads(folder, stageDir, files) {
+  const saved = [], skipped = []; let unzipped = 0;
+  for (const f of files) {
+    if (/\.zip$/i.test(String(f.filename))) {
+      let entries = null; try { entries = unzipBuffer(f.data); } catch { entries = null; }
+      if (entries && entries.length) {
+        const zipBase = path.basename(String(f.filename)).replace(/\.zip$/i, '').replace(/[\\/:*?"<>|]/g, '_').trim() || 'архив';
+        for (const en of entries) {
+          const segs = en.path.split('/').map((x) => x.replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim()).filter((x) => x && x !== '..');
+          if (!segs.length) { skipped.push(en.path); continue; }
+          const dir = path.join(stageDir, zipBase, ...segs.slice(0, -1));
+          const rel = await saveFileUnique(folder, dir, segs[segs.length - 1], en.data);
+          rel ? (saved.push(rel), unzipped++) : skipped.push(en.path);
+        }
+        continue;
+      }
+    }
+    const rel = await saveFileUnique(folder, stageDir, path.basename(String(f.filename)), f.data);
+    rel ? saved.push(rel) : skipped.push(f.filename);
+  }
+  return { saved, skipped, unzipped };
+}
+// один обработчик выдачи файла (inline/скачивание) и конвертации для ЗП и ПЗ
+function recServeFile(res, folder, rel, dl) {
+  if (!folder) { res.writeHead(404); return res.end('Папка не найдена'); }
+  const target = path.normalize(path.join(folder, rel));
+  if (target !== folder && !target.startsWith(folder + path.sep)) { res.writeHead(403); return res.end('Доступ запрещён'); }
+  let st; try { st = fs.statSync(target); } catch { res.writeHead(404); return res.end('Файл не найден'); }
+  if (!st.isFile()) { res.writeHead(404); return res.end('Не файл'); }
+  const ext = (target.split('.').pop() || '').toLowerCase();
+  const ct = FILE_MIME[ext] || MIME['.' + ext] || 'application/octet-stream';
+  const fn = encodeURIComponent(path.basename(target));
+  res.writeHead(200, { 'Content-Type': ct, 'Content-Disposition': `${dl ? 'attachment' : 'inline'}; filename*=UTF-8''${fn}`, 'Cache-Control': 'private, max-age=60' });
+  const s = fs.createReadStream(target); s.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); }); return s.pipe(res);
+}
+async function recConvertFile(res, folder, rel) {
+  if (!cfg().GOTENBERG) { res.writeHead(501, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Предпросмотр office выполняется на сервере (NAS): не задан адрес Gotenberg.'); }
+  if (!folder) { res.writeHead(404); return res.end('Папка не найдена'); }
+  const target = path.normalize(path.join(folder, rel));
+  if (target !== folder && !target.startsWith(folder + path.sep)) { res.writeHead(403); return res.end('Доступ запрещён'); }
+  let st; try { st = fs.statSync(target); } catch { res.writeHead(404); return res.end('Файл не найден'); }
+  if (!st.isFile()) { res.writeHead(404); return res.end('Не файл'); }
+  try { const pdf = await officeToPdf(target); const fn = encodeURIComponent(path.basename(target).replace(/\.[^.]+$/, '') + '.pdf');
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename*=UTF-8''${fn}`, 'Cache-Control': 'private, max-age=300' }); return res.end(pdf);
+  } catch (e) { res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Не удалось конвертировать в PDF: ' + String(e.message || e)); }
+}
+// задним числом: деревья для всех ПЗ (кроме тестовых) и всех ЗнЗ, плюс раздел 6.4-Логистика
+async function recEnsureAll() {
+  const report = { orders: [], znz: [], logistics: null, errors: [] };
+  const orders = await ncListSoft('orders');
+  for (const o of orders) { const n = String(o['№ ПЗ'] || '').trim(); if (!/^ПЗ-\d{4}-\d{3}$/.test(n)) continue;
+    try { const r = await recEnsureTree('orders', n); if (r) report.orders.push({ num: n, created: r.created, renamed: r.renamed, added: r.addedStages.length }); } catch (e) { report.errors.push(n + ': ' + e.message); } }
+  const znz = await ncListSoft('procurement_requests');
+  for (const z of znz) { const n = String(z['№ ЗнЗ'] || '').trim(); if (!/^ЗнЗ-\d{4}-\d{3}$/.test(n)) continue;
+    try { const r = await recEnsureTree('znz', n); if (r) report.znz.push({ num: n, created: r.created, added: r.addedStages.length }); } catch (e) { report.errors.push(n + ': ' + e.message); } }
+  const root = cfg().RECORDS; if (root) { const d = path.join(root, '6.4-Логистика', String(new Date().getFullYear()));
+    try { for (const x of [path.dirname(d), d]) { if (fs.existsSync(x)) continue; if (fsEnabled() && fsSharePath(x)) { try { await fsCreateFolder(path.dirname(x), [path.basename(x)]); continue; } catch (e) { fsWarn('создание ' + path.basename(x), e); } } fs.mkdirSync(x, { recursive: true }); } report.logistics = recPublicPath(d); } catch (e) { report.errors.push('6.4-Логистика: ' + e.message); } }
+  return report;
+}
 // запись файла в dir с очисткой имени, защитой от выхода за folder и дедупом « (N)». Возвращает rel|null.
 async function saveFileUnique(folder, dir, rawName, data) {
   // NFC: macOS отдаёт имена в форме Unicode NFD («й» = «и» + U+0306). На ext4
@@ -5552,7 +5701,8 @@ async function createOrder(body, who) {
   let chatCreated = null;
   try { chatCreated = await createOrderChat({ num: numPz, participants: body.chatUsers, who }); }
   catch (e) { console.warn('ПЗ: чат заказа не создан:', e.message); chatCreated = { ok: false, error: String(e.message || e) }; }
-  return { ok: true, numPz, id: orderId, positions: posCount, chatCreated };
+  let folderCreated = false; if (cfg().RECORDS) { try { folderCreated = !!(await ensureOrderFolder(numPz)); } catch (e) { console.warn('[K-338] папка ПЗ', numPz, e.message); } } // K-338
+  return { ok: true, numPz, id: orderId, positions: posCount, chatCreated, folderCreated };
 }
 
 // ── K-108: рабочий чат производственного заказа в Bitrix ─────────────────────
@@ -14294,8 +14444,38 @@ const server = http.createServer(async (req, res) => {
       if (!cfg().RECORDS) return sendJson(res, 200, { files: [], warning: 'Путь к записям не задан («Настройки» → «Путь к записям»).' });
       const folder = salesFolder(zp);
       if (!folder) return sendJson(res, 200, { files: [], warning: `Папка запроса ${zp} не найдена в записях.` });
-      try { return sendJson(res, 200, { files: walkSalesFiles(folder), folder: path.basename(folder) }); }
+      try { return sendJson(res, 200, { files: walkSalesFiles(folder), folder: path.basename(folder), path: recPublicPath(folder), fsUrl: recFsUrl(folder), stages: SALES_STAGES }); } // DEF-37: полный путь и ссылка на File Station
       catch (e) { return sendJson(res, 200, { files: [], warning: String(e.message || e) }); }
+    }
+    // ── K-338: файлы заказа (папка ПЗ на NAS) — те же возможности, что у ЗП ──
+    if (p === '/api/orders/files') {
+      const pz = url.searchParams.get('pz') || '';
+      if (!cfg().RECORDS) return sendJson(res, 200, { files: [], stages: ORDER_STAGES, warning: 'Путь к записям не задан («Настройки» → «Путь к записям»).' });
+      try { return sendJson(res, 200, recFilesPayload('orders', pz, recFolder('orders', pz))); }
+      catch (e) { return sendJson(res, 200, { files: [], stages: ORDER_STAGES, warning: String(e.message || e) }); }
+    }
+    if (p === '/api/orders/file') return recServeFile(res, recFolder('orders', url.searchParams.get('pz') || ''), url.searchParams.get('rel') || '', url.searchParams.get('dl') === '1');
+    if (p === '/api/orders/convert') return recConvertFile(res, recFolder('orders', url.searchParams.get('pz') || ''), url.searchParams.get('rel') || '');
+    if (p === '/api/orders/upload' && req.method === 'POST') {
+      if (!cfg().RECORDS) return sendJson(res, 400, { error: 'Путь к записям не задан («Настройки» → «Путь к записям»).' });
+      const ct = String(req.headers['content-type'] || '');
+      const bm = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ct);
+      if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
+      let raw; try { raw = await readRawBody(req, 64 * 1024 * 1024); } catch (e) { return sendJson(res, 413, { error: String(e.message || e) }); }
+      const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim());
+      const pz = String(fields.pz || '').trim(), stage = String(fields.stage || '').trim();
+      if (!files.length) return sendJson(res, 400, { error: 'Файлы не переданы.' });
+      const folder = await ensureOrderFolder(pz);
+      if (!folder) return sendJson(res, 400, { error: `Не удалось определить/создать папку заказа ${pz || '(пусто)'}.` });
+      const stageDir = (stage && ORDER_STAGES.includes(stage)) ? path.join(folder, stage) : folder;
+      try { fs.mkdirSync(stageDir, { recursive: true }); } catch (e) { return sendJson(res, 500, { error: 'Не удалось создать папку этапа: ' + e.message }); }
+      const r = await recSaveUploads(folder, stageDir, files);
+      return sendJson(res, 200, { ok: true, ...r, ...recFilesPayload('orders', pz, folder) });
+    }
+    if (p === '/api/orders/folders/ensure-all' && req.method === 'POST') { // K-338: деревья задним числом (админ)
+      if (!(req.session && req.session.isAdmin)) return sendJson(res, 403, { error: 'Только администратор.' });
+      if (!cfg().RECORDS) return sendJson(res, 400, { error: 'Путь к записям не задан.' });
+      try { return sendJson(res, 200, await recEnsureAll()); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
     }
     if (p === '/api/sales/upload' && req.method === 'POST') {
       if (!cfg().RECORDS) return sendJson(res, 400, { error: 'Путь к записям не задан («Настройки» → «Путь к записям»).' });

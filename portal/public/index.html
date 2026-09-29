@@ -7294,10 +7294,15 @@
     const F_OFFICE=/^(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;   // предпросмотр через конвертацию в PDF (Gotenberg)
     const SALES_STAGES=['01-Запрос','02-Оценка','03-КП','04-Договор','05-Оплата','06-Переписка']; // этапы папки запроса (ДП–З.1)
     const fsize=(n)=>{ if(n==null)return ''; if(n<1024)return n+' Б'; if(n<1048576)return Math.round(n/1024)+' КБ'; return (n/1048576).toFixed(1).replace('.',',')+' МБ'; };
-    const fileUrl=(zp,rel,dl)=>`/api/sales/file?zp=${encodeURIComponent(zp)}&rel=${encodeURIComponent(rel)}${dl?'&dl=1':''}`;
-    async function loadReqFiles(zp){
+    // K-338: один блок файлов на ЗП (6.1-Продажи) и ПЗ (6.2-Производство) — отличается только API и именем параметра
+    const recApi=(kind)=>kind==='orders'?{base:'/api/orders',q:'pz'}:{base:'/api/sales',q:'zp'};
+    const fileUrl=(zp,rel,dl,kind)=>{ const A=recApi(kind); return `${A.base}/file?${A.q}=${encodeURIComponent(zp)}&rel=${encodeURIComponent(rel)}${dl?'&dl=1':''}`; };
+    // копирование пути: портал ходит по http, navigator.clipboard там недоступен — фолбэк через скрытое поле
+    function copyText(t){ try{ if(navigator.clipboard&&window.isSecureContext){ navigator.clipboard.writeText(t); return true; } }catch{} try{ const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); const ok=document.execCommand('copy'); ta.remove(); return ok; }catch{ return false; } }
+    async function loadReqFiles(zp,kind){
       const host=document.getElementById('reqfiles'); if(!host)return;
-      let d; try{ d=await (await fetch('/api/sales/files?zp='+encodeURIComponent(zp))).json(); }
+      const A=recApi(kind);
+      let d; try{ d=await (await fetch(A.base+'/files?'+A.q+'='+encodeURIComponent(zp))).json(); }
       catch(e){ if(host.isConnected)host.innerHTML=`<div style="font-size:13px;color:var(--red)">Не удалось получить файлы: ${esc(e.message)}</div>`; return; }
       if(!host.isConnected)return;   // detail-панель пересобралась за время await (быстрое переключение ЗП) — не писать в отвалившийся узел
       const files=d.files||[];
@@ -7305,13 +7310,17 @@
       const uplBar=`<div style="background:#f6fbff;border:1px solid #cfe0f5;border-radius:var(--r-s);padding:9px 10px;margin-bottom:8px">
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px">
           <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--sl-500)">Добавить файл · этап</span>
-          <select id="upl-stage" style="font:inherit;font-size:13px;color:#1f3a52;padding:5px 8px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff">${SALES_STAGES.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}<option value="">(в корень папки)</option></select>
+          <select id="upl-stage" style="font:inherit;font-size:13px;color:#1f3a52;padding:5px 8px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff">${(d.stages||SALES_STAGES).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}<option value="">(в корень папки)</option></select>
           <button class="tbtn primary" id="upl-btn" style="margin-left:auto;padding:5px 13px;font-size:13px">Загрузить</button>
         </div>
         <div id="upl-dz"></div>
         <div id="upl-status" style="font-size:13px;color:var(--sub);margin-top:6px"></div></div>`;
+      // DEF-37: где это лежит на сервере — полный путь, кнопка «Скопировать путь», ссылка на File Station
+      const pathBar=d.path?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;margin-bottom:8px"><span style="color:var(--sl-500)">Папка на NAS:</span><code style="font-size:12px;background:#f1f4f8;padding:2px 7px;border-radius:4px;overflow-wrap:anywhere">${esc(d.path)}</code><button class="tbtn" id="rec-copy" style="padding:3px 9px;font-size:12px" title="Скопировать путь в буфер">Скопировать путь</button>${d.fsUrl?`<a class="tbtn" href="${escA(d.fsUrl)}" target="_blank" rel="noopener" style="padding:3px 9px;font-size:12px;text-decoration:none" title="Открыть папку в File Station (нужен вход в DSM)">File Station</a>`:''}</div>`
+        +(kind==='orders'?`<div style="font-size:12px;color:var(--sl-500);margin:-2px 0 8px">Спецификация и договор в папке заказа не хранятся, они в папке запроса ЗП (раздел «Продажи»). В «00-Основание» кладите только то, что можно показывать производству.</div>`:'')
+        :(d.warning?`<div style="font-size:13px;color:#b45309;margin-bottom:8px">${esc(d.warning)}</div>`:'');
       let listHtml;
-      if(!files.length){ listHtml=`<div style="font-size:13px;color:var(--sub)">${esc(d.warning||'Файлов пока нет — приложите через «Добавить файл».')}</div>`; }
+      if(!files.length){ listHtml=`<div style="font-size:13px;color:var(--sub)">${esc(d.path?'Файлов пока нет — приложите через «Добавить файл».':(d.warning||'Файлов пока нет — приложите через «Добавить файл».'))}</div>`; }
       else {
         const groups={}, order=[];
         files.forEach(f=>{ const g=f.stage||'(корень)'; if(!groups[g]){groups[g]=[];order.push(g);} groups[g].push(f); });
@@ -7319,7 +7328,7 @@
         const fext=(x)=>`<span style="font:11px/1.4 monospace;font-weight:700;color:var(--navy);background:#eef4fb;border:1px solid #d6e4f5;border-radius:var(--r-s);padding:1px 5px;min-width:40px;text-align:center;flex:0 0 auto">${esc((x||'·').toUpperCase())}</span>`;
         listHtml=`<div style="font-size:12px;color:var(--sub);margin-bottom:2px">${files.length} файл(ов)${d.folder?` · ${esc(d.folder)}`:''}</div>`+order.map(g=>`<div style="margin-top:8px">
             <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">${esc(g)} <span style="color:var(--gray4)">${groups[g].length}</span></div>
-            ${groups[g].map(f=>{const u=fileUrl(zp,f.rel),conv=`/api/sales/convert?zp=${encodeURIComponent(zp)}&rel=${encodeURIComponent(f.rel)}`,v=F_VIEW.test(f.ext)||F_OFFICE.test(f.ext);return `<div class="frow">
+            ${groups[g].map(f=>{const u=fileUrl(zp,f.rel,false,kind),conv=`${A.base}/convert?${A.q}=${encodeURIComponent(zp)}&rel=${encodeURIComponent(f.rel)}`,v=F_VIEW.test(f.ext)||F_OFFICE.test(f.ext);return `<div class="frow">
               <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line2)">
                 ${fext(f.ext)}<span class="ell" title="${esc(f.name)}" style="flex:1;font-size:13px;color:var(--sl-700)">${esc(f.name)}</span>
                 <span style="font-size:12px;color:var(--sub);white-space:nowrap">${fsize(f.size)}</span>
@@ -7328,22 +7337,24 @@
               </div><div class="fprev" hidden></div></div>`;}).join('')}
           </div>`).join('');
       }
-      host.innerHTML=uplBar+listHtml;
+      host.innerHTML=pathBar+uplBar+listHtml;
       host.querySelectorAll('[data-prev]').forEach(b=>b.onclick=()=>toggleFilePrev(b));
-      const dzEl=host.querySelector('#upl-dz'); const uplDz=dzEl?fileDropzone(dzEl,{note:'Перетащите файлы для этого запроса'}):null;
-      const ub=host.querySelector('#upl-btn'); if(ub)ub.onclick=()=>uploadReqFiles(zp,uplDz);
+      const cpb=host.querySelector('#rec-copy'); if(cpb)cpb.onclick=()=>{ copyText(d.path)?toast('Путь скопирован: '+d.path,'ok'):toast('Не удалось скопировать — выделите путь мышью.','err'); };
+      const dzEl=host.querySelector('#upl-dz'); const uplDz=dzEl?fileDropzone(dzEl,{note:kind==='orders'?'Перетащите файлы для этого заказа':'Перетащите файлы для этого запроса'}):null;
+      const ub=host.querySelector('#upl-btn'); if(ub)ub.onclick=()=>uploadReqFiles(zp,uplDz,kind);
     }
-    async function uploadReqFiles(zp,dz){
+    async function uploadReqFiles(zp,dz,kind){
+      const A=recApi(kind);
       const sel=document.getElementById('upl-stage'),
         st=document.getElementById('upl-status'), btn=document.getElementById('upl-btn');
       const picked=dz?dz.files():[];
       if(!picked.length){ if(st)st.textContent='Перетащите или выберите файл(ы).'; return; }
-      const fd=new FormData(); fd.append('zp',zp); fd.append('stage',sel?sel.value:'');
+      const fd=new FormData(); fd.append(A.q,zp); fd.append('stage',sel?sel.value:'');
       picked.forEach(f=>fd.append('file',f,f.name));
       btn.disabled=true; const old=btn.textContent; btn.textContent='Загрузка…'; st.textContent='';
-      try{ const r=await fetch('/api/sales/upload',{method:'POST',body:fd}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+      try{ const r=await fetch(A.base+'/upload',{method:'POST',body:fd}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         const n=(j.saved||[]).length, sk=(j.skipped||[]).length;
-        await loadReqFiles(zp);
+        await loadReqFiles(zp,kind);
         const st2=document.getElementById('upl-status'); if(st2)st2.textContent=`Загружено: ${n}${sk?`, пропущено: ${sk}`:''}`;
       }catch(e){ st.textContent='Ошибка: '+(e.message||e); btn.disabled=false; btn.textContent=old; }
     }
@@ -14833,7 +14844,7 @@
       const nc=ctlOfPz((DATA.controls||{}).nonconformity,o.numPz).filter(ncOpen);
       const riskBlock=(late||nc.length)?`<div class="card pad" style="border-left:3px solid var(--red);background:#fef2f2"><b class="c-red">Риск срока</b> <span style="color:var(--sl-700)">${[late?'план '+esc(fmt(o.plan))+' просрочен':'',nc.length?('открытые НП: '+nc.map(n=>esc(n.num||n.numNp||'НП')).join(', ')):''].filter(Boolean).join(' · ')}</span></div>`:'';
       const routeBtns=(o.routes||[]).map(r=>`<button class="tbtn" data-mk="${esc(r.mk)}">${aico('route',14)} Маршрут ${esc(String(r.mk).replace('МК-',''))}</button>`).join('');
-      const tabs=[['pos','Позиции'],['tasks','Задачи'],['ctl','Контроль'],['hist','История']];
+      const tabs=[['pos','Позиции'],['tasks','Задачи'],['files','Файлы'],['ctl','Контроль'],['hist','История']]; // K-338: папка заказа на NAS
       host.innerHTML=`
         <div class="card pad" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:20px;font-weight:700;color:var(--navy)">${esc(o.numPz)}</span>${stCell(o.status)}${linkBtn('#orders/'+encodeURIComponent(o.numPz))}
@@ -15059,6 +15070,10 @@
         const gb=h.querySelector('#pos-gen'); if(gb)gb.onclick=()=>genOrderTasks(o.numPz);
         const mb=h.querySelector('#mk-wiz-btn'); if(mb)mb.onclick=()=>{ mkWizNumPz=o.numPz; openMkWizard(); };
         const pa=h.querySelector('#od-pos-add'); if(pa)pa.onclick=()=>{ const host=document.getElementById('odetail'); if(host&&host._odEdit)host._odEdit(); };
+      } else if(ordTab==='files'){
+        // K-338: файлы заказа — папка 6.2-Производство/<год>/ПЗ-… (создаётся при размещении ПЗ; для старых — при первой загрузке)
+        h.innerHTML=`<div class="card pad"><div class="sec-h" style="margin-bottom:6px">Файлы заказа <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub);font-size:12px">· папка на NAS</span></div><div id="reqfiles"><div style="font-size:13px;color:var(--sub)">Загрузка…</div></div></div>`;
+        loadReqFiles(o.numPz,'orders');
       } else if(ordTab==='tasks'){
         const tk=(o.tasks||[]).slice().sort((a,b)=>(Number(a.opNum)||0)-(Number(b.opNum)||0));
         const tasks=tk.map(t=>{const cls=t.status==='Выполнено'?'done':(t.status==='В работе'?'work':'');return `<div class="tcard ${cls}"><div class="st">${esc(t.sectionCode||t.section||'')}${(t.opNum!==''&&t.opNum!=null)?' · оп.'+esc(t.opNum):''}</div><div class="nm">${esc(t.title||t.op||'')}</div>${badge(t.status)}</div>`;}).join('')||'<div style="color:var(--sub)">Задач нет</div>';

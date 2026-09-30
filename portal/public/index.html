@@ -9441,7 +9441,7 @@
             <div style="grid-column:span 4">${FLAB('Сумма, ₽',true)}<input id="pay-amt" type="number" min="0" step="any" style="${FINP}" placeholder="0"></div>
             <div style="grid-column:span 4">${FLAB('Тип оплаты',true)}<select id="pay-type" style="${FINP}"><option value="AVANS">Предоплата (AVANS)</option><option value="POSTOPLATA">Постоплата (POSTOPLATA)</option></select></div>
             <div style="grid-column:span 4" id="pay-avans-wrap">${FLAB('Аванс, %',true)}<input id="pay-avans" type="number" min="1" max="100" step="any" style="${FINP}" value="100"></div>
-            <div style="grid-column:span 4" id="pay-expdate-wrap" hidden>${FLAB('Ожидаемая дата оплаты',true)}<input id="pay-expdate" type="date" style="${FINP}"></div>
+            <div style="grid-column:span 4" id="pay-expdate-wrap">${FLAB('Оплатить до (дата оплаты)',true)}<input id="pay-expdate" type="date" style="${FINP}" title="Обязательна для предоплаты и постоплаты: без даты реестр оплат заявку не принимает"></div>
             <div style="grid-column:span 3">${FLAB('№ счёта (опц.)')}<input id="pay-inv-no" style="${FINP}"></div>
             <div style="grid-column:span 3">${FLAB('Дата счёта (опц.)')}<input id="pay-inv-date" type="date" style="${FINP}"></div>
             <div style="grid-column:span 3">${FLAB('№ договора (опц.)')}<input id="pay-contract" style="${FINP}"></div>
@@ -9470,7 +9470,7 @@
       }
       const v=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
       const typeEl=document.getElementById('pay-type');
-      const syncType=()=>{const t=typeEl.value; document.getElementById('pay-avans-wrap').hidden=(t!=='AVANS'); document.getElementById('pay-expdate-wrap').hidden=(t!=='POSTOPLATA');};
+      const syncType=()=>{const t=typeEl.value; document.getElementById('pay-avans-wrap').hidden=(t!=='AVANS'); /* K-340: дата оплаты нужна при любом типе — поле всегда видно */ };
       typeEl.onchange=syncType; syncType();
       document.getElementById('pay-cancel').onclick=()=>{host.innerHTML='';};
       document.getElementById('pay-save').onclick=async()=>{
@@ -9483,7 +9483,7 @@
         if(prefill&&prefill.invoiceId)body.invoiceId=prefill.invoiceId; // K-83 этап 2: оплата по конкретному счёту
         const projId=v('pay-proj'); if(projId)body.projectId=Number(projId);
         if(type==='AVANS'){ const ap=Number(v('pay-avans')); if(!Number.isFinite(ap)||ap<1||ap>100){errEl.textContent='Аванс: процент 1..100.';return;} body.avansPercent=ap; }
-        else{ const d=v('pay-expdate'); if(!d){errEl.textContent='Для постоплаты укажите ожидаемую дату оплаты.';return;} body.expectedPaymentDate=d; }
+        { const d=v('pay-expdate'); if(!d){ errEl.textContent='Укажите дату оплаты («Оплатить до»): без неё реестр оплат заявку не принимает.'; const c=document.getElementById('pay-expdate'); if(c){ c.style.borderColor='#b91c1c'; try{c.focus();}catch(_){}} return; } body.expectedPaymentDate=d; }
         const invNo=v('pay-inv-no'); if(invNo)body.invoiceNumber=invNo;
         const invDate=v('pay-inv-date'); if(invDate)body.invoiceDate=invDate;
         const contract=v('pay-contract'); if(contract)body.contractNumber=contract;
@@ -9523,10 +9523,7 @@
           // человеческое сообщение вместо сырого кода ошибки портала (живой прогон 22.07)
           errEl.textContent=/contract_required/i.test(m)
             ? 'Платёжный портал требует № договора: сумма по этому контрагенту превысила лимит 100 000 ₽/год. Заполните «№ договора» (и дату договора) и нажмите «Отправить» ещё раз.'
-            : (/bad_request/i.test(m)&&!v('pay-cp-inn')
-              ? 'Платёжный портал отклонил заявку ('+m+'). Скорее всего не хватает ИНН: контрагента ещё нет в реестре оплат, а без ИНН он не заводится. Заполните «ИНН» и отправьте ещё раз.'
-              : 'Не удалось отправить: '+m);
-          if(/bad_request/i.test(m)&&!v('pay-cp-inn')){ const c=document.getElementById('pay-cp-inn'); if(c){ c.style.borderColor='#b91c1c'; try{c.focus();}catch(_){}} }
+            : 'Реестр оплат не принял заявку: '+m;
           if(/contract_required/i.test(m)){ const c=document.getElementById('pay-contract'); if(c){ c.style.borderColor='#b91c1c'; try{c.focus();}catch(_){}} }
           btn.disabled=false; btn.textContent='Отправить на оплату'; }
       };

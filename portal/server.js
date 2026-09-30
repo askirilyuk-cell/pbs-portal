@@ -4635,7 +4635,10 @@ async function ingestCall(method, path, body) {
     // голый код и не понимал, что исправить (замечание Динары 30.09). Теперь код + сообщение + детали.
     let detail;
     if (data && typeof data === 'object') {
-      const parts = [data.error, data.message, data.detail, data.details && (typeof data.details === 'string' ? data.details : JSON.stringify(data.details)), data.errors && JSON.stringify(data.errors)]
+      // K-340: валидатор платёжного портала кладёт причину в issues[] ({message, path}) — без неё
+      // снабженец видит голый «bad_request» (так и вышло у Динары 30.09 во второй раз).
+      const issues = Array.isArray(data.issues) ? data.issues.map((i) => [i && i.message, i && Array.isArray(i.path) && i.path.length ? '(' + i.path.join('.') + ')' : ''].filter(Boolean).join(' ')).filter(Boolean).join('; ') : '';
+      const parts = [issues, issues ? '' : data.error, data.message, data.detail, data.details && (typeof data.details === 'string' ? data.details : JSON.stringify(data.details)), data.errors && JSON.stringify(data.errors)]
         .map((x) => (x == null ? '' : String(x).trim())).filter(Boolean);
       detail = [...new Set(parts)].join(' · ') || JSON.stringify(data);
     } else detail = data || `HTTP ${res.status}`;
@@ -4875,6 +4878,11 @@ async function createPayment(body, session) {
     const ap = Number(body.avansPercent);
     if (!Number.isFinite(ap) || ap < 1 || ap > 100) throw payErr(400, 'Для предоплаты укажите процент аванса (1..100).');
     payload.avansPercent = ap;
+    // K-340: с 30.09.2026 платёжный портал требует дату оплаты и для предоплаты
+    // («Без неё заявка уходила бы "оплатить сегодня"») — поле стало обязательным для обоих типов.
+    const d = String(body.expectedPaymentDate || '').slice(0, 10);
+    if (!d) throw payErr(400, 'Укажите дату оплаты: когда счёт нужно оплатить.');
+    payload.expectedPaymentDate = d;
   } else { // POSTOPLATA
     const d = String(body.expectedPaymentDate || '').slice(0, 10);
     if (!d) throw payErr(400, 'Для постоплаты укажите ожидаемую дату оплаты.');

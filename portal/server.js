@@ -4631,9 +4631,15 @@ async function ingestCall(method, path, body) {
   const text = await res.text();
   let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   if (!res.ok) {
-    const detail = (data && typeof data === 'object')
-      ? (data.error || data.message || JSON.stringify(data))
-      : (data || `HTTP ${res.status}`);
+    // K-340: раньше брали только data.error («bad_request») и теряли пояснение — снабженец видел
+    // голый код и не понимал, что исправить (замечание Динары 30.09). Теперь код + сообщение + детали.
+    let detail;
+    if (data && typeof data === 'object') {
+      const parts = [data.error, data.message, data.detail, data.details && (typeof data.details === 'string' ? data.details : JSON.stringify(data.details)), data.errors && JSON.stringify(data.errors)]
+        .map((x) => (x == null ? '' : String(x).trim())).filter(Boolean);
+      detail = [...new Set(parts)].join(' · ') || JSON.stringify(data);
+    } else detail = data || `HTTP ${res.status}`;
+    console.warn(`[оплата] ${method} ${path} → HTTP ${res.status}: ${String(typeof data === 'string' ? data : JSON.stringify(data)).slice(0, 600)}${body ? ' | отправлено: ' + JSON.stringify({ ...body, initiatorEmail: body.initiatorEmail ? '…' : undefined }).slice(0, 500) : ''}`);
     const e = payErr(res.status, String(detail)); e.payload = data; throw e;
   }
   return { status: res.status, data };
@@ -4804,6 +4810,17 @@ async function createPayment(body, session) {
     if (Number(invoice['ЗнЗ Id']) !== znzId) throw payErr(400, 'Счёт не относится к указанной заявке ЗнЗ.');
   }
 
+  // K-340: оплату отправили кнопкой на уровне заявки, а счёт в заявке уже заведён (кейс Динары 30.09:
+  // ЗнЗ-2026-011, счёт НФ-19051 с ИНН — форма ушла без счёта, без ИНН и без № счёта → bad_request).
+  // Если у заявки ровно один ещё не отправленный счёт — это он и есть: привязываем оплату к нему.
+  let autoInvoice = false;
+  if (!invoice) {
+    try {
+      const open = (await ncListSoft('invoices')).filter((x) => Number(x['ЗнЗ Id']) === znzId && !String(x['Оплата ExternalRef'] || '').trim() && !['Оплачено', 'Отклонено'].includes(String(x['Статус оплаты'] || '').trim()));
+      if (open.length === 1) { invoice = open[0]; autoInvoice = true; }
+    } catch { /* таблицы счетов может не быть — работаем как раньше */ }
+  }
+
   // externalRef = ключ идемпотентности: «№ЗнЗ» (без счёта) либо «№ЗнЗ/№счёта» (per-invoice)
   let externalRef;
   if (invoice) {
@@ -4846,7 +4863,12 @@ async function createPayment(body, session) {
   else {
     if (!cpName) throw payErr(400, 'Укажите контрагента (наименование или id).');
     payload.counterparty = { name: cpName };
-    const inn = String(cp.inn || '').trim(); if (inn) payload.counterparty.inn = inn;
+    // K-340: контракт — «id | name+inn». Нового контрагента платёжный портал без ИНН не заводит,
+    // поэтому ИНН добираем сами: форма → счёт → реестр контрагентов портала по наименованию.
+    let inn = String(cp.inn || '').trim();
+    if (!inn && invoice) inn = String(invoice['ИНН поставщика'] || '').trim();
+    if (!inn) { try { const nm = cpName.toLowerCase().replace(/[«»"']/g, '').replace(/\s+/g, ' ').trim(); const hit = (await ncListSoft('sales_counterparties')).find((x) => String(x['Наименование'] || '').toLowerCase().replace(/[«»"']/g, '').replace(/\s+/g, ' ').trim() === nm && String(x['ИНН'] || '').trim()); if (hit) inn = String(hit['ИНН']).trim(); } catch {} }
+    if (inn) payload.counterparty.inn = inn;
   }
 
   if (paymentType === 'AVANS') {
@@ -4868,6 +4890,7 @@ async function createPayment(body, session) {
   if (body.contractDate) payload.contractDate = String(body.contractDate).slice(0, 10);
   let desc = String(body.description || '').trim();
   if (!desc && invoice) desc = invDate ? `Оплата по счёту ${invNo || externalRef} от ${invDate}` : `Оплата по счёту ${invNo || externalRef}`;
+  if (!desc) desc = `Оплата по заявке ${znzNo}${znz['Наименование'] ? ': ' + String(znz['Наименование']).slice(0, 120) : ''}`; // K-340: пустое назначение платежа не отправляем
   if (desc) payload.description = desc;
 
   // 4) вызов (обрабатываем оба кода — 201 создано / 200 idempotent)

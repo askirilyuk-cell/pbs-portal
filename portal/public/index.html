@@ -9323,7 +9323,13 @@
           }catch(e){ rb.disabled=false; rb.textContent='Обновить статус'; uiAlert('Не удалось обновить статус: '+(e.message||e)); }
         };
       }
-      const ab=document.getElementById('znz-pay-add'); if(ab){ ab.textContent=has?'Отправить повторно':'Отправить на оплату'; ab.onclick=()=>openPayFormInline(r,canAct); }
+      const ab=document.getElementById('znz-pay-add'); if(ab){ ab.textContent=has?'Отправить повторно':'Отправить на оплату';
+        // K-340: в заявке заведён счёт — оплата должна идти ОТ СЧЁТА (ИНН, № и дата счёта, скан, статус на счёте).
+        // Раньше кнопка уровня заявки открывала пустую форму, и заявка уходила без ИНН → bad_request (Динара, 30.09).
+        ab.onclick=async()=>{ let open=[]; try{ const d=await (await fetch('/api/procurement/invoices?znzId='+encodeURIComponent(r.id))).json(); open=(d.invoices||d.items||[]).filter(x=>!x.payExternalRef&&x.payStatus==='Черновик'); }catch{}
+          if(open.length===1){ const x=open[0]; openPayFormInline(r,canAct,{invoiceId:x.id,invoiceNo:x.invoiceNo,date:x.date,supplier:x.supplier,amount:x.amount,note:x.note,inn:x.inn}); return; }
+          if(open.length>1){ toast(`В заявке ${open.length} неотправленных счёта: отправляйте кнопкой «→ На оплату» у нужного счёта — каждый счёт уходит отдельной заявкой на оплату.`,'warn'); const l=document.getElementById('znz-inv-list'); if(l)l.scrollIntoView({block:'center',behavior:'smooth'}); return; }
+          openPayFormInline(r,canAct); }; }
       // K-134: прикрепление файлов к заявке. Несколько файлов за раз; каждый добавляется
       //  к уже приложенным (сервер конкатенирует, а не заменяет).
       const fInp=document.getElementById('znz-file-inp');
@@ -9431,7 +9437,7 @@
             <div style="grid-column:span 6">${FLAB('Отдел',true)}<select id="pay-dept" style="${FINP}">${deptOpts}</select></div>
             <div style="grid-column:span 6">${FLAB('Проект (опц.)')}<select id="pay-proj" style="${FINP}">${projOpts}</select></div>
             <div style="grid-column:span 8">${FLAB('Контрагент',true)}<input id="pay-cp-name" style="${FINP}" placeholder="Наименование контрагента"></div>
-            <div style="grid-column:span 4">${FLAB('ИНН (опц.)')}<input id="pay-cp-inn" style="${FINP}" placeholder="ИНН"></div>
+            <div style="grid-column:span 4">${FLAB('ИНН')}<input id="pay-cp-inn" style="${FINP}" placeholder="нужен для нового контрагента" title="Если контрагента ещё нет в реестре оплат, без ИНН заявка не пройдёт"></div>
             <div style="grid-column:span 4">${FLAB('Сумма, ₽',true)}<input id="pay-amt" type="number" min="0" step="any" style="${FINP}" placeholder="0"></div>
             <div style="grid-column:span 4">${FLAB('Тип оплаты',true)}<select id="pay-type" style="${FINP}"><option value="AVANS">Предоплата (AVANS)</option><option value="POSTOPLATA">Постоплата (POSTOPLATA)</option></select></div>
             <div style="grid-column:span 4" id="pay-avans-wrap">${FLAB('Аванс, %',true)}<input id="pay-avans" type="number" min="1" max="100" step="any" style="${FINP}" value="100"></div>
@@ -9517,7 +9523,10 @@
           // человеческое сообщение вместо сырого кода ошибки портала (живой прогон 22.07)
           errEl.textContent=/contract_required/i.test(m)
             ? 'Платёжный портал требует № договора: сумма по этому контрагенту превысила лимит 100 000 ₽/год. Заполните «№ договора» (и дату договора) и нажмите «Отправить» ещё раз.'
-            : 'Не удалось отправить: '+m;
+            : (/bad_request/i.test(m)&&!v('pay-cp-inn')
+              ? 'Платёжный портал отклонил заявку ('+m+'). Скорее всего не хватает ИНН: контрагента ещё нет в реестре оплат, а без ИНН он не заводится. Заполните «ИНН» и отправьте ещё раз.'
+              : 'Не удалось отправить: '+m);
+          if(/bad_request/i.test(m)&&!v('pay-cp-inn')){ const c=document.getElementById('pay-cp-inn'); if(c){ c.style.borderColor='#b91c1c'; try{c.focus();}catch(_){}} }
           if(/contract_required/i.test(m)){ const c=document.getElementById('pay-contract'); if(c){ c.style.borderColor='#b91c1c'; try{c.focus();}catch(_){}} }
           btn.disabled=false; btn.textContent='Отправить на оплату'; }
       };

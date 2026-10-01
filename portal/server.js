@@ -4512,7 +4512,41 @@ function znzItemRowFromBody(body, znz) {
   const note = String(body.note || '').trim(); if (note) row['Примечание'] = note;
   return row;
 }
-async function createZnzItem(body) {
+// ── K-342: след изменений позиций ЗнЗ + гейт после размещения ──────────────────
+//  (а) любая правка/добавление/удаление позиции пишется в «Историю изменений» заявки
+//      (тот же append-формат, что rename/verify): поле, было → стало, кто, когда.
+//  (б) позиция уже размещена у поставщика (статус позиции «Размещена» и дальше) —
+//      изменение количества/наименования/ед./поставщика/срока и удаление требуют
+//      причины (`reason`), иначе 409 reason_required; причина — в историю, событие —
+//      в чат закупок (ZNZ_CHAT): по ДП–К изменение размещённого заказа согласуется
+//      с поставщиком, и исполнитель должен об этом узнать.
+const ZNZ_ITEM_PLACED = ['Размещена', 'В пути', 'Принята'];
+const ZNZ_ITEM_FIELDS = { name: ['Наименование', 'Наименование'], qty: ['Кол-во', 'Кол-во'], unit: ['Ед.изм.', 'Ед.изм.'], category: ['Категория', 'Категория'],
+  catalogCode: ['Каталог-код', 'Каталог-код'], status: ['Статус', 'Статус'], supplier: ['Поставщик', 'Поставщик'], due: ['Срок поставки', 'Срок поставки'], note: ['Примечание', 'Примечание'] };
+const ZNZ_ITEM_SENSITIVE = ['Наименование', 'Кол-во', 'Ед.изм.', 'Поставщик', 'Срок поставки'];
+const znzItemLabel = (row) => `«${String(row['Наименование'] || '').slice(0, 80)}»` + (row['Кол-во'] != null && row['Кол-во'] !== '' ? ` × ${row['Кол-во']} ${row['Ед.изм.'] || ''}`.replace(/\s+$/, '') : '');
+async function znzItemTrail(znzId, entries, { chat, who } = {}) {
+  if (!entries.length) return;
+  try {
+    const znz = (await ncListSoft('procurement_requests')).find((x) => String(x.Id ?? x.id) === String(znzId));
+    if (!znz) return;
+    const ts = new Date().toISOString();
+    const history = znzHistoryParse(znz['История изменений']);
+    for (const e of entries) history.push({ ts, user: who || 'неизвестно', field: e.field, from: String(e.from ?? ''), to: String(e.to ?? '') });
+    await ncUpdate('procurement_requests', znzId, { 'История изменений': JSON.stringify(history) });
+    logEvent({ type: 'комментарий', obj: 'ЗнЗ', objNum: String(znz['№ ЗнЗ'] || ''), who: who || '', details: entries.map((e) => `${e.field}: ${e.from ?? ''} → ${e.to ?? ''}`).join('; ') });
+    if (chat) {
+      const c = cfg(); const ch = String(c.ZNZ_CHAT || '').trim();
+      if (c.BITRIX && /^\d+$/.test(ch)) {
+        const portal = String(c.PORTAL_BASE || '').replace(/\/+$/, '');
+        await bitrixCall('im.message.add', { DIALOG_ID: `chat${ch}`, MESSAGE: `✏️ ${znz['№ ЗнЗ'] || ''}: ${chat}${who ? ` (${who})` : ''}. Заказ уже размещён — согласуйте изменение с поставщиком.${portal ? ` ${portal}/#purchase/${encodeURIComponent(znz['№ ЗнЗ'] || '')}` : ''}` });
+      }
+    }
+  } catch (e) { console.warn('[K-342] след изменения позиции не записан:', e.message); }
+}
+const znzReasonErr = () => { const e = new Error('Позиция уже размещена у поставщика: укажите причину изменения — она попадёт в историю заявки и исполнителю.'); e.status = 409; e.code = 'reason_required'; return e; };
+
+async function createZnzItem(body, session) {
   if (!(await znzItemsTableReady())) throw new Error('Раздел «Позиции» появится после применения миграции (таблица «Позиции ЗнЗ» ещё не создана).');
   const znzId = Number(body.znzId ?? body.znz_id);
   if (!Number.isFinite(znzId)) throw new Error('Не указана заявка ЗнЗ (znzId).');
@@ -4529,6 +4563,10 @@ async function createZnzItem(body) {
   const id = cr && (cr.Id ?? cr.id);
   try { if (id != null) await ncLinkRecords('procurement_requests', 'Позиции', znzId, [id]); } catch { /* soft */ }
   await syncZnzHeadFromItems(znzId);
+  // K-342: след + если в заявке уже есть размещённые позиции — исполнителю в чат
+  const who = session && (session.fioShort || session.fio) || '';
+  let placedAround = false; try { placedAround = (await ncListSoft('znz_items')).some((x) => String(x['ЗнЗ Id'] || '') === String(znzId) && ZNZ_ITEM_PLACED.includes(String(x['Статус'] || ''))); } catch {}
+  await znzItemTrail(znzId, [{ field: 'Позиция', from: '', to: `добавлена ${znzItemLabel(row)}` }], { who, chat: placedAround ? `добавлена позиция ${znzItemLabel(row)}` : '' });
   return { ok: true, id, znzId };
 }
 // K-151: количество и наименование живут В ДВУХ местах — в позиции и в старых полях
@@ -4550,13 +4588,14 @@ async function syncZnzHeadFromItems(znzId) {
     });
   } catch (e) { console.warn('ЗнЗ: шапка не синхронизирована с позицией:', e.message); }
 }
-async function updateZnzItem(body) {
+async function updateZnzItem(body, session) {
   if (!(await znzItemsTableReady())) throw new Error('Раздел «Позиции» появится после применения миграции (таблица «Позиции ЗнЗ» ещё не создана).');
   const id = Number(body.id ?? body.Id);
   if (!Number.isFinite(id)) throw new Error('Не указан идентификатор позиции (id).');
   const rows = await ncListSoft('znz_items');
   const row = rows.find((x) => String(x.Id ?? x.id) === String(id));
   if (!row) throw new Error('Позиция не найдена.');
+  const reason = String(body.reason || '').trim();
   const patch = {};
   if (body.name != null && String(body.name).trim() !== '') patch['Наименование'] = String(body.name).trim();
   if (body.qty != null && String(body.qty).trim() !== '') { const q = Number(body.qty); if (Number.isFinite(q) && q >= 0) patch['Кол-во'] = q; }
@@ -4572,20 +4611,43 @@ async function updateZnzItem(body) {
   if (typeof body.supplier === 'string') patch['Поставщик'] = body.supplier.trim();
   if (typeof body.due === 'string') patch['Срок поставки'] = body.due.trim().slice(0, 10) || null;
   if (body.note != null) patch['Примечание'] = String(body.note).trim();
+  // K-342: только реальные изменения (иначе каждое сохранение формы засоряло бы историю)
+  const norm = (v) => (v == null ? '' : String(v)).trim();
+  for (const k of Object.keys(patch)) if (norm(patch[k]) === norm(row[k])) delete patch[k];
   if (!Object.keys(patch).length) return { ok: true, id, unchanged: true };
+  const placed = ZNZ_ITEM_PLACED.includes(String(row['Статус'] || ''));
+  const sensitive = Object.keys(patch).filter((k) => ZNZ_ITEM_SENSITIVE.includes(k));
+  if (placed && sensitive.length && !reason) throw znzReasonErr();
   await ncUpdate('znz_items', id, patch);
-  await syncZnzHeadFromItems(row['ЗнЗ Id'] ?? row['procurement_requests_id']);
+  const znzId = row['ЗнЗ Id'] ?? row['procurement_requests_id'];
+  await syncZnzHeadFromItems(znzId);
+  const who = session && (session.fioShort || session.fio) || '';
+  const label = znzItemLabel(row);
+  const entries = Object.keys(patch).map((k) => ({ field: `Позиция ${label} · ${k}`, from: norm(row[k]), to: norm(patch[k]) }));
+  if (reason) entries.push({ field: `Причина изменения ${label}`, from: '', to: reason });
+  const chat = (placed && sensitive.length) ? `изменена размещённая позиция ${label}: ${sensitive.map((k) => `${k} ${norm(row[k]) || '—'} → ${norm(patch[k]) || '—'}`).join(', ')}${reason ? `. Причина: ${reason}` : ''}` : '';
+  await znzItemTrail(znzId, entries, { who, chat });
   return { ok: true, id, patched: Object.keys(patch) };
 }
-async function deleteZnzItem(body) {
+async function deleteZnzItem(body, session) {
   if (!(await znzItemsTableReady())) throw new Error('Раздел «Позиции» появится после применения миграции (таблица «Позиции ЗнЗ» ещё не создана).');
   const id = Number(body.id ?? body.Id);
   if (!Number.isFinite(id)) throw new Error('Не указан идентификатор позиции (id).');
   // владельца читаем ДО удаления — после записи уже не найти
   const gone = (await ncListSoft('znz_items')).find((x) => String(x.Id ?? x.id) === String(id));
   const owner = gone && (gone['ЗнЗ Id'] ?? gone['procurement_requests_id']);
+  const reason = String(body.reason || '').trim();
+  const placed = !!gone && ZNZ_ITEM_PLACED.includes(String(gone['Статус'] || ''));
+  if (placed && !reason) throw znzReasonErr();   // K-342
   await ncDeleteMany('znz_items', [id]);
   if (owner != null) await syncZnzHeadFromItems(owner);
+  if (gone && owner != null) {
+    const who = session && (session.fioShort || session.fio) || '';
+    const label = znzItemLabel(gone);
+    const entries = [{ field: 'Позиция', from: label, to: 'удалена' }];
+    if (reason) entries.push({ field: `Причина удаления ${label}`, from: '', to: reason });
+    await znzItemTrail(owner, entries, { who, chat: placed ? `удалена размещённая позиция ${label}${reason ? `. Причина: ${reason}` : ''}` : '' });
+  }
   return { ok: true, id, deleted: true };
 }
 // список поставщиков из реестра «Контрагенты» (роль «Поставщик» / есть в РОП) для
@@ -14461,24 +14523,24 @@ const server = http.createServer(async (req, res) => {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);
       let out;
-      try { out = await createZnzItem(body); }
-      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+      try { out = await createZnzItem(body, sessionFromReq(req)); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), code: e.code }); }
       return sendJson(res, 200, out);
     }
     if (p === '/api/procurement/znz/items' && req.method === 'PATCH') {
       if (!isLive()) return sendJson(res, 501, { error: 'Запись доступна только в LIVE-режиме: задайте токен NocoDB на странице «Настройки».' });
       const body = await readBody(req);
       let out;
-      try { out = await updateZnzItem(body); }
-      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+      try { out = await updateZnzItem(body, sessionFromReq(req)); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), code: e.code }); }
       return sendJson(res, 200, out);
     }
     if (p === '/api/procurement/znz/items' && req.method === 'DELETE') {
       if (!isLive()) return sendJson(res, 501, { error: 'Удаление доступно только в LIVE-режиме.' });
       const body = await readBody(req);
       let out;
-      try { out = await deleteZnzItem(body); }
-      catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+      try { out = await deleteZnzItem(body, sessionFromReq(req)); }
+      catch (e) { return sendJson(res, e.status || 400, { error: String(e.message || e), code: e.code }); }
       return sendJson(res, 200, out);
     }
     if (p === '/api/routes') {
@@ -14661,6 +14723,32 @@ const server = http.createServer(async (req, res) => {
       try { fs.mkdirSync(stageDir, { recursive: true }); } catch (e) { return sendJson(res, 500, { error: 'Не удалось создать папку этапа: ' + e.message }); }
       const r = await recSaveUploads(folder, stageDir, files);
       return sendJson(res, 200, { ok: true, ...r, ...recFilesPayload('orders', pz, folder) });
+    }
+    // K-342 (в): досье заявки на закупку — папка 6.3-Закупки/<год>/ЗнЗ-… (создаётся при создании ЗнЗ, K-338)
+    if (p === '/api/procurement/znz/rec-files') {
+      const znz = url.searchParams.get('znz') || '';
+      if (!cfg().RECORDS) return sendJson(res, 200, { files: [], stages: ZNZ_STAGES, warning: 'Путь к записям не задан («Настройки» → «Путь к записям»).' });
+      try { return sendJson(res, 200, recFilesPayload('znz', znz, recFolder('znz', znz))); }
+      catch (e) { return sendJson(res, 200, { files: [], stages: ZNZ_STAGES, warning: String(e.message || e) }); }
+    }
+    if (p === '/api/procurement/znz/rec-file') return recServeFile(res, recFolder('znz', url.searchParams.get('znz') || ''), url.searchParams.get('rel') || '', url.searchParams.get('dl') === '1');
+    if (p === '/api/procurement/znz/rec-convert') return recConvertFile(res, recFolder('znz', url.searchParams.get('znz') || ''), url.searchParams.get('rel') || '');
+    if (p === '/api/procurement/znz/rec-upload' && req.method === 'POST') {
+      if (!cfg().RECORDS) return sendJson(res, 400, { error: 'Путь к записям не задан («Настройки» → «Путь к записям»).' });
+      const ct = String(req.headers['content-type'] || '');
+      const bm = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ct);
+      if (!/multipart\/form-data/i.test(ct) || !bm) return sendJson(res, 400, { error: 'Ожидается multipart/form-data.' });
+      let raw; try { raw = await readRawBody(req, 64 * 1024 * 1024); } catch (e) { return sendJson(res, 413, { error: String(e.message || e) }); }
+      const { fields, files } = parseMultipart(raw, (bm[1] || bm[2]).trim());
+      const znz = String(fields.znz || '').trim(), stage = String(fields.stage || '').trim();
+      if (!files.length) return sendJson(res, 400, { error: 'Файлы не переданы.' });
+      const folder = await ensureZnzFolder(znz);
+      if (!folder) return sendJson(res, 400, { error: `Не удалось определить/создать папку заявки ${znz || '(пусто)'}.` });
+      const stageDir = (stage && ZNZ_STAGES.includes(stage)) ? path.join(folder, stage) : folder;
+      try { fs.mkdirSync(stageDir, { recursive: true }); } catch (e) { return sendJson(res, 500, { error: 'Не удалось создать папку этапа: ' + e.message }); }
+      const r = await recSaveUploads(folder, stageDir, files);
+      try { const who = (sessionFromReq(req) || {}).fioShort || (sessionFromReq(req) || {}).fio || ''; logEvent({ type: 'файл приложен', obj: 'ЗнЗ', objNum: znz, who, details: `${stage || 'корень'}: ${(r.saved || []).join(', ')}` }); } catch {}
+      return sendJson(res, 200, { ok: true, ...r, ...recFilesPayload('znz', znz, folder) });
     }
     if (p === '/api/orders/folders/ensure-all' && req.method === 'POST') { // K-338: деревья задним числом (админ)
       if (!(req.session && req.session.isAdmin)) return sendJson(res, 403, { error: 'Только администратор.' });

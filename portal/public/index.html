@@ -1715,7 +1715,15 @@
     // K-203: сетевой сбой (Safari «Load failed», Chrome «Failed to fetch») — чаще всего перезапуск портала при деплое (~10 с): одна повторная попытка через 5 с, понятный текст вместо «Load failed»
     const NET_ERR=/load failed|failed to fetch|networkerror|network request failed/i;
     async function fetchRetry(url,opts){ try{ return await fetch(url,opts); }catch(e){ if(!NET_ERR.test(String(e&&e.message||e)))throw e; await new Promise(r=>setTimeout(r,5000)); try{ return await fetch(url,opts); }catch(e2){ throw new Error('Связь с порталом прервалась (возможно, он перезапускался) — подождите 10 секунд и повторите.'); } } }
-    const postJson=async(url,a,b)=>{ let method='POST',body=a; if(typeof a==='string'){method=a;body=b;} const r=await fetchRetry(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; };
+    const postJson=async(url,a,b)=>{ let method='POST',body=a; if(typeof a==='string'){method=a;body=b;} const r=await fetchRetry(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error){ const e=new Error(j.error||('HTTP '+r.status)); e.code=j.code; e.status=r.status; throw e; } return j; };
+    // K-342: правка/удаление размещённой позиции ЗнЗ — сервер отвечает 409 reason_required; спрашиваем причину и повторяем
+    async function postJsonWithReason(url,method,body,title){
+      try{ return await postJson(url,method,body); }
+      catch(e){ if(e.code!=='reason_required')throw e;
+        const reason=await uiPrompt(title||'Позиция уже размещена у поставщика','',{text:'Укажите причину изменения — она попадёт в историю заявки и уйдёт исполнителю в чат закупок (изменение нужно согласовать с поставщиком).',placeholder:'например: заказчик уменьшил объём / поставщик предложил замену',ok:'Сохранить с причиной'});
+        if(reason==null||!String(reason).trim())throw new Error('Отменено: без причины размещённую позицию не меняем.');
+        return postJson(url,method,{...body,reason:String(reason).trim()}); }
+    }
 
     // Переиспользуемая таблица: поиск + сортировка по столбцу + resize колонок + группировка.
     // cols: [{label, cell:(row)=>html, val?:(row)=>значение для сортировки/поиска, align?, w?}]
@@ -7347,14 +7355,15 @@
     const SALES_STAGES=['01-Запрос','02-Оценка','03-КП','04-Договор','05-Оплата','06-Переписка']; // этапы папки запроса (ДП–З.1)
     const fsize=(n)=>{ if(n==null)return ''; if(n<1024)return n+' Б'; if(n<1048576)return Math.round(n/1024)+' КБ'; return (n/1048576).toFixed(1).replace('.',',')+' МБ'; };
     // K-338: один блок файлов на ЗП (6.1-Продажи) и ПЗ (6.2-Производство) — отличается только API и именем параметра
-    const recApi=(kind)=>kind==='orders'?{base:'/api/orders',q:'pz'}:{base:'/api/sales',q:'zp'};
-    const fileUrl=(zp,rel,dl,kind)=>{ const A=recApi(kind); return `${A.base}/file?${A.q}=${encodeURIComponent(zp)}&rel=${encodeURIComponent(rel)}${dl?'&dl=1':''}`; };
+    // K-342: + ЗнЗ (6.3-Закупки) — у заявок на закупку маршруты с префиксом rec-, остальное общее
+    const recApi=(kind)=>kind==='orders'?{base:'/api/orders',q:'pz',pre:''}:kind==='znz'?{base:'/api/procurement/znz',q:'znz',pre:'rec-'}:{base:'/api/sales',q:'zp',pre:''};
+    const fileUrl=(zp,rel,dl,kind)=>{ const A=recApi(kind); return `${A.base}/${A.pre}file?${A.q}=${encodeURIComponent(zp)}&rel=${encodeURIComponent(rel)}${dl?'&dl=1':''}`; };
     // копирование пути: портал ходит по http, navigator.clipboard там недоступен — фолбэк через скрытое поле
     function copyText(t){ try{ if(navigator.clipboard&&window.isSecureContext){ navigator.clipboard.writeText(t); return true; } }catch{} try{ const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); const ok=document.execCommand('copy'); ta.remove(); return ok; }catch{ return false; } }
     async function loadReqFiles(zp,kind){
       const host=document.getElementById('reqfiles'); if(!host)return;
       const A=recApi(kind);
-      let d; try{ d=await (await fetch(A.base+'/files?'+A.q+'='+encodeURIComponent(zp))).json(); }
+      let d; try{ d=await (await fetch(A.base+'/'+A.pre+'files?'+A.q+'='+encodeURIComponent(zp))).json(); }
       catch(e){ if(host.isConnected)host.innerHTML=`<div style="font-size:13px;color:var(--red)">Не удалось получить файлы: ${esc(e.message)}</div>`; return; }
       if(!host.isConnected)return;   // detail-панель пересобралась за время await (быстрое переключение ЗП) — не писать в отвалившийся узел
       const files=d.files||[];
@@ -7380,7 +7389,7 @@
         const fext=(x)=>`<span style="font:11px/1.4 monospace;font-weight:700;color:var(--navy);background:#eef4fb;border:1px solid #d6e4f5;border-radius:var(--r-s);padding:1px 5px;min-width:40px;text-align:center;flex:0 0 auto">${esc((x||'·').toUpperCase())}</span>`;
         listHtml=`<div style="font-size:12px;color:var(--sub);margin-bottom:2px">${files.length} файл(ов)${d.folder?` · ${esc(d.folder)}`:''}</div>`+order.map(g=>`<div style="margin-top:8px">
             <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">${esc(g)} <span style="color:var(--gray4)">${groups[g].length}</span></div>
-            ${groups[g].map(f=>{const u=fileUrl(zp,f.rel,false,kind),conv=`${A.base}/convert?${A.q}=${encodeURIComponent(zp)}&rel=${encodeURIComponent(f.rel)}`,v=F_VIEW.test(f.ext)||F_OFFICE.test(f.ext);return `<div class="frow">
+            ${groups[g].map(f=>{const u=fileUrl(zp,f.rel,false,kind),conv=`${A.base}/${A.pre}convert?${A.q}=${encodeURIComponent(zp)}&rel=${encodeURIComponent(f.rel)}`,v=F_VIEW.test(f.ext)||F_OFFICE.test(f.ext);return `<div class="frow">
               <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line2)">
                 ${fext(f.ext)}<span class="ell" title="${esc(f.name)}" style="flex:1;font-size:13px;color:var(--sl-700)">${esc(f.name)}</span>
                 <span style="font-size:12px;color:var(--sub);white-space:nowrap">${fsize(f.size)}</span>
@@ -7392,7 +7401,7 @@
       host.innerHTML=pathBar+uplBar+listHtml;
       host.querySelectorAll('[data-prev]').forEach(b=>b.onclick=()=>toggleFilePrev(b));
       const cpb=host.querySelector('#rec-copy'); if(cpb)cpb.onclick=()=>{ copyText(d.path)?toast('Путь скопирован: '+d.path,'ok'):toast('Не удалось скопировать — выделите путь мышью.','err'); };
-      const dzEl=host.querySelector('#upl-dz'); const uplDz=dzEl?fileDropzone(dzEl,{note:kind==='orders'?'Перетащите файлы для этого заказа':'Перетащите файлы для этого запроса'}):null;
+      const dzEl=host.querySelector('#upl-dz'); const uplDz=dzEl?fileDropzone(dzEl,{note:kind==='orders'?'Перетащите файлы для этого заказа':kind==='znz'?'Перетащите файлы для этой заявки':'Перетащите файлы для этого запроса'}):null;
       const ub=host.querySelector('#upl-btn'); if(ub)ub.onclick=()=>uploadReqFiles(zp,uplDz,kind);
     }
     async function uploadReqFiles(zp,dz,kind){
@@ -7404,7 +7413,7 @@
       const fd=new FormData(); fd.append(A.q,zp); fd.append('stage',sel?sel.value:'');
       picked.forEach(f=>fd.append('file',f,f.name));
       btn.disabled=true; const old=btn.textContent; btn.textContent='Загрузка…'; st.textContent='';
-      try{ const r=await fetch(A.base+'/upload',{method:'POST',body:fd}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+      try{ const r=await fetch(A.base+'/'+A.pre+'upload',{method:'POST',body:fd}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
         const n=(j.saved||[]).length, sk=(j.skipped||[]).length;
         await loadReqFiles(zp,kind);
         const st2=document.getElementById('upl-status'); if(st2)st2.textContent=`Загружено: ${n}${sk?`, пропущено: ${sk}`:''}`;
@@ -8305,12 +8314,14 @@
           <button data-zt="items" class="on">Позиции и приёмка</button>
           <button data-zt="qc">Входной контроль</button>
           <button data-zt="inv">Счета и OCR</button>
+          <button data-zt="files">Файлы</button>
           <button data-zt="hist">История приёмки</button>
         </div>
         <div style="display:flex;flex-direction:column;gap:var(--gap)">
           <div class="ztab-p" data-zp="items">${acceptHost}${reqCard}${midRow}${itemsCard}${filesCard}</div>
           <div class="ztab-p" data-zp="qc" hidden>${actsCard}</div>
           <div class="ztab-p" data-zp="inv" hidden>${invCard}${payCard}</div>
+          <div class="ztab-p" data-zp="files" hidden><div class="card pad"><div class="sec-h" style="margin-bottom:6px">Досье заявки <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub);font-size:12px">· папка 6.3-Закупки на NAS</span></div><div id="reqfiles"><div style="font-size:13px;color:var(--sub)">загрузка…</div></div></div></div>
           <div class="ztab-p" data-zp="hist" hidden>${histCard||'<div class="card pad"><div class="ui-empty"><div class="why">Истории пока нет</div><div class="sub">Записи появятся после первых действий с заявкой.</div></div></div>'}</div>
         </div>`);
       // K-118: вкладки карточки ЗнЗ по референсу («Позиции и приёмка / Входной контроль /
@@ -8324,6 +8335,7 @@
         });
       })();
       document.getElementById('znz-back').onclick=znzFormBack;
+      loadReqFiles(r.numZnz,'znz');   // K-342 (в): досье заявки — папка записей на NAS
       wireCopyLink(host);
       wireInnHints(host);   // K-98: подсказка «без ИНН» у поставщика заказа (счёт/оплата без ИНН не свяжутся с 1С)
       const acceptBtn=document.getElementById('znz-accept-btn'); if(acceptBtn)acceptBtn.onclick=()=>openZnzAcceptFormInline(r);
@@ -9190,7 +9202,7 @@
         if(canAct){
           listEl.querySelectorAll('[data-item-del]').forEach(el=>el.onclick=async ()=>{
             if(!(await uiConfirm('Удалить позицию?')))return; const id=Number(el.dataset.itemDel);
-            try{ await postJson('/api/procurement/znz/items','DELETE',{id}); toast('Позиция удалена','ok'); PROC=null; try{PROC=await (await fetch('/api/procurement')).json();}catch(e){} await loadZnzItems(r,canAct); }
+            try{ await postJsonWithReason('/api/procurement/znz/items','DELETE',{id},'Позиция уже размещена у поставщика — удалить?'); toast('Позиция удалена','ok'); PROC=null; try{PROC=await (await fetch('/api/procurement')).json();}catch(e){} await loadZnzItems(r,canAct); }
             catch(e){ uiAlert('Не удалось удалить: '+(e.message||e)); }
           });
           listEl.querySelectorAll('[data-item-edit]').forEach(el=>el.onclick=()=>{ const id=Number(el.dataset.itemEdit); openItemFormInline(r,canAct,items.find(x=>x.id===id)||null); });
@@ -9198,7 +9210,7 @@
           //  Пишем сразу, перечитываем заявку: статус ЗнЗ выводится из позиций и меняется вслед.
           const saveItem=async(id,patch,el)=>{
             const prev=el?el.value:null; if(el)el.disabled=true;
-            try{ await postJson('/api/procurement/znz/items','PATCH',{id,...patch});
+            try{ await postJsonWithReason('/api/procurement/znz/items','PATCH',{id,...patch});
               PROC=await (await fetch('/api/procurement')).json();
               const upd=(PROC.requests||[]).find(x=>String(x.id)===String(r.id))||r;
               openZnzCard(upd);
@@ -9238,7 +9250,7 @@
         const btn=document.getElementById('it-save'); btn.disabled=true; btn.textContent='Сохранение…';
         const body={ name, qty:v('it-qty'), unit:v('it-unit'), category:v('it-cat'), catalogCode:v('it-cc'), note:v('it-note') };
         try{
-          if(edit){ body.id=it.id; await postJson('/api/procurement/znz/items','PATCH',body); toast('Позиция обновлена','ok'); }
+          if(edit){ body.id=it.id; await postJsonWithReason('/api/procurement/znz/items','PATCH',body); toast('Позиция обновлена','ok'); }
           else{ body.znzId=r.id; await postJson('/api/procurement/znz/items',body); toast('Позиция добавлена','ok'); }
           host.innerHTML=''; PROC=null; try{PROC=await (await fetch('/api/procurement')).json();}catch(e){}
           await loadZnzItems(r,canAct);

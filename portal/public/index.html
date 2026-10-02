@@ -1923,7 +1923,7 @@
       }
       const tbar=(opts.toolbar||[]).map((b,i)=>`<button class="tbtn ${b.cls||''}" data-tb="${i}"${b.disabled?' disabled':''}${b.title?` title="${esc(b.title)}"`:''}${b.disabled?' style="opacity:.5;cursor:not-allowed"':''}>${esc(b.label)}</button>`).join('');
       const colmenu=`<div class="erp-colwrap"><button class="tbtn" data-colbtn>⊞ Колонки ▾</button><div class="colmenu" hidden><div class="h">Показывать столбцы</div>${cols.filter(c=>c.label).map(c=>`<label><input type="checkbox" data-col="${esc(c.key)}" ${H[c.key]?'':'checked'} ${c.fixed?'disabled':''}>${esc(c.label)}</label>`).join('')}</div></div>`;
-      const search=opts.search!==false?`<input class="erp-search" type="search" aria-label="Поиск по таблице" placeholder="Поиск…" value="${esc(st.q)}">`:'';
+      const search=opts.search!==false?`<input class="erp-search" type="search" aria-label="${esc(opts.searchTitle||'Поиск по таблице')}" placeholder="${esc(opts.searchPlaceholder||'Поиск…')}"${opts.searchTitle?` title="${esc(opts.searchTitle)}"`:''} value="${esc(st.q)}">`:''; // K-343: свои подсказка/пояснение поиска у реестра
       const selbtn=DEL?`<button class="tbtn" data-selbtn style="display:inline-flex;align-items:center;gap:5px"><i class=ic-chk></i> Выбрать</button>`:'';
       const delbtn=DEL?`<button class="tbtn" data-delbtn disabled style="color:var(--red);border-color:#fca5a5;display:none;align-items:center;gap:5px">${aico('trash',13)} Удалить (0)</button>`:'';
       // п.2 аудита: подсказку «клик по строке — карточка» рисует сам компонент (одна формулировка на портал)
@@ -16988,6 +16988,9 @@
         {key:'date',label:'Дата',w:110,cls:'nw c-gray',cell:r=>esc(r.date||'—'),sortVal:r=>r.date},
       ];
       erpGrid(document.getElementById('stgrid'),{key:'setup_cards',cols,rows:items,onRow:r=>openSetupCard(host,r.id),
+        // K-343: пояснение, по чему ищет строка поиска (по видимым колонкам; «В МК» — только число привязок, не номера МК)
+        searchPlaceholder:'№ КН, название, станок, деталь',
+        searchTitle:'Поиск по колонкам «№ КН», «Наименование», «Станок», «Деталь» и «Дата» (без учёта регистра). «Деталь» — то, что вписано в саму карту наладки. Скрытые через «Колонки» столбцы в поиске не участвуют.',
         del:live?{key:'setup_cards',idOf:r=>r.id,reload:()=>{SETUP=null;renderSetupView(host);}}:undefined,
         info:`${srcChip(live)}<span>Карт наладки: <b style="color:var(--ink)">${items.length}</b></span>${SETUP.warning?'<span class="c-red">'+esc(SETUP.warning)+'</span>':''}`,
         empty:{text:'Карт наладки пока нет',sub:live?'Карта наладки заводится на операцию маршрутной карты.':'Раздел заполнится в LIVE-режиме.'},

@@ -9,13 +9,14 @@
 // ============================================================================
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.0.0' };
+const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.1.0' };
 const INSTRUCTIONS = [
-  'Портал ИСМ ПБС (производство ПБС). Сейчас доступен раздел «Закупки»: заявки на закупку (ЗнЗ) с позициями, поставщики, счета.',
+  'Портал ИСМ ПБС (производство ПБС). Разделы: «Закупки» — заявки на закупку (ЗнЗ) с позициями, поставщики, счета; «Продажи» — запросы заказчиков (ЗП), КП и его результат, контрагенты.',
   'Номера: ЗнЗ-ГГГГ-NNN (заявка на закупку), ПЗ-ГГГГ-NNN (производственный заказ), ЗП-ГГГГ-NNN (запрос от заказчика).',
   'Одна ЗнЗ может содержать несколько позиций — материалы под один заказ заводите ОДНОЙ заявкой с позициями, а не отдельными заявками.',
   'Перед созданием ЗнЗ znz_create сам ищет дубли (тот же источник и похожие позиции) и останавливается — покажите их человеку и спросите, прежде чем повторять с allowDuplicate.',
-  'Все изменения пишутся в историю от имени владельца токена с пометкой «ИИ». Удаление и отправка на оплату — только в интерфейсе портала.',
+  'Новый запрос ЗП: сначала найдите заказчика в контрагентах (counterparties_search), чтобы имя совпало с реестром; zp_create тоже ищет дубли.',
+  'Все изменения пишутся в историю от имени владельца токена с пометкой «ИИ». Удаление, отправка на оплату, отправка КП заказчику и создание заказа — только в интерфейсе портала.',
 ].join('\n');
 
 const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[«»"'.,;:()]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -197,10 +198,153 @@ function procurementTools() {
   ];
 }
 
+// ── K-351: инструменты раздела «Продажи» ────────────────────────────────────
+const KP_RESULTS = ['Отправлено', 'Согласовано', 'Выиграли', 'Выиграли частично', 'Проиграли', 'Отказались'];
+function salesTools() {
+  async function findZp(api, ref) {
+    const d = await api('GET', '/api/sales');
+    const s = String(ref == null ? '' : ref).trim();
+    const z = (d.requests || []).find((x) => String(x.numZp).toLowerCase() === s.toLowerCase()) || (d.requests || []).find((x) => String(x.id) === s);
+    if (!z) throw new Error(`Запрос ${s} не найден.`);
+    return { z, all: d.requests || [] };
+  }
+  const kpBrief = (kp) => (kp && typeof kp === 'object') ? { no: kp.ofNo && kp.ofNo !== '—' ? kp.ofNo : null, date: kp.date || null, result: kp.status || null } : null;
+  const brief = (x) => ({
+    numZp: x.numZp, received: x.received, customer: x.customer, name: x.name, kind: x.kind || null, deadline: x.deadline || null,
+    status: x.status, owner: x.owner || null, sumKp: x.sumKpNum ?? null, kp: kpBrief(x.kp), kpOverdue: !!x.kpStale, wonSum: x.wonSum ?? null,
+    orderNo: x.orderNo || null, productionOrders: (x.prodOrders || []).map((o) => o.numPz).filter(Boolean), hasChat: !!x.chat,
+  });
+  return [
+    tool('zp_search', 'Найти запросы заказчиков',
+      'Поиск запросов продаж (ЗП) по тексту (номер, заказчик, наименование, ответственный), статусу и виду обращения. Новые сверху.',
+      {
+        query: { type: 'string', description: 'Текст: «ЗП-2026-060», «ЗЭРС», «переводник»' },
+        status: { type: 'string', description: 'Новый, КП готовится, КП отправлено, Выигран, Проигран, Принят…' },
+        kind: { type: 'string', enum: ['Запрос предложений', 'Тендер'] },
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 },
+      }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/sales');
+        let list = (d.requests || []).slice();
+        const q = norm(a.query);
+        if (q) list = list.filter((x) => norm([x.numZp, x.customer, x.name, x.owner, x.contact, x.note].join(' ')).includes(q));
+        if (a.status) list = list.filter((x) => norm(x.status) === norm(a.status));
+        if (a.kind) list = list.filter((x) => norm(x.kind) === norm(a.kind));
+        list.sort((x, y) => String(y.numZp).localeCompare(String(x.numZp), 'ru'));
+        return { total: list.length, items: list.slice(0, a.limit || 30).map(brief) };
+      }),
+
+    tool('zp_get', 'Карточка запроса заказчика',
+      'Полная карточка ЗП: заказчик и контакт, предмет и количество, классификация, срок подачи, статус, КП (номер, дата, сумма, результат), выигранная часть, связанные заказы и ПЗ, примечание, история.',
+      { zp: { type: 'string', description: 'Номер ЗП-ГГГГ-NNN (или id)' } }, ['zp'], RO,
+      async (api, a) => {
+        const { z } = await findZp(api, a.zp);
+        return {
+          ...brief(z), id: z.id, contact: z.contact || null, source: z.source || null, dealNature: z.dealNature || null, foreignTrade: !!z.ved,
+          products: z.products || [], productLine: z.line || null, qty: z.qty || null, note: z.note || null, wonNote: z.wonNote || null,
+          feasibility: z.lov || null, orderGateOpen: !!(z.gates && z.gates.order),
+          productionOrders: (z.prodOrders || []).map((o) => ({ numPz: o.numPz, status: o.status, plan: o.plan || null })),
+          history: (Array.isArray(z.history) ? z.history : []).slice(-20),
+        };
+      }),
+
+    tool('zp_create', 'Зарегистрировать запрос заказчика',
+      'Регистрирует новый запрос ЗП (Ф.1–З.1). Перед созданием ищет дубли: тот же заказчик с похожим наименованием за 60 дней — если нашёл, НЕ создаёт и возвращает их; повторяйте с allowDuplicate=true только после подтверждения человеком. Заказчика берите из counterparties_search.',
+      {
+        customer: { type: 'string', description: 'Заказчик — как в реестре контрагентов' },
+        name: { type: 'string', description: 'Наименование запроса (что просят)' },
+        received: { type: 'string', description: 'Дата поступления ГГГГ-ММ-ДД (по умолчанию сегодня)' },
+        kind: { type: 'string', enum: ['Запрос предложений', 'Тендер'], default: 'Запрос предложений' },
+        deadline: { type: 'string', description: 'Срок подачи (для тендера) «ГГГГ-ММ-ДД ЧЧ:ММ»' },
+        tenderUrl: { type: 'string' }, contact: { type: 'string', description: 'Контактное лицо' }, contacts: { type: 'string', description: 'Телефон / email' },
+        source: { type: 'string', description: 'Откуда пришёл запрос (почта, площадка, звонок…)' },
+        dealNature: { type: 'string', description: 'Характер сделки (как в справочнике портала)' },
+        productClass: { type: 'array', items: { type: 'string' }, description: 'Коды продуктовых подгрупп' },
+        qty: { type: 'number', minimum: 0 }, unit: { type: 'string' }, owner: { type: 'string', description: 'Ответственный' },
+        ism: { type: 'string', enum: ['ДА', 'НЕТ', 'ЧАСТИЧНО'], default: 'ДА', description: 'В области ИСМ' },
+        note: { type: 'string' },
+        allowDuplicate: { type: 'boolean', default: false },
+      }, ['customer', 'name'], RW,
+      async (api, a, ctx) => {
+        if (!a.allowDuplicate) {
+          const d = await api('GET', '/api/sales');
+          const since = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+          const c = norm(a.customer), n = norm(a.name);
+          const dups = (d.requests || []).filter((x) => String(x.received || '') >= since && norm(x.customer) === c && (norm(x.name).includes(n) || n.includes(norm(x.name))));
+          if (dups.length) return { created: false, reason: 'Похожий запрос этого заказчика уже есть — проверьте, не дубль ли это. Создать всё равно можно с allowDuplicate=true после подтверждения человеком.', possibleDuplicates: dups.map(brief) };
+        }
+        const { allowDuplicate, ...body } = a;
+        const j = await api('POST', '/api/sales/requests/create', { ...body, acceptedBy: ctx.user.fio });
+        return { created: true, numZp: j.numZp, id: j.id, folderCreated: !!j.folderCreated };
+      }),
+
+    tool('zp_update', 'Обновить запрос заказчика',
+      'Меняет статус, ответственного, сумму КП (если КП делали вне портала) или примечание ЗП. appendNote дописывает строку к примечанию с датой, не затирая его.',
+      {
+        zp: { type: 'string' }, status: { type: 'string' }, owner: { type: 'string' },
+        sumKp: { type: 'number', minimum: 0, description: 'Сумма КП, руб.' },
+        note: { type: 'string', description: 'Заменить примечание целиком' }, appendNote: { type: 'string', description: 'Дописать к примечанию' },
+      }, ['zp'], RW,
+      async (api, a, ctx) => {
+        const { z } = await findZp(api, a.zp);
+        const body = { zp: z.numZp };
+        for (const k of ['status', 'owner', 'sumKp', 'note']) if (a[k] != null && a[k] !== '') body[k] = a[k];
+        if (a.appendNote && body.note == null) body.note = [String(z.note || '').trim(), `[${new Date().toISOString().slice(0, 10)} ${ctx.user.fio}, ИИ] ${a.appendNote}`].filter(Boolean).join('\n');
+        const j = await api('POST', '/api/sales/requests/update', body);
+        return { ok: true, numZp: z.numZp, changed: Object.keys(j.patch || {}) };
+      }),
+
+    tool('zp_set_kp_result', 'Зафиксировать результат КП',
+      `Фиксирует исход КП по запросу: ${KP_RESULTS.join(', ')}; пустая строка — снять результат. Портал сам переводит статус ЗП (например, «Проиграли» → «Проигран»). Для «Выиграли частично» укажите wonPartSum.`,
+      {
+        zp: { type: 'string' }, result: { type: 'string', enum: [...KP_RESULTS, ''] },
+        wonPartSum: { type: 'number', minimum: 0, description: 'Сумма выигранной части, руб. (для «Выиграли частично»)' },
+        wonPartNote: { type: 'string', description: 'Объём/примечание выигранной части' },
+      }, ['zp', 'result'], RW,
+      async (api, a) => {
+        const { z } = await findZp(api, a.zp);
+        await api('POST', '/api/sales/kp/result', { zp: z.numZp, result: a.result, wonPartSum: a.wonPartSum, wonPartNote: a.wonPartNote });
+        const { z: after } = await findZp(api, z.numZp);
+        return { ok: true, numZp: z.numZp, result: a.result || null, status: after.status };
+      }),
+
+    tool('counterparties_search', 'Найти контрагента',
+      'Поиск в реестре контрагентов (заказчики, поставщики, партнёры) по названию, ИНН, региону; возвращает роли, контакты и сколько у контрагента запросов/заказов.',
+      {
+        query: { type: 'string' }, role: { type: 'string', enum: ['Заказчик', 'Поставщик', 'Партнёр'] },
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/counterparties');
+        const q = norm(a.query);
+        let list = (d.counterparties || []).filter((c) => !q || norm([c.name, c.shortName, c.inn, c.region, c.industry].join(' ')).includes(q));
+        if (a.role) list = list.filter((c) => (c.roles || []).includes(a.role));
+        return { total: list.length, items: list.slice(0, a.limit || 20).map((c) => ({ counterpartyId: c.id, name: c.name, shortName: c.shortName || null, inn: c.inn || null, kpp: c.kpp || null, region: c.region || null, roles: c.roles || [], contact: c.contact || null, contacts: c.contacts || null, salesRequests: (c.counts && c.counts.salesRequests) || 0, salesOrders: (c.counts && c.counts.salesOrders) || 0 })) };
+      }),
+
+    tool('counterparty_create', 'Завести контрагента',
+      'Заводит контрагента в реестр. Если такой ИНН уже есть — новый не создаётся, существующему добавляется роль. Без ИНН сначала проверьте counterparties_search, чтобы не завести дубль по названию.',
+      {
+        name: { type: 'string', description: 'Полное наименование: ООО «…»' }, inn: { type: 'string', pattern: '^\\d{10}(\\d{2})?$' }, kpp: { type: 'string' },
+        shortName: { type: 'string' }, role: { type: 'string', enum: ['Заказчик', 'Поставщик', 'Партнёр'], default: 'Заказчик' },
+        region: { type: 'string' }, contact: { type: 'string' }, contacts: { type: 'string' }, note: { type: 'string' },
+      }, ['name'], RW,
+      async (api, a) => {
+        if (!a.inn) {
+          const d = await api('GET', '/api/counterparties'); const n = norm(a.name);
+          const same = (d.counterparties || []).filter((c) => norm(c.name) === n || (c.shortName && norm(c.shortName) === n));
+          if (same.length) return { created: false, reason: 'Контрагент с таким названием уже есть.', existing: same.map((c) => ({ counterpartyId: c.id, name: c.name, inn: c.inn || null, roles: c.roles || [] })) };
+        }
+        const j = await api('POST', '/api/counterparties/create', a);
+        return { created: !j.existed, existed: !!j.existed, counterpartyId: j.id, name: j.name, inn: j.inn || null, roles: j.roles || null };
+      }),
+  ];
+}
+
 // ── протокол ────────────────────────────────────────────────────────────────
 // deps: { port, authenticate(req) → { sid, user:{id,fio}, tokenId } | null }
 export function createMcpHandler(deps) {
-  const tools = procurementTools();
+  const tools = [...procurementTools(), ...salesTools()];
   const byName = new Map(tools.map((t) => [t.def.name, t]));
 
   const apiFor = (sid) => async (method, path, body) => {

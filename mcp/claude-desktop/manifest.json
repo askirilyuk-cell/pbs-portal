@@ -2,15 +2,19 @@
   "manifest_version": "0.3",
   "name": "pbs-portal",
   "display_name": "Портал ИСМ ПБС",
-  "version": "1.0.0",
-  "description": "Работа с порталом ИСМ ПБС из Claude: заявки на закупку, позиции, поставщики, счета. Права — как у вас в портале.",
-  "author": { "name": "ПБС" },
+  "version": "1.1.0",
+  "description": "Работа с порталом ИСМ ПБС из Claude: закупки (заявки, позиции, поставщики, счета) и продажи (запросы ЗП, результат КП, контрагенты). Права — как у вас в портале.",
+  "author": {
+    "name": "ПБС"
+  },
   "server": {
     "type": "node",
     "entry_point": "server/index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/server/index.js"],
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
       "env": {
         "PORTAL_TOKEN": "${user_config.token}",
         "PORTAL_MCP_URL": "${user_config.portal_url}"
@@ -34,14 +38,74 @@
     }
   },
   "tools": [
-    { "name": "znz_search", "description": "Найти заявки на закупку" },
-    { "name": "znz_get", "description": "Карточка заявки на закупку" },
-    { "name": "znz_create", "description": "Создать заявку на закупку с позициями" },
-    { "name": "znz_add_position", "description": "Добавить позицию в заявку" },
-    { "name": "znz_update_position", "description": "Изменить позицию заявки" },
-    { "name": "znz_set_source", "description": "Указать источник заявки (ПЗ/ЗП)" },
-    { "name": "suppliers_search", "description": "Найти поставщика" },
-    { "name": "invoice_update", "description": "Изменить счёт / общий счёт" }
+    {
+      "name": "znz_search",
+      "description": "Найти заявки на закупку"
+    },
+    {
+      "name": "znz_get",
+      "description": "Карточка заявки на закупку"
+    },
+    {
+      "name": "znz_create",
+      "description": "Создать заявку на закупку с позициями"
+    },
+    {
+      "name": "znz_add_position",
+      "description": "Добавить позицию в заявку"
+    },
+    {
+      "name": "znz_update_position",
+      "description": "Изменить позицию заявки"
+    },
+    {
+      "name": "znz_set_source",
+      "description": "Указать источник заявки (ПЗ/ЗП)"
+    },
+    {
+      "name": "suppliers_search",
+      "description": "Найти поставщика"
+    },
+    {
+      "name": "invoice_update",
+      "description": "Изменить счёт / общий счёт"
+    },
+    {
+      "name": "zp_search",
+      "description": "Найти запросы заказчиков"
+    },
+    {
+      "name": "zp_get",
+      "description": "Карточка запроса заказчика"
+    },
+    {
+      "name": "zp_create",
+      "description": "Зарегистрировать запрос заказчика"
+    },
+    {
+      "name": "zp_update",
+      "description": "Обновить запрос (статус, ответственный, сумма КП, примечание)"
+    },
+    {
+      "name": "zp_set_kp_result",
+      "description": "Зафиксировать результат КП"
+    },
+    {
+      "name": "counterparties_search",
+      "description": "Найти контрагента"
+    },
+    {
+      "name": "counterparty_create",
+      "description": "Завести контрагента"
+    }
   ],
-  "compatibility": { "platforms": ["darwin", "win32"], "runtimes": { "node": ">=18.0.0" } }
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
 }

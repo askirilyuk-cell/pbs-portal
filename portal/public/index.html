@@ -7790,10 +7790,32 @@
     }
     // K-295: заведение поставщика из реестра РОП (просьба Рисалиевой 25.09). Контрагент с ролью «Поставщик» + поля РОП; дедуп по ИНН на сервере.
     // K-345: пункты comboBox для выбора поставщика (реестр РОП) — одинаково во всех формах
-    function supplierComboItems(){
-      return (PROC&&PROC.suppliers||[]).map(sp=>({id:sp.id,label:sp.name,
+    function supplierComboItems(list){
+      return (list||(PROC&&PROC.suppliers)||[]).map(sp=>({id:sp.id,label:sp.name,
         sub:[sp.inn?'ИНН '+sp.inn:'',sp.productCat||'',sp.category?'кат. '+sp.category:'',sp.status||''].filter(Boolean).join(' · '),
         search:`${sp.name} ${sp.inn||''} ${sp.productCat||''}`}));
+    }
+    // K-346: поле «Поставщик» в формах — тот же comboBox. Разметка <div data-supfield="<id>" data-val data-ph>,
+    //  после вставки HTML — mountSupplierFields(scope). id переносится на input комбобокса, поэтому прежние
+    //  чтение и подстановка (getElementById(id).value, автозаполнение OCR) работают как раньше. Свободный текст
+    //  допустим (поставщика может не быть в реестре); выбранный из реестра — в dataset.supId.
+    let SUPLIST=null;
+    async function supplierListLoad(){
+      if(PROC&&PROC.suppliers&&PROC.suppliers.length)return PROC.suppliers;
+      if(!SUPLIST){ try{ SUPLIST=(await (await fetch('/api/procurement/suppliers')).json()).suppliers||[]; }catch(e){ SUPLIST=[]; } }
+      return SUPLIST;
+    }
+    function mountSupplierFields(scope){
+      (scope||document).querySelectorAll('[data-supfield]').forEach(el=>{ if(el.dataset.mounted)return; el.dataset.mounted='1';
+        const cb=comboBox(el,{items:supplierComboItems(),value:el.dataset.val||'',placeholder:el.dataset.ph||'Поставщик — название или ИНН…',ariaLabel:'Поставщик',
+          onPick:(it)=>{ inp.dataset.supId=it.id; },
+          onClear:()=>{ delete inp.dataset.supId; },
+          createLabel:'Завести поставщика',
+          onCreate:(text)=>supplierNewDialog(null,{name:text,onDone:(j,name)=>{ cb.setValue(name); if(j&&j.id!=null){ inp.dataset.supId=j.id; const add={id:j.id,name}; if(PROC&&PROC.suppliers)PROC.suppliers.push(add); if(SUPLIST)SUPLIST.push(add); cb.setItems(supplierComboItems(SUPLIST||undefined)); } }})});
+        const inp=el.querySelector('.cb-inp'); inp.id=el.dataset.supfield;
+        inp.addEventListener('input',()=>{ delete inp.dataset.supId; });
+        if(!(PROC&&PROC.suppliers&&PROC.suppliers.length))supplierListLoad().then(l=>cb.setItems(supplierComboItems(l)));
+      });
     }
     function supplierNewDialog(viewHost,o={}){ // K-345: o.name — предзаполнить, o.onDone(j,name) — вместо перехода в реестр
       const w=document.createElement('div'); w.className='ui-dlg';
@@ -7912,13 +7934,8 @@
               <span id="zn-files-sel" style="font-size:12px;color:var(--sl-500);margin-left:9px">файлы не выбраны</span>
               <div style="font-size:12px;color:var(--sl-500);margin-top:5px">Загрузятся сразу после создания заявки — до неё файл прикреплять не к чему.</div></div>
             <div style="grid-column:span 6">${FLAB('Поставщик (опц.)')}
-              <select id="zn-sup-sel" style="${FINP}">
-                <option value="">— выбрать из реестра —</option>
-                ${supObjs.map(s=>`<option value="${s.id}">${esc(s.name)}${s.category?' · '+esc(s.category):''}${s.score!=null?' · '+esc(s.score)+' б.':''}</option>`).join('')}
-                <option value="__manual__">＋ ввести вручную…</option>
-              </select>
-              <input id="zn-sup-manual" style="${FINP};margin-top:6px;display:none" placeholder="Наименование поставщика (нет в реестре)">
-              <div style="font-size:12px;color:var(--sl-500);margin-top:4px">Реестр = контрагенты с ролью «Поставщик» (РОП). Пусто или нет нужного — «ввести вручную».</div>
+              <div data-supfield="zn-sup"></div>
+              <div style="font-size:12px;color:var(--sl-500);margin-top:4px">Реестр = контрагенты с ролью «Поставщик» (РОП). Нет в реестре — впишите название или «Завести поставщика».</div>
             </div>
             <div style="grid-column:span 6">${FLAB('Привязка к заказам (ПЗ, опц.)')}
               ${ordersList.length
@@ -8040,12 +8057,12 @@
         unit:(r.querySelector('.znp-unit').value||'').trim(), category:(r.querySelector('.znp-cat').value||'').trim(),
       })).filter(p=>p.name);
       // K-86 этап 3: поставщик — выбор из реестра «Контрагенты» (роль «Поставщик»/РОП) + fallback ручной ввод
-      const supSel=document.getElementById('zn-sup-sel'), supManual=document.getElementById('zn-sup-manual');
-      supSel.onchange=()=>{ const m=supSel.value==='__manual__'; supManual.style.display=m?'':'none'; if(m)try{supManual.focus();}catch(e){} };
-      const readSupplier=()=>{ const val=supSel.value;
-        if(val==='__manual__')return {supplier:(supManual.value||'').trim(),supplierId:null};
-        if(val){ const s=supObjs.find(x=>String(x.id)===String(val)); return {supplier:s?s.name:'',supplierId:s?s.id:null}; }
-        return {supplier:'',supplierId:null};
+      // K-346: тот же comboBox, что и везде; выбранный из реестра → supplierId, вписанный вручную → только имя
+      mountSupplierFields(document);
+      const readSupplier=()=>{ const el=document.getElementById('zn-sup'); const name=((el&&el.value)||'').trim();
+        if(!name)return {supplier:'',supplierId:null};
+        const s=(el.dataset.supId&&supObjs.find(x=>String(x.id)===String(el.dataset.supId)))||supObjs.find(x=>x.name===name);
+        return {supplier:name,supplierId:s?s.id:null};
       };
       // K-148: заявка может обеспечивать НЕСКОЛЬКО заказов — поле было одиночным select'ом.
       //  Собираем список чипами: видно, что привязано, и легко снять лишнее.
@@ -8548,7 +8565,7 @@
       host.innerHTML=`<div class="card pad" style="border:1px solid #2e7d32">
         <div class="sec-h" style="margin-bottom:10px">Приёмка по заявке (акт входного контроля Ф.3–Д.1)</div>
         <div style="${G};margin-bottom:12px">
-          <div style="grid-column:span 4">${FLAB('Поставщик')}<input id="acc-sup" style="${FINP}" value="${escA(defSupplier)}"></div>
+          <div style="grid-column:span 4">${FLAB('Поставщик')}<div data-supfield="acc-sup" data-val="${escA(defSupplier)}"></div></div>
           <div style="grid-column:span 4">${FLAB('Накладная №')}<input id="acc-wbno" style="${FINP}"></div>
           <div style="grid-column:span 4">${FLAB('Накладная от')}<input id="acc-wbdate" type="date" style="${FINP}"></div>
           <div style="grid-column:span 12"><span class="c-gray" style="font-size:12px">№ акта присваивается автоматически при сохранении (ВК-ГГГГ-NNN).</span></div>
@@ -8611,6 +8628,7 @@
       };
       // K-99 (N-1): человек тронул поле/галочку → метка снимается сразу, и откат его уже не касается.
       // Поля формы после рендера не пересоздаются (rowsHtml строится один раз), поэтому вешаем один раз.
+      mountSupplierFields(host); // K-346
       ['acc-wbno','acc-wbdate','acc-sup'].forEach(id=>{ const el=document.getElementById(id);
         if(el)el.addEventListener('input',()=>acOcrForget(el)); });
       host.querySelectorAll('.acc-cert').forEach(el=>el.addEventListener('input',()=>acOcrForget(el)));
@@ -8991,7 +9009,7 @@
           </div>
           <div style="${G}">
             <div style="grid-column:span 4">${FLAB('№ счёта',true)}<input id="iv-no" style="${FINP}" placeholder="напр. СЧ-1043"></div>
-            <div style="grid-column:span 5">${FLAB('Поставщик')}<input id="iv-sup" style="${FINP}" placeholder="Наименование поставщика (свободный текст)"></div>
+            <div style="grid-column:span 5">${FLAB('Поставщик')}<div data-supfield="iv-sup"></div></div>
             <div style="grid-column:span 3">${FLAB('ИНН поставщика')}<input id="iv-inn" style="${FINP}" placeholder="10-12 цифр"></div>
             <div style="grid-column:span 3">${FLAB('Сумма, ₽')}<input id="iv-amt" type="number" min="0" step="any" style="${FINP}" placeholder="0"></div>
             <div style="grid-column:span 3">${FLAB('Ставка НДС')}${fSelect('iv-vatr',INV_VAT_RATES,'22%',' — ')}</div>
@@ -9008,6 +9026,7 @@
             <button class="tbtn" id="iv-save" style="padding:8px 16px">Сохранить счёт</button>
             <button class="tbtn primary" id="iv-save-pay" style="padding:8px 16px">Сохранить и отправить на оплату</button>
           </div></div>`;
+      mountSupplierFields(host); // K-346
       const v=(id)=>{const el=document.getElementById(id);return el?el.value.trim():'';};
       document.getElementById('iv-no').focus();
       document.getElementById('iv-cancel').onclick=()=>{host.innerHTML='';};
@@ -10304,7 +10323,7 @@
       modal.innerHTML=`<div class="mh"><b>Добавить цену (на канон)</b><span class="op">сводится в разброс «от X до Y ₽/ед»</span><button class="x" id="mx" aria-label="Закрыть">✕</button></div>
         <div class="mb" style="gap:0"><div style="${G}">
           <div style="grid-column:span 4">${FLAB('Дата')}<input id="cp-date" type="date" value="${catYmd()}" style="${FINP}"></div>
-          <div style="grid-column:span 8">${FLAB('Поставщик')}<input id="cp-supplier" style="${FINP}"></div>
+          <div style="grid-column:span 8">${FLAB('Поставщик')}<div data-supfield="cp-supplier"></div></div>
           <div style="grid-column:span 4">${FLAB('Цена',true)}<input id="cp-price" type="number" step="any" style="${FINP}"></div>
           <div style="grid-column:span 4">${FLAB('Единица цены')}<input id="cp-unit" style="${FINP}" placeholder="${esc(baseUnit||'ед')}"></div>
           <div style="grid-column:span 4">${FLAB('Кол-во (для ₽/базовую)')}<input id="cp-qty" type="number" step="any" style="${FINP}"></div>
@@ -10316,6 +10335,7 @@
         <div id="cp-err" style="margin-top:12px;color:#b91c1c;font-size:13px"></div>
         <div style="margin-top:14px;padding-top:13px;border-top:1px solid var(--sl-200);display:flex;align-items:center;gap:10px"><span style="font-size:13px;color:var(--sl-500)"><span style="color:#b91c1c">*</span> — обязательное</span><div style="margin-left:auto;display:flex;gap:10px"><button class="tbtn" id="cp-cancel" style="padding:9px 18px">Отмена</button><button class="tbtn green" id="cp-save" style="padding:9px 18px">Добавить цену</button></div></div></div>`;
       modal.classList.add('open'); mscrim.classList.add('open');
+      mountSupplierFields(modal); // K-346
       document.getElementById('mx').onclick=closeModal; document.getElementById('cp-cancel').onclick=closeModal;
       document.getElementById('cp-save').onclick=async()=>{
         const err=document.getElementById('cp-err'); err.textContent='';
@@ -14205,7 +14225,7 @@
       function buildFields(){
         const op=opEl.value, it=curItem();
         const heat=op==='Приход'?`<div style="grid-column:span 6">${FLAB('№ сертификата / плавки',true)}<input id="mm-heat" style="${FINP}" placeholder="прослеживаемость плавки"></div>`:'';
-        const supp=op==='Приход'?`<div style="grid-column:span 6">${FLAB('Поставщик')}<input id="mm-supplier" style="${FINP}"></div>
+        const supp=op==='Приход'?`<div style="grid-column:span 6">${FLAB('Поставщик')}<div data-supfield="mm-supplier"></div></div>
             <div style="grid-column:span 6">${FLAB('№ счёта')}<input id="mm-invoice" style="${FINP}"></div>`:'';
         const pz=(op==='Расход'||op==='Резерв')?`<div style="grid-column:span 6">${FLAB('№ ПЗ / позиция')}<input id="mm-pzline" style="${FINP}" placeholder="ПЗ-2026-001 · поз.3"></div>`:'';
         const part=op==='Расход'?`<div style="grid-column:span 6">${FLAB('Деталь')}<input id="mm-part" style="${FINP}" placeholder="что изготавливаем"></div>`:'';
@@ -14225,6 +14245,7 @@
           <div style="grid-column:span 3">${FLAB(qtyLbl(op),true)}<input id="mm-qty" type="number" step="any" style="${FINP}"></div>
           <div style="grid-column:span 3">${FLAB('Дата')}<input id="mm-date" type="date" value="${mtYmd()}" style="${FINP}"></div>
           ${heat}${supp}${pz}${part}${fmtF}${reason}${remnant}`;
+        mountSupplierFields(document.getElementById('mm-fields')); // K-346
         const qe=document.getElementById('mm-qty'); if(qe)qe.oninput=recalc;
         const rem=document.getElementById('mm-rem'); if(rem)rem.onchange=()=>{const rb=document.getElementById('mm-rembox'); if(rb)rb.style.display=rem.checked?'grid':'none';};
         recalc();
@@ -16363,11 +16384,6 @@
     }
     function rtCoopBlockHtml(op,i){
       const c=op.coop=op.coop||rtCoopDefault();
-      const contractors=rtWiz.contractors||[];
-      const matched=c.contractorId!=null?contractors.find(x=>String(x.id)===String(c.contractorId)):null;
-      const isCustom=!matched&&!!String(c.contractor||'').trim();
-      const selVal=matched?String(c.contractorId):(isCustom||!c.contractorId?'__custom__':'');
-      const contractorOptH=contractors.map(x=>`<option value="${x.id}"${String(x.id)===String(c.contractorId)?' selected':''}>${esc(x.name)}</option>`).join('');
       const st=rtCoopStatus(c);
       const badge=st.done?`<span class="rt-rt" style="color:#15803d;font-weight:700">возврат завершён (${rtNum(st.closedTotal)} из ${rtNum(st.sentTotal)})</span>`
         :st.overdueDays>0?`<span class="rt-rt" style="color:#b91c1c;font-weight:700">⚠ возврат просрочен ${st.overdueDays} дн.</span>`
@@ -16381,8 +16397,7 @@
         <div data-cf="body" style="display:${c.enabled?'':'none'};margin-top:9px">
           <div class="rt-g2">
             <div class="rt-fld"><label>Исполнитель (юрлицо)</label>
-              <select class="rt-inp" data-cf="contractor"><option value="">— выбрать из контрагентов —</option>${contractorOptH}<option value="__custom__"${selVal==='__custom__'?' selected':''}>— другое (ввести вручную) —</option></select>
-              <input class="rt-inp" data-cf="contractorFree" style="margin-top:6px;display:${selVal==='__custom__'?'':'none'}" placeholder="наименование юрлица (нет в реестре контрагентов)" value="${rtEscA(c.contractor)}">
+              <div data-cf="contractorCb"></div><!-- K-346: comboBox по реестру контрагентов; не нашли — впишите наименование -->
             </div>
             <div class="rt-fld"><label>№ договора</label><input class="rt-inp" data-cf="contractNo" value="${rtEscA(c.contractNo)}"></div>
           </div>
@@ -16821,14 +16836,13 @@
           const refreshPrev=()=>{ const pv=box.querySelector('[data-cf="preview"]'); if(pv)pv.textContent=rtCoopText(c); const sb=host.querySelector('#rt-summbox'); if(sb)sb.innerHTML=rtSummaryHtml(); };
           const en=box.querySelector('[data-cf="en"]'); const body=box.querySelector('[data-cf="body"]');
           if(en)en.onchange=()=>{ c.enabled=en.checked; if(body)body.style.display=c.enabled?'':'none'; refreshPrev(); };
-          const contractorSel=box.querySelector('[data-cf="contractor"]'), contractorFree=box.querySelector('[data-cf="contractorFree"]');
-          if(contractorSel)contractorSel.onchange=()=>{
-            if(contractorSel.value==='__custom__'){ c.contractorId=null; if(contractorFree){ contractorFree.style.display=''; contractorFree.focus(); } }
-            else if(contractorSel.value){ const it=(rtWiz.contractors||[]).find(x=>String(x.id)===contractorSel.value); c.contractorId=it?it.id:null; c.contractor=it?it.name:''; if(contractorFree)contractorFree.style.display='none'; }
-            else { c.contractorId=null; c.contractor=''; if(contractorFree)contractorFree.style.display='none'; }
-            refreshPrev();
-          };
-          if(contractorFree)contractorFree.oninput=()=>{ c.contractor=contractorFree.value; refreshPrev(); };
+          // K-346: исполнитель — comboBox (поиск по названию и ИНН); вписанное вручную — юрлицо вне реестра (contractorId=null)
+          const cbMount=box.querySelector('[data-cf="contractorCb"]');
+          if(cbMount){ const ccb=comboBox(cbMount,{items:(rtWiz.contractors||[]).map(x=>({id:x.id,label:x.name,sub:x.inn?'ИНН '+x.inn:'',search:`${x.name} ${x.inn||''}`})),
+              value:c.contractor||'',placeholder:'Юрлицо — название или ИНН…',ariaLabel:'Исполнитель кооперации',
+              onPick:(it)=>{ c.contractorId=it.id; c.contractor=it.label; refreshPrev(); },
+              onClear:()=>{ c.contractorId=null; c.contractor=''; refreshPrev(); }});
+            cbMount.querySelector('.cb-inp').addEventListener('input',(e)=>{ c.contractorId=null; c.contractor=e.target.value; refreshPrev(); }); }
           ['contractNo','specNo','sentDate','returnPlan'].forEach((f)=>{ const inp=box.querySelector('[data-cf="'+f+'"]'); if(inp)inp.oninput=inp.onchange=()=>{ c[f]=inp.value; refreshPrev(); }; });
           const wirePartRows=()=>{
             box.querySelectorAll('[data-partf]').forEach((inp)=>{ inp.oninput=()=>{ const pIdx=+inp.dataset.parti, f=inp.dataset.partf; if(c.parts[pIdx])c.parts[pIdx][f]=inp.value; refreshPrev(); }; });
@@ -17939,7 +17953,7 @@
         <div class="mb" style="gap:0"><div style="${G}">
           <div style="grid-column:span 8">${FLAB('Наименование материала',true)}<input id="in-mat" style="${FINP}" placeholder="напр. Лист 09Г2С 10мм"></div>
           <div style="grid-column:span 4">${FLAB('Марка / Сортамент')}<input id="in-grade" style="${FINP}"></div>
-          <div style="grid-column:span 6">${FLAB('Поставщик')}<input id="in-sup" style="${FINP}"></div>
+          <div style="grid-column:span 6">${FLAB('Поставщик')}<div data-supfield="in-sup"></div></div>
           <div style="grid-column:span 6">${FLAB('Договор / Заказ №')}<input id="in-contr" style="${FINP}"></div>
           <div style="grid-column:span 4">${FLAB('Накладная №')}<input id="in-inv" style="${FINP}"></div>
           <div style="grid-column:span 4">${FLAB('Накладная от')}<input id="in-invd" type="date" style="${FINP}"></div>
@@ -17965,6 +17979,7 @@
             <button class="tbtn green" id="in-save" style="padding:9px 18px">Провести входной контроль</button>
           </div></div></div>`;
       modal.classList.add('open'); mscrim.classList.add('open');
+      mountSupplierFields(modal); // K-346
       document.getElementById('mx').onclick=closeModal; document.getElementById('in-cancel').onclick=closeModal;
       document.getElementById('in-save').onclick=async()=>{
         const err=document.getElementById('in-err'); err.textContent='';

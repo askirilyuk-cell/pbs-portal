@@ -2081,7 +2081,7 @@ async function buildRoutesCatalog() {
       names: [...new Set(String(ot['Типовые наименования'] || '').split(/\s*[;\n]\s*/).map((x) => x.trim()).filter(Boolean).concat(usedNames.get(ot.Id ?? ot.id) || []))], // K-184: типовые наименования операций типа (справочник + уже использованные в МК): оборудование типа операции (инв. №), настраивается в Настройки → Справочники → Типы операций
     };
   }).sort((a, b) => String(a.code).localeCompare(String(b.code), 'ru'));
-  const contractors = counterparties.map((c) => ({ id: c.Id ?? c.id, name: c['Наименование'] || '' }))
+  const contractors = counterparties.map((c) => ({ id: c.Id ?? c.id, name: c['Наименование'] || '', inn: c['ИНН'] || '' })) // K-346: ИНН — подсказка и поиск в comboBox исполнителя
     .filter((c) => c.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ru'));
   return {
     mode: 'live', opTypes: types,

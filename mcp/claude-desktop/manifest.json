@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "pbs-portal",
   "display_name": "Портал ИСМ ПБС",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Работа с порталом ИСМ ПБС из Claude: закупки (заявки, позиции, поставщики, счета) и продажи (запросы ЗП, результат КП, контрагенты). Права — как у вас в портале.",
   "author": {
     "name": "ПБС"
@@ -97,6 +97,14 @@
     {
       "name": "counterparty_create",
       "description": "Завести контрагента"
+    },
+    {
+      "name": "counterparty_add_contact",
+      "description": "Добавить контактное лицо контрагенту"
+    },
+    {
+      "name": "counterparty_update_contact",
+      "description": "Изменить контактное лицо"
     }
   ],
   "compatibility": {

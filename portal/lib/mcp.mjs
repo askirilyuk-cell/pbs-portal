@@ -9,7 +9,7 @@
 // ============================================================================
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.1.0' };
+const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.2.0' };
 const INSTRUCTIONS = [
   'Портал ИСМ ПБС (производство ПБС). Разделы: «Закупки» — заявки на закупку (ЗнЗ) с позициями, поставщики, счета; «Продажи» — запросы заказчиков (ЗП), КП и его результат, контрагенты.',
   'Номера: ЗнЗ-ГГГГ-NNN (заявка на закупку), ПЗ-ГГГГ-NNN (производственный заказ), ЗП-ГГГГ-NNN (запрос от заказчика).',
@@ -199,6 +199,7 @@ function procurementTools() {
 }
 
 // ── K-351: инструменты раздела «Продажи» ────────────────────────────────────
+const CONTACT_SCHEMA = { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string', description: 'ФИО' }, position: { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' }, primary: { type: 'boolean', description: 'Основной контакт' } } };
 const KP_RESULTS = ['Отправлено', 'Согласовано', 'Выиграли', 'Выиграли частично', 'Проиграли', 'Отказались'];
 function salesTools() {
   async function findZp(api, ref) {
@@ -319,7 +320,7 @@ function salesTools() {
         const q = norm(a.query);
         let list = (d.counterparties || []).filter((c) => !q || norm([c.name, c.shortName, c.inn, c.region, c.industry].join(' ')).includes(q));
         if (a.role) list = list.filter((c) => (c.roles || []).includes(a.role));
-        return { total: list.length, items: list.slice(0, a.limit || 20).map((c) => ({ counterpartyId: c.id, name: c.name, shortName: c.shortName || null, inn: c.inn || null, kpp: c.kpp || null, region: c.region || null, roles: c.roles || [], contact: c.contact || null, contacts: c.contacts || null, salesRequests: (c.counts && c.counts.salesRequests) || 0, salesOrders: (c.counts && c.counts.salesOrders) || 0 })) };
+        return { total: list.length, items: list.slice(0, a.limit || 20).map((c) => ({ counterpartyId: c.id, name: c.name, shortName: c.shortName || null, inn: c.inn || null, kpp: c.kpp || null, region: c.region || null, roles: c.roles || [], contactPersons: (c.contactsList || []).map((p) => ({ contactId: p.id, name: p.name, position: p.position || null, phone: p.phone || null, email: p.email || null, primary: !!p.primary })), salesRequests: (c.counts && c.counts.salesRequests) || 0, salesOrders: (c.counts && c.counts.salesOrders) || 0 })) };
       }),
 
     tool('counterparty_create', 'Завести контрагента',
@@ -327,7 +328,8 @@ function salesTools() {
       {
         name: { type: 'string', description: 'Полное наименование: ООО «…»' }, inn: { type: 'string', pattern: '^\\d{10}(\\d{2})?$' }, kpp: { type: 'string' },
         shortName: { type: 'string' }, role: { type: 'string', enum: ['Заказчик', 'Поставщик', 'Партнёр'], default: 'Заказчик' },
-        region: { type: 'string' }, contact: { type: 'string' }, contacts: { type: 'string' }, note: { type: 'string' },
+        region: { type: 'string' }, note: { type: 'string' },
+        contactPersons: { type: 'array', items: CONTACT_SCHEMA, description: 'Контактные лица — заводятся вместе с контрагентом' },
       }, ['name'], RW,
       async (api, a) => {
         if (!a.inn) {
@@ -335,8 +337,38 @@ function salesTools() {
           const same = (d.counterparties || []).filter((c) => norm(c.name) === n || (c.shortName && norm(c.shortName) === n));
           if (same.length) return { created: false, reason: 'Контрагент с таким названием уже есть.', existing: same.map((c) => ({ counterpartyId: c.id, name: c.name, inn: c.inn || null, roles: c.roles || [] })) };
         }
-        const j = await api('POST', '/api/counterparties/create', a);
-        return { created: !j.existed, existed: !!j.existed, counterpartyId: j.id, name: j.name, inn: j.inn || null, roles: j.roles || null };
+        const { contactPersons, ...cp } = a;
+        const primary = (contactPersons || []).find((p) => p.primary) || (contactPersons || [])[0];
+        const j = await api('POST', '/api/counterparties/create', { ...cp, contact: primary ? primary.name : undefined, contacts: primary ? [primary.phone, primary.email].filter(Boolean).join(', ') : undefined });
+        const added = [];
+        for (const p of contactPersons || []) { try { const r = await api('POST', '/api/counterparty/contact', { counterpartyId: j.id, ...p }); added.push({ contactId: r.id, name: p.name }); } catch (e) { added.push({ name: p.name, error: e.message }); } }
+        return { created: !j.existed, existed: !!j.existed, counterpartyId: j.id, name: j.name, inn: j.inn || null, roles: j.roles || null, contactPersons: added };
+      }),
+
+    tool('counterparty_add_contact', 'Добавить контактное лицо',
+      'Добавляет контактное лицо контрагенту (ФИО, должность, телефон, email, «основной»). Контрагента укажите counterpartyId из counterparties_search или ИНН. Если человек с таким ФИО у контрагента уже есть — не дублирует, а возвращает его (правьте через counterparty_update_contact).',
+      {
+        counterpartyId: { type: 'integer' }, inn: { type: 'string', description: 'ИНН контрагента — если нет counterpartyId' },
+        name: { type: 'string', description: 'ФИО' }, position: { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' }, primary: { type: 'boolean' },
+      }, ['name'], RW,
+      async (api, a) => {
+        const d = await api('GET', '/api/counterparties');
+        const c = (d.counterparties || []).find((x) => (a.counterpartyId != null && String(x.id) === String(a.counterpartyId)) || (a.inn && String(x.inn) === String(a.inn).trim()));
+        if (!c) throw new Error('Контрагент не найден — укажите counterpartyId из counterparties_search или ИНН.');
+        const same = (c.contactsList || []).find((p) => norm(p.name) === norm(a.name));
+        if (same) return { added: false, reason: 'Такой контакт у контрагента уже есть.', contact: { contactId: same.id, name: same.name, position: same.position || null, phone: same.phone || null, email: same.email || null, primary: !!same.primary } };
+        const { counterpartyId, inn, ...p } = a;
+        const r = await api('POST', '/api/counterparty/contact', { counterpartyId: c.id, ...p });
+        return { added: true, counterparty: c.name, contactId: r.id };
+      }),
+
+    tool('counterparty_update_contact', 'Изменить контактное лицо',
+      'Правит контактное лицо контрагента (contactId из counterparties_search → contactPersons).',
+      { contactId: { type: 'integer' }, name: { type: 'string' }, position: { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' }, primary: { type: 'boolean' } }, ['contactId'], RW,
+      async (api, a) => {
+        const { contactId, ...p } = a;
+        await api('PATCH', '/api/counterparty/contact', { id: contactId, ...p });
+        return { ok: true, contactId, changed: Object.keys(p) };
       }),
   ];
 }

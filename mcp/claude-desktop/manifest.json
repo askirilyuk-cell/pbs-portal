@@ -1,0 +1,47 @@
+{
+  "manifest_version": "0.3",
+  "name": "pbs-portal",
+  "display_name": "Портал ИСМ ПБС",
+  "version": "1.0.0",
+  "description": "Работа с порталом ИСМ ПБС из Claude: заявки на закупку, позиции, поставщики, счета. Права — как у вас в портале.",
+  "author": { "name": "ПБС" },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "PORTAL_TOKEN": "${user_config.token}",
+        "PORTAL_MCP_URL": "${user_config.portal_url}"
+      }
+    }
+  },
+  "user_config": {
+    "token": {
+      "type": "string",
+      "title": "Личный токен портала",
+      "description": "Выдаёт администратор портала (Настройки → Доступ для ИИ). Начинается с pis_",
+      "sensitive": true,
+      "required": true
+    },
+    "portal_url": {
+      "type": "string",
+      "title": "Адрес MCP портала",
+      "description": "Обычно менять не нужно. Работает в сети офиса или при включённом Tailscale.",
+      "default": "http://nas-pbs:4173/mcp",
+      "required": false
+    }
+  },
+  "tools": [
+    { "name": "znz_search", "description": "Найти заявки на закупку" },
+    { "name": "znz_get", "description": "Карточка заявки на закупку" },
+    { "name": "znz_create", "description": "Создать заявку на закупку с позициями" },
+    { "name": "znz_add_position", "description": "Добавить позицию в заявку" },
+    { "name": "znz_update_position", "description": "Изменить позицию заявки" },
+    { "name": "znz_set_source", "description": "Указать источник заявки (ПЗ/ЗП)" },
+    { "name": "suppliers_search", "description": "Найти поставщика" },
+    { "name": "invoice_update", "description": "Изменить счёт / общий счёт" }
+  ],
+  "compatibility": { "platforms": ["darwin", "win32"], "runtimes": { "node": ">=18.0.0" } }
+}

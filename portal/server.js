@@ -22,6 +22,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { createMcpHandler } from './lib/mcp.mjs'; // K-349: MCP-сервер портала (/mcp)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // K-210: генератор QR — вендорная библиотека qrcode-generator (MIT, K. Arase), CommonJS,
@@ -12691,6 +12692,67 @@ ensureAuthRuntime();
 
 function loadSessions() { try { return JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8')); } catch { return {}; } }
 let sessions = loadSessions();
+
+// ── K-349: личные токены доступа для ИИ (MCP, /mcp) ─────────────────────────
+//  Токен = сотрудник Bitrix. Хранится только sha256; сам токен показывается один раз
+//  при выпуске. На запрос к /mcp — внутренняя сессия этого сотрудника с его ЖИВЫМИ
+//  ролями портала (перечитываются из Bitrix раз в 10 мин), ФИО с пометкой «(ИИ)» —
+//  так история изменений и чаты показывают, что действие сделано через ИИ.
+const AI_TOKENS_FILE = path.join(__dirname, '.data', 'ai-tokens.json');
+const AI_ROLE_TTL = 10 * 60 * 1000;
+const aiSessionCache = new Map(); // tokenId → { sid, at }
+function aiTokensLoad() { try { const a = JSON.parse(fs.readFileSync(AI_TOKENS_FILE, 'utf8')); return Array.isArray(a) ? a : []; } catch { return []; } }
+function aiTokensSave(list) { fs.mkdirSync(path.dirname(AI_TOKENS_FILE), { recursive: true }); fs.writeFileSync(AI_TOKENS_FILE, JSON.stringify(list, null, 2)); }
+const aiHash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+async function aiBitrixUser(userId) {
+  const r = await bitrixCall('user.get', { ID: String(userId) });
+  const u = Array.isArray(r) ? r[0] : (r && r.result && r.result[0]);
+  if (!u || !u.ID) throw new Error(`Сотрудник ${userId} не найден в Bitrix.`);
+  return u;
+}
+async function aiIssueToken(userId, createdBy) {
+  const u = await aiBitrixUser(userId);
+  if (u.ACTIVE === false) throw new Error('Сотрудник неактивен в Bitrix.');
+  const token = 'pis_' + crypto.randomBytes(24).toString('hex');
+  const fio = [u.LAST_NAME, u.NAME].filter(Boolean).join(' ').trim() || ('Пользователь ' + u.ID);
+  const rec = { id: crypto.randomBytes(6).toString('hex'), hash: aiHash(token), last4: token.slice(-4), userId: String(u.ID), fio, createdAt: new Date().toISOString(), createdBy: createdBy || '', lastUsedAt: null, revokedAt: null };
+  const list = aiTokensLoad(); list.push(rec); aiTokensSave(list);
+  console.log(`[mcp] выпущен токен ${rec.id} для ${fio} (${rec.userId}), выпустил ${createdBy || '—'}`);
+  return { token, rec };
+}
+function aiTokenPublic(r) { const { hash, ...rest } = r; return rest; }
+let aiLastUsedSaveAt = 0;
+async function mcpAuthenticate(req) {
+  const m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ''));
+  if (!m) return null;
+  const list = aiTokensLoad();
+  const rec = list.find((x) => x.hash === aiHash(m[1]) && !x.revokedAt);
+  if (!rec) { console.warn('[mcp] отклонён неизвестный или отозванный токен'); return null; }
+  const now = Date.now();
+  const cached = aiSessionCache.get(rec.id);
+  let sid = cached && sessions[cached.sid] ? cached.sid : null;
+  if (!sid || now - cached.at > AI_ROLE_TTL) {
+    try {
+      const u = await aiBitrixUser(rec.userId);
+      if (u.ACTIVE === false) { console.warn(`[mcp] токен ${rec.id}: сотрудник ${rec.userId} неактивен`); return null; }
+      const fio = [u.LAST_NAME, u.NAME].filter(Boolean).join(' ').trim() || rec.fio;
+      const portalRoles = resolvePortalRoles(u);
+      if (sid) delete sessions[sid];
+      sid = crypto.randomBytes(24).toString('hex');
+      sessions[sid] = {
+        userId: String(u.ID), fio: `${fio} (ИИ)`, fioShort: (fioInitials(u.LAST_NAME, u.NAME, u.SECOND_NAME) || fio) + ' (ИИ)', position: u.WORK_POSITION || '', email: u.EMAIL || '',
+        depts: [].concat(u.UF_DEPARTMENT || []).map(String), roles: resolveRoles(u), role: portalRoles[0] || 'guest', portalRoles,
+        isAdmin: portalRoles.includes('Администратор'), ai: true, aiTokenId: rec.id, exp: now + AI_ROLE_TTL * 6,
+      };
+      aiSessionCache.set(rec.id, { sid, at: now });
+    } catch (e) {
+      if (!sid) { console.warn(`[mcp] токен ${rec.id}: не удалось получить сотрудника из Bitrix: ${e.message}`); return null; }
+    }
+  }
+  if (now - aiLastUsedSaveAt > 60000) { aiLastUsedSaveAt = now; rec.lastUsedAt = new Date(now).toISOString(); try { aiTokensSave(list); } catch {} }
+  return { sid, tokenId: rec.id, user: { id: rec.userId, fio: String(sessions[sid].fio || '').replace(/ \(ИИ\)$/, '') } };
+}
+const mcpHandler = createMcpHandler({ port: PORT, authenticate: mcpAuthenticate });
 // ══ K-206: посты участков (киоски) — вход по токену поста, оператор представляется личной биркой ═════════════════
 //  runtime.STATION_POSTS = [{id, section, name, token, createdAt, lastSeen}]; сессия поста живёт год, оператор — до 30 мин бездействия.
 const STATION_SESSION_TTL = 365 * 24 * 3600 * 1000;
@@ -13365,6 +13427,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   try {
     if (canonicalHostRedirect(req, res, url)) return; // старая закладка/IP → 302 на PORTAL_BASE (иначе ломается OAuth-вход)
+    if (p === '/mcp') return await mcpHandler(req, res, readBody); // K-349: MCP — своя авторизация по личному токену
     const svc = serviceCtx(req); // null для браузера; { service, actor } для MCP-агента (иначе 401)
     if (p.startsWith('/auth/')) { if (await handleAuth(req, res, p, url)) return; }
     // K-49 middleware (МЯГКИЙ режим): определяем сессию/роль и кладём в контекст запроса.
@@ -13389,6 +13452,19 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/admin/roles' && req.method === 'GET') { await handleRolesGet(req, res); return; }
     if (p === '/api/admin/roles' && req.method === 'POST') { await handleRolesPost(req, res); return; }
     // ── K-206: посты участков и оператор ──────────────────────────────────────────────
+    // K-349: личные токены для ИИ (MCP) — выпуск/отзыв только администратором; сам токен показывается один раз
+    if (p === '/api/admin/ai-tokens') {
+      const s = req.session; if (!s || !s.isAdmin || s.ai) return sendJson(res, 403, { error: 'Только администратор.' });
+      if (req.method === 'POST') { const b = await readBody(req);
+        try {
+          if (b.action === 'issue') { const { token, rec } = await aiIssueToken(b.userId, s.fio); return sendJson(res, 200, { ok: true, token, issued: aiTokenPublic(rec), tokens: aiTokensLoad().map(aiTokenPublic) }); }
+          if (b.action === 'revoke') { const list = aiTokensLoad(); const r = list.find((x) => x.id === String(b.id)); if (!r) return sendJson(res, 404, { error: 'Токен не найден.' });
+            r.revokedAt = new Date().toISOString(); r.revokedBy = s.fio; aiTokensSave(list); const c = aiSessionCache.get(r.id); if (c) { delete sessions[c.sid]; aiSessionCache.delete(r.id); }
+            console.log(`[mcp] отозван токен ${r.id} (${r.fio}), отозвал ${s.fio}`); }
+        } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); } }
+      const portal = String(cfg().PORTAL_BASE || '').replace(/\/+$/, '');
+      return sendJson(res, 200, { ok: true, mcpUrl: `${portal}/mcp`, tokens: aiTokensLoad().map(aiTokenPublic).reverse() });
+    }
     if (p === '/api/admin/station-posts') {
       const s = req.session; if (!s || !s.isAdmin) return sendJson(res, 403, { error: 'Только администратор.' });
       if (req.method === 'POST') { const b = await readBody(req); let list = stationPosts();

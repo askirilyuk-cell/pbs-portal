@@ -2,8 +2,8 @@
   "manifest_version": "0.3",
   "name": "pbs-portal",
   "display_name": "Портал ИСМ ПБС",
-  "version": "1.3.0",
-  "description": "Работа с порталом ИСМ ПБС из Claude: закупки (заявки, позиции, поставщики, счета, файлы) и продажи (запросы ЗП, результат КП, контрагенты, файлы). Файлы, брошенные в чат, мост берёт с вашего компьютера. Права — как у вас в портале.",
+  "version": "1.4.0",
+  "description": "Работа с порталом ИСМ ПБС из Claude: закупки, продажи, техподготовка и цех (оборудование, инструмент, карты наладки, МК, металл, задания, ПЗ, КД), файлы. Права — как у вас в портале.",
   "author": {
     "name": "ПБС"
   },
@@ -121,6 +121,74 @@
     {
       "name": "zp_attach_file",
       "description": "Приложить файл к запросу заказчика"
+    },
+    {
+      "name": "equipment_search",
+      "description": "Найти оборудование"
+    },
+    {
+      "name": "equipment_get",
+      "description": "Карточка оборудования"
+    },
+    {
+      "name": "tools_search",
+      "description": "Найти инструмент и оснастку"
+    },
+    {
+      "name": "tool_get",
+      "description": "Карточка инструмента"
+    },
+    {
+      "name": "tool_catalog_search",
+      "description": "Каталог державок, пластин, кулачков"
+    },
+    {
+      "name": "setup_cards_search",
+      "description": "Найти карты наладки"
+    },
+    {
+      "name": "setup_card_get",
+      "description": "Карта наладки"
+    },
+    {
+      "name": "setup_card_link",
+      "description": "Привязать КН к операции МК"
+    },
+    {
+      "name": "routes_search",
+      "description": "Найти маршрутные карты"
+    },
+    {
+      "name": "route_get",
+      "description": "Маршрутная карта"
+    },
+    {
+      "name": "metal_search",
+      "description": "Остатки металла и заготовки"
+    },
+    {
+      "name": "tasks_search",
+      "description": "Задания участков"
+    },
+    {
+      "name": "task_update",
+      "description": "Отметить ход задания"
+    },
+    {
+      "name": "orders_search",
+      "description": "Производственные заказы (ПЗ)"
+    },
+    {
+      "name": "kd_search",
+      "description": "Найти КД"
+    },
+    {
+      "name": "tool_move",
+      "description": "Движение инструмента"
+    },
+    {
+      "name": "tool_save",
+      "description": "Завести/изменить позицию инструмента"
     }
   ],
   "compatibility": {

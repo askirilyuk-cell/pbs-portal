@@ -12752,7 +12752,7 @@ async function mcpAuthenticate(req) {
   if (now - aiLastUsedSaveAt > 60000) { aiLastUsedSaveAt = now; rec.lastUsedAt = new Date(now).toISOString(); try { aiTokensSave(list); } catch {} }
   return { sid, tokenId: rec.id, user: { id: rec.userId, fio: String(sessions[sid].fio || '').replace(/ \(ИИ\)$/, '') } };
 }
-const mcpHandler = createMcpHandler({ port: PORT, authenticate: mcpAuthenticate, stages: { znz: ZNZ_STAGES, zp: SALES_STAGES }, portalBase: () => String(cfg().PORTAL_BASE || '').replace(/\/+$/, '') });
+const mcpHandler = createMcpHandler({ port: PORT, authenticate: mcpAuthenticate, stages: { znz: ZNZ_STAGES, zp: SALES_STAGES }, toolOps: TOOL_OPS, portalBase: () => String(cfg().PORTAL_BASE || '').replace(/\/+$/, '') });
 // ══ K-206: посты участков (киоски) — вход по токену поста, оператор представляется личной биркой ═════════════════
 //  runtime.STATION_POSTS = [{id, section, name, token, createdAt, lastSeen}]; сессия поста живёт год, оператор — до 30 мин бездействия.
 const STATION_SESSION_TTL = 365 * 24 * 3600 * 1000;

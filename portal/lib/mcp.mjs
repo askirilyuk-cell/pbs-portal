@@ -9,9 +9,10 @@
 // ============================================================================
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.3.0' };
+const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.4.0' };
 const INSTRUCTIONS = [
-  'Портал ИСМ ПБС (производство ПБС). Разделы: «Закупки» — заявки на закупку (ЗнЗ) с позициями, поставщики, счета; «Продажи» — запросы заказчиков (ЗП), КП и его результат, контрагенты.',
+  'Портал ИСМ ПБС (производство ПБС). Разделы: «Закупки» — заявки на закупку (ЗнЗ) с позициями, поставщики, счета; «Продажи» — запросы заказчиков (ЗП), КП и его результат, контрагенты; «Техподготовка и цех» — оборудование, инструмент и оснастка, каталог державок/пластин/кулачков, карты наладки (КН), маршрутные карты (МК), металл, задания участков, производственные заказы (ПЗ), КД.',
+  'Инструменты доступны по правам владельца токена: если раздел у человека закрыт в портале, инструмент вернёт «нет доступа» — это нормально, скажите об этом пользователю.',
   'Номера: ЗнЗ-ГГГГ-NNN (заявка на закупку), ПЗ-ГГГГ-NNN (производственный заказ), ЗП-ГГГГ-NNN (запрос от заказчика).',
   'Одна ЗнЗ может содержать несколько позиций — материалы под один заказ заводите ОДНОЙ заявкой с позициями, а не отдельными заявками.',
   'Перед созданием ЗнЗ znz_create сам ищет дубли (тот же источник и похожие позиции) и останавливается — покажите их человеку и спросите, прежде чем повторять с allowDuplicate.',
@@ -455,10 +456,250 @@ function salesTools(deps) {
   ];
 }
 
+// ── K-354: инструменты «Техподготовка и цех» (роли Инструментальщик / Технолог / Цех) ──
+// Оборудование, инструмент и оснастка, каталог державок/пластин/кулачков, карты наладки, маршрутные
+// карты (МК), металл, задания участков и заказы (ПЗ), КД. Запись — только безопасное: движение и
+// карточка инструмента, привязка карты наладки к операции МК, ход задания на участке. Создание и правка
+// самих МК и карт наладки, согласование, удаление — только в интерфейсе.
+function techTools(deps) {
+  const q = (x) => norm(x);
+  const like = (obj, fields, query) => !query || q(fields.map((f) => obj[f]).join(' ')).includes(q(query));
+  const slim = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] != null && o[k] !== '' && !(Array.isArray(o[k]) && !o[k].length)).map((k) => [k, o[k]]));
+  const lim = (a, n) => (a || []).slice(0, n || 30);
+  const must = (d, label, ref) => { if (!d || !d.item) throw new Error(`${label} «${ref}» не найден(а).`); return d.item; };
+  async function findBy(api, path, key, ref, fields, label) {
+    const d = await api('GET', path);
+    const s = String(ref == null ? '' : ref).trim();
+    const arr = d[key] || [];
+    const hit = arr.find((x) => fields.some((f) => String(x[f] ?? '').toLowerCase() === s.toLowerCase()));
+    if (!hit) throw new Error(`${label} «${s}» не найден(а).`);
+    return hit;
+  }
+  const EQ_BRIEF = ['id', 'invNo', 'name', 'model', 'category', 'subtype', 'status', 'responsible', 'sectionName', 'location', 'isCnc', 'cncControl', 'to1Next', 'inspectionNext', 'taskCount'];
+  const TOOL_BRIEF = ['id', 'code', 'name', 'type', 'category', 'subcategory', 'unit', 'balance', 'minStock', 'belowMin', 'cell', 'where', 'status', 'invNo', 'calNext', 'calOverdue', 'responsible'];
+  const TASK_BRIEF = ['id', 'num', 'title', 'status', 'priority', 'sectionCode', 'sectionName', 'opNum', 'mk', 'partName', 'drawing', 'qtyPlan', 'factQty', 'plan', 'orderDue', 'executors', 'equip', 'normTime', 'setupCardNo', 'numPz', 'posNo', 'startedAt', 'finishedAt', 'pauseReason'];
+  const allTasks = (board) => (board.orders || []).flatMap((o) => (o.tasks || []).map((t) => ({ ...t, numPz: t.numPz || o.numPz })));
+
+  return [
+    tool('equipment_search', 'Найти оборудование',
+      'Станки и оборудование: инв. №, модель, статус, ответственный, участок, ЧПУ, ближайшее ТО/поверка, сколько заданий.',
+      { query: { type: 'string', description: 'Инв. №, название, модель, ответственный' }, cncOnly: { type: 'boolean' }, status: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 } }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/equipment');
+        let list = (d.items || []).filter((x) => like(x, ['invNo', 'name', 'model', 'responsible', 'sectionName', 'subtype'], a.query));
+        if (a.cncOnly) list = list.filter((x) => x.isCnc);
+        if (a.status) list = list.filter((x) => q(x.status) === q(a.status));
+        return { total: list.length, items: lim(list, a.limit).map((x) => slim(x, EQ_BRIEF)) };
+      }),
+
+    tool('equipment_get', 'Карточка оборудования',
+      'Полная карточка станка: ТТХ (головка, патрон, ЧПУ), ТО, документы, текущие задания, карты наладки этого станка и последние фактические наладки.',
+      { equipment: { type: 'string', description: 'Инв. № (ПБС-ОБ-021) или id' } }, ['equipment'], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/equipment/item?id=' + encodeURIComponent(a.equipment));
+        const it = must(d, 'Оборудование', a.equipment);
+        const [cards, runs] = await Promise.all([api('GET', '/api/setup-cards'), api('GET', '/api/setup-cards/runs?machineId=' + encodeURIComponent(it.id)).catch(() => ({ runs: [] }))]);
+        return {
+          ...slim(it, Object.keys(it).filter((k) => k !== 'docs')), docs: it.docs || d.docs || null,
+          tasks: lim(d.tasks, 30),
+          setupCards: (cards.items || []).filter((c) => String(c.machineId) === String(it.id)).map((c) => slim(c, ['id', 'no', 'name', 'status', 'part', 'operationKind', 'date'])),
+          recentSetupRuns: lim(runs.runs, 10).map((r) => slim(r, ['when', 'who', 'no', 'part', 'note'])),
+        };
+      }),
+
+    tool('tools_search', 'Найти инструмент и оснастку',
+      'Реестр инструмента, оснастки и СИ: код ИН-…, наименование, категория, остаток и минимум, ячейка/где находится, статус, поверка. Можно отобрать только позиции ниже минимума.',
+      { query: { type: 'string' }, category: { type: 'string' }, belowMinOnly: { type: 'boolean' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 } }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/tools');
+        let list = (d.items || []).filter((x) => like(x, ['code', 'name', 'category', 'subcategory', 'gost', 'cell', 'invNo', 'code1c'], a.query));
+        if (a.category) list = list.filter((x) => q(x.category) === q(a.category));
+        if (a.belowMinOnly) list = list.filter((x) => x.belowMin);
+        return { total: list.length, items: lim(list, a.limit).map((x) => slim(x, TOOL_BRIEF)), belowMinTotal: (d.items || []).filter((x) => x.belowMin).length };
+      }),
+
+    tool('tool_get', 'Карточка инструмента',
+      'Позиция инструмента/оснастки и журнал движений (последние 30): кто, когда, сколько, основание, остаток после.',
+      { tool: { type: 'string', description: 'Код ИН-NNNN или id' } }, ['tool'], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/tools/item?id=' + encodeURIComponent(a.tool));
+        must(d, 'Позиция инструмента', a.tool);
+        return { item: d.item, balance: d.balance, belowMin: !!d.belowMin, journal: (d.journal || []).slice(-30).reverse() };
+      }),
+
+    tool('tool_catalog_search', 'Каталог державок, пластин и кулачков',
+      'Поиск в каталоге: пластины (ISO, сплав, режимы ap/f/vc), державки (ISO и совместимые пластины), комплекты кулачков (под какой патрон/станок, состояние).',
+      { kind: { type: 'string', enum: ['inserts', 'holders', 'jaws'] }, query: { type: 'string', description: 'ISO-код, производитель, сплав, № комплекта' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 } }, ['kind'], RO,
+      async (api, a) => {
+        if (a.kind === 'jaws') {
+          const d = await api('GET', '/api/chuck-jaws');
+          const list = (d.items || []).filter((x) => like(x, ['setNo', 'jawType', 'compat', 'station', 'chuckInv', 'location', 'material'], a.query));
+          return { total: list.length, items: lim(list, a.limit).map((x) => slim(x, ['id', 'setNo', 'jawType', 'jawCount', 'clampDia', 'material', 'compat', 'station', 'chuckInv', 'condition', 'location', 'boredFor', 'note'])) };
+        }
+        const d = await api('GET', '/api/tool-catalog/' + a.kind);
+        const list = (d.items || []).filter((x) => like(x, ['iso', 'maker', 'makerCode', 'grade', 'holderType', 'material', 'isoGroups'], a.query));
+        return { total: list.length, items: lim(list, a.limit).map((x) => ({ ...slim(x, ['id', 'iso', 'grade', 'chipbreaker', 'holderType', 'maker', 'makerCode', 'isoGroups', 'ap', 'fn', 'vc', 'material', 'procType', 'status', 'note']), ...(x.compat ? { compatibleInserts: x.compat.map((c) => c.iso + (c.grade ? ' ' + c.grade : '')) } : {}) })) };
+      }),
+
+    tool('setup_cards_search', 'Найти карты наладки',
+      'Карты наладки (КН): №, станок, деталь, статус, вид операции, к каким операциям МК привязаны.',
+      { query: { type: 'string', description: '№ КН, деталь, станок' }, machine: { type: 'string', description: 'Инв. № или название станка' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 } }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/setup-cards');
+        let list = (d.items || []).filter((x) => like(x, ['no', 'name', 'part', 'machine', 'author'], a.query));
+        if (a.machine) list = list.filter((x) => q([x.machine, x.machineModel].join(' ')).includes(q(a.machine)));
+        return { total: list.length, items: lim(list, a.limit).map((x) => ({ ...slim(x, ['id', 'no', 'name', 'status', 'machine', 'part', 'operationKind', 'author', 'date']), usedIn: (x.usedIn || []).map((u) => `${u.mk} оп.${u.opN}`) })) };
+      }),
+
+    tool('setup_card_get', 'Карта наладки',
+      'Полная карта наладки: станок и головка, позиции инструмента (державка, пластина, вылет, корректоры), патрон и кулачки, нулевая точка, привязки к МК, фактические наладки, история.',
+      { card: { type: 'string', description: '№ КН или id' } }, ['card'], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/setup-card?id=' + encodeURIComponent(a.card));
+        must(d, 'Карта наладки', a.card);
+        return { item: d.item, lines: (d.lines || []).map((l) => slim(l, ['pos', 'toolPos', 'toolKind', 'holderIso', 'insertIso', 'insertGrade', 'overhang', 'lenX', 'lenZ', 'radius', 'width', 'edgePos', 'params', 'note'])) };
+      }),
+
+    tool('setup_card_link', 'Привязать карту наладки к операции МК',
+      'Привязывает (или отвязывает, unlink=true) карту наладки к операции маршрутной карты. Если к операции уже привязана другая КН — портал откажет: сначала отвяжите её.',
+      { card: { type: 'string', description: '№ КН или id' }, mk: { type: 'string', description: '№ МК, как в route_get' }, opN: { type: 'string', description: '№ операции' }, unlink: { type: 'boolean', default: false } }, ['card', 'mk', 'opN'], RW,
+      async (api, a) => {
+        const d = await api('GET', '/api/setup-card?id=' + encodeURIComponent(a.card));
+        must(d, 'Карта наладки', a.card);
+        const j = await api('POST', '/api/setup-card/link', { id: d.item.id, mk: a.mk, opN: String(a.opN), unlink: !!a.unlink });
+        return { ok: true, card: j.no, mk: j.mk, opN: j.opN, linked: j.linked };
+      }),
+
+    tool('routes_search', 'Найти маршрутные карты',
+      'Маршрутные карты (МК): №, изделие и обозначение, статус МК, автор, согласующий, число операций, кооперация, изменения КД.',
+      { query: { type: 'string', description: '№ МК, наименование, обозначение' }, status: { type: 'string', description: 'Статус МК' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 } }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/routes');
+        let list = (d.routes || []).filter((x) => like(x, ['mk', 'name', 'designation', 'author', 'productType'], a.query));
+        if (a.status) list = list.filter((x) => q(x.statusMk || x.status) === q(a.status));
+        return { total: list.length, items: lim(list, a.limit).map((x) => slim(x, ['id', 'mk', 'type', 'name', 'designation', 'revision', 'statusMk', 'author', 'approverName', 'opCount', 'hasCoop', 'kdChanged', 'variant', 'isMain'])) };
+      }),
+
+    tool('route_get', 'Маршрутная карта',
+      'МК целиком: заготовка и материал, операции по порядку (участок, оборудование, параметры, норма времени, оснастка, карта наладки, файлы УП ЧПУ, кооперация, задания), комплектующие.',
+      { mk: { type: 'string', description: '№ МК или id' } }, ['mk'], RO,
+      async (api, a) => {
+        const r = await findBy(api, '/api/routes', 'routes', a.mk, ['mk', 'id'], 'МК');
+        const d = await api('GET', '/api/route?id=' + encodeURIComponent(r.id));
+        const rt = d.route || {};
+        return {
+          route: slim(rt, ['id', 'mk', 'type', 'name', 'designation', 'productType', 'revision', 'statusMk', 'material', 'author', 'blankText', 'bomText', 'kdChanged', 'normsFixed']),
+          operations: (d.operations || []).map((o) => ({ ...slim(o, ['n', 'name', 'opType', 'section', 'equip', 'params', 'norm', 'tooling', 'setupCard', 'control', 'comment', 'coopText', 'planText']), ncFiles: (o.ncFiles || []).map((f) => (f && (f.name || f.rel)) || f), tasks: (o.tasks || []).map((t) => `${t.num} ${t.status}`) })),
+          components: d.components || [],
+        };
+      }),
+
+    tool('metal_search', 'Остатки металла и заготовки',
+      'Металл на складе: вид проката, марка, размер, остаток/резерв/доступно, ячейка; деловые остатки. С rollType+grade+sizeFrom подбирает заготовку (точный размер и больше).',
+      { query: { type: 'string', description: 'Марка, размер, код МС-…' }, rollType: { type: 'string', description: 'Лист, Круг, Труба…' }, grade: { type: 'string' }, sizeFrom: { type: 'number', description: 'Для подбора заготовки: минимальный размер (толщина/диаметр), мм' }, inStockOnly: { type: 'boolean', default: true }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 } }, [], RO,
+      async (api, a) => {
+        if (a.rollType && a.grade && a.sizeFrom) {
+          const d = await api('GET', `/api/metal/find-blank?rollType=${encodeURIComponent(a.rollType)}&grade=${encodeURIComponent(a.grade)}&sizeFrom=${encodeURIComponent(a.sizeFrom)}`);
+          return { mode: 'подбор заготовки', candidates: d.candidates || [], remnants: d.remnants || [] };
+        }
+        const d = await api('GET', '/api/metal');
+        let list = (d.items || []).filter((x) => like(x, ['code', 'grade', 'rollType', 'size', 'gost', 'cell', 'name1c'], a.query));
+        if (a.rollType) list = list.filter((x) => q(x.rollType) === q(a.rollType));
+        if (a.grade) list = list.filter((x) => q(x.grade).includes(q(a.grade)));
+        if (a.inStockOnly !== false) list = list.filter((x) => Number(x.balance) > 0);
+        const rem = (d.remnants || []).filter((x) => like(x, ['code', 'grade', 'rollType', 'sizes', 'location'], a.query) && (!a.rollType || q(x.rollType) === q(a.rollType)));
+        return { total: list.length, items: lim(list, a.limit).map((x) => slim(x, ['id', 'code', 'rollType', 'grade', 'size', 'unit', 'balance', 'reserved', 'available', 'cell', 'warehouse', 'belowMin'])), remnants: lim(rem, 20).map((x) => slim(x, ['code', 'rollType', 'grade', 'sizes', 'weight', 'status', 'location'])) };
+      }),
+
+    tool('tasks_search', 'Задания участков',
+      'Задания (операции по МК) на участках: статус, участок, деталь и чертёж, количество план/факт, срок, оборудование, норма, карта наладки, ПЗ. Удобно для «что сейчас в очереди на участке», «что в работе по ПЗ-…».',
+      { section: { type: 'string', description: 'Код или название участка' }, status: { type: 'string', enum: ['В очереди', 'В работе', 'Выполнено', 'Приостановлено'] }, numPz: { type: 'string' }, query: { type: 'string', description: 'Деталь, чертёж, № МК, оборудование' }, limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 } }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/board');
+        let list = allTasks(d).filter((t) => like(t, ['partName', 'drawing', 'mk', 'title', 'equip', 'num'], a.query));
+        if (a.section) list = list.filter((t) => q([t.sectionCode, t.sectionName, t.section].join(' ')).includes(q(a.section)));
+        if (a.status) list = list.filter((t) => t.status === a.status);
+        if (a.numPz) list = list.filter((t) => q(t.numPz) === q(a.numPz));
+        list.sort((x, y) => (Number(x.queueOrder) || 9999) - (Number(y.queueOrder) || 9999));
+        return { total: list.length, items: lim(list, a.limit).map((t) => slim(t, TASK_BRIEF)) };
+      }),
+
+    tool('task_update', 'Отметить ход задания',
+      'Ход задания на участке: статус (В очереди / В работе / Выполнено / Приостановлено), количество факт, время факт (ч), причина паузы, самоконтроль, примечание. «Выполнено» ставит дату факта; статус ПЗ портал пересчитает сам. Результат ОТК здесь не ставится.',
+      { taskId: { type: 'integer', description: 'id из tasks_search' }, status: { type: 'string', enum: ['В очереди', 'В работе', 'Выполнено', 'Приостановлено'] }, factQty: { type: 'number', minimum: 0 }, factTime: { type: 'number', minimum: 0, description: 'Время факт., ч' }, pauseReason: { type: 'string' }, selfControl: { type: 'string' }, note: { type: 'string' } }, ['taskId'], RW,
+      async (api, a, ctx) => {
+        const { taskId, ...p } = a;
+        if (!Object.keys(p).length) throw new Error('Нечего менять: укажите статус, количество, время или примечание.');
+        if (p.note) p.note = `${p.note} [${ctx.user.fio}, ИИ]`;
+        const j = await api('POST', '/api/task/update', { id: taskId, ...p });
+        return { ok: true, taskId, changed: Object.keys(j.patch || p) };
+      }),
+
+    tool('orders_search', 'Производственные заказы (ПЗ)',
+      'ПЗ: заказчик, тип, статус, приоритет, плановый срок, позиции (изделие, чертёж, кол-во, статус, МК) и сводка заданий по статусам.',
+      { query: { type: 'string', description: '№ ПЗ, заказчик, изделие' }, status: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }, [], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/board');
+        let list = (d.orders || []).filter((o) => like({ ...o, pos: (o.positions || []).map((p) => p.name + ' ' + p.drawing).join(' ') }, ['numPz', 'customer', 'brief', 'pos', 'numZp'], a.query));
+        if (a.status) list = list.filter((o) => q(o.status) === q(a.status));
+        list.sort((x, y) => String(y.numPz).localeCompare(String(x.numPz), 'ru'));
+        return { total: list.length, items: lim(list, a.limit).map((o) => {
+          const byStatus = {}; for (const t of o.tasks || []) byStatus[t.status] = (byStatus[t.status] || 0) + 1;
+          return { ...slim(o, ['numPz', 'customer', 'orderType', 'status', 'priority', 'plan', 'numZp', 'brief']), positions: (o.positions || []).map((p) => slim(p, ['numPos', 'name', 'drawing', 'qty', 'unit', 'status', 'dateReady', 'mk'])), tasks: byStatus };
+        }) };
+      }),
+
+    tool('kd_search', 'Найти КД (чертежи)',
+      'Конструкторская документация: обозначение, наименование, материал, литера, статус, ревизия, файлы (чертёж/СБ/СП) и в каких МК используется.',
+      { query: { type: 'string', description: 'Обозначение или наименование детали' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }, ['query'], RO,
+      async (api, a) => {
+        const d = await api('GET', '/api/design');
+        const list = (d.kd || []).filter((x) => like(x, ['docNo', 'name', 'material', 'projectNo'], a.query));
+        const base = deps.portalBase();
+        return { total: list.length, items: lim(list, a.limit).map((x) => ({ ...slim(x, ['docNo', 'name', 'kind', 'material', 'litera', 'status', 'rev', 'projectNo', 'toProduction', 'qty']), files: (x.files || []).map((f) => ({ kind: f.kind, link: base ? `${base}/api/design/kd/file?doc=${encodeURIComponent(x.docNo)}&kind=${encodeURIComponent(f.kind)}` : null })), usedInMk: (x.mks || []).map((m) => m.mk) })) };
+      }),
+
+    tool('tool_move', 'Движение инструмента',
+      `Проводит движение по позиции инструмента/оснастки: ${deps.toolOps.join(', ')}. Выдача требует получателя (recipient) и не больше остатка; Перемещение и Передача на участок — куда (to); Списание — основание (basis). Повтор одного и того же вызова не задвоит движение.`,
+      {
+        tool: { type: 'string', description: 'Код ИН-NNNN или id' }, operation: { type: 'string', enum: deps.toolOps },
+        qty: { type: 'number', exclusiveMinimum: 0, description: 'Для Выдача/Пополнение/Возврат/Поступление' },
+        recipient: { type: 'string', description: 'Кому выдано (для Выдачи)' }, basis: { type: 'string', description: 'Основание: ПЗ/МК/заявка/причина списания' },
+        to: { type: 'string', description: 'Куда (Перемещение, Передача на участок)' }, cell: { type: 'string', description: 'Ячейка при возврате на склад' },
+        batch: { type: 'string' }, date: { type: 'string', description: 'ГГГГ-ММ-ДД' }, note: { type: 'string' },
+        opKey: { type: 'string', description: 'Ключ операции для защиты от повтора (если не задан — формируется из параметров)' },
+      }, ['tool', 'operation'], RW,
+      async (api, a, ctx) => {
+        const it = must(await api('GET', '/api/tools/item?id=' + encodeURIComponent(a.tool)), 'Позиция инструмента', a.tool);
+        const key = a.opKey || ['mcp', ctx.tokenId || ctx.user.id, it.id, a.operation, a.qty ?? '', a.recipient || '', a.to || '', a.basis || '', new Date().toISOString().slice(0, 13)].join('|');
+        const body = { itemId: it.id, operation: a.operation, qty: a.qty, recipient: a.recipient, basis: a.basis, reason: a.basis, to: a.to, shopArea: a.to, cell: a.cell, batch: a.batch, date: a.date, note: [a.note, `[${ctx.user.fio}, ИИ]`].filter(Boolean).join(' '), clientOpId: key };
+        const j = await api('POST', '/api/tools/move', body);
+        return { ok: true, code: j.code || it.code, operation: j.operation, qty: j.qty ?? null, balance: j.balance ?? null, status: j.status || null, where: j.where || j.location || null, warning: j.warning || null };
+      }),
+
+    tool('tool_save', 'Завести или изменить позицию инструмента',
+      'Новая позиция (без tool) — нужен name; портал сам присвоит код ИН-… и инв. № для оснастки/СИ. Изменение — укажите tool (код или id) и меняемые поля. Остаток задаётся только при заведении; дальше — через tool_move.',
+      {
+        tool: { type: 'string', description: 'Код ИН-NNNN или id — для изменения' }, name: { type: 'string' },
+        type: { type: 'string', description: 'Расходный / Специальный' }, category: { type: 'string', description: 'Резцы, Пластины, Свёрла, Фрезы, Метчики, Оправки, Мерительный/СИ, …' },
+        subcategory: { type: 'string' }, gost: { type: 'string' }, unit: { type: 'string' }, minStock: { type: 'number', minimum: 0 }, balance: { type: 'number', minimum: 0, description: 'Только при заведении' },
+        cell: { type: 'string' }, location: { type: 'string' }, responsible: { type: 'string' }, code1c: { type: 'string' }, note: { type: 'string' },
+      }, [], RW,
+      async (api, a) => {
+        const { tool: ref, ...f } = a;
+        let body = f;
+        if (ref) { const it = must(await api('GET', '/api/tools/item?id=' + encodeURIComponent(ref)), 'Позиция инструмента', ref); delete body.balance; body = { id: it.id, code: it.code, ...body }; }
+        else if (!a.name) throw new Error('Для новой позиции нужен name.');
+        const j = await api('POST', '/api/tools/save', body);
+        return { ok: true, created: !!j.created, id: j.id, code: j.code };
+      }),
+  ];
+}
+
 // ── протокол ────────────────────────────────────────────────────────────────
 // deps: { port, authenticate(req) → { sid, user:{id,fio}, tokenId } | null, stages:{znz,zp}, portalBase() }
 export function createMcpHandler(deps) {
-  const tools = [...procurementTools(deps), ...salesTools(deps)];
+  const tools = [...procurementTools(deps), ...salesTools(deps), ...techTools(deps)];
   const byName = new Map(tools.map((t) => [t.def.name, t]));
 
   const apiFor = (sid) => async (method, path, body) => {

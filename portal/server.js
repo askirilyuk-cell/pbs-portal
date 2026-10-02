@@ -739,10 +739,11 @@ async function logiFromZnz({ numZnz, type }) {
 async function notifyInvoicePaid(invoiceRow, payment) {
   try {
     const c = cfg(); if (!c.BITRIX || !invoiceRow) return;
-    const numZnz = String(invoiceRow['ЗнЗ (№)'] || '').trim(); if (!numZnz) return;
+    const nums = invoiceZnzNums(invoiceRow); if (!nums.length) return; // K-347: общий счёт — все его заявки
+    const numZnz = nums.join(', ');
     const reqs = await ncListSoft('procurement_requests');
-    const z = reqs.find((x) => String(x['№ ЗнЗ'] || '').trim() === numZnz); if (!z) return;
-    const chats = orderChatsFor(z['Триггер-источник (ЗКЗ/ПЗ/склад)']); if (!chats.length) return;
+    const zs = reqs.filter((x) => nums.includes(String(x['№ ЗнЗ'] || '').trim())); if (!zs.length) return;
+    const chats = orderChatsFor(zs.map((z) => z['Триггер-источник (ЗКЗ/ПЗ/склад)'] || '').join(', ')); if (!chats.length) return;
     const amount = invoiceRow['Сумма, ₽'] != null ? Number(invoiceRow['Сумма, ₽']).toLocaleString('ru-RU') + ' ₽' : '';
     for (const oc of chats) {
       const msg = [`[B]💳 Оплачен счёт ${invoiceRow['№ счёта'] || ''} по закупке ${numZnz}[/B]`, `${invoiceRow['Поставщик'] || ''}${amount ? ' · ' + amount : ''}`, `Заказ ${oc.numPz}: срок поставки теперь считается от оплаты.`].join('\n');
@@ -3127,7 +3128,7 @@ async function buildProcurementLive() {
   ]);
   const numOrNull = (v) => (v != null && v !== '') ? Number(v) : null;
   const assignees = readZnzAssignees();      // K-102: «в работе у» (оверлей, № ЗнЗ → {fio, when})
-  const invByZnz = invoicesSumByZnz(pinv);   // znzId → { sum, count }
+  const invByZnz = invoicesSumByZnz(pinv, new Map(preq.map((r) => [String(r['№ ЗнЗ'] || '').trim(), r.Id ?? r.id]))); // znzId → { sum, count }; K-347: общие счета — во всех своих заявках
   const itemsByZnz = itemsCountByZnz(pitems); // znzId → число позиций
   const acceptByZnz = znzAcceptProgressMap(preq, pitems, pinc); // znzId → { ordered, accepted } (быстрое улучшение 2)
   const requests = preq.map((r) => {
@@ -3926,6 +3927,27 @@ function invoiceItemIdsFromBody(v) {
   if (!Array.isArray(arr)) return null;
   return arr.map((x) => Number(x)).filter((n) => Number.isFinite(n));
 }
+// K-347: общий счёт на несколько ЗнЗ (просьба Рисалиевой 02.10: один счёт поставщика по нескольким заявкам
+//  иначе дублировался в реестре оплат). «ЗнЗ (№)» хранит список через запятую, ПЕРВЫЙ — основная заявка
+//  (её «ЗнЗ Id», по ней ключ оплаты externalRef). Счёт виден и оплачивается из карточки любой своей заявки.
+function invoiceZnzNums(r) {
+  return [...new Set(String((r && r['ЗнЗ (№)']) || '').split(/[,;]/).map((x) => x.trim()).filter(Boolean))];
+}
+function invoiceCoversZnz(r, znzId, znzNo) {
+  return Number(r['ЗнЗ Id']) === Number(znzId) || (!!znzNo && invoiceZnzNums(r).includes(String(znzNo).trim()));
+}
+// проверить и нормализовать «также покрывает» (номера или id ЗнЗ) → [№ …] без основной; неизвестные → ошибка
+function invoiceAlsoZnzResolve(also, reqs, primaryNo) {
+  const list = Array.isArray(also) ? also : String(also || '').split(/[,;]/);
+  const out = [];
+  for (const raw of list.map((x) => String(x || '').trim()).filter(Boolean)) {
+    const z = reqs.find((x) => String(x['№ ЗнЗ'] || '').trim() === raw || String(x.Id ?? x.id) === raw);
+    if (!z) throw new Error(`Заявка ${raw} не найдена.`);
+    const no = String(z['№ ЗнЗ'] || '').trim();
+    if (no && no !== primaryNo && !out.includes(no)) out.push(no);
+  }
+  return out;
+}
 // нормализованная карточка счёта для клиента
 function invoiceShape(r) {
   return {
@@ -3933,7 +3955,8 @@ function invoiceShape(r) {
     invoiceNo: r['№ счёта'] || '', supplier: r['Поставщик'] || '', inn: r['ИНН поставщика'] || '',
     amount: invNumOrNull(r['Сумма, ₽']), vatRate: r['Ставка НДС'] || '', vatAmount: invNumOrNull(r['Сумма НДС, ₽']),
     payStatus: r['Статус оплаты'] || '', date: r['Дата счёта'] || '', note: r['Комментарий'] || '',
-    znzNum: r['ЗнЗ (№)'] || '', znzId: invNumOrNull(r['ЗнЗ Id']),
+    znzNum: invoiceZnzNums(r)[0] || '', znzId: invNumOrNull(r['ЗнЗ Id']),
+    znzNums: invoiceZnzNums(r), // K-347: все заявки общего счёта (первая — основная)
     scan: eqAttach(r['Файл-скан']),
     itemIds: invoiceItemIdsParse(r['Позиции счёта (Ids)']), // K-83: позиции заявки, покрытые этим счётом ([] = не задано/весь охват)
     // K-83 этап 2: статус заявки на оплату ЭТОГО счёта (per-invoice externalRef)
@@ -3948,23 +3971,28 @@ async function invoicesTableReady() {
 async function listInvoicesForZnz(znzId) {
   const id = Number(znzId);
   if (!Number.isFinite(id)) throw new Error('Некорректный идентификатор заявки (znzId).');
-  const rows = await ncListSoft('invoices');
-  return rows.map(invoiceShape).filter((x) => x.znzId === id)
+  const [rows, reqs] = await Promise.all([ncListSoft('invoices'), ncListSoft('procurement_requests')]);
+  const z = reqs.find((x) => String(x.Id ?? x.id) === String(id)); const no = z ? String(z['№ ЗнЗ'] || '').trim() : '';
+  return rows.filter((r) => invoiceCoversZnz(r, id, no)).map(invoiceShape) // K-347: и общие счета, где заявка не основная
     .sort((a, b) => String(a.invoiceNo).localeCompare(String(b.invoiceNo), 'ru'));
 }
 // карта znzId → { sum, count, paidSum, paidCount, sentCount } по всем счетам
 // (колонки СУММА и ОПЛАТА реестра ЗнЗ — правка Александра 22.07: видеть оплаты без захода в карточку)
-function invoicesSumByZnz(invoiceRows) {
+// K-347: общий счёт учитывается в КАЖДОЙ своей заявке (numToId — № ЗнЗ → Id); сумма — полная сумма счёта
+function invoicesSumByZnz(invoiceRows, numToId = new Map()) {
   const m = new Map();
   for (const r of invoiceRows) {
-    const zid = invNumOrNull(r['ЗнЗ Id']); if (zid == null) continue;
+    const ids = new Set(); const zid0 = invNumOrNull(r['ЗнЗ Id']); if (zid0 != null) ids.add(zid0);
+    for (const no of invoiceZnzNums(r)) { const z = numToId.get(no); if (z != null) ids.add(Number(z)); }
     const amt = invNumOrNull(r['Сумма, ₽']) || 0;
     const st = String(r['Статус оплаты'] || '').trim();
-    const cur = m.get(zid) || { sum: 0, count: 0, paidSum: 0, paidCount: 0, sentCount: 0 };
-    cur.sum += amt; cur.count += 1;
-    if (st === 'Оплачено') { cur.paidSum += amt; cur.paidCount += 1; }
-    if (r['Оплата ExternalRef']) cur.sentCount += 1;
-    m.set(zid, cur);
+    for (const zid of ids) {
+      const cur = m.get(zid) || { sum: 0, count: 0, paidSum: 0, paidCount: 0, sentCount: 0 };
+      cur.sum += amt; cur.count += 1;
+      if (st === 'Оплачено') { cur.paidSum += amt; cur.paidCount += 1; }
+      if (r['Оплата ExternalRef']) cur.sentCount += 1;
+      m.set(zid, cur);
+    }
   }
   return m;
 }
@@ -3991,10 +4019,12 @@ async function createInvoice(body) {
   const vatRate = String(body.vatRate || '').trim();
   if (vatRate && !INVOICE_VAT_RATES.includes(vatRate)) throw new Error(`Недопустимая ставка НДС: ${vatRate}`);
 
+  const primaryNo = String(znz['№ ЗнЗ'] || '').trim();
+  const also = invoiceAlsoZnzResolve(body.alsoZnz, reqs, primaryNo); // K-347
   const row = {
     '№ счёта': invoiceNo,
     'Статус оплаты': payStatus,
-    'ЗнЗ (№)': znz['№ ЗнЗ'] || '', 'ЗнЗ Id': znzId,
+    'ЗнЗ (№)': [primaryNo, ...also].filter(Boolean).join(', '), 'ЗнЗ Id': znzId,
   };
   const supplier = String(body.supplier || '').trim(); if (supplier) row['Поставщик'] = supplier;
   const inn = String(body.inn || '').trim(); if (inn) row['ИНН поставщика'] = inn;
@@ -4013,12 +4043,13 @@ async function createInvoice(body) {
   const cr = Array.isArray(created) ? created[0] : created;
   const id = cr && (cr.Id ?? cr.id);
 
-  // нативная связь ЗнЗ→Счёт (best-effort; фильтрация всё равно идёт по «ЗнЗ Id»)
+  // нативная связь ЗнЗ→Счёт (best-effort; фильтрация всё равно идёт по «ЗнЗ Id»/списку «ЗнЗ (№)»)
   try { await ncLinkRecords('procurement_requests', 'Счета', znzId, [id]); } catch { /* soft — связи может ещё не быть */ }
+  for (const no of also) { const z = reqs.find((x) => String(x['№ ЗнЗ'] || '').trim() === no); try { if (z) await ncLinkRecords('procurement_requests', 'Счета', z.Id ?? z.id, [id]); } catch { /* soft */ } }
   // best-effort автозавод поставщика в «Контрагенты» (снабженцу не нужно заводить его вручную)
   await upsertSupplierFromInvoice(supplier, inn, invoiceNo);
 
-  return { ok: true, id, invoiceNo, znzId, payStatus };
+  return { ok: true, id, invoiceNo, znzId, payStatus, znzNums: [primaryNo, ...also].filter(Boolean) };
 }
 // обновить счёт (смена статуса оплаты и/или полей). body: { id, payStatus?, ... }
 async function updateInvoice(body) {
@@ -4045,6 +4076,17 @@ async function updateInvoice(body) {
   if (body.note != null) patch['Комментарий'] = String(body.note).trim();
   if (Array.isArray(body.scan)) patch['Файл-скан'] = body.scan;
   if (body.itemIds !== undefined) { const itemIds = invoiceItemIdsFromBody(body.itemIds) || []; patch['Позиции счёта (Ids)'] = JSON.stringify(itemIds); }
+  // K-347: «также покрывает заявки» — основная (первая) не меняется
+  if (body.alsoZnz !== undefined) {
+    const reqs = await ncListSoft('procurement_requests');
+    const primaryNo = invoiceZnzNums(row)[0] || '';
+    const also = invoiceAlsoZnzResolve(body.alsoZnz, reqs, primaryNo);
+    const val = [primaryNo, ...also].filter(Boolean).join(', ');
+    if (val !== String(row['ЗнЗ (№)'] || '').trim()) {
+      patch['ЗнЗ (№)'] = val;
+      for (const no of also) { const z = reqs.find((x) => String(x['№ ЗнЗ'] || '').trim() === no); try { if (z) await ncLinkRecords('procurement_requests', 'Счета', z.Id ?? z.id, [id]); } catch { /* soft */ } }
+    }
+  }
   if (!Object.keys(patch).length) return { ok: true, id, unchanged: true };
 
   await ncUpdate('invoices', id, patch);
@@ -4872,7 +4914,7 @@ async function createPayment(body, session) {
     const invRows = await ncListSoft('invoices');
     invoice = invRows.find((x) => String(x.Id ?? x.id) === String(invId));
     if (!invoice) throw payErr(404, 'Счёт не найден.');
-    if (Number(invoice['ЗнЗ Id']) !== znzId) throw payErr(400, 'Счёт не относится к указанной заявке ЗнЗ.');
+    if (!invoiceCoversZnz(invoice, znzId, znzNo)) throw payErr(400, 'Счёт не относится к указанной заявке ЗнЗ.'); // K-347: общий счёт — любая его заявка
   }
 
   // K-340: оплату отправили кнопкой на уровне заявки, а счёт в заявке уже заведён (кейс Динары 30.09:
@@ -4892,7 +4934,8 @@ async function createPayment(body, session) {
     if (!znzNo) throw payErr(400, 'У заявки нет № ЗнЗ (externalRef) — оплату отправить нельзя.');
     const invId = invoice.Id ?? invoice.id;
     const invNo = String(invoice['№ счёта'] || '').trim() || `inv${invId}`;
-    externalRef = `${znzNo}/${invNo}`;
+    // K-347: ключ — по ОСНОВНОЙ заявке счёта (или уже сохранённый): общий счёт из любой карточки = одна оплата
+    externalRef = String(invoice['Оплата ExternalRef'] || '').trim() || `${invoiceZnzNums(invoice)[0] || znzNo}/${invNo}`;
   } else {
     externalRef = znzNo;
     if (!externalRef) throw payErr(400, 'У заявки нет № ЗнЗ (externalRef) — оплату отправить нельзя.');
@@ -4960,6 +5003,7 @@ async function createPayment(body, session) {
   if (body.contractDate) payload.contractDate = String(body.contractDate).slice(0, 10);
   let desc = String(body.description || '').trim();
   if (!desc && invoice) desc = invDate ? `Оплата по счёту ${invNo || externalRef} от ${invDate}` : `Оплата по счёту ${invNo || externalRef}`;
+  if (desc && invoice && invoiceZnzNums(invoice).length > 1 && !/ЗнЗ-/.test(desc)) desc += ` (заявки ${invoiceZnzNums(invoice).join(', ')})`; // K-347: общий счёт
   if (!desc) desc = `Оплата по заявке ${znzNo}${znz['Наименование'] ? ': ' + String(znz['Наименование']).slice(0, 120) : ''}`; // K-340: пустое назначение платежа не отправляем
   if (desc) payload.description = desc;
 

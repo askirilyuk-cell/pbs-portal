@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "pbs-portal",
   "display_name": "Портал ИСМ ПБС",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Работа с порталом ИСМ ПБС из Claude: закупки, продажи, техподготовка и цех (оборудование, инструмент, карты наладки, МК, металл, задания, ПЗ, КД), файлы. Права — как у вас в портале.",
   "author": {
     "name": "ПБС"
@@ -189,6 +189,26 @@
     {
       "name": "tool_save",
       "description": "Завести/изменить позицию инструмента"
+    },
+    {
+      "name": "route_catalog",
+      "description": "Справочники МК: типы операций, шаблоны"
+    },
+    {
+      "name": "route_save",
+      "description": "Составить/изменить МК (черновик)"
+    },
+    {
+      "name": "route_copy",
+      "description": "Копировать МК (вариант или новая)"
+    },
+    {
+      "name": "setup_card_save",
+      "description": "Составить/изменить карту наладки (черновик)"
+    },
+    {
+      "name": "setup_card_copy",
+      "description": "Копировать карту наладки"
     }
   ],
   "compatibility": {

@@ -9,9 +9,10 @@
 // ============================================================================
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.4.0' };
+const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.5.0' };
 const INSTRUCTIONS = [
   'Портал ИСМ ПБС (производство ПБС). Разделы: «Закупки» — заявки на закупку (ЗнЗ) с позициями, поставщики, счета; «Продажи» — запросы заказчиков (ЗП), КП и его результат, контрагенты; «Техподготовка и цех» — оборудование, инструмент и оснастка, каталог державок/пластин/кулачков, карты наладки (КН), маршрутные карты (МК), металл, задания участков, производственные заказы (ПЗ), КД.',
+  'МК и карты наладки: ИИ составляет и правит только ЧЕРНОВИКИ (setup_card_save, route_save), копии — всегда новый черновик (setup_card_copy, route_copy). Перед составлением МК посмотрите route_catalog (типы операций) и похожие МК (routes_search/route_get); карту наладки — по карточке станка (equipment_get) и каталогу (tool_catalog_search). Отправку на согласование и утверждение делает человек в портале.',
   'Инструменты доступны по правам владельца токена: если раздел у человека закрыт в портале, инструмент вернёт «нет доступа» — это нормально, скажите об этом пользователю.',
   'Номера: ЗнЗ-ГГГГ-NNN (заявка на закупку), ПЗ-ГГГГ-NNN (производственный заказ), ЗП-ГГГГ-NNN (запрос от заказчика).',
   'Одна ЗнЗ может содержать несколько позиций — материалы под один заказ заводите ОДНОЙ заявкой с позициями, а не отдельными заявками.',
@@ -696,10 +697,222 @@ function techTools(deps) {
   ];
 }
 
+// ── K-355: составление МК и карт наладки (только ЧЕРНОВИКИ) ─────────────────
+// Портал при сохранении КН заменяет ВСЕ позиции, а МК требует ПОЛНЫЙ набор операций (не переданное
+// стирается). Поэтому инструменты сначала читают документ, накладывают только просимые изменения и
+// отправляют целиком. Правило «ИИ правит только черновики» проверяется здесь — для всех, включая
+// администратора (сервер админу разрешает править и утверждённое). Копия — всегда новый черновик.
+// Согласование/утверждение, генерация заданий, удаление — только человек в портале.
+const isoHolderKey = (iso) => { const c = String(iso || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = c.match(/^([A-Z])([A-Z])([A-Z])([A-Z])([A-Z])(\d{2,4})([A-Z])(\d{2})/); return m ? { shape: m[2], clr: m[4], size: m[8] } : null; };
+const isoInsertKey = (iso) => { const c = String(iso || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = c.match(/^([A-Z])([A-Z])([A-Z])([A-Z])(\d{2})(\d{2})(\d{2})/); return m ? { shape: m[1], clr: m[2], size: m[5] } : null; };
+const isoCompatible = (h, i) => { const a = isoHolderKey(h), b = isoInsertKey(i); if (!a || !b) return null; return a.shape === b.shape && a.clr === b.clr && a.size === b.size; }; // K-313, как в UI
+const SC_LINE_FIELDS = ['toolPos', 'toolKind', 'edgePos', 'overhang', 'params', 'note', 'lenX', 'lenZ', 'radius', 'width'];
+const OP_SAVE_FIELDS = ['opTypeId', 'name', 'equipment', 'materials', 'planMaterials', 'control', 'whatControl', 'si', 'tolerance', 'norm', 'paramPlan', 'comment', 'tooling', 'setupCardNo', 'components'];
+const scPositionSchema = {
+  type: 'object', additionalProperties: false, required: ['slot'],
+  properties: {
+    slot: { type: 'integer', minimum: 1, description: 'Позиция револьверной головки (гнездо)' },
+    toolKind: { type: 'string', description: 'наружный резец, торцовый / подрезной, канавочный / отрезной, резьбовой наружный, расточной резец, сверло, центровочное сверло, резьбовой внутренний, развёртка, метчик' },
+    holderIso: { type: 'string', description: 'ISO державки — найдётся в каталоге; нет в каталоге — запишется как есть' },
+    insertIso: { type: 'string', description: 'ISO пластины — найдётся в каталоге; нет в каталоге — запишется как есть' },
+    overhang: { type: 'string', description: 'Вылет, мм' }, edgePos: { type: 'string', description: 'Положение режущей кромки 1–8 (Sinumerik)' },
+    lenX: { type: 'string', description: 'Корректор длины X' }, lenZ: { type: 'string', description: 'Корректор длины Z' }, radius: { type: 'string' }, width: { type: 'string' },
+    params: { type: 'string', description: 'Режимы: ap, f, vc, n…' }, note: { type: 'string' }, toolPos: { type: 'string', description: 'Обозначение позиции (по умолчанию T<slot>)' },
+  },
+};
+const opSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    opType: { type: 'string', description: 'Тип операции — код или название из route_catalog (токарная ЧПУ, фрезерная, отрезка…)' },
+    name: { type: 'string', description: 'Наименование операции (по умолчанию — имя типа)' }, equipment: { type: 'string', description: 'Оборудование (инв. № / модель)' },
+    norm: { type: 'number', minimum: 0, description: 'Норма времени, ч' }, tooling: { type: 'string', description: 'Оснастка' }, setupCardNo: { type: 'string', description: '№ карты наладки' },
+    control: { type: 'string', enum: ['нет', 'С', 'ОТК'] }, whatControl: { type: 'string' }, si: { type: 'string', description: 'Средства измерения' }, tolerance: { type: 'string' },
+    comment: { type: 'string', description: 'Комментарий оператору' },
+    paramPlan: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, norm: { type: 'string' }, tol: { type: 'string' } } }, description: 'Параметры по плану' },
+    planMaterials: { type: 'array', items: { type: 'object' }, description: 'Материалы по плану; заготовка первой операции — запись с role «Заготовка» (name, unit, norm…)' },
+    components: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, qty: { type: 'number' }, src: { type: 'string' } } } },
+  },
+};
+
+function authoringTools(deps) {
+  const must = (d, label, ref) => { if (!d || !d.item) throw new Error(`${label} «${ref}» не найден(а).`); return d.item; };
+  // ── карты наладки ──
+  async function catalogs(api) {
+    const [h, i] = await Promise.all([api('GET', '/api/tool-catalog/holders'), api('GET', '/api/tool-catalog/inserts')]);
+    return { holders: h.items || [], inserts: i.items || [] };
+  }
+  const isoEq = (a, b) => String(a || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === String(b || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // позиции из ответа портала → формат сохранения (pos → slot; id каталога приоритетнее ISO)
+  const linesFromCard = (lines) => (lines || []).map((l) => ({ slot: Number(l.pos), holderId: l.holderId ?? null, insertId: l.insertId ?? null, holderIso: l.holderId ? '' : (l.holderIso || ''), insertIso: l.insertId ? '' : (l.insertIso || ''), ...Object.fromEntries(SC_LINE_FIELDS.map((k) => [k, l[k] ?? ''])) })).filter((l) => Number.isFinite(l.slot));
+  // позиция из запроса ИИ → формат сохранения + проверки по каталогу
+  function lineFromArg(p, cat, warnings) {
+    const out = { slot: p.slot, holderId: null, insertId: null, holderIso: '', insertIso: '' };
+    for (const k of SC_LINE_FIELDS) if (p[k] != null) out[k] = String(p[k]);
+    let hIso = p.holderIso, iIso = p.insertIso;
+    if (hIso) { const h = cat.holders.find((x) => isoEq(x.iso, hIso)); if (h) { out.holderId = h.id; hIso = h.iso; } else { out.holderIso = String(hIso).slice(0, 60); warnings.push(`Поз. ${p.slot}: державки ${hIso} нет в каталоге — записана как есть.`); } }
+    if (iIso) { const i = cat.inserts.find((x) => isoEq(x.iso, iIso)); if (i) { out.insertId = i.id; iIso = i.iso; } else { out.insertIso = String(iIso).slice(0, 60); warnings.push(`Поз. ${p.slot}: пластины ${iIso} нет в каталоге — записана как есть.`); } }
+    if (hIso && iIso && isoCompatible(hIso, iIso) === false) warnings.push(`Поз. ${p.slot}: державка ${hIso} и пластина ${iIso} не совпадают по ISO (форма/задний угол/длина кромки) — проверьте.`);
+    return out;
+  }
+  async function machineById(api, ref) {
+    const d = await api('GET', '/api/equipment/item?id=' + encodeURIComponent(ref));
+    return must(d, 'Станок', ref);
+  }
+  async function saveCard(api, body, warnings) {
+    const j = await api('POST', '/api/setup-card/save', body);
+    return { ok: true, id: j.id, no: j.no, positions: j.lines, status: 'Черновик', warnings };
+  }
+
+  // ── МК ──
+  async function routeCatalog(api) { return api('GET', '/api/routes/catalog'); }
+  function opTypeId(cat, ref) {
+    if (ref == null || ref === '') return null;
+    const s = norm(ref); const t = (cat.opTypes || []);
+    const hit = t.find((x) => norm(x.code) === s) || t.find((x) => norm(x.name) === s) || t.find((x) => (x.names || []).some((n) => norm(n) === s)) || t.find((x) => norm(x.name).includes(s));
+    if (!hit) throw new Error(`Тип операции «${ref}» не найден — посмотрите route_catalog.`);
+    return hit;
+  }
+  function opFromArg(o, cat) {
+    const out = {};
+    if (o.opType != null) { const t = opTypeId(cat, o.opType); out.opTypeId = t.id; if (!o.name) out.name = t.name; }
+    for (const k of ['name', 'equipment', 'norm', 'tooling', 'setupCardNo', 'control', 'whatControl', 'si', 'tolerance', 'comment', 'paramPlan', 'planMaterials', 'components']) if (o[k] !== undefined) out[k] = o[k];
+    return out;
+  }
+  const opToSave = (o) => Object.fromEntries(OP_SAVE_FIELDS.map((k) => [k, o[k] ?? (['planMaterials', 'paramPlan', 'components'].includes(k) ? [] : '')]));
+  const stripCoopReturns = (materials) => { try { const j = JSON.parse(materials); if (j && j.coop) { delete j.returned; return JSON.stringify(j); } } catch {} return materials; };
+  async function routeEditFor(api, ref) {
+    const list = await api('GET', '/api/routes');
+    const s = String(ref == null ? '' : ref).trim();
+    const r = (list.routes || []).find((x) => String(x.mk).toLowerCase() === s.toLowerCase() || String(x.id) === s);
+    if (!r) throw new Error(`МК «${s}» не найдена.`);
+    const d = await api('GET', '/api/route/edit?id=' + encodeURIComponent(r.id));
+    if (!d || !d.route) throw new Error(`МК «${s}» не открылась для правки.`);
+    return d;
+  }
+  const headerFrom = (rt) => ({ type: rt.type, name: rt.name, designation: rt.designation, productType: rt.productType, revision: rt.revision, material: rt.material, bom: rt.bom || [], projectDecNo: rt.projectDecNo, kdDrawings: rt.kdDrawings || [], variant: rt.variant, isMain: rt.isMain });
+  const routeOut = (j, warnings) => ({ ok: true, id: j.id, mk: j.mk, operations: j.operations, status: 'Черновик', blankReserve: j.blankReserve || null, warnings: warnings || [] });
+
+  return [
+    tool('route_catalog', 'Справочники МК',
+      'Справочники для составления МК: типы операций (код, название, участок, параметры, оборудование), типы продукции, типы МК, точки контроля, исполнители кооперации и сохранённые шаблоны операций.',
+      {}, [], RO,
+      async (api) => {
+        const [c, t] = await Promise.all([routeCatalog(api), api('GET', '/api/route/op-templates').catch(() => ({ items: [] }))]);
+        return { opTypes: (c.opTypes || []).map((x) => ({ code: x.code, name: x.name, section: x.section, ri: x.ri || null, params: (x.params || []).map((p) => p.name + (p.unit ? ', ' + p.unit : '')), equipment: x.equipment || [] })), productTypes: c.productTypes, mkTypes: c.mkTypes, controlPoints: c.controlPoints, contractors: (c.contractors || []).map((x) => x.name), opTemplates: (t.items || []).map((x) => ({ name: x.name, op: x.op })) };
+      }),
+
+    tool('setup_card_save', 'Составить или изменить карту наладки (черновик)',
+      'Без card — новая КН (черновик): нужен станок (machine), номер портал присвоит сам (КН-<станок>-NNN). С card — правка ЧЕРНОВИКА: меняются только переданные поля; positions по умолчанию ДОПОЛНЯЮТ/заменяют указанные гнёзда (positionsMode=merge), removeSlots — убрать гнёзда, positionsMode=replace — задать весь набор. Державки/пластины ищутся в каталоге по ISO; несовместимость по ISO вернётся предупреждением. Утверждённую КН не правит — используйте setup_card_copy.',
+      {
+        card: { type: 'string', description: '№ КН или id — для правки черновика' },
+        machine: { type: 'string', description: 'Инв. № или id станка (обязателен для новой КН)' },
+        name: { type: 'string' }, part: { type: 'string', description: 'Деталь (обозначение/наименование)' }, purpose: { type: 'string' },
+        operationKind: { type: 'string', enum: ['Токарная', 'Фрезерная', 'Наплавка', 'Плазменная резка'] },
+        positions: { type: 'array', items: scPositionSchema }, positionsMode: { type: 'string', enum: ['merge', 'replace'], default: 'merge' },
+        removeSlots: { type: 'array', items: { type: 'integer' } },
+        jaw: { type: 'object', description: 'Патрон и кулачки: chuckType, jawTypeCard, jawSetNo, jawClampDia, jawLen, jawForce, workpieceOverhang, jawSupport, jawRunout, jawNote, chuckSetId' },
+        zero: { type: 'object', description: 'Нулевая точка: zeroOffset, zeroZMethod, zeroZ, zeroXMethod, zeroX, zeroBase, zeroNote' },
+        tail: { type: 'object', description: 'Задняя бабка: tailKind, tailTaper, tailTool, tailQuill, tailForce, tailNote' },
+      }, [], RW,
+      async (api, a, ctx) => {
+        const cat = await catalogs(api); const warnings = [];
+        if (!a.card) {
+          if (!a.machine) throw new Error('Для новой карты наладки укажите станок (machine).');
+          const m = await machineById(api, a.machine);
+          const lines = (a.positions || []).map((p) => lineFromArg(p, cat, warnings));
+          const slots = Number(m.revolverSlots) || 0; for (const l of lines) if (slots && l.slot > slots) warnings.push(`Поз. ${l.slot}: у станка ${slots} позиций головки.`);
+          return saveCard(api, { machineId: m.id, name: a.name || '', part: a.part || '', purpose: a.purpose || '', author: ctx.user.fio, operationKind: a.operationKind, lines, jaw: a.jaw, zero: a.zero, tail: a.tail }, warnings);
+        }
+        const d = await api('GET', '/api/setup-card?id=' + encodeURIComponent(a.card)); const it = must(d, 'Карта наладки', a.card);
+        if (it.status && it.status !== 'Черновик') throw new Error(`КН ${it.no} в статусе «${it.status}» — ИИ правит только черновики. Сделайте копию (setup_card_copy) и правьте её.`);
+        let lines = linesFromCard(d.lines);
+        const incoming = (a.positions || []).map((p) => lineFromArg(p, cat, warnings));
+        if (a.positionsMode === 'replace') lines = incoming;
+        else {
+          // merge: переданные поля гнезда поверх текущих; державку/пластину меняем, только если её ISO передан
+          const bySlot = new Map(lines.map((l) => [l.slot, l]));
+          (a.positions || []).forEach((p, i) => {
+            const inc = incoming[i];
+            const cur = { ...(bySlot.get(p.slot) || { slot: p.slot, holderId: null, insertId: null, holderIso: '', insertIso: '' }) };
+            for (const k of SC_LINE_FIELDS) if (p[k] != null) cur[k] = inc[k];
+            if (p.holderIso != null) { cur.holderId = inc.holderId; cur.holderIso = inc.holderIso; }
+            if (p.insertIso != null) { cur.insertId = inc.insertId; cur.insertIso = inc.insertIso; }
+            bySlot.set(p.slot, cur);
+          });
+          lines = [...bySlot.values()];
+        }
+        if (a.removeSlots) lines = lines.filter((l) => !a.removeSlots.includes(l.slot));
+        lines.sort((x, y) => x.slot - y.slot);
+        const machineId = a.machine ? (await machineById(api, a.machine)).id : it.machineId;
+        return saveCard(api, { id: it.id, status: 'Черновик', machineId, name: a.name ?? it.name, part: a.part ?? it.part ?? '', purpose: a.purpose ?? it.purpose ?? '', operationKind: a.operationKind || it.operationKind, headType: a.machine ? undefined : it.headType, revolverSlots: a.machine ? undefined : it.revolverSlots, lines, jaw: a.jaw ? { ...(it.jaw || {}), ...a.jaw } : it.jaw, zero: a.zero ? { ...(it.zero || {}), ...a.zero } : it.zero, tail: a.tail ? { ...(it.tail || {}), ...a.tail } : it.tail }, warnings);
+      }),
+
+    tool('setup_card_copy', 'Копировать карту наладки',
+      'Создаёт НОВУЮ карту наладки (черновик) на основе существующей: все позиции, патрон/кулачки, ноль, задняя бабка. Можно сразу сменить станок, деталь или наименование. Исходная КН не меняется, файлы не копируются.',
+      { card: { type: 'string', description: '№ КН или id исходной' }, machine: { type: 'string', description: 'Другой станок (инв. №/id)' }, part: { type: 'string' }, name: { type: 'string' } }, ['card'], RW,
+      async (api, a, ctx) => {
+        const d = await api('GET', '/api/setup-card?id=' + encodeURIComponent(a.card)); const it = must(d, 'Карта наладки', a.card);
+        const m = a.machine ? await machineById(api, a.machine) : null;
+        const jaw = { ...(it.jaw || {}) }; if (m) delete jaw.chuckSetId; // комплект кулачков привязан к патрону станка
+        const r = await saveCard(api, { machineId: m ? m.id : it.machineId, name: a.name || '', part: a.part ?? it.part ?? '', purpose: it.purpose || '', author: ctx.user.fio, operationKind: it.operationKind, headType: m ? undefined : it.headType, revolverSlots: m ? undefined : it.revolverSlots, lines: linesFromCard(d.lines), jaw, zero: it.zero, tail: it.tail }, m ? ['Станок сменён: проверьте вылеты, корректоры и кулачки под новый станок.'] : []);
+        return { ...r, copiedFrom: it.no };
+      }),
+
+    tool('route_save', 'Составить или изменить маршрутную карту (черновик)',
+      'Без mk — новая МК (черновик): нужны type (КОМ — компонент/деталь, СБР — сборка) и name; номер МК-<тип>-<год>-NNN портал присвоит сам. С mk — правка ЧЕРНОВИКА: шапка — только переданные поля; операции: operations — задать весь список заново, либо точечно opsPatch (по № операции), opsInsert (после № операции; 0 — в начало), opsDelete (№) — все номера в ИСХОДНОЙ нумерации, портал перенумерует по порядку. Типы операций — из route_catalog. Заготовку указывайте в planMaterials первой операции (role «Заготовка»). Утверждённую МК не правит — route_copy или вернуть в черновик через согласующего.',
+      {
+        mk: { type: 'string', description: '№ МК или id — для правки черновика' },
+        type: { type: 'string', enum: ['КОМ', 'СБР'] }, name: { type: 'string', description: 'Наименование изделия/компонента' }, designation: { type: 'string', description: 'Обозначение (децимальный №/чертёж)' },
+        productType: { type: 'string' }, revision: { type: 'string' }, material: { type: 'string' },
+        operations: { type: 'array', items: opSchema, description: 'Полный список операций по порядку' },
+        opsPatch: { type: 'array', items: { type: 'object', required: ['n'], properties: { n: { type: 'integer', minimum: 1 }, ...opSchema.properties } } },
+        opsInsert: { type: 'array', items: { type: 'object', required: ['after', 'op'], properties: { after: { type: 'integer', minimum: 0 }, op: opSchema } } },
+        opsDelete: { type: 'array', items: { type: 'integer', minimum: 1 } },
+      }, [], RW,
+      async (api, a) => {
+        const cat = await routeCatalog(api);
+        if (!a.mk) {
+          if (!a.type || !a.name) throw new Error('Для новой МК нужны type (КОМ/СБР) и name.');
+          const ops = (a.operations || []).map((o) => opToSave(opFromArg(o, cat)));
+          const j = await api('POST', '/api/routes/save', { id: null, type: a.type, name: a.name, designation: a.designation || '', productType: a.productType || '', revision: a.revision || '', material: a.material || '', operations: ops });
+          return routeOut(j);
+        }
+        const d = await routeEditFor(api, a.mk); const rt = d.route;
+        if (rt.statusMk !== 'Черновик') throw new Error(`${rt.mk} в статусе «${rt.statusMk}» — ИИ правит только черновики. Сделайте копию (route_copy) или верните МК в черновик через согласующего.`);
+        // opsPatch / opsInsert / opsDelete — все номера в ИСХОДНОЙ нумерации МК
+        let rows = (a.operations ? a.operations.map((o) => opToSave(opFromArg(o, cat))) : (d.operations || []).map((o) => opToSave(o))).map((o, i) => ({ o, n: i + 1 }));
+        const total = rows.length, chk = (n) => { if (!(n >= 1 && n <= total)) throw new Error(`Операции №${n} нет (всего ${total}).`); };
+        for (const p of a.opsPatch || []) { chk(p.n); const { n, ...rest } = p; const r = rows.find((x) => x.n === n); r.o = { ...r.o, ...opFromArg(rest, cat) }; }
+        for (const ins of a.opsInsert || []) { if (ins.after !== 0) chk(ins.after); }
+        const out = []; const at = (n) => (a.opsInsert || []).filter((x) => x.after === n).map((x) => ({ o: opToSave(opFromArg(x.op, cat)), n: null }));
+        out.push(...at(0)); for (const r of rows) { if (!(a.opsDelete || []).includes(r.n)) out.push(r); out.push(...at(r.n)); }
+        for (const n of a.opsDelete || []) chk(n);
+        let ops = out.map((x) => x.o);
+        const header = { ...headerFrom(rt) }; for (const k of ['type', 'name', 'designation', 'productType', 'revision', 'material']) if (a[k] != null) header[k] = a[k];
+        const j = await api('POST', '/api/routes/save', { id: rt.id, ...header, operations: ops });
+        return routeOut(j, (a.opsDelete || a.opsInsert) ? ['Номера операций пересчитаны по порядку.'] : []);
+      }),
+
+    tool('route_copy', 'Копировать маршрутную карту',
+      'Создаёт НОВУЮ МК-черновик из существующей. asVariant=true — другой способ изготовления того же изделия (вариант с тем же обозначением, variantName обязателен); иначе — отдельная МК, можно задать новое name/designation (например, похожая деталь). Операции, параметры, нормы, материалы и заготовка копируются; файлы УП и отметки о возврате кооперации — нет. keepSetupCards=false — очистить № карт наладки. Исходная МК не меняется, к позициям ПЗ копия не привязывается.',
+      { mk: { type: 'string', description: '№ МК или id исходной' }, asVariant: { type: 'boolean', default: false }, variantName: { type: 'string' }, name: { type: 'string' }, designation: { type: 'string' }, keepSetupCards: { type: 'boolean', default: true } }, ['mk'], RW,
+      async (api, a) => {
+        const d = await routeEditFor(api, a.mk); const rt = d.route;
+        if (a.asVariant && !a.variantName) throw new Error('Для варианта укажите variantName (например, «Из трубы»).');
+        const ops = (d.operations || []).map((o) => ({ ...opToSave(o), materials: stripCoopReturns(o.materials || ''), setupCardNo: a.keepSetupCards === false ? '' : (o.setupCardNo || '') }));
+        const header = headerFrom(rt);
+        if (a.asVariant) Object.assign(header, { variant: a.variantName, isMain: false, variantOf: rt.id });
+        else Object.assign(header, { variant: '', isMain: false, name: a.name || rt.name, designation: a.designation ?? rt.designation });
+        const j = await api('POST', '/api/routes/save', { id: null, ...header, operations: ops });
+        return { ...routeOut(j), copiedFrom: rt.mk, asVariant: !!a.asVariant };
+      }),
+  ];
+}
+
 // ── протокол ────────────────────────────────────────────────────────────────
 // deps: { port, authenticate(req) → { sid, user:{id,fio}, tokenId } | null, stages:{znz,zp}, portalBase() }
 export function createMcpHandler(deps) {
-  const tools = [...procurementTools(deps), ...salesTools(deps), ...techTools(deps)];
+  const tools = [...procurementTools(deps), ...salesTools(deps), ...techTools(deps), ...authoringTools(deps)];
   const byName = new Map(tools.map((t) => [t.def.name, t]));
 
   const apiFor = (sid) => async (method, path, body) => {

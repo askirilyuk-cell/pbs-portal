@@ -1610,7 +1610,7 @@
 
     // ── Переиспользуемый searchable-комбобокс (эталон redesign-modal-newrequest) ──
     // mount — пустой контейнер; opts:{items:[{id,label,sub,search}], placeholder, value,
-    //   onPick(item), onCreate(text), createLabel}. Поиск по label+sub (или search),
+    //   onPick(item), onCreate(text), createLabel, onClear()}. Поиск по label+sub (или search),
     //   подсветка совпадения, выпадашка-оверлей. Возвращает {value(), selected(), setItems(), setValue()}.
     function comboBox(mount, opts){
       const items=(opts.items||[]).slice(); let sel=null, open=false;
@@ -1645,7 +1645,7 @@
       inp.onfocus=()=>{open=true;render();};
       inp.oninput=()=>{open=true;sel=null;render();};
       inp.onblur=()=>{setTimeout(()=>{open=false;render();},160);};
-      clr.onmousedown=(e)=>{e.preventDefault();inp.value='';sel=null;open=true;inp.focus();render();};
+      clr.onmousedown=(e)=>{e.preventDefault();inp.value='';sel=null;open=true;inp.focus();render();if(opts.onClear)opts.onClear();}; // K-345: onClear — сохранить «не выбран»
       render();
       return { value:()=>inp.value.trim(), selected:()=>sel, focus:()=>inp.focus(),
         setValue:(v)=>{inp.value=v==null?'':v;sel=null;render();},
@@ -7789,12 +7789,18 @@
         toolbar:[{label:'+ Поставщик',cls:'primary',disabled:!(PROC.mode==='live'&&znzCanAct()),title:PROC.mode==='live'?'Завести поставщика в реестр одобренных поставщиков':'Только в LIVE-режиме',onClick:()=>supplierNewDialog(viewHost)}]});
     }
     // K-295: заведение поставщика из реестра РОП (просьба Рисалиевой 25.09). Контрагент с ролью «Поставщик» + поля РОП; дедуп по ИНН на сервере.
-    function supplierNewDialog(viewHost){
+    // K-345: пункты comboBox для выбора поставщика (реестр РОП) — одинаково во всех формах
+    function supplierComboItems(){
+      return (PROC&&PROC.suppliers||[]).map(sp=>({id:sp.id,label:sp.name,
+        sub:[sp.inn?'ИНН '+sp.inn:'',sp.productCat||'',sp.category?'кат. '+sp.category:'',sp.status||''].filter(Boolean).join(' · '),
+        search:`${sp.name} ${sp.inn||''} ${sp.productCat||''}`}));
+    }
+    function supplierNewDialog(viewHost,o={}){ // K-345: o.name — предзаполнить, o.onDone(j,name) — вместо перехода в реестр
       const w=document.createElement('div'); w.className='ui-dlg';
       const ROP_ST=['На контроле','Активен','Исключён'];
       w.innerHTML=`<div class="ui-dlg-box wide"><div class="ui-dlg-h">Новый поставщик</div><div class="ui-dlg-t">Заводится как контрагент с ролью «Поставщик» и попадает в реестр одобренных поставщиков (РОП). Если ИНН уже есть в базе — к существующему контрагенту добавится роль.</div>
         <div class="dlg-form">
-          <div class="field full"><label>Наименование *</label><input id="sn-name" maxlength="200" placeholder="ООО «…»"></div>
+          <div class="field full"><label>Наименование *</label><input id="sn-name" maxlength="200" placeholder="ООО «…»" value="${escA(o.name||'')}"></div>
           <div class="field"><label>ИНН</label><input id="sn-inn" maxlength="12" placeholder="10 или 12 цифр"></div>
           <div class="field"><label>КПП</label><input id="sn-kpp" maxlength="9"></div>
           <div class="field"><label>Краткое наименование</label><input id="sn-short"></div>
@@ -7811,6 +7817,7 @@
         const ok=$$('[data-d="ok"]'); ok.disabled=true; ok.textContent='Сохранение…';
         try{ const j=await postJson('/api/procurement/supplier/create',{name,inn,kpp:g('sn-kpp'),shortName:g('sn-short'),region:g('sn-region'),productCat:g('sn-cat'),ropStatus:g('sn-st'),contact:g('sn-contact'),contacts:g('sn-contacts'),note:g('sn-note')});
           w.remove(); toast(j.existed?`Контрагент с ИНН ${inn} уже был — добавлена роль «Поставщик».`:`Поставщик «${name}» заведён.`,'ok'); PROC=null; CPS=null;
+          if(o.onDone){ o.onDone(j,name); return; }
           try{ PROC=await (await fetch('/api/procurement')).json(); }catch(e){} renderProcurement(document.getElementById('view')); if(j.id!=null)openSupplierCard(viewHost||document.getElementById('view'),j.id); }
         catch(e){ toast('Не удалось: '+(e.message||e),'err'); ok.disabled=false; ok.textContent='Завести'; } };
     }
@@ -8433,7 +8440,7 @@
             const upd=(PROC.requests||[]).find(x=>String(x.id)===String(r.id))||{...r,sourceRef:val,history:out.history||r.history};
             if(!out.unchanged){
               const oc=out.orderChatNotified||{};
-              toast('Источник сохранён'+(oc.ok?' · автопост в чат заказа '+(oc.numPz||'')+' отправлен':''),'ok');
+              toast('Источник сохранён'+(oc.ok?' · автопост в чат '+[...(oc.orders||[]),...(oc.requests||[])].join(', ')+' отправлен':''),'ok'); // K-344: и чаты запросов (ЗП)
             }
             openZnzCard(upd);
           }catch(e){ sb.disabled=false; toast('Не удалось сохранить источник: '+(e.message||e),'err'); }
@@ -9150,11 +9157,7 @@
         :(st?`<span class="st c-${dot}" style="white-space:nowrap"${znzHint(st)?` title="${escA(znzHint(st))}"`:''}><i class="i-${dot}"></i>${esc(st)}</span>`:'');
       const line2=x.legacy?'':`<div style="display:flex;align-items:center;gap:10px;margin-top:6px;font-size:12px;flex-wrap:wrap">
           <span class="c-gray">Поставщик:</span>
-          ${canAct?`<select data-item-sup="${x.id}" style="font:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s);background:#fff;min-width:170px">
-              <option value=""${x.supplier?'':' selected'}>— не выбран —</option>
-              ${(PROC.suppliers||[]).map(sp=>`<option value="${escA(sp.name)}"${sp.name===x.supplier?' selected':''}>${esc(sp.name)}</option>`).join('')}
-              ${x.supplier&&!(PROC.suppliers||[]).some(sp=>sp.name===x.supplier)?`<option value="${escA(x.supplier)}" selected>${esc(x.supplier)}</option>`:''}
-            </select>`:`<span>${x.supplier?esc(x.supplier):'<span class="c-gray">не выбран</span>'}</span>`}
+          ${canAct?`<div data-item-supcb="${x.id}" data-sup="${escA(x.supplier||'')}" style="flex:1 1 280px;min-width:240px;max-width:460px"></div>`:`<span>${x.supplier?esc(x.supplier):'<span class="c-gray">не выбран</span>'}</span>`}
           <span class="c-gray" style="margin-left:6px">Срок:</span>
           ${canAct?`<input type="date" data-item-due="${x.id}" value="${esc(String(x.due||'').slice(0,10))}" style="font:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--sl-300);border-radius:var(--r-s)">`
                  :`<span class="${late?'c-red':''}">${x.due?esc(fmt(x.due)):'—'}</span>`}
@@ -9213,11 +9216,16 @@
             try{ await postJsonWithReason('/api/procurement/znz/items','PATCH',{id,...patch});
               PROC=await (await fetch('/api/procurement')).json();
               const upd=(PROC.requests||[]).find(x=>String(x.id)===String(r.id))||r;
-              openZnzCard(upd);
-            }catch(e){ if(el){el.disabled=false; if(prev!=null)el.value=prev;} toast('Не сохранилось: '+(e.message||e),'err'); }
+              openZnzCard(upd); return true;
+            }catch(e){ if(el){el.disabled=false; if(prev!=null)el.value=prev;} toast('Не сохранилось: '+(e.message||e),'err'); return false; }
           };
           listEl.querySelectorAll('[data-item-st]').forEach(el=>el.onchange=()=>saveItem(Number(el.dataset.itemSt),{status:el.value},el));
-          listEl.querySelectorAll('[data-item-sup]').forEach(el=>el.onchange=()=>saveItem(Number(el.dataset.itemSup),{supplier:el.value},el));
+          // K-345: поставщик позиции — эталонный comboBox (поиск по названию и ИНН, «Завести поставщика»), как «Заказчик» в новом запросе
+          listEl.querySelectorAll('[data-item-supcb]').forEach(el=>{ const id=Number(el.dataset.itemSupcb), cur=el.dataset.sup||'';
+            const put=(name)=>{ if(name===cur)return; saveItem(id,{supplier:name},null).then(ok=>{ if(!ok)cb.setValue(cur); }); };
+            const cb=comboBox(el,{items:supplierComboItems(),value:cur,placeholder:'Поставщик — название или ИНН…',ariaLabel:'Поставщик позиции',
+              onPick:(it)=>put(it.label), onClear:()=>put(''),
+              createLabel:'Завести поставщика', onCreate:(text)=>supplierNewDialog(null,{name:text,onDone:(j,name)=>put(name)})}); });
           listEl.querySelectorAll('[data-item-due]').forEach(el=>el.onchange=()=>saveItem(Number(el.dataset.itemDue),{due:el.value},el));
         }
       }
@@ -15157,7 +15165,7 @@
           const j=await postJson('/api/procurement/znz/create',body);
           PROC=null; // реестр закупок перечитается при заходе в раздел
           const nt=j.notified||{}, oc=j.orderChatNotified||{};
-          toast('Создана заявка '+j.numZnz+(nt.ok?' · уведомление в чат закупок':'')+(oc.ok?' · автопост в чат заказа':''),'ok');
+          toast('Создана заявка '+j.numZnz+(nt.ok?' · уведомление в чат закупок':'')+(oc.ok?' · автопост в чат '+[...(oc.orders||[]),...(oc.requests||[])].join(', '):''),'ok'); // K-344
           const link='#purchase/'+encodeURIComponent(j.numZnz);
           panel.innerHTML=`<div class="card pad" style="border:1px solid var(--green);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <span class="st--done">✓ Создана</span>

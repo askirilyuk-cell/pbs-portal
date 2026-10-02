@@ -5143,23 +5143,43 @@ async function notifyZnzCreated(z) {
   return { ok: true, chat };
 }
 
+// K-344: чаты ЗАПРОСОВ (ЗП) из источника ЗнЗ — ссылка в «Чат Bitrix» записи «Запросы»
+//  (вид …/online/?IM_DIALOG=chatNNN, ставится кнопкой «Создать чат» в карточке ЗП).
+//  Чаты, уже попавшие в рассылку как чаты заказов, не дублируем.
+async function zpChatsFor(sourceRef, skipChats = []) {
+  const nums = [...new Set(sourceRefList(sourceRef).map((x) => (/ЗП-\d{4}-\d{3}/.exec(x) || [])[0]).filter(Boolean))];
+  if (!nums.length) return [];
+  const rows = await ncListSoft('sales_requests');
+  const seen = new Set(skipChats.map(String)); const out = [];
+  for (const zp of nums) {
+    const row = rows.find((r) => String(r['№ запроса'] || '').trim() === zp);
+    const m = /IM_DIALOG=chat(\d+)/i.exec(String((row && row['Чат Bitrix']) || ''));
+    if (m && !seen.has(m[1])) { seen.add(m[1]); out.push({ numZp: zp, chat: m[1] }); }
+  }
+  return out;
+}
+
 // K-102: автопост о ЗнЗ в чат ЗАКАЗА (ПЗ с привязанным чатом — оверлей order-chats.json).
 // Вызывается при создании ЗнЗ с sourceRef=ПЗ и при поздней привязке источника к заявке.
 // Тот же webhook-механизм (bitrixCall/im.message.add), что и notifyZnzCreated, но
 // DIALOG_ID — чат конкретного заказа. Безопасно заглушено: нет вебхука/чата → skipped.
+// K-344: источник-ЗП (запрос) — то же сообщение уходит в чат запроса.
 async function notifyOrderChatZnz({ sourceRef, numZnz, name, qty, unit, duePlan }) {
   const c = cfg();
   if (!c.BITRIX) return { ok: false, skipped: true, reason: 'webhook not configured' };
   const chats = orderChatsFor(sourceRef);
-  if (!chats.length) return { ok: false, skipped: true, reason: 'order chat not configured' };
+  let zpChats = [];
+  try { zpChats = await zpChatsFor(sourceRef, chats.map((x) => x.chat)); }
+  catch (e) { console.warn('ЗнЗ: чат запроса не определён:', e.message); }
+  if (!chats.length && !zpChats.length) return { ok: false, skipped: true, reason: 'order chat not configured' };
   const portal = String(c.PORTAL_BASE || '').replace(/\/+$/, '');
   const qtyStr = [qty, unit].filter((x) => x != null && x !== '').join(' ');
   // K-150: текст собирается ДЛЯ КАЖДОГО чата — в нём стоит номер ИМЕННО того заказа,
   //  в чат которого он уходит. В K-134 текст остался общим и ссылался на переменную oc
   //  из удалённого кода — «oc is not defined», и уведомление не уходило вообще никуда.
-  const msgFor = (numPz) => {
+  const msgFor = (numPz, what = 'заказу') => {
     const L = [
-      `[B]📦 По заказу ${numPz} размещена заявка ${numZnz}[/B]`,
+      `[B]📦 По ${what} ${numPz} размещена заявка ${numZnz}[/B]`,
       `${name || '—'}${qtyStr ? ` · ${qtyStr}` : ''}`,
     ];
     if (chats.length > 1) L.push(`Заявка обеспечивает заказы: ${chats.map((x) => x.numPz).join(', ')}`);
@@ -5176,7 +5196,12 @@ async function notifyOrderChatZnz({ sourceRef, numZnz, name, qty, unit, duePlan 
     try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${oc.chat}`, MESSAGE: msgFor(oc.numPz) }); sent.push(oc.numPz); }
     catch (e) { console.warn(`ЗнЗ: уведомление в чат заказа ${oc.numPz} не ушло:`, e.message); }
   }
-  return { ok: sent.length > 0, chats: chats.map((x) => x.chat), orders: sent };
+  const sentZp = [];
+  for (const zc of zpChats) {
+    try { await bitrixCall('im.message.add', { DIALOG_ID: `chat${zc.chat}`, MESSAGE: msgFor(zc.numZp, 'запросу') }); sentZp.push(zc.numZp); }
+    catch (e) { console.warn(`ЗнЗ: уведомление в чат запроса ${zc.numZp} не ушло:`, e.message); }
+  }
+  return { ok: sent.length + sentZp.length > 0, chats: [...chats, ...zpChats].map((x) => x.chat), orders: sent, requests: sentZp };
 }
 
 // --- файлы запроса (папки записей продаж на NAS) ----------------------------

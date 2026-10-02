@@ -4200,23 +4200,48 @@ function ocrCleanSupplierFrom(fragment) {
   return name ? `${m[1]} ${name}` : null;
 }
 // best-effort парсинг реквизитов счёта из распознанного текста (регэкспы по ТЗ K-83)
+// K-348: разбор реквизитов счёта — номер из заголовка, поставщик по строке со своим ИНН
+const OCR_OWN_INN = new Set(['3918015359']); // ПБС (ООО «Петробалт Сервис») — покупатель, не поставщик
+const OCR_BUYER_LINE_RE = /покупател|плательщик|грузополучател|заказчик/i;
+const OCR_BANK_LINE_RE = /банк|\bБИК\b|ф-л\b|филиал|отделение|сбербанк|кор\.?\s*сч/i;
+const OCR_LONG_FORMS = [
+  [/закрытое\s+акционерное\s+общество/i, 'ЗАО'], [/открытое\s+акционерное\s+общество/i, 'ОАО'],
+  [/публичное\s+акционерное\s+общество/i, 'ПАО'], [/непубличное\s+акционерное\s+общество/i, 'АО'],
+  [/акционерное\s+общество/i, 'АО'], [/общество\s+с\s+ограниченной\s+ответственностью/i, 'ООО'],
+  [/индивидуальный\s+предприниматель/i, 'ИП'],
+];
+function ocrShortForms(s) { let t = String(s || ''); for (const [re, abbr] of OCR_LONG_FORMS) t = t.replace(re, abbr); return t; }
 function parseInvoiceOcrText(text) {
   const t = String(text || '');
+  const lines = t.split(/\r?\n/).map((l) => l.trim());
   const out = { number: null, date: null, supplier: null, inn: null, amount: null, vatRate: 22, vatAmount: null };
-  let m = /сч[её]т(?:\s+на\s+оплату)?\s*№?\s*([A-Za-zА-Яа-я0-9\-/]+)/i.exec(t);
-  if (m) out.number = m[1];
-  m = /от\s+(\d{1,2}[.\s]\d{1,2}[.\s]\d{2,4}|\d{1,2}\s+[а-яё]+\s+\d{4})/i.exec(t);
-  if (m) out.date = ocrParseRuDate(m[1]);
-  m = /ИНН\s*:?\s*(\d{10,12})/i.exec(t);
-  if (m) out.inn = m[1];
-  // K-83 доп.: приоритет — строка после «Поставщик:»/«Исполнитель:», иначе строка с «ИНН»,
-  // иначе весь текст; из найденного фрагмента вырезаем ТОЛЬКО орг.форму + название.
-  let supplierFrag = null;
-  m = /(?:Поставщик|Исполнитель)\s*:?\s*([^\n\r]{3,150})/i.exec(t);
-  if (m) supplierFrag = m[1];
-  if (!supplierFrag) { m = /^.*ИНН.*$/im.exec(t); if (m) supplierFrag = m[0]; }
-  out.supplier = (supplierFrag && ocrCleanSupplierFrom(supplierFrag)) || ocrCleanSupplierFrom(t);
-  const amtRe = /(?:всего\s+к\s+оплате|итого)\D{0,20}([\d\s]+[.,]\d{2})/gi;
+  // № и дата — из заголовка «Счёт (на оплату) № X от <дата>»; «Сч. №» банка и «счета» в условиях не подходят
+  let m = /сч[её]т(?:[ \t]+на[ \t]+оплату)?[ \t]*№[ \t]*([A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9\-\/]*)[ \t]+от[ \t]+(\d{1,2}[.\s]\d{1,2}[.\s]\d{2,4}|\d{1,2}\s+[а-яё]+\s+\d{4})/i.exec(t);
+  if (m) { out.number = m[1]; out.date = ocrParseRuDate(m[2]); }
+  else {
+    m = /сч[её]т(?:[ \t]+на[ \t]+оплату)?[ \t]*№[ \t]*([A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9\-\/]*)/i.exec(t); if (m) out.number = m[1];
+    m = /от\s+(\d{1,2}[.\s]\d{1,2}[.\s]\d{2,4}|\d{1,2}\s+[а-яё]+\s+\d{4})/i.exec(t); if (m) out.date = ocrParseRuDate(m[1]);
+  }
+  // ИНН поставщика — первый ИНН не со строки покупателя и не свой
+  for (const l of lines) {
+    if (OCR_BUYER_LINE_RE.test(l)) continue;
+    const mm = /ИНН(?:\s*\/\s*КПП)?\s*:?\s*(\d{10,12})/i.exec(l);
+    if (mm && !OCR_OWN_INN.has(mm[1])) { out.inn = mm[1]; break; }
+  }
+  // поставщик: 1) строка «<название>, ИНН <ИНН поставщика>»; 2) строка над «Получатель»; 3) строка с орг.формой рядом с ИНН;
+  // 4) первая орг.форма в тексте вне банковских строк и строк покупателя
+  const clean = (frag) => ocrCleanSupplierFrom(ocrShortForms(String(frag || '').replace(/^\s*(?:Поставщик|Исполнитель|Продавец|Получатель)[^:,]*?:?\s*/i, '')));
+  let sup = null;
+  if (out.inn) {
+    const re = new RegExp('^(.{3,}?),?\\s*ИНН\\s*:?\\s*' + out.inn);
+    for (const l of lines) { const mm = re.exec(l); if (mm && !OCR_BANK_LINE_RE.test(mm[1])) { sup = clean(mm[1]); if (sup) break; } }
+  }
+  if (!sup) { const i = lines.findIndex((l) => /^получатель$/i.test(l)); if (i > 0 && !OCR_BANK_LINE_RE.test(lines[i - 1])) sup = clean(lines[i - 1]); }
+  if (!sup && out.inn) { const i = lines.findIndex((l) => l.includes(out.inn)); for (const j of [i - 1, i + 1, i - 2, i + 2]) { const l = lines[j]; if (l && !OCR_BANK_LINE_RE.test(l) && !OCR_BUYER_LINE_RE.test(l)) { sup = clean(l); if (sup) break; } } }
+  if (!sup) { for (const l of lines) { if (OCR_BANK_LINE_RE.test(l) || OCR_BUYER_LINE_RE.test(l)) continue; sup = clean(l); if (sup) break; } }
+  out.supplier = sup;
+  // сумма: максимум из «Итого/Всего к оплате» либо «… на сумму X» (строка 1С «Всего наименований N, на сумму X»)
+  const amtRe = /(?:всего\s+к\s+оплате|итого(?:\s+к\s+оплате|\s+с\s+НДС)?|на\s+сумму)[^\d\n]{0,20}(\d[\d\s]*[.,]\d{2})/gi;
   let am, maxAmt = null;
   while ((am = amtRe.exec(t))) { const v = ocrParseRuNumber(am[1]); if (v != null && (maxAmt == null || v > maxAmt)) maxAmt = v; }
   if (maxAmt != null) out.amount = maxAmt;

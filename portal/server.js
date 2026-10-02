@@ -12752,7 +12752,7 @@ async function mcpAuthenticate(req) {
   if (now - aiLastUsedSaveAt > 60000) { aiLastUsedSaveAt = now; rec.lastUsedAt = new Date(now).toISOString(); try { aiTokensSave(list); } catch {} }
   return { sid, tokenId: rec.id, user: { id: rec.userId, fio: String(sessions[sid].fio || '').replace(/ \(ИИ\)$/, '') } };
 }
-const mcpHandler = createMcpHandler({ port: PORT, authenticate: mcpAuthenticate });
+const mcpHandler = createMcpHandler({ port: PORT, authenticate: mcpAuthenticate, stages: { znz: ZNZ_STAGES, zp: SALES_STAGES }, portalBase: () => String(cfg().PORTAL_BASE || '').replace(/\/+$/, '') });
 // ══ K-206: посты участков (киоски) — вход по токену поста, оператор представляется личной биркой ═════════════════
 //  runtime.STATION_POSTS = [{id, section, name, token, createdAt, lastSeen}]; сессия поста живёт год, оператор — до 30 мин бездействия.
 const STATION_SESSION_TTL = 365 * 24 * 3600 * 1000;
@@ -13427,7 +13427,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   try {
     if (canonicalHostRedirect(req, res, url)) return; // старая закладка/IP → 302 на PORTAL_BASE (иначе ломается OAuth-вход)
-    if (p === '/mcp') return await mcpHandler(req, res, readBody); // K-349: MCP — своя авторизация по личному токену
+    if (p === '/mcp') return await mcpHandler(req, res, (r) => readRawBody(r, 32 * 1024 * 1024).then((buf) => JSON.parse(buf.toString('utf8')))); // K-349: MCP — своя авторизация по личному токену; K-353: тело до 32 МБ (файлы в base64)
     const svc = serviceCtx(req); // null для браузера; { service, actor } для MCP-агента (иначе 401)
     if (p.startsWith('/auth/')) { if (await handleAuth(req, res, p, url)) return; }
     // K-49 middleware (МЯГКИЙ режим): определяем сессию/роль и кладём в контекст запроса.

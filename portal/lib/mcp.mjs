@@ -9,12 +9,13 @@
 // ============================================================================
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.2.0' };
+const SERVER_INFO = { name: 'pbs-portal', title: 'Портал ИСМ ПБС', version: '1.3.0' };
 const INSTRUCTIONS = [
   'Портал ИСМ ПБС (производство ПБС). Разделы: «Закупки» — заявки на закупку (ЗнЗ) с позициями, поставщики, счета; «Продажи» — запросы заказчиков (ЗП), КП и его результат, контрагенты.',
   'Номера: ЗнЗ-ГГГГ-NNN (заявка на закупку), ПЗ-ГГГГ-NNN (производственный заказ), ЗП-ГГГГ-NNN (запрос от заказчика).',
   'Одна ЗнЗ может содержать несколько позиций — материалы под один заказ заводите ОДНОЙ заявкой с позициями, а не отдельными заявками.',
   'Перед созданием ЗнЗ znz_create сам ищет дубли (тот же источник и похожие позиции) и останавливается — покажите их человеку и спросите, прежде чем повторять с allowDuplicate.',
+  'Файлы: если пользователь бросил файл в чат и просит приложить его к ЗнЗ/ЗП — вызовите znz_attach_file/zp_attach_file с точным именем файла в fileName: локальный мост найдёт его на компьютере пользователя.',
   'Новый запрос ЗП: сначала найдите заказчика в контрагентах (counterparties_search), чтобы имя совпало с реестром; zp_create тоже ищет дубли.',
   'Все изменения пишутся в историю от имени владельца токена с пометкой «ИИ». Удаление, отправка на оплату, отправка КП заказчику и создание заказа — только в интерфейсе портала.',
 ].join('\n');
@@ -28,8 +29,51 @@ function tool(name, title, description, properties, required, annotations, run) 
 const RO = { readOnlyHint: true, openWorldHint: false };
 const RW = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
+// ── K-353: файлы — общее для ЗнЗ и ЗП ───────────────────────────────────────
+// Источник файла: contentBase64+fileName (так их присылает локальный мост, прочитав файл с диска
+// пользователя по localPath или найдя по имени в «Загрузках»/«Рабочем столе»/«Документах») или url
+// (портал скачивает сам). localPath/имя без содержимого при прямом HTTP-подключении не сработают.
+const FILE_MAX = 20 * 1024 * 1024;
+const fileSourceProps = {
+  fileName: { type: 'string', description: 'Имя файла. Без localPath/url локальный мост сам найдёт файл с таким именем в «Загрузках», на «Рабочем столе» или в «Документах» — удобно, когда пользователь бросил файл в чат (передайте его точное имя)' },
+  localPath: { type: 'string', description: 'Полный путь к файлу на компьютере пользователя (читает локальный мост)' },
+  url: { type: 'string', description: 'Ссылка https на файл — портал скачает его сам' },
+  contentBase64: { type: 'string', description: 'Содержимое файла в base64 — только для маленьких файлов' },
+};
+function isPrivateHost(h) {
+  h = String(h || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h.includes('.') || h === 'localhost' || h.endsWith('.local') || h.endsWith('.ts.net')) return true;
+  return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.|::1$|fc|fd)/.test(h);
+}
+async function resolveFileSource(a) {
+  if (a.contentBase64) {
+    const buf = Buffer.from(String(a.contentBase64), 'base64');
+    if (!buf.length) throw new Error('Пустой файл.');
+    if (!a.fileName) throw new Error('Укажите fileName вместе с contentBase64.');
+    return { buf, name: a.fileName };
+  }
+  if (a.url) {
+    let u; try { u = new URL(a.url); } catch { throw new Error('Некорректная ссылка url.'); }
+    if (!/^https?:$/.test(u.protocol) || isPrivateHost(u.hostname)) throw new Error('По ссылке можно взять только файл из интернета (http/https, не внутренний адрес).');
+    const r = await fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(60000) });
+    if (!r.ok) throw new Error(`Не удалось скачать файл: HTTP ${r.status}.`);
+    const len = Number(r.headers.get('content-length') || 0); if (len > FILE_MAX) throw new Error('Файл больше 20 МБ.');
+    const buf = Buffer.from(await r.arrayBuffer()); if (buf.length > FILE_MAX) throw new Error('Файл больше 20 МБ.');
+    const cd = r.headers.get('content-disposition') || '';
+    const m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
+    const fromUrl = decodeURIComponent(u.pathname.split('/').pop() || '');
+    return { buf, name: a.fileName || (m ? decodeURIComponent(m[1]) : '') || fromUrl || 'файл' };
+  }
+  if (a.localPath || a.fileName) throw new Error('Файл с компьютера пользователя передаёт локальный мост портала (расширение Claude Desktop или мост для Claude Code/Qwen Code). При прямом подключении по HTTP дайте url.');
+  throw new Error('Укажите источник файла: fileName/localPath (через мост) или url.');
+}
+const fileList = (j, base, kindParam, num) => ({
+  folder: j.folder || null, path: j.path || null, stages: j.stages || [], warning: j.warning || null,
+  files: (j.files || []).map((f) => ({ stage: f.stage || '(корень)', name: f.name, sizeKb: f.size != null ? Math.round(f.size / 1024) : null, link: base ? `${base}${kindParam}${encodeURIComponent(num)}&rel=${encodeURIComponent(f.rel)}` : null })),
+});
+
 // ── инструменты раздела «Закупки» ───────────────────────────────────────────
-function procurementTools() {
+function procurementTools(deps) {
   // ЗнЗ по номеру или id (из реестра /api/procurement)
   async function findZnz(api, ref) {
     const d = await api('GET', '/api/procurement');
@@ -195,13 +239,32 @@ function procurementTools() {
         const j = await api('PATCH', '/api/procurement/invoices', { id: invoiceId, ...rest });
         return { ok: true, invoiceId, changed: j.patched || [], unchanged: !!j.unchanged };
       }),
+
+    tool('znz_files', 'Файлы заявки на закупку',
+      'Список файлов в папке ЗнЗ на NAS по этапам (заявка, предложения и счета, сертификаты, входной контроль, переписка) со ссылками для открытия в портале.',
+      { znz: { type: 'string' } }, ['znz'], RO,
+      async (api, a) => {
+        const { z } = await findZnz(api, a.znz);
+        const j = await api('GET', '/api/procurement/znz/rec-files?znz=' + encodeURIComponent(z.numZnz));
+        return { znz: z.numZnz, ...fileList(j, deps.portalBase(), '/api/procurement/znz/rec-file?znz=', z.numZnz) };
+      }),
+
+    tool('znz_attach_file', 'Приложить файл к заявке на закупку',
+      `Кладёт файл в папку ЗнЗ на NAS, в выбранный этап: ${deps.stages.znz.join(', ')}. Источник — fileName (мост найдёт файл в «Загрузках»/«Рабочем столе»/«Документах»), localPath или url. До 20 МБ. ZIP распаковывается. Счёт для оплаты по-прежнему заводится в карточке ЗнЗ (с распознаванием) — здесь только файл в папку.`,
+      { znz: { type: 'string' }, stage: { type: 'string', enum: deps.stages.znz }, ...fileSourceProps }, ['znz', 'stage'], RW,
+      async (api, a) => {
+        const { z } = await findZnz(api, a.znz);
+        const f = await resolveFileSource(a);
+        const j = await api.upload('/api/procurement/znz/rec-upload', { znz: z.numZnz, stage: a.stage }, f.name, f.buf);
+        return { ok: true, znz: z.numZnz, stage: a.stage, saved: j.saved || [], skipped: j.skipped || [] };
+      }),
   ];
 }
 
 // ── K-351: инструменты раздела «Продажи» ────────────────────────────────────
 const CONTACT_SCHEMA = { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string', description: 'ФИО' }, position: { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' }, primary: { type: 'boolean', description: 'Основной контакт' } } };
 const KP_RESULTS = ['Отправлено', 'Согласовано', 'Выиграли', 'Выиграли частично', 'Проиграли', 'Отказались'];
-function salesTools() {
+function salesTools(deps) {
   async function findZp(api, ref) {
     const d = await api('GET', '/api/sales');
     const s = String(ref == null ? '' : ref).trim();
@@ -370,13 +433,32 @@ function salesTools() {
         await api('PATCH', '/api/counterparty/contact', { id: contactId, ...p });
         return { ok: true, contactId, changed: Object.keys(p) };
       }),
+
+    tool('zp_files', 'Файлы запроса заказчика',
+      'Список файлов в папке ЗП на NAS по этапам (запрос, оценка, КП, договор, оплата, переписка) со ссылками для открытия в портале.',
+      { zp: { type: 'string' } }, ['zp'], RO,
+      async (api, a) => {
+        const { z } = await findZp(api, a.zp);
+        const j = await api('GET', '/api/sales/files?zp=' + encodeURIComponent(z.numZp));
+        return { zp: z.numZp, ...fileList(j, deps.portalBase(), '/api/sales/file?zp=', z.numZp) };
+      }),
+
+    tool('zp_attach_file', 'Приложить файл к запросу заказчика',
+      `Кладёт файл в папку ЗП на NAS, в выбранный этап: ${deps.stages.zp.join(', ')}. Источник — fileName (мост найдёт файл в «Загрузках»/«Рабочем столе»/«Документах»), localPath или url. До 20 МБ. ZIP распаковывается.`,
+      { zp: { type: 'string' }, stage: { type: 'string', enum: deps.stages.zp }, ...fileSourceProps }, ['zp', 'stage'], RW,
+      async (api, a) => {
+        const { z } = await findZp(api, a.zp);
+        const f = await resolveFileSource(a);
+        const j = await api.upload('/api/sales/upload', { zp: z.numZp, stage: a.stage }, f.name, f.buf);
+        return { ok: true, zp: z.numZp, stage: a.stage, saved: j.saved || [], skipped: j.skipped || [] };
+      }),
   ];
 }
 
 // ── протокол ────────────────────────────────────────────────────────────────
-// deps: { port, authenticate(req) → { sid, user:{id,fio}, tokenId } | null }
+// deps: { port, authenticate(req) → { sid, user:{id,fio}, tokenId } | null, stages:{znz,zp}, portalBase() }
 export function createMcpHandler(deps) {
-  const tools = [...procurementTools(), ...salesTools()];
+  const tools = [...procurementTools(deps), ...salesTools(deps)];
   const byName = new Map(tools.map((t) => [t.def.name, t]));
 
   const apiFor = (sid) => async (method, path, body) => {
@@ -390,6 +472,21 @@ export function createMcpHandler(deps) {
       e.code = j.code; e.status = r.status; throw e;
     }
     return j;
+  };
+  const apiWithUpload = (sid) => {
+    const api = apiFor(sid);
+    api.upload = async (path, fields, fileName, buf) => {
+      if (buf.length > FILE_MAX) throw new Error('Файл больше 20 МБ.');
+      const b = '----pbsmcp' + Math.random().toString(16).slice(2);
+      const safe = String(fileName || 'файл').normalize('NFC').replace(/[\r\n"]/g, '_').replace(/^.*[\\/]/, '');
+      const parts = Object.entries(fields).map(([k, v]) => Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+      parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="${safe}"\r\nContent-Type: application/octet-stream\r\n\r\n`), buf, Buffer.from(`\r\n--${b}--\r\n`));
+      const r = await fetch(`http://127.0.0.1:${deps.port}${path}`, { method: 'POST', headers: { cookie: `pbs_sid=${sid}`, 'Content-Type': `multipart/form-data; boundary=${b}`, 'X-Mcp': '1' }, body: Buffer.concat(parts) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) { const e = new Error(j.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
+      return j;
+    };
+    return api;
   };
 
   async function rpc(msg, ctx) {
@@ -409,7 +506,7 @@ export function createMcpHandler(deps) {
       if (!t) return err(-32602, `Нет инструмента ${params && params.name}`);
       const args = (params && params.arguments) || {};
       try {
-        const out = await t.run(apiFor(ctx.sid), args, ctx);
+        const out = await t.run(apiWithUpload(ctx.sid), args, ctx);
         return ok({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out, isError: false });
       } catch (e) {
         const hint = e.code === 'reason_required' ? ' Укажите reason — причину изменения размещённой позиции.' : (e.status === 403 ? ' Недостаточно прав в портале.' : '');
@@ -425,7 +522,7 @@ export function createMcpHandler(deps) {
     const ctx = await deps.authenticate(req);
     if (!ctx) return send(401, { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Нужен личный токен портала: Authorization: Bearer … (Настройки → Доступ для ИИ).' } }, { 'WWW-Authenticate': 'Bearer realm="pbs-portal"' });
     let body;
-    try { body = await readBody(req); } catch { return send(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
+    try { body = await readBody(req); } catch (e) { return send(/лимит/i.test(String(e && e.message)) ? 413 : 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: /лимит/i.test(String(e && e.message)) ? 'Запрос слишком большой (файл больше 20 МБ?).' : 'Parse error' } }); }
     if (Array.isArray(body)) {
       const out = (await Promise.all(body.map((m) => rpc(m, ctx)))).filter(Boolean);
       return out.length ? send(200, out) : send(202, null);

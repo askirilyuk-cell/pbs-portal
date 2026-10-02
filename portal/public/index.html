@@ -17772,13 +17772,15 @@
         try{ const sj=await (await fetch('/api/staff')).json(); sel.innerHTML='<option value="">— сотрудник —</option>'+((sj&&sj.staff)||[]).map(u=>`<option value="${esc(u.id)}">${esc(u.name)}${u.position?' · '+esc(u.position):''}</option>`).join(''); }catch{}
         $s('s_ai_issue').onclick=async(e)=>{ if(!sel.value){ toast('Выберите сотрудника.','err'); return; } e.target.disabled=true;
           const j=await paint({action:'issue',userId:sel.value}); e.target.disabled=false; if(!j||!j.token)return; sel.value='';
-          const cmd=`claude mcp add --scope user --transport http pbs-portal ${mcpUrl} --header "Authorization: Bearer ${j.token}"`;
+          // K-353: Claude Code / Qwen Code — через локальный мост: он умеет брать файлы с компьютера (бросил файл в чат → в портал)
+          const bridgeUrl=mcpUrl.replace(/\/mcp$/,'/downloads/pbs-portal-bridge.js');
+          const cmd=`curl -so ~/.pbs-portal-bridge.js ${bridgeUrl} && claude mcp add --scope user pbs-portal -e PORTAL_TOKEN=${j.token} -e PORTAL_MCP_URL=${mcpUrl} -- node ~/.pbs-portal-bridge.js`;
           nb.innerHTML=`<div style="margin-top:10px;padding:12px 14px;border:1px solid #2e7d32;border-radius:var(--r-m);background:#f3faf3;font-size:13px;line-height:1.5">
             <b>Токен для ${esc(j.issued.fio)}</b> — показывается один раз, сохраните или сразу передайте сотруднику:<br>
             <code style="font-size:13px;word-break:break-all">${esc(j.token)}</code> <button class="ui-btn ui-btn--ghost" data-ai-copy="${esc(j.token)}" style="padding:2px 8px">копировать</button>
             <div style="margin-top:8px"><b>Claude Desktop:</b> включить Tailscale → скачать <a href="/downloads/pbs-portal.mcpb" download>pbs-portal.mcpb</a> → открыть файл, установить «Портал ИСМ ПБС» → в настройках расширения вставить токен.</div>
             <div style="margin-top:6px"><b>Claude Code:</b> <code style="font-size:12px;word-break:break-all">${esc(cmd)}</code> <button class="ui-btn ui-btn--ghost" data-ai-copy="${esc(cmd)}" style="padding:2px 8px">копировать</button></div>
-            <div style="margin-top:6px"><b>Другие MCP-клиенты</b> (Cursor и др., с этого компьютера): адрес ${esc(mcpUrl)}, заголовок <code>Authorization: Bearer &lt;токен&gt;</code>.</div></div>`;
+            <div style="margin-top:6px"><b>Qwen Code, LM Studio, Cursor и др.</b> — локальный MCP-сервер: скачать мост <a href="/downloads/pbs-portal-bridge.js" download>pbs-portal-bridge.js</a>, команда <code>node</code> с путём к нему, переменные <code>PORTAL_TOKEN</code> (токен) и <code>PORTAL_MCP_URL</code> (${esc(mcpUrl)}). Без моста (прямо по адресу, заголовок <code>Authorization: Bearer &lt;токен&gt;</code>) всё работает, кроме файлов с компьютера.</div></div>`;
           nb.querySelectorAll('[data-ai-copy]').forEach(b=>b.onclick=async()=>{ try{ await navigator.clipboard.writeText(b.dataset.aiCopy); toast('Скопировано.','ok'); }catch{ prompt('Скопируйте:',b.dataset.aiCopy); } });
         }; })();
       (async()=>{ const box=$s('s_posts_list'); if(!box)return; const paint=async(body)=>{ try{ const j=await (body?postJson('/api/admin/station-posts',body):(await fetch('/api/admin/station-posts')).json()); if(j.error)throw new Error(j.error); const posts=j.posts||[];
